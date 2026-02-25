@@ -6,13 +6,10 @@ use std::time::Duration;
 use rand::RngExt;
 use serde_json::Value;
 use ureq::Body;
-
-use ureq::http::{Response, StatusCode};
+use ureq::http::Response;
 use ureq::typestate::{WithBody, WithoutBody};
 use ureq::unversioned::multipart::Form;
 use ureq::{Agent, Error as UreqError, RequestBuilder};
-
-
 
 // HTTP 方法枚举
 #[derive(Debug, Clone, Copy)]
@@ -38,64 +35,13 @@ impl From<HttpMethod> for &'static str {
     }
 }
 
-// HTTP 状态码枚举
-#[derive(Debug, PartialEq, Eq)]
-pub enum HttpStatus {
-    OK = 200,
-    Created = 201,
-    NoContent = 204,
-    NotModified = 304,
-    Forbidden = 403,
-    NotFound = 404,
-}
-
-impl HttpStatus {
-    pub fn from_code(code: u16) -> Option<Self> {
-        match code {
-            200 => Some(HttpStatus::OK),
-            201 => Some(HttpStatus::Created),
-            204 => Some(HttpStatus::NoContent),
-            304 => Some(HttpStatus::NotModified),
-            403 => Some(HttpStatus::Forbidden),
-            404 => Some(HttpStatus::NotFound),
-            _ => None,
-        }
-    }
-}
-
 // 分页方式
 #[derive(Debug, Clone, Copy)]
 pub enum PaginationMethod {
     Offset,
     Page,
 }
-// 添加这个结构体
-#[derive(Debug)]
-pub struct HttpResponse {
-    pub status: u16,
-    pub data: Value,
-}
 
-impl HttpResponse {
-    pub fn from_response(response: Response<Body>) -> Result<Self, UreqError> {
-        let status = response.status().as_u16();
-        let data = response.into_body().read_json()?;
-
-        Ok(Self { status, data })
-    }
-
-    pub fn is_success(&self) -> bool {
-        self.status >= 200 && self.status < 300
-    }
-
-    pub fn is_client_error(&self) -> bool {
-        self.status >= 400 && self.status < 500
-    }
-
-    pub fn is_server_error(&self) -> bool {
-        self.status >= 500
-    }
-}
 // 客户端配置
 #[derive(Debug, Clone)]
 pub struct ClientConfig {
@@ -121,7 +67,7 @@ impl Default for ClientConfig {
             timeout: Duration::from_secs(30),
             max_retries: 3,
             retry_delay: Duration::from_millis(1000),
-            log_requests: false,
+            log_requests: true,
         }
     }
 }
@@ -313,6 +259,7 @@ pub struct HttpClient {
     agent: Agent,
     headers: Arc<Mutex<HashMap<String, String>>>, // Use Mutex
 }
+
 impl HttpClient {
     pub fn new(config: ClientConfig) -> Self {
         let agent: Agent = ureq::Agent::config_builder()
@@ -320,23 +267,55 @@ impl HttpClient {
             .build()
             .into();
 
+        // 创建默认headers
+        let mut default_headers = HashMap::new();
+        default_headers.insert(
+            "User-Agent".to_string(),
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36".to_string()
+        );
+        default_headers.insert("Referer".to_string(), "https://www.codemao.cn/".to_string());
+        default_headers.insert("Origin".to_string(), "https://www.codemao.cn".to_string());
+
         Self {
             config,
             agent,
-            headers: Arc::from(Mutex::from(HashMap::new())),
+            headers: Arc::from(Mutex::from(default_headers)),
         }
     }
 
     pub fn update_headers(&mut self, headers: HashMap<String, String>) {
+        let mut current_headers = self.headers.lock().unwrap();
+
+        // 保留默认的 User-Agent、Referer、Origin
+        let default_ua = current_headers.get("User-Agent").cloned();
+        let default_referer = current_headers.get("Referer").cloned();
+        let default_origin = current_headers.get("Origin").cloned();
+
+        // 清空并重新插入
+        current_headers.clear();
+
+        // 恢复默认头
+        if let Some(ua) = default_ua {
+            current_headers.insert("User-Agent".to_string(), ua);
+        }
+        if let Some(referer) = default_referer {
+            current_headers.insert("Referer".to_string(), referer);
+        }
+        if let Some(origin) = default_origin {
+            current_headers.insert("Origin".to_string(), origin);
+        }
+
+        // 添加新headers
         for (k, v) in headers {
             if !v.trim().is_empty() {
-                self.headers.lock().unwrap().insert(k, v);
+                current_headers.insert(k, v);
             }
         }
+
         // 移除空的 Authorization 头
-        if let Some(auth) = self.headers.lock().unwrap().get("Authorization") {
+        if let Some(auth) = current_headers.get("Authorization") {
             if auth.trim().is_empty() || auth == "Bearer" {
-                self.headers.lock().unwrap().remove("Authorization");
+                current_headers.remove("Authorization");
                 println!("警告: Authorization 头为空, 移除该头");
             }
         }
@@ -383,15 +362,127 @@ impl HttpClient {
         req
     }
 
-    // 提取响应处理逻辑
-    fn handle_response(&self, url: String, response: Response<Body>) -> Result<Value, UreqError> {
-        if self.config.log_requests {
-            self.log_request(&url, &response);
-        }
-        Ok(response.into_body().read_json()?)
+    // 修改为直接返回 Response<Body>
+    fn log_request(&self, url: &str, response: &Response<Body>) {
+        println!("[Request] URL: {}, Status: {}", url, response.status());
     }
 
-    // 发送请求的通用方法
+    fn build_url(&self, endpoint: &str, base_url_key: Option<&str>) -> String {
+        if endpoint.starts_with("http") {
+            endpoint.to_string()
+        } else {
+            let base_url = self.config.get_base_url(base_url_key);
+            if base_url.ends_with('/') {
+                format!("{}{}", base_url, endpoint.trim_start_matches('/'))
+            } else if endpoint.starts_with('/') {
+                format!("{}{}", base_url, endpoint)
+            } else {
+                format!("{}/{}", base_url, endpoint)
+            }
+        }
+    }
+
+    fn log_request_info(
+        &self,
+        method: &str,
+        url: &str,
+        params: Option<&HashMap<String, String>>,
+        payload: Option<&Value>,
+    ) {
+        if !self.config.log_requests {
+            return;
+        }
+
+        println!("\n========== 网络请求信息 ==========");
+        println!("方法: {}", method);
+        println!("URL: {}", url);
+
+        // 打印请求头
+        println!("请求头:");
+        let headers = self.headers.lock().unwrap();
+        for (key, value) in headers.iter() {
+            if key == "Authorization" {
+                println!("  {}: Bearer [已隐藏]", key);
+            } else {
+                println!("  {}: {}", key, value);
+            }
+        }
+
+        // 打印查询参数
+        if let Some(params) = params {
+            if !params.is_empty() {
+                println!("查询参数:");
+                for (key, value) in params {
+                    println!("  {}: {}", key, value);
+                }
+            }
+        }
+
+        // 打印请求体
+        if let Some(payload) = payload {
+            println!("请求体:");
+            if let Ok(pretty) = serde_json::to_string_pretty(payload) {
+                for line in pretty.lines() {
+                    println!("  {}", line);
+                }
+            } else {
+                println!("  {}", payload);
+            }
+        }
+    }
+
+    // 新增：打印响应信息的辅助方法
+    fn log_response_info(
+        &self,
+        url: &str,
+        response: Response<Body>,
+    ) -> Result<Response<Body>, UreqError> {
+        if !self.config.log_requests {
+            return Ok(response);
+        }
+
+        println!("\n---------- 响应信息 ----------");
+        println!(
+            "状态: {} {}",
+            response.status(),
+            response.status().canonical_reason().unwrap_or("")
+        );
+
+        // 打印响应头
+        println!("响应头:");
+        for (key, value) in response.headers() {
+            if let Ok(value_str) = value.to_str() {
+                println!("  {}: {}", key, value_str);
+            }
+        }
+
+        // 获取 body 数据
+        let body = response.into_body();
+        let bytes = body.read_to_vec()?;
+
+        // 尝试解析为 JSON 或文本
+        if let Ok(json) = serde_json::from_slice::<Value>(&bytes) {
+            println!("响应体 (JSON):");
+            if let Ok(pretty) = serde_json::to_string_pretty(&json) {
+                for line in pretty.lines() {
+                    println!("  {}", line);
+                }
+            }
+        } else if !bytes.is_empty() {
+            if let Ok(text) = String::from_utf8(bytes.clone()) {
+                println!("响应体 (文本):");
+                println!("  {}", text);
+            }
+        }
+
+        println!("================================\n");
+
+        // 重建 Response
+        let (parts, _) = response.into_parts();
+        Ok(Response::from_parts(parts, Body::from(bytes)))
+    }
+
+    // 修改 send_request 方法
     pub fn send_request(
         &self,
         method: HttpMethod,
@@ -399,48 +490,50 @@ impl HttpClient {
         params: Option<&HashMap<String, String>>,
         payload: Option<&Value>,
         base_url_key: Option<&str>,
-    ) -> Result<Value, UreqError> {
+    ) -> Result<Response<Body>, UreqError> {
         let url = self.build_url(endpoint, base_url_key);
+        let method_str: &'static str = method.into();
+
+        // 打印请求信息
+        self.log_request_info(method_str, &url, params, payload);
 
         // 根据 HTTP 方法类型选择不同的请求构建方式
-        match method {
-            // 无 Body 请求
+        let response = match method {
             HttpMethod::GET | HttpMethod::DELETE | HttpMethod::HEAD => {
                 let mut req = self.build_request_without_body(method, &url);
 
-                // 添加查询参数
                 if let Some(params) = params {
                     for (key, value) in params {
                         req = req.query(key, value);
                     }
                 }
 
-                let response = req.call()?;
-                self.handle_response(url, response)
+                req.call()?
             }
-            // 带 Body 请求
             HttpMethod::POST | HttpMethod::PUT | HttpMethod::PATCH => {
                 let mut req = self.build_request_with_body(method, &url);
 
-                // 添加查询参数
                 if let Some(params) = params {
                     for (key, value) in params {
                         req = req.query(key, value);
                     }
                 }
 
-                let response = if let Some(payload) = payload {
+                if let Some(payload) = payload {
                     req.send_json(payload)
                 } else {
                     req.send_empty()
-                }?;
-
-                self.handle_response(url, response)
+                }?
             }
-        }
+        };
+
+        // 打印响应信息（需要克隆 response 或者重新获取）
+        let _ = self.log_response_info(&url, &response);
+
+        Ok(response)
     }
 
-    // 带重试的请求
+    // 修改带重试的请求方法
     pub fn send_request_with_retry(
         &self,
         method: HttpMethod,
@@ -448,19 +541,36 @@ impl HttpClient {
         params: Option<&HashMap<String, String>>,
         payload: Option<&Value>,
         base_url_key: Option<&str>,
-    ) -> Result<Value, UreqError> {
+    ) -> Result<Response<Body>, UreqError> {
         let mut last_error = None;
+        let url = self.build_url(endpoint, base_url_key);
+        let method_str: &'static str = method.into();
 
         for attempt in 0..self.config.max_retries {
+            if attempt > 0 && self.config.log_requests {
+                println!("[重试] 第 {} 次尝试...", attempt + 1);
+            }
+
             match self.send_request(method, endpoint, params, payload, base_url_key) {
                 Ok(response) => return Ok(response),
                 Err(e) => {
                     last_error = Some(e);
                     if attempt < self.config.max_retries - 1 {
-                        std::thread::sleep(self.config.retry_delay * (2_u32.pow(attempt)));
+                        if self.config.log_requests {
+                            println!(
+                                "[重试] 请求失败，{}ms 后重试: {:?}",
+                                self.config.retry_delay.as_millis(),
+                                last_error.as_ref().unwrap()
+                            );
+                        }
+                        std::thread::sleep(self.config.retry_delay * (2_u32.pow(attempt as u32)));
                     }
                 }
             }
+        }
+
+        if self.config.log_requests {
+            println!("[错误] 请求最终失败: {:?}", last_error.as_ref().unwrap());
         }
 
         Err(last_error.unwrap())
@@ -506,29 +616,20 @@ impl HttpClient {
         0
     }
 
-    fn log_request(&self, url: &str, response: &Response<Body>) {
-        println!("[Request] URL: {}, Status: {}", url, response.status());
+    // 辅助方法：从响应中读取 JSON
+    pub fn response_to_json(response: Response<Body>) -> Result<Value, UreqError> {
+        response.into_body().read_json()
     }
 
-    fn build_url(&self, endpoint: &str, base_url_key: Option<&str>) -> String {
-        if endpoint.starts_with("http") {
-            endpoint.to_string()
-        } else {
-            let base_url = self.config.get_base_url(base_url_key);
-            if base_url.ends_with('/') {
-                format!("{}{}", base_url, endpoint.trim_start_matches('/'))
-            } else if endpoint.starts_with('/') {
-                format!("{}{}", base_url, endpoint)
-            } else {
-                format!("{}/{}", base_url, endpoint)
-            }
-        }
+    // 辅助方法：从响应中读取文本
+    pub fn response_to_string(response: Response<Body>) -> Result<String, UreqError> {
+        response.into_body().read_to_string()
     }
 }
 
-// 分页迭代器
-pub struct PaginatedIter<'a> {
-    client: &'a HttpClient,
+// 分页迭代器 - 需要修改以使用新的返回类型
+pub struct PaginatedIter {
+    client: Arc<HttpClient>,
     method: HttpMethod,
     endpoint: String,
     base_params: HashMap<String, String>,
@@ -552,11 +653,11 @@ pub struct PaginatedIter<'a> {
     initialized: bool,
 }
 
-impl<'a> PaginatedIter<'a> {
+impl PaginatedIter {
     const DEFAULT_PAGE_SIZE: usize = 15;
     const MIN_PAGE_SIZE: usize = 1;
 
-    pub fn new(client: &'a HttpClient, endpoint: impl Into<String>) -> Self {
+    pub fn new(client: Arc<HttpClient>, endpoint: impl Into<String>) -> Self {
         Self {
             client,
             method: HttpMethod::GET,
@@ -764,7 +865,7 @@ impl<'a> PaginatedIter<'a> {
         page_params
     }
 
-    // 获取单个页面的数据
+    // 获取单个页面的数据 - 修改为使用新的返回类型
     fn fetch_page_data(&self, params: &HashMap<String, String>) -> Result<Vec<Value>, UreqError> {
         let response = self.client.send_request(
             self.method,
@@ -774,7 +875,9 @@ impl<'a> PaginatedIter<'a> {
             self.base_url_key.as_deref(),
         )?;
 
-        if let Some(data) = self.client.get_nested_value(&response, &self.data_key) {
+        let json = HttpClient::response_to_json(response)?;
+
+        if let Some(data) = self.client.get_nested_value(&json, &self.data_key) {
             if let Some(array) = data.as_array() {
                 return Ok(array.clone());
             }
@@ -799,14 +902,16 @@ impl<'a> PaginatedIter<'a> {
             self.base_url_key.as_deref(),
         )?;
 
+        let json = HttpClient::response_to_json(response)?;
+
         // 提取总数
-        self.total_items = self.client.safe_extract_total(&response, &self.total_key);
+        self.total_items = self.client.safe_extract_total(&json, &self.total_key);
 
         // 计算每页项目数
-        self.items_per_page = self.calculate_items_per_page(&response, &request_params);
+        self.items_per_page = self.calculate_items_per_page(&json, &request_params);
 
         // 提取第一页数据
-        self.first_page = self.extract_first_page(&response, true);
+        self.first_page = self.extract_first_page(&json, true);
         self.current_page_data = self.first_page.clone();
 
         self.initialized = true;
@@ -827,7 +932,7 @@ impl<'a> PaginatedIter<'a> {
     }
 }
 
-impl<'a> Iterator for PaginatedIter<'a> {
+impl Iterator for PaginatedIter {
     type Item = Result<Value, UreqError>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -953,7 +1058,7 @@ impl CodeMaoClient {
         self.identity_manager.lock().unwrap().get_auth_header()
     }
 
-    // 发送请求
+    // 发送请求 - 返回 Response<Body>
     pub fn send_request(
         &self,
         method: HttpMethod,
@@ -961,12 +1066,12 @@ impl CodeMaoClient {
         params: Option<&HashMap<String, String>>,
         payload: Option<&Value>,
         base_url_key: Option<&str>,
-    ) -> Result<Value, UreqError> {
+    ) -> Result<Response<Body>, UreqError> {
         self.http_client
             .send_request(method, endpoint, params, payload, base_url_key)
     }
 
-    // 带重试的请求
+    // 带重试的请求 - 返回 Response<Body>
     pub fn send_request_with_retry(
         &self,
         method: HttpMethod,
@@ -974,19 +1079,29 @@ impl CodeMaoClient {
         params: Option<&HashMap<String, String>>,
         payload: Option<&Value>,
         base_url_key: Option<&str>,
-    ) -> Result<Value, UreqError> {
+    ) -> Result<Response<Body>, UreqError> {
         self.http_client
             .send_request_with_retry(method, endpoint, params, payload, base_url_key)
     }
 
+    // 辅助方法：从响应中读取 JSON
+    pub fn response_to_json(response: Response<Body>) -> Result<Value, UreqError> {
+        HttpClient::response_to_json(response)
+    }
+
+    // 辅助方法：从响应中读取文本
+    pub fn response_to_string(response: Response<Body>) -> Result<String, UreqError> {
+        HttpClient::response_to_string(response)
+    }
+
     // 分页查询
     pub fn paginated(&self, endpoint: &str) -> PaginatedIter {
-        PaginatedIter::new(&self.http_client, endpoint)
+        PaginatedIter::new(self.http_client.clone(), endpoint) // 使用 clone
     }
 
     // 带 base_url 的分页查询
     pub fn paginated_with_base(&self, endpoint: &str, base_url_key: &str) -> PaginatedIter {
-        PaginatedIter::new(&self.http_client, endpoint).with_base_url(base_url_key)
+        PaginatedIter::new(self.http_client.clone(), endpoint).with_base_url(base_url_key)
     }
 
     // 获取分页总数
@@ -1000,7 +1115,7 @@ impl CodeMaoClient {
         config: Option<&PaginationConfig>,
         base_url_key: Option<&str>,
     ) -> Result<(usize, usize), UreqError> {
-        let mut temp_iter = PaginatedIter::new(&self.http_client, endpoint)
+        let mut temp_iter = PaginatedIter::new(self.http_client.clone(), endpoint)
             .with_params(params.clone())
             .with_total_key(total_key)
             .with_data_key(data_key);
@@ -1094,7 +1209,7 @@ impl FileUploader {
     ) -> Result<String, Box<dyn std::error::Error>> {
         let form = Form::new()
             .text("path", save_path)
-            .file("file", file_path)?; // 注意：这里需要文件路径
+            .file("file", file_path)?;
 
         // 发送 multipart 表单
         let response = self
@@ -1144,7 +1259,7 @@ impl FileUploader {
             .text("token", &token_info.token)
             .text("key", &token_info.file_path)
             .text("fname", &unique_filename)
-            .file("file", file_path)?; // 直接使用文件路径
+            .file("file", file_path)?;
 
         let response = self.upload_agent.post(&token_info.upload_url).send(form)?;
 
@@ -1153,7 +1268,7 @@ impl FileUploader {
         Ok(format!("{}{}", token_info.bucket_url, key))
     }
 
-    // 获取 CodeMao 上传 token
+    // 获取 CodeMao 上传 token - 修改为使用新的返回类型
     fn get_codemao_token(
         &self,
         file_path: &str,
@@ -1174,21 +1289,21 @@ impl FileUploader {
             None,
         )?;
 
-        let tokens = response["tokens"]
-            .as_array()
-            .ok_or("无法获取 tokens 数组")?;
+        let json = CodeMaoClient::response_to_json(response)?;
+
+        let tokens = json["tokens"].as_array().ok_or("无法获取 tokens 数组")?;
 
         let token_info = tokens.get(0).ok_or("无法获取第一个 token")?;
 
         Ok(CodeMaoTokenInfo {
             token: token_info["token"].as_str().unwrap_or("").to_string(),
             file_path: token_info["file_path"].as_str().unwrap_or("").to_string(),
-            upload_url: response["upload_url"].as_str().unwrap_or("").to_string(),
-            bucket_url: response["bucket_url"].as_str().unwrap_or("").to_string(),
+            upload_url: json["upload_url"].as_str().unwrap_or("").to_string(),
+            bucket_url: json["bucket_url"].as_str().unwrap_or("").to_string(),
         })
     }
 
-    // 获取 CodeGame 上传 token
+    // 获取 CodeGame 上传 token - 修改为使用新的返回类型
     fn get_codegame_token(
         &self,
         prefix: &str,
@@ -1212,14 +1327,16 @@ impl FileUploader {
             None,
         )?;
 
-        let data = response["data"].as_array().ok_or("无法获取 data 数组")?;
+        let json = CodeMaoClient::response_to_json(response)?;
+
+        let data = json["data"].as_array().ok_or("无法获取 data 数组")?;
 
         let token_data = data.get(0).ok_or("无法获取第一个数据项")?;
 
         Ok(CodeGameTokenInfo {
             token: token_data["token"].as_str().unwrap_or("").to_string(),
             file_path: token_data["filename"].as_str().unwrap_or("").to_string(),
-            pic_host: response["bucket_url"].as_str().unwrap_or("").to_string(),
+            pic_host: json["bucket_url"].as_str().unwrap_or("").to_string(),
             upload_url: "https://upload.qiniup.com".to_string(),
         })
     }
