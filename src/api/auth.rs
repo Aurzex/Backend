@@ -1,10 +1,10 @@
-use crate::utils::acquire::{ClientFactory, CodeMaoClient, HttpMethod, Identity, IdentityManger};
+use crate::utils::acquire::{CodeMaoClient, HttpMethod, Identity};
 use crate::utils::data::{CodeMaoFile, FileContent, PathConfig};
 use rand::RngExt;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use ureq::http::HeaderValue;
 
@@ -97,7 +97,7 @@ impl AccountStatus {
     }
 
     // 转换为 Identity
-    fn to_identity(&self) -> Identity {
+    pub fn to_identity(&self) -> Identity {
         match self {
             AccountStatus::Judgement => Identity::Judgement,
             AccountStatus::Average => Identity::Average,
@@ -109,6 +109,7 @@ impl AccountStatus {
 // ==================== 数据结构 ====================
 
 // 登录凭证
+#[derive(Debug, Clone)]
 pub struct LoginCredentials {
     pub identity: String,
     pub password: String,
@@ -132,6 +133,7 @@ impl Default for LoginCredentials {
 }
 
 // 登录结果
+#[derive(Debug, Clone)]
 pub struct LoginResult {
     pub success: bool,
     pub method: LoginMethod,
@@ -169,9 +171,52 @@ impl LoginResult {
     }
 }
 
+// ==================== 客户端提供者特质 ====================
+
+/// 客户端提供者特质，用于依赖注入
+pub trait ClientProvider: Send + Sync + std::fmt::Debug {
+    /// 获取客户端实例
+    fn client(&self) -> &CodeMaoClient;
+
+    /// 克隆客户端提供者
+    fn clone_box(&self) -> Box<dyn ClientProvider>;
+}
+
+impl Clone for Box<dyn ClientProvider> {
+    fn clone(&self) -> Self {
+        self.clone_box()
+    }
+}
+
+/// 全局客户端提供者（默认实现）
+#[derive(Debug, Clone)]
+pub struct GlobalClientProvider;
+
+impl GlobalClientProvider {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl ClientProvider for GlobalClientProvider {
+    fn client(&self) -> &CodeMaoClient {
+        CodeMaoClient::global()
+    }
+
+    fn clone_box(&self) -> Box<dyn ClientProvider> {
+        Box::new(self.clone())
+    }
+}
+
+impl Default for GlobalClientProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ==================== 全局单例 ====================
 
-// 全局 AuthManager 单例
+// 全局 AuthManager 单例（使用默认的全局客户端提供者）
 static GLOBAL_AUTH_MANAGER: OnceLock<Arc<AuthManager>> = OnceLock::new();
 
 // 获取全局 AuthManager 实例
@@ -188,9 +233,11 @@ pub fn init_global_auth_manager() -> Arc<AuthManager> {
 
 // ==================== 辅助函数 ====================
 
-// 获取当前服务器时间戳
-pub fn fetch_current_timestamp() -> Result<i64, Box<dyn std::error::Error>> {
-    let client = CodeMaoClient::global(); // 使用全局单例
+// 获取当前服务器时间戳（接受客户端提供者）
+pub fn fetch_current_timestamp_with_provider(
+    provider: &dyn ClientProvider,
+) -> Result<i64, Box<dyn std::error::Error>> {
+    let client = provider.client();
     let response = client.send_request(
         HttpMethod::GET,
         "/coconut/clouddb/currentTime",
@@ -200,6 +247,11 @@ pub fn fetch_current_timestamp() -> Result<i64, Box<dyn std::error::Error>> {
     )?;
     let json = client.response_to_json(response)?;
     Ok(json["data"].as_i64().unwrap_or(0))
+}
+
+// 获取当前服务器时间戳（使用默认全局客户端）
+pub fn fetch_current_timestamp() -> Result<i64, Box<dyn std::error::Error>> {
+    fetch_current_timestamp_with_provider(&GlobalClientProvider::new())
 }
 
 // 确定用户登录方法
@@ -236,22 +288,34 @@ fn determine_admin_login_method(
 
 #[derive(Clone)]
 pub struct AuthProcessor {
-    // 移除 client 字段，直接使用全局单例
+    client_provider: Box<dyn ClientProvider>,
     client_secret: &'static str,
 }
 
 impl AuthProcessor {
     const CLIENT_SECRET: &'static str = "pBlYqXbJDu";
 
-    pub fn new() -> Self {
+    /// 创建新的认证处理器（使用指定的客户端提供者）
+    pub fn new_with_provider(provider: Box<dyn ClientProvider>) -> Self {
         Self {
+            client_provider: provider,
             client_secret: Self::CLIENT_SECRET,
         }
     }
 
+    /// 创建新的认证处理器（使用默认的全局客户端）
+    pub fn new() -> Self {
+        Self::new_with_provider(Box::new(GlobalClientProvider::new()))
+    }
+
+    // 获取客户端
+    fn client(&self) -> &CodeMaoClient {
+        self.client_provider.client()
+    }
+
     // 获取认证详情
     pub fn fetch_auth_details(&self, token: &str) -> Result<Value, Box<dyn std::error::Error>> {
-        let client = CodeMaoClient::global(); // 使用全局单例
+        let client = self.client();
 
         // 先切换到 blank 身份发送请求，然后手动添加 cookie
         let cookie_str = format!("authorization={}", token);
@@ -288,7 +352,7 @@ impl AuthProcessor {
         timestamp: i64,
         pid: &str,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let client = CodeMaoClient::global(); // 使用全局单例
+        let client = self.client();
 
         let payload = json!({
             "identity": identity,
@@ -313,7 +377,7 @@ impl AuthProcessor {
         ticket: &str,
         pid: &str,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let client = CodeMaoClient::global(); // 使用全局单例
+        let client = self.client();
 
         let payload = json!({
             "identity": identity,
@@ -366,7 +430,7 @@ impl AuthProcessor {
         key: i64,
         code: &str,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let client = CodeMaoClient::global(); // 使用全局单例
+        let client = self.client();
 
         let payload = json!({
             "username": username,
@@ -390,7 +454,7 @@ impl AuthProcessor {
         &self,
         timestamp: i64,
     ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        let client = CodeMaoClient::global(); // 使用全局单例
+        let client = self.client();
 
         let endpoint = format!("/admins/captcha/{}", timestamp);
 
@@ -422,7 +486,7 @@ impl AuthProcessor {
         password: &str,
         pid: &str,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let client = CodeMaoClient::global(); // 使用全局单例
+        let client = self.client();
 
         let payload = json!({
             "identity": identity,
@@ -447,7 +511,7 @@ impl AuthProcessor {
         password: &str,
         pid: &str,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let client = CodeMaoClient::global(); // 使用全局单例
+        let client = self.client();
 
         let payload = json!({
             "identity": identity,
@@ -472,9 +536,9 @@ impl AuthProcessor {
         password: &str,
         pid: &str,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let client = CodeMaoClient::global(); // 使用全局单例
+        let client = self.client();
 
-        let timestamp = fetch_current_timestamp()?;
+        let timestamp = self.fetch_current_timestamp()?;
         let ticket_response = self.get_login_ticket(identity, timestamp, pid)?;
         println!("Ticket response: {:?}", ticket_response);
 
@@ -488,6 +552,11 @@ impl AuthProcessor {
         );
 
         Ok(security_response)
+    }
+
+    // 获取当前时间戳（使用当前客户端）
+    fn fetch_current_timestamp(&self) -> Result<i64, Box<dyn std::error::Error>> {
+        fetch_current_timestamp_with_provider(&*self.client_provider)
     }
 }
 
@@ -504,10 +573,21 @@ pub struct LoginHandler {
 }
 
 impl LoginHandler {
-    pub fn new() -> Self {
+    /// 创建新的登录处理器（使用指定的客户端提供者）
+    pub fn new_with_provider(provider: Box<dyn ClientProvider>) -> Self {
         Self {
-            processor: AuthProcessor::new(),
+            processor: AuthProcessor::new_with_provider(provider),
         }
+    }
+
+    /// 创建新的登录处理器（使用默认的全局客户端）
+    pub fn new() -> Self {
+        Self::new_with_provider(Box::new(GlobalClientProvider::new()))
+    }
+
+    // 获取客户端
+    fn client(&self) -> &CodeMaoClient {
+        self.processor.client()
     }
 
     // 处理 v0 版本密码登录
@@ -518,7 +598,7 @@ impl LoginHandler {
         pid: &str,
         status: AccountStatus,
     ) -> Result<LoginResult, Box<dyn std::error::Error>> {
-        let client = CodeMaoClient::global(); // 使用全局单例
+        let client = self.client();
 
         // 切换到 blank 身份
         let _ = client.switch_identity(Identity::Blank);
@@ -527,7 +607,7 @@ impl LoginHandler {
             Ok(data) => {
                 if let Some(token) = data.get("token").and_then(|t| t.as_str()) {
                     // 设置令牌并切换到对应身份
-                    client.set_token(status.to_identity(), token);
+                    client.set_token(status.to_identity(), token)?;
                     let _ = client.switch_identity(status.to_identity());
 
                     Ok(
@@ -558,7 +638,7 @@ impl LoginHandler {
         pid: &str,
         status: AccountStatus,
     ) -> Result<LoginResult, Box<dyn std::error::Error>> {
-        let client = CodeMaoClient::global(); // 使用全局单例
+        let client = self.client();
 
         // 切换到 blank 身份
         let _ = client.switch_identity(Identity::Blank);
@@ -571,7 +651,7 @@ impl LoginHandler {
                     .and_then(|t| t.as_str())
                 {
                     // 设置令牌并切换到对应身份
-                    client.set_token(status.to_identity(), token);
+                    client.set_token(status.to_identity(), token)?;
                     let _ = client.switch_identity(status.to_identity());
 
                     Ok(
@@ -602,7 +682,7 @@ impl LoginHandler {
         pid: &str,
         status: AccountStatus,
     ) -> Result<LoginResult, Box<dyn std::error::Error>> {
-        let client = CodeMaoClient::global(); // 使用全局单例
+        let client = self.client();
 
         // 切换到 blank 身份
         let _ = client.switch_identity(Identity::Blank);
@@ -615,7 +695,7 @@ impl LoginHandler {
                     .and_then(|t| t.as_str())
                 {
                     // 设置令牌并切换到对应身份
-                    client.set_token(status.to_identity(), token);
+                    client.set_token(status.to_identity(), token)?;
                     let _ = client.switch_identity(status.to_identity());
 
                     Ok(
@@ -643,12 +723,12 @@ impl LoginHandler {
         token: &str,
         status: AccountStatus,
     ) -> Result<LoginResult, Box<dyn std::error::Error>> {
-        let client = CodeMaoClient::global(); // 使用全局单例
+        let client = self.client();
 
         let auth_details = self.processor.fetch_auth_details(token)?;
 
         // 设置令牌并切换到对应身份
-        client.set_token(status.to_identity(), token);
+        client.set_token(status.to_identity(), token)?;
         let _ = client.switch_identity(status.to_identity());
 
         Ok(LoginResult::new(true, LoginMethod::Token, "Token 登录成功")
@@ -661,7 +741,7 @@ impl LoginHandler {
         &self,
         token: Option<&str>,
     ) -> Result<LoginResult, Box<dyn std::error::Error>> {
-        let client = CodeMaoClient::global(); // 使用全局单例
+        let client = self.client();
 
         let token = match token {
             Some(t) => t.to_string(),
@@ -674,7 +754,7 @@ impl LoginHandler {
         };
 
         // 设置令牌并切换到 Judgement 身份
-        client.set_token(Identity::Judgement, &token);
+        client.set_token(Identity::Judgement, &token)?;
         let _ = client.switch_identity(Identity::Judgement);
 
         Ok(
@@ -689,7 +769,7 @@ impl LoginHandler {
         username: Option<&str>,
         password: Option<&str>,
     ) -> Result<LoginResult, Box<dyn std::error::Error>> {
-        let client = CodeMaoClient::global(); // 使用全局单例
+        let client = self.client();
 
         let mut username = match username {
             Some(u) => u.to_string(),
@@ -732,7 +812,7 @@ impl LoginHandler {
                 Ok(response) => {
                     if let Some(token) = response.get("token").and_then(|t| t.as_str()) {
                         // 设置令牌并切换到 Judgement 身份
-                        client.set_token(Identity::Judgement, token);
+                        client.set_token(Identity::Judgement, token)?;
                         let _ = client.switch_identity(Identity::Judgement);
 
                         return Ok(LoginResult::new(
@@ -782,22 +862,34 @@ impl Default for LoginHandler {
 // ==================== 认证管理器 ====================
 
 pub struct AuthManager {
-    // 移除 client 和 auth 字段，直接使用 CodeMaoClient 的全局单例
+    client_provider: Box<dyn ClientProvider>,
     processor: AuthProcessor,
     handler: LoginHandler,
     current_credentials: Option<LoginCredentials>,
 }
 
 impl AuthManager {
-    pub fn new() -> Self {
-        // 确保 CodeMaoClient 全局单例已初始化
-        let _client = CodeMaoClient::global();
+    /// 创建新的认证管理器（使用指定的客户端提供者）
+    pub fn new_with_provider(provider: Box<dyn ClientProvider>) -> Self {
+        let processor = AuthProcessor::new_with_provider(provider.clone_box());
+        let handler = LoginHandler::new_with_provider(provider.clone_box());
 
         Self {
-            processor: AuthProcessor::new(),
-            handler: LoginHandler::new(),
+            client_provider: provider,
+            processor,
+            handler,
             current_credentials: None,
         }
+    }
+
+    /// 创建新的认证管理器（使用默认的全局客户端）
+    pub fn new() -> Self {
+        Self::new_with_provider(Box::new(GlobalClientProvider::new()))
+    }
+
+    // 获取客户端
+    fn client(&self) -> &CodeMaoClient {
+        self.client_provider.client()
     }
 
     // 统一的登录接口
@@ -1001,7 +1093,7 @@ impl AuthManager {
 
     // 执行 v0 版本用户登出
     pub fn execute_logout_v0(&self) -> Result<bool, Box<dyn std::error::Error>> {
-        let client = CodeMaoClient::global(); // 使用全局单例
+        let client = self.client();
 
         let response = client.send_request(
             HttpMethod::POST,
@@ -1015,7 +1107,7 @@ impl AuthManager {
 
     // 执行 v12 版本用户登出
     pub fn execute_logout_v12(&self, method: &str) -> Result<bool, Box<dyn std::error::Error>> {
-        let client = CodeMaoClient::global(); // 使用全局单例
+        let client = self.client();
 
         let endpoint = format!("/tiger/v3/{}/accounts/logout", method);
         let response =
@@ -1025,7 +1117,7 @@ impl AuthManager {
 
     // 管理员登出
     pub fn admin_logout(&self) -> Result<bool, Box<dyn std::error::Error>> {
-        let client = CodeMaoClient::global(); // 使用全局单例
+        let client = self.client();
 
         let response = client.send_request(
             HttpMethod::DELETE,
@@ -1039,7 +1131,7 @@ impl AuthManager {
 
     // 获取管理员仪表板数据
     pub fn fetch_admin_dashboard_data(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let client = CodeMaoClient::global(); // 使用全局单例
+        let client = self.client();
 
         let response =
             client.send_request(HttpMethod::GET, "/admins/info", None, None, Some("whale"))?;
@@ -1047,11 +1139,16 @@ impl AuthManager {
     }
 
     // 配置认证 Token
-    pub fn configure_authentication_token(&self, token: &str, status: AccountStatus) {
-        let client = CodeMaoClient::global(); // 使用全局单例
+    pub fn configure_authentication_token(
+        &self,
+        token: &str,
+        status: AccountStatus,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let client = self.client();
 
-        client.set_token(status.to_identity(), token);
+        client.set_token(status.to_identity(), token)?;
         let _ = client.switch_identity(status.to_identity());
+        Ok(())
     }
 
     // 获取当前登录凭证
@@ -1069,6 +1166,7 @@ impl Default for AuthManager {
 // ==================== 云服务认证器 ====================
 
 pub struct CloudAuthenticator {
+    client_provider: Box<dyn ClientProvider>,
     authorization_token: Option<String>,
     client_id: String,
     time_difference: i64,
@@ -1078,15 +1176,30 @@ pub struct CloudAuthenticator {
 impl CloudAuthenticator {
     const CLIENT_SECRET: &'static str = "pBlYqXbJDu";
 
-    pub fn new(authorization_token: Option<String>) -> Self {
+    /// 创建新的云服务认证器（使用指定的客户端提供者）
+    pub fn new_with_provider(
+        provider: Box<dyn ClientProvider>,
+        authorization_token: Option<String>,
+    ) -> Self {
         let client_id = Self::generate_client_id(8);
 
         Self {
+            client_provider: provider,
             authorization_token,
             client_id,
             time_difference: 0,
             client_secret: Self::CLIENT_SECRET,
         }
+    }
+
+    /// 创建新的云服务认证器（使用默认的全局客户端）
+    pub fn new(authorization_token: Option<String>) -> Self {
+        Self::new_with_provider(Box::new(GlobalClientProvider::new()), authorization_token)
+    }
+
+    // 获取客户端
+    fn client(&self) -> &CodeMaoClient {
+        self.client_provider.client()
     }
 
     fn generate_client_id(length: usize) -> String {
@@ -1104,7 +1217,7 @@ impl CloudAuthenticator {
     // 获取校准后的时间戳
     pub fn get_calibrated_timestamp(&mut self) -> Result<i64, Box<dyn std::error::Error>> {
         if self.time_difference == 0 {
-            let server_time = fetch_current_timestamp()?;
+            let server_time = fetch_current_timestamp_with_provider(&*self.client_provider)?;
             let local_time = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
@@ -1133,4 +1246,20 @@ impl CloudAuthenticator {
             "client_id": self.client_id,
         }))
     }
+}
+
+// ==================== 便捷函数 ====================
+
+/// 使用默认全局客户端执行登录
+pub fn login(
+    identity: Option<&str>,
+    password: Option<&str>,
+    token: Option<&str>,
+    pid: Option<&str>,
+    status: Option<&str>,
+    role: Option<&str>,
+    prefer_method: Option<&str>,
+) -> Result<LoginResult, Box<dyn std::error::Error>> {
+    let mut auth_manager = AuthManager::new();
+    auth_manager.login(identity, password, token, pid, status, role, prefer_method)
 }

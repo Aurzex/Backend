@@ -1,11 +1,11 @@
+use rand::RngExt;
+use serde_json::Value;
 use std::collections::HashMap;
+use std::fmt;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::{Arc, OnceLock, RwLock};
 use std::time::Duration;
-
-use rand::RngExt;
-use serde_json::Value;
 use ureq::http::Response;
 use ureq::unversioned::multipart::Form;
 use ureq::{Agent, Body, RequestBuilder};
@@ -131,38 +131,32 @@ impl AsRef<str> for Identity {
     }
 }
 
-// ==================== 身份管理器 ====================
-/// 身份管理器，使用固定长度数组存储令牌
-#[derive(Debug, Clone)]
-pub struct IdentityManger {
+// ==================== 身份管理器（核心单例）====================
+/// 全局身份管理器，使用固定长度数组存储令牌
+#[derive(Debug)]
+pub struct GlobalIdentityManager {
     tokens: [Option<String>; 4],
     current: Identity,
 }
 
-impl Default for IdentityManger {
-    fn default() -> Self {
+impl GlobalIdentityManager {
+    fn new() -> Self {
         Self {
             tokens: Default::default(),
             current: Identity::Average,
         }
     }
-}
 
-impl IdentityManger {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// 设置指定身份的令牌（空字符串会被忽略）
-    pub fn set_token(&mut self, identity: Identity, token: impl Into<String>) {
+    /// 设置指定身份的令牌
+    fn set_token(&mut self, identity: Identity, token: impl Into<String>) {
         let token = token.into();
         if !token.is_empty() {
             self.tokens[identity.index()] = Some(token);
         }
     }
 
-    /// 切换到已有令牌的身份
-    pub fn switch_identity(&mut self, identity: Identity) -> Result<()> {
+    /// 切换到指定身份
+    fn switch_identity(&mut self, identity: Identity) -> Result<()> {
         if identity == Identity::Blank || self.tokens[identity.index()].is_some() {
             self.current = identity;
             Ok(())
@@ -172,20 +166,29 @@ impl IdentityManger {
     }
 
     /// 当前身份
-    pub fn current_identity(&self) -> Identity {
+    fn current_identity(&self) -> Identity {
         self.current
     }
 
     /// 当前身份对应的令牌
-    pub fn current_token(&self) -> Option<&str> {
+    fn current_token(&self) -> Option<&str> {
         self.tokens[self.current.index()].as_deref()
     }
 
     /// 生成认证头
-    pub fn auth_header(&self) -> Option<(&'static str, String)> {
+    fn auth_header(&self) -> Option<(&'static str, String)> {
         self.current_token()
             .map(|token| ("Authorization", format!("Bearer {}", token)))
     }
+}
+
+/// 全局身份管理器单例
+static GLOBAL_IDENTITY_MANAGER: OnceLock<Arc<RwLock<GlobalIdentityManager>>> = OnceLock::new();
+
+fn get_global_identity_manager() -> Arc<RwLock<GlobalIdentityManager>> {
+    GLOBAL_IDENTITY_MANAGER
+        .get_or_init(|| Arc::new(RwLock::new(GlobalIdentityManager::new())))
+        .clone()
 }
 
 // ==================== 客户端配置 ====================
@@ -194,6 +197,8 @@ pub struct ClientConfig {
     default_base_url_key: &'static str,
     timeout: Duration,
     log_requests: bool,
+    /// 是否使用全局身份管理器
+    use_global_auth: bool,
 }
 
 impl ClientConfig {
@@ -226,6 +231,12 @@ impl ClientConfig {
         self.log_requests = log;
         self
     }
+
+    /// 设置为独立身份模式（不使用全局身份管理器）
+    pub fn with_independent_auth(mut self) -> Self {
+        self.use_global_auth = false;
+        self
+    }
 }
 
 impl Default for ClientConfig {
@@ -234,12 +245,13 @@ impl Default for ClientConfig {
             default_base_url_key: "default",
             timeout: Duration::from_secs(30),
             log_requests: true,
+            use_global_auth: true, // 默认使用全局身份管理器
         }
     }
 }
 
 // ==================== HTTP 方法 ====================
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HttpMethod {
     GET,
     POST,
@@ -262,16 +274,171 @@ impl From<HttpMethod> for &'static str {
     }
 }
 
-// ==================== 内部客户端结构（非公开） ====================
+// ==================== 独立身份管理器 ====================
+/// 用于独立客户端的身份管理器
+#[derive(Debug, Clone)]
+pub struct LocalIdentityManager {
+    tokens: [Option<String>; 4],
+    current: Identity,
+}
+
+impl LocalIdentityManager {
+    pub fn new() -> Self {
+        Self {
+            tokens: Default::default(),
+            current: Identity::Average,
+        }
+    }
+
+    pub fn set_token(&mut self, identity: Identity, token: impl Into<String>) {
+        let token = token.into();
+        if !token.is_empty() {
+            self.tokens[identity.index()] = Some(token);
+        }
+    }
+
+    pub fn switch_identity(&mut self, identity: Identity) -> Result<()> {
+        if identity == Identity::Blank || self.tokens[identity.index()].is_some() {
+            self.current = identity;
+            Ok(())
+        } else {
+            Err(Error::Auth(format!("No token for identity {:?}", identity)))
+        }
+    }
+
+    pub fn current_identity(&self) -> Identity {
+        self.current
+    }
+
+    pub fn current_token(&self) -> Option<&str> {
+        self.tokens[self.current.index()].as_deref()
+    }
+
+    pub fn auth_header(&self) -> Option<(&'static str, String)> {
+        self.current_token()
+            .map(|token| ("Authorization", format!("Bearer {}", token)))
+    }
+}
+
+// ==================== 认证特质 ====================
+/// 认证提供者特质，允许不同的认证实现
+pub trait AuthProvider: Send + Sync + std::fmt::Debug {
+    fn current_identity(&self) -> Identity;
+    fn current_token(&self) -> Option<String>;
+    fn auth_header(&self) -> Option<(&'static str, String)>;
+    fn set_token(&self, identity: Identity, token: String) -> Result<()>;
+    fn switch_identity(&self, identity: Identity) -> Result<()>;
+}
+
+/// 全局认证提供者
+#[derive(Debug, Clone)]
+pub struct GlobalAuthProvider;
+
+impl GlobalAuthProvider {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl AuthProvider for GlobalAuthProvider {
+    fn current_identity(&self) -> Identity {
+        get_global_identity_manager()
+            .read()
+            .map(|guard| guard.current_identity())
+            .unwrap_or(Identity::Blank)
+    }
+
+    fn current_token(&self) -> Option<String> {
+        get_global_identity_manager()
+            .read()
+            .ok()
+            .and_then(|guard| guard.current_token().map(String::from))
+    }
+
+    fn auth_header(&self) -> Option<(&'static str, String)> {
+        get_global_identity_manager()
+            .read()
+            .ok()
+            .and_then(|guard| guard.auth_header())
+    }
+
+    fn set_token(&self, identity: Identity, token: String) -> Result<()> {
+        get_global_identity_manager()
+            .write()
+            .map(|mut guard| {
+                guard.set_token(identity, token);
+            })
+            .map_err(|_| Error::Auth("Failed to acquire write lock".into()))
+    }
+
+    fn switch_identity(&self, identity: Identity) -> Result<()> {
+        get_global_identity_manager()
+            .write()
+            .map_err(|_| Error::Auth("Failed to acquire write lock".into()))?
+            .switch_identity(identity)
+    }
+}
+
+/// 本地认证提供者
+#[derive(Debug, Clone)]
+pub struct LocalAuthProvider {
+    inner: Arc<RwLock<LocalIdentityManager>>,
+}
+
+impl LocalAuthProvider {
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(LocalIdentityManager::new())),
+        }
+    }
+}
+
+impl AuthProvider for LocalAuthProvider {
+    fn current_identity(&self) -> Identity {
+        self.inner
+            .read()
+            .map(|guard| guard.current_identity())
+            .unwrap_or(Identity::Blank)
+    }
+
+    fn current_token(&self) -> Option<String> {
+        self.inner
+            .read()
+            .ok()
+            .and_then(|guard| guard.current_token().map(String::from))
+    }
+
+    fn auth_header(&self) -> Option<(&'static str, String)> {
+        self.inner.read().ok().and_then(|guard| guard.auth_header())
+    }
+
+    fn set_token(&self, identity: Identity, token: String) -> Result<()> {
+        self.inner
+            .write()
+            .map(|mut guard| {
+                guard.set_token(identity, token);
+            })
+            .map_err(|_| Error::Auth("Failed to acquire write lock".into()))
+    }
+
+    fn switch_identity(&self, identity: Identity) -> Result<()> {
+        self.inner
+            .write()
+            .map_err(|_| Error::Auth("Failed to acquire write lock".into()))?
+            .switch_identity(identity)
+    }
+}
+
+// ==================== 内部客户端结构 ====================
 #[derive(Clone)]
 struct InnerClient {
     agent: Agent,
     config: ClientConfig,
-    auth: Arc<RwLock<IdentityManger>>,
+    auth: Arc<dyn AuthProvider>,
 }
 
 impl InnerClient {
-    fn new(config: ClientConfig) -> Self {
+    fn new(config: ClientConfig, auth: Arc<dyn AuthProvider>) -> Self {
         let agent = Agent::config_builder()
             .timeout_global(Some(config.timeout))
             .build()
@@ -279,7 +446,7 @@ impl InnerClient {
         Self {
             agent,
             config,
-            auth: Arc::new(RwLock::new(IdentityManger::default())),
+            auth,
         }
     }
 
@@ -306,11 +473,9 @@ impl InnerClient {
             builder = builder.header(*k, *v);
         }
 
-        // 从 RwLock 中读取当前认证信息
-        if let Ok(auth) = self.auth.read() {
-            if let Some((k, v)) = auth.auth_header() {
-                builder = builder.header(k, v);
-            }
+        // 从认证提供者获取认证信息
+        if let Some((k, v)) = self.auth.auth_header() {
+            builder = builder.header(k, v);
         }
         builder
     }
@@ -334,11 +499,8 @@ impl InnerClient {
             println!("  {}: {}", k, v);
         }
 
-        // 从 RwLock 中读取当前认证信息用于日志
-        if let Ok(auth) = self.auth.read() {
-            if auth.auth_header().is_some() {
-                println!("  Authorization: Bearer [已隐藏]");
-            }
+        if self.auth.auth_header().is_some() {
+            println!("  Authorization: Bearer [已隐藏]");
         }
 
         if let Some(params) = params {
@@ -469,29 +631,56 @@ impl InnerClient {
     }
 }
 
-// ==================== 公开的 CodeMaoClient（单例包装器）====================
+// ==================== 公开的 CodeMaoClient ====================
+/// 主客户端，支持全局单例和独立实例两种模式
 #[derive(Clone)]
 pub struct CodeMaoClient {
     inner: Arc<InnerClient>,
 }
 
 impl CodeMaoClient {
-    /// 获取全局单例实例
+    /// 获取全局单例实例（使用全局身份管理器）
     pub fn global() -> &'static Self {
         static INSTANCE: OnceLock<CodeMaoClient> = OnceLock::new();
-        INSTANCE.get_or_init(|| CodeMaoClient::new(ClientConfig::default()))
+        INSTANCE.get_or_init(|| {
+            CodeMaoClient::new_with_auth(
+                ClientConfig::default(),
+                Arc::new(GlobalAuthProvider::new()),
+            )
+        })
     }
 
     /// 初始化全局实例（如果尚未初始化）
     pub fn init_global(config: ClientConfig) -> &'static Self {
         static INSTANCE: OnceLock<CodeMaoClient> = OnceLock::new();
-        INSTANCE.get_or_init(|| CodeMaoClient::new(config))
+        INSTANCE.get_or_init(|| {
+            CodeMaoClient::new_with_auth(config, Arc::new(GlobalAuthProvider::new()))
+        })
     }
 
-    /// 创建新实例（主要用于测试，通常应使用 global()）
-    pub fn new(config: ClientConfig) -> Self {
+    /// 创建使用全局身份管理器的客户端
+    pub fn new_with_global_auth(config: ClientConfig) -> Self {
+        Self::new_with_auth(config, Arc::new(GlobalAuthProvider::new()))
+    }
+
+    /// 创建使用独立身份管理器的客户端
+    pub fn new_independent(config: ClientConfig) -> Self {
+        Self::new_with_auth(config, Arc::new(LocalAuthProvider::new()))
+    }
+
+    /// 使用自定义认证提供者创建客户端
+    pub fn new_with_auth(config: ClientConfig, auth: Arc<dyn AuthProvider>) -> Self {
         Self {
-            inner: Arc::new(InnerClient::new(config)),
+            inner: Arc::new(InnerClient::new(config, auth)),
+        }
+    }
+
+    /// 创建新实例（向后兼容，使用全局身份管理器）
+    pub fn new(config: ClientConfig) -> Self {
+        if config.use_global_auth {
+            Self::new_with_global_auth(config)
+        } else {
+            Self::new_independent(config)
         }
     }
 
@@ -501,37 +690,23 @@ impl CodeMaoClient {
     }
 
     /// 设置指定身份的令牌
-    pub fn set_token(&self, identity: Identity, token: impl Into<String>) {
-        if let Ok(mut auth) = self.inner.auth.write() {
-            auth.set_token(identity, token);
-        }
+    pub fn set_token(&self, identity: Identity, token: impl Into<String>) -> Result<()> {
+        self.inner.auth.set_token(identity, token.into())
     }
 
     /// 切换到指定身份
     pub fn switch_identity(&self, identity: Identity) -> Result<()> {
-        if let Ok(mut auth) = self.inner.auth.write() {
-            auth.switch_identity(identity)
-        } else {
-            Err(Error::Auth("Failed to acquire write lock".into()))
-        }
+        self.inner.auth.switch_identity(identity)
     }
 
     /// 获取当前身份
     pub fn current_identity(&self) -> Identity {
-        if let Ok(auth) = self.inner.auth.read() {
-            auth.current_identity()
-        } else {
-            Identity::Blank
-        }
+        self.inner.auth.current_identity()
     }
 
     /// 获取当前令牌
     pub fn current_token(&self) -> Option<String> {
-        if let Ok(auth) = self.inner.auth.read() {
-            auth.current_token().map(String::from)
-        } else {
-            None
-        }
+        self.inner.auth.current_token()
     }
 
     /// 发送 HTTP 请求
@@ -681,6 +856,30 @@ impl PaginatedIter {
         self
     }
 
+    pub fn with_amount_key(mut self, key: impl Into<String>) -> Self {
+        let mut config = self.config.clone();
+        config.amount_key = Some(key.into());
+        self.config = config;
+        self
+    }
+    pub fn with_offset_key(mut self, key: impl Into<String>) -> Self {
+        let mut config = self.config.clone();
+        config.offset_key = Some(key.into());
+        self.config = config;
+        self
+    }
+    pub fn with_response_amount_key(mut self, key: impl Into<String>) -> Self {
+        let mut config = self.config.clone();
+        config.response_amount_key = Some(key.into());
+        self.config = config;
+        self
+    }
+    pub fn with_response_offset_key(mut self, key: impl Into<String>) -> Self {
+        let mut config = self.config.clone();
+        config.response_offset_key = Some(key.into());
+        self.config = config;
+        self
+    }
     pub fn with_base_url(mut self, key: impl Into<String>) -> Self {
         self.base_key = Some(key.into());
         self
@@ -1050,14 +1249,156 @@ fn generate_id(length: usize) -> String {
         .collect()
 }
 
-// ==================== 简单工厂 ====================
+// 定义HTTP状态码枚举
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HTTPStatus {
+    // 1xx Informational
+    Continue = 100,
+    SwitchingProtocols = 101,
+    Processing = 102,
+
+    // 2xx Success
+    Ok = 200,
+    Created = 201,
+    Accepted = 202,
+    NonAuthoritativeInfo = 203,
+    NoContent = 204,
+    ResetContent = 205,
+    PartialContent = 206,
+
+    // 3xx Redirection
+    MultipleChoices = 300,
+    MovedPermanently = 301,
+    Found = 302,
+    SeeOther = 303,
+    NotModified = 304,
+    TemporaryRedirect = 307,
+    PermanentRedirect = 308,
+
+    // 4xx Client Error
+    BadRequest = 400,
+    Unauthorized = 401,
+    PaymentRequired = 402,
+    Forbidden = 403,
+    NotFound = 404,
+    MethodNotAllowed = 405,
+    NotAcceptable = 406,
+    Conflict = 409,
+    Gone = 410,
+
+    // 5xx Server Error
+    InternalServerError = 500,
+    NotImplemented = 501,
+    BadGateway = 502,
+    ServiceUnavailable = 503,
+    GatewayTimeout = 504,
+}
+
+impl HTTPStatus {
+    // 从u16创建HTTPStatus
+    pub fn from_code(code: u16) -> Option<Self> {
+        match code {
+            100 => Some(HTTPStatus::Continue),
+            101 => Some(HTTPStatus::SwitchingProtocols),
+            102 => Some(HTTPStatus::Processing),
+            200 => Some(HTTPStatus::Ok),
+            201 => Some(HTTPStatus::Created),
+            202 => Some(HTTPStatus::Accepted),
+            203 => Some(HTTPStatus::NonAuthoritativeInfo),
+            204 => Some(HTTPStatus::NoContent),
+            205 => Some(HTTPStatus::ResetContent),
+            206 => Some(HTTPStatus::PartialContent),
+            300 => Some(HTTPStatus::MultipleChoices),
+            301 => Some(HTTPStatus::MovedPermanently),
+            302 => Some(HTTPStatus::Found),
+            303 => Some(HTTPStatus::SeeOther),
+            304 => Some(HTTPStatus::NotModified),
+            307 => Some(HTTPStatus::TemporaryRedirect),
+            308 => Some(HTTPStatus::PermanentRedirect),
+            400 => Some(HTTPStatus::BadRequest),
+            401 => Some(HTTPStatus::Unauthorized),
+            402 => Some(HTTPStatus::PaymentRequired),
+            403 => Some(HTTPStatus::Forbidden),
+            404 => Some(HTTPStatus::NotFound),
+            405 => Some(HTTPStatus::MethodNotAllowed),
+            406 => Some(HTTPStatus::NotAcceptable),
+            409 => Some(HTTPStatus::Conflict),
+            410 => Some(HTTPStatus::Gone),
+            500 => Some(HTTPStatus::InternalServerError),
+            501 => Some(HTTPStatus::NotImplemented),
+            502 => Some(HTTPStatus::BadGateway),
+            503 => Some(HTTPStatus::ServiceUnavailable),
+            504 => Some(HTTPStatus::GatewayTimeout),
+            _ => None,
+        }
+    }
+
+    // 获取状态码对应的原因短语
+    pub fn reason_phrase(&self) -> &'static str {
+        match self {
+            HTTPStatus::Continue => "Continue",
+            HTTPStatus::SwitchingProtocols => "Switching Protocols",
+            HTTPStatus::Processing => "Processing",
+            HTTPStatus::Ok => "OK",
+            HTTPStatus::Created => "Created",
+            HTTPStatus::Accepted => "Accepted",
+            HTTPStatus::NonAuthoritativeInfo => "Non-Authoritative Information",
+            HTTPStatus::NoContent => "No Content",
+            HTTPStatus::ResetContent => "Reset Content",
+            HTTPStatus::PartialContent => "Partial Content",
+            HTTPStatus::MultipleChoices => "Multiple Choices",
+            HTTPStatus::MovedPermanently => "Moved Permanently",
+            HTTPStatus::Found => "Found",
+            HTTPStatus::SeeOther => "See Other",
+            HTTPStatus::NotModified => "Not Modified",
+            HTTPStatus::TemporaryRedirect => "Temporary Redirect",
+            HTTPStatus::PermanentRedirect => "Permanent Redirect",
+            HTTPStatus::BadRequest => "Bad Request",
+            HTTPStatus::Unauthorized => "Unauthorized",
+            HTTPStatus::PaymentRequired => "Payment Required",
+            HTTPStatus::Forbidden => "Forbidden",
+            HTTPStatus::NotFound => "Not Found",
+            HTTPStatus::MethodNotAllowed => "Method Not Allowed",
+            HTTPStatus::NotAcceptable => "Not Acceptable",
+            HTTPStatus::Conflict => "Conflict",
+            HTTPStatus::Gone => "Gone",
+            HTTPStatus::InternalServerError => "Internal Server Error",
+            HTTPStatus::NotImplemented => "Not Implemented",
+            HTTPStatus::BadGateway => "Bad Gateway",
+            HTTPStatus::ServiceUnavailable => "Service Unavailable",
+            HTTPStatus::GatewayTimeout => "Gateway Timeout",
+        }
+    }
+}
+
+// 实现从HTTPStatus到u16的转换
+impl From<HTTPStatus> for u16 {
+    fn from(status: HTTPStatus) -> Self {
+        status as u16
+    }
+}
+
+// 实现Display trait
+impl fmt::Display for HTTPStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {}", *self as u16, self.reason_phrase())
+    }
+}
+// ==================== 简化的工厂 ====================
 pub struct ClientFactory;
 
 impl ClientFactory {
-    pub fn create_http_client(config: Option<ClientConfig>) -> CodeMaoClient {
-        CodeMaoClient::new(config.unwrap_or_default())
+    /// 创建使用全局身份管理器的 HTTP 客户端
+    pub fn create_global_client(config: Option<ClientConfig>) -> CodeMaoClient {
+        CodeMaoClient::new_with_global_auth(config.unwrap_or_default())
     }
 
+    /// 创建使用独立身份管理器的 HTTP 客户端
+    pub fn create_independent_client(config: Option<ClientConfig>) -> CodeMaoClient {
+        CodeMaoClient::new_independent(config.unwrap_or_default())
+    }
+
+    /// 创建文件上传器
     pub fn create_file_uploader(client: CodeMaoClient) -> FileUploader {
         FileUploader::new(client)
     }
@@ -1070,5 +1411,10 @@ impl ClientFactory {
     /// 获取全局客户端实例
     pub fn global_client() -> &'static CodeMaoClient {
         CodeMaoClient::global()
+    }
+
+    /// 获取全局身份管理器
+    pub fn global_identity_manager() -> Arc<RwLock<GlobalIdentityManager>> {
+        get_global_identity_manager()
     }
 }
