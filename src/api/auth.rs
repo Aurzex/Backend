@@ -1,19 +1,17 @@
-use crate::utils::acquire::{CodeMaoClient, HttpMethod};
+use crate::utils::acquire::{ClientFactory, CodeMaoClient, HttpMethod, Identity, IdentityManger};
 use crate::utils::data::{CodeMaoFile, FileContent, PathConfig};
 use rand::RngExt;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::path::PathBuf;
+
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
 use ureq::http::HeaderValue;
 
 // ==================== 枚举定义 ====================
 
 // 登录方法枚举
+#[derive(Debug, Clone, Copy)]
 pub enum LoginMethod {
     PasswordV0,
     PasswordV1,
@@ -49,7 +47,7 @@ impl LoginMethod {
 }
 
 // 用户角色枚举
-#[derive(Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UserRole {
     User,
     Admin,
@@ -72,7 +70,8 @@ impl UserRole {
     }
 }
 
-// 账号状态枚举
+// 账号状态枚举 - 映射到 Identity
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccountStatus {
     Judgement,
     Average,
@@ -94,6 +93,15 @@ impl AccountStatus {
             "average" => Some(AccountStatus::Average),
             "edu" => Some(AccountStatus::Edu),
             _ => None,
+        }
+    }
+
+    // 转换为 Identity
+    fn to_identity(&self) -> Identity {
+        match self {
+            AccountStatus::Judgement => Identity::Judgement,
+            AccountStatus::Average => Identity::Average,
+            AccountStatus::Edu => Identity::Edu,
         }
     }
 }
@@ -161,10 +169,28 @@ impl LoginResult {
     }
 }
 
+// ==================== 全局单例 ====================
+
+// 全局 AuthManager 单例
+static GLOBAL_AUTH_MANAGER: OnceLock<Arc<AuthManager>> = OnceLock::new();
+
+// 获取全局 AuthManager 实例
+pub fn global_auth_manager() -> Arc<AuthManager> {
+    GLOBAL_AUTH_MANAGER
+        .get_or_init(|| Arc::new(AuthManager::new()))
+        .clone()
+}
+
+// 初始化全局 AuthManager（带配置）
+pub fn init_global_auth_manager() -> Arc<AuthManager> {
+    global_auth_manager() // 直接返回已初始化的实例
+}
+
 // ==================== 辅助函数 ====================
 
 // 获取当前服务器时间戳
-pub fn fetch_current_timestamp(client: &CodeMaoClient) -> Result<i64, Box<dyn std::error::Error>> {
+pub fn fetch_current_timestamp() -> Result<i64, Box<dyn std::error::Error>> {
+    let client = CodeMaoClient::global(); // 使用全局单例
     let response = client.send_request(
         HttpMethod::GET,
         "/coconut/clouddb/currentTime",
@@ -172,7 +198,7 @@ pub fn fetch_current_timestamp(client: &CodeMaoClient) -> Result<i64, Box<dyn st
         None,
         None,
     )?;
-    let json = CodeMaoClient::response_to_json(response)?;
+    let json = client.response_to_json(response)?;
     Ok(json["data"].as_i64().unwrap_or(0))
 }
 
@@ -208,38 +234,36 @@ fn determine_admin_login_method(
 
 // ==================== 认证处理器 ====================
 
+#[derive(Clone)]
 pub struct AuthProcessor {
-    client: Arc<Mutex<CodeMaoClient>>,
+    // 移除 client 字段，直接使用全局单例
     client_secret: &'static str,
-    captcha_img_path: PathBuf,
 }
 
 impl AuthProcessor {
     const CLIENT_SECRET: &'static str = "pBlYqXbJDu";
 
-    pub fn new(client: Arc<Mutex<CodeMaoClient>>, captcha_img_path: PathBuf) -> Self {
+    pub fn new() -> Self {
         Self {
-            client,
             client_secret: Self::CLIENT_SECRET,
-            captcha_img_path: captcha_img_path,
         }
     }
 
     // 获取认证详情
     pub fn fetch_auth_details(&self, token: &str) -> Result<Value, Box<dyn std::error::Error>> {
+        let client = CodeMaoClient::global(); // 使用全局单例
+
+        // 先切换到 blank 身份发送请求，然后手动添加 cookie
         let cookie_str = format!("authorization={}", token);
-        let mut headers = HashMap::new();
-        headers.insert("cookie".to_string(), cookie_str);
 
-        let response = self.client.lock().unwrap().send_request(
-            HttpMethod::GET,
-            "/web/users/details",
-            None,
-            None,
-            None,
-        )?;
+        // 通过 agent 发送自定义请求
+        let response = client
+            .agent()
+            .get("https://api.codemao.cn/web/users/details")
+            .header("Cookie", &cookie_str)
+            .call()?;
 
-        // 分步骤处理，让编译器更容易推断类型
+        // 处理 cookies
         let headers = response.headers();
         let set_cookie_headers = headers.get_all("set-cookie");
 
@@ -253,7 +277,7 @@ impl AuthProcessor {
             println!("Received cookie: {}", cookie);
         }
 
-        let json = CodeMaoClient::response_to_json(response)?;
+        let json = client.response_to_json(response)?;
         Ok(json)
     }
 
@@ -264,21 +288,24 @@ impl AuthProcessor {
         timestamp: i64,
         pid: &str,
     ) -> Result<Value, Box<dyn std::error::Error>> {
+        let client = CodeMaoClient::global(); // 使用全局单例
+
         let payload = json!({
             "identity": identity,
             "pid": pid,
             "timestamp": timestamp,
         });
 
-        let response = self.client.lock().unwrap().send_request(
+        let response = client.send_request(
             HttpMethod::POST,
             "https://open-service.codemao.cn/captcha/rule/v3",
             None,
             Some(&payload),
             None,
         )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        Ok(client.response_to_json(response)?)
     }
+
     pub fn get_login_security_info(
         &self,
         identity: &str,
@@ -286,6 +313,8 @@ impl AuthProcessor {
         ticket: &str,
         pid: &str,
     ) -> Result<Value, Box<dyn std::error::Error>> {
+        let client = CodeMaoClient::global(); // 使用全局单例
+
         let payload = json!({
             "identity": identity,
             "password": password,
@@ -293,28 +322,18 @@ impl AuthProcessor {
             "agreement_ids": [-1],
         });
 
-        // 创建包含 x-captcha-ticket 的 headers
-        let mut headers = HashMap::new();
-        headers.insert("x-captcha-ticket".to_string(), ticket.to_string());
-
-        println!("--- 调用 Security API ---");
-        println!("Payload: {}", serde_json::to_string_pretty(&payload)?);
-
-        let response = self.client.lock().unwrap().send_request(
-            HttpMethod::POST,
-            "/tiger/v3/web/accounts/login/security",
-            None,
-            Some(&payload),
-            None,
-        )?;
+        // 由于 CodeMaoClient 的 send_request 不支持自定义头，需要使用 agent
+        let response = client
+            .agent()
+            .post("https://api.codemao.cn/tiger/v3/web/accounts/login/security")
+            .header("x-captcha-ticket", ticket)
+            .send_json(&payload)?;
 
         // 检查状态码
         let status = response.status();
-        println!("Security API Status: {}", status);
 
         if status != 200 {
             let body = response.into_body().read_to_string().unwrap_or_default();
-            println!("Security API Error Body: {}", body);
             return Err(format!("API返回错误状态码: {}, Body: {}", status, body).into());
         }
 
@@ -327,8 +346,6 @@ impl AuthProcessor {
             }
         };
 
-        println!("Security API Body: {}", body);
-
         // 解析JSON
         let json_value: Value = match serde_json::from_str(&body) {
             Ok(v) => v,
@@ -338,13 +355,9 @@ impl AuthProcessor {
             }
         };
 
-        println!(
-            "Security API JSON: {}",
-            serde_json::to_string_pretty(&json_value)?
-        );
-
         Ok(json_value)
     }
+
     // 管理员用户认证
     pub fn authenticate_admin_user(
         &self,
@@ -353,6 +366,8 @@ impl AuthProcessor {
         key: i64,
         code: &str,
     ) -> Result<Value, Box<dyn std::error::Error>> {
+        let client = CodeMaoClient::global(); // 使用全局单例
+
         let payload = json!({
             "username": username,
             "password": password,
@@ -360,14 +375,14 @@ impl AuthProcessor {
             "code": code,
         });
 
-        let response = self.client.lock().unwrap().send_request(
+        let response = client.send_request(
             HttpMethod::POST,
             "/admins/login",
             None,
             Some(&payload),
             Some("whale"),
         )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        Ok(client.response_to_json(response)?)
     }
 
     // 获取管理员验证码
@@ -375,28 +390,29 @@ impl AuthProcessor {
         &self,
         timestamp: i64,
     ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        let client = CodeMaoClient::global(); // 使用全局单例
+
         let endpoint = format!("/admins/captcha/{}", timestamp);
 
-        let response = self.client.lock().unwrap().send_request(
-            HttpMethod::GET,
-            &endpoint,
-            None,
-            None,
-            Some("whale"),
-        )?;
+        let response =
+            client.send_request(HttpMethod::GET, &endpoint, None, None, Some("whale"))?;
+
         if response.status() == 200 {
-            let _res = CodeMaoFile::file_write(
-                &self.captcha_img_path,
-                &FileContent::Bytes(response.into_body().read_to_vec().unwrap()),
+            let bytes = response.into_body().read_to_vec()?;
+            CodeMaoFile::file_write(
+                &PathConfig::captcha_file_path(),
+                &FileContent::Bytes(bytes.clone()),
                 "b",
+            )?;
+            println!(
+                "验证码已保存至: {:?}",
+                &PathConfig::captcha_file_path().to_str()
             );
-            println!("验证码已保存至: {:?}", self.captcha_img_path.to_str());
+            Ok(bytes)
         } else {
             println!("获取验证码失败, 错误代码: {}", response.status());
+            Ok(Vec::new())
         }
-
-        // 返回图片数据
-        Ok(Vec::new()) // 实际应该从response获取
     }
 
     // 处理 v0 版本密码登录
@@ -406,20 +422,22 @@ impl AuthProcessor {
         password: &str,
         pid: &str,
     ) -> Result<Value, Box<dyn std::error::Error>> {
+        let client = CodeMaoClient::global(); // 使用全局单例
+
         let payload = json!({
             "identity": identity,
             "password": password,
             "pid": pid,
         });
 
-        let response = self.client.lock().unwrap().send_request(
+        let response = client.send_request(
             HttpMethod::POST,
             "/tiger/accounts/login",
             None,
             Some(&payload),
             None,
         )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        Ok(client.response_to_json(response)?)
     }
 
     // 处理 v1 版本密码登录
@@ -429,20 +447,22 @@ impl AuthProcessor {
         password: &str,
         pid: &str,
     ) -> Result<Value, Box<dyn std::error::Error>> {
+        let client = CodeMaoClient::global(); // 使用全局单例
+
         let payload = json!({
             "identity": identity,
             "password": password,
             "pid": pid,
         });
 
-        let response = self.client.lock().unwrap().send_request(
+        let response = client.send_request(
             HttpMethod::POST,
             "/tiger/v3/web/accounts/login",
             None,
             Some(&payload),
             None,
         )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        Ok(client.response_to_json(response)?)
     }
 
     // 处理 v2 版本密码登录
@@ -452,9 +472,11 @@ impl AuthProcessor {
         password: &str,
         pid: &str,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let timestamp = fetch_current_timestamp(&self.client.lock().unwrap())?;
+        let client = CodeMaoClient::global(); // 使用全局单例
+
+        let timestamp = fetch_current_timestamp()?;
         let ticket_response = self.get_login_ticket(identity, timestamp, pid)?;
-        println!("Ticket response: {:?}", ticket_response); // 你已经添加了这一行
+        println!("Ticket response: {:?}", ticket_response);
 
         let ticket = ticket_response["ticket"].as_str().ok_or("无法获取ticket")?;
 
@@ -463,22 +485,29 @@ impl AuthProcessor {
         println!(
             "Security API response: {}",
             serde_json::to_string_pretty(&security_response)?
-        ); // <-- 添加这一行
+        );
 
         Ok(security_response)
+    }
+}
+
+impl Default for AuthProcessor {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
 // ==================== 登录处理器 ====================
 
 pub struct LoginHandler {
-    client: Arc<Mutex<CodeMaoClient>>,
     processor: AuthProcessor,
 }
 
 impl LoginHandler {
-    pub fn new(client: Arc<Mutex<CodeMaoClient>>, processor: AuthProcessor) -> Self {
-        Self { client, processor }
+    pub fn new() -> Self {
+        Self {
+            processor: AuthProcessor::new(),
+        }
     }
 
     // 处理 v0 版本密码登录
@@ -487,20 +516,23 @@ impl LoginHandler {
         identity: &str,
         password: &str,
         pid: &str,
-        status: &AccountStatus,
+        status: AccountStatus,
     ) -> Result<LoginResult, Box<dyn std::error::Error>> {
-        let _ = self.client.lock().unwrap().switch_identity("", "blank");
+        let client = CodeMaoClient::global(); // 使用全局单例
+
+        // 切换到 blank 身份
+        let _ = client.switch_identity(Identity::Blank);
 
         match self.processor.handle_password_v0(identity, password, pid) {
             Ok(data) => {
                 if let Some(token) = data.get("token").and_then(|t| t.as_str()) {
-                    let _ = self
-                        .client
-                        .lock()
-                        .unwrap()
-                        .switch_identity(token, status.as_str());
+                    // 设置令牌并切换到对应身份
+                    client.set_token(status.to_identity(), token);
+                    let _ = client.switch_identity(status.to_identity());
+
                     Ok(
                         LoginResult::new(true, LoginMethod::PasswordV0, "v0 密码登录成功")
+                            .with_token(token)
                             .with_data(data),
                     )
                 } else {
@@ -524,9 +556,12 @@ impl LoginHandler {
         identity: &str,
         password: &str,
         pid: &str,
-        status: &AccountStatus,
+        status: AccountStatus,
     ) -> Result<LoginResult, Box<dyn std::error::Error>> {
-        self.client.lock().unwrap().switch_identity("", "blank");
+        let client = CodeMaoClient::global(); // 使用全局单例
+
+        // 切换到 blank 身份
+        let _ = client.switch_identity(Identity::Blank);
 
         match self.processor.handle_password_v1(identity, password, pid) {
             Ok(data) => {
@@ -535,13 +570,13 @@ impl LoginHandler {
                     .and_then(|a| a.get("token"))
                     .and_then(|t| t.as_str())
                 {
-                    let _ = self
-                        .client
-                        .lock()
-                        .unwrap()
-                        .switch_identity(token, status.as_str());
+                    // 设置令牌并切换到对应身份
+                    client.set_token(status.to_identity(), token);
+                    let _ = client.switch_identity(status.to_identity());
+
                     Ok(
                         LoginResult::new(true, LoginMethod::PasswordV1, "v1 密码登录成功")
+                            .with_token(token)
                             .with_data(data),
                     )
                 } else {
@@ -565,9 +600,12 @@ impl LoginHandler {
         identity: &str,
         password: &str,
         pid: &str,
-        status: &AccountStatus,
+        status: AccountStatus,
     ) -> Result<LoginResult, Box<dyn std::error::Error>> {
-        self.client.lock().unwrap().switch_identity("", "blank");
+        let client = CodeMaoClient::global(); // 使用全局单例
+
+        // 切换到 blank 身份
+        let _ = client.switch_identity(Identity::Blank);
 
         match self.processor.handle_password_v2(identity, password, pid) {
             Ok(data) => {
@@ -576,13 +614,13 @@ impl LoginHandler {
                     .and_then(|a| a.get("token"))
                     .and_then(|t| t.as_str())
                 {
-                    let _ = self
-                        .client
-                        .lock()
-                        .unwrap()
-                        .switch_identity(token, status.as_str());
+                    // 设置令牌并切换到对应身份
+                    client.set_token(status.to_identity(), token);
+                    let _ = client.switch_identity(status.to_identity());
+
                     Ok(
                         LoginResult::new(true, LoginMethod::PasswordV2, "v2 密码登录成功")
+                            .with_token(token)
                             .with_data(data),
                     )
                 } else {
@@ -592,11 +630,10 @@ impl LoginHandler {
                     )
                 }
             }
-            Err(e) => Ok(LoginResult::new(
-                false,
-                LoginMethod::PasswordV2,
-                &format!("登录失败: {}", e),
-            )),
+            Err(e) => {
+                // 返回真正的错误，而不是 Ok
+                return Err(format!("password_v2 登录失败: {}", e).into());
+            }
         }
     }
 
@@ -604,14 +641,15 @@ impl LoginHandler {
     pub fn handle_token(
         &self,
         token: &str,
-        status: &AccountStatus,
+        status: AccountStatus,
     ) -> Result<LoginResult, Box<dyn std::error::Error>> {
+        let client = CodeMaoClient::global(); // 使用全局单例
+
         let auth_details = self.processor.fetch_auth_details(token)?;
-        let _ = self
-            .client
-            .lock()
-            .unwrap()
-            .switch_identity(token, status.as_str());
+
+        // 设置令牌并切换到对应身份
+        client.set_token(status.to_identity(), token);
+        let _ = client.switch_identity(status.to_identity());
 
         Ok(LoginResult::new(true, LoginMethod::Token, "Token 登录成功")
             .with_token(token)
@@ -623,10 +661,11 @@ impl LoginHandler {
         &self,
         token: Option<&str>,
     ) -> Result<LoginResult, Box<dyn std::error::Error>> {
+        let client = CodeMaoClient::global(); // 使用全局单例
+
         let token = match token {
             Some(t) => t.to_string(),
             None => {
-                // 在实际应用中，这里应该从其他地方获取token
                 println!("请输入 Authorization Token:");
                 let mut input = String::new();
                 std::io::stdin().read_line(&mut input)?;
@@ -634,11 +673,10 @@ impl LoginHandler {
             }
         };
 
-        let _ = self
-            .client
-            .lock()
-            .unwrap()
-            .switch_identity(&token, "judgement");
+        // 设置令牌并切换到 Judgement 身份
+        client.set_token(Identity::Judgement, &token);
+        let _ = client.switch_identity(Identity::Judgement);
+
         Ok(
             LoginResult::new(true, LoginMethod::AdminToken, "管理员 Token 登录成功")
                 .with_token(&token),
@@ -651,6 +689,8 @@ impl LoginHandler {
         username: Option<&str>,
         password: Option<&str>,
     ) -> Result<LoginResult, Box<dyn std::error::Error>> {
+        let client = CodeMaoClient::global(); // 使用全局单例
+
         let mut username = match username {
             Some(u) => u.to_string(),
             None => {
@@ -691,11 +731,10 @@ impl LoginHandler {
             {
                 Ok(response) => {
                     if let Some(token) = response.get("token").and_then(|t| t.as_str()) {
-                        let _ = self
-                            .client
-                            .lock()
-                            .unwrap()
-                            .switch_identity(token, "judgement");
+                        // 设置令牌并切换到 Judgement 身份
+                        client.set_token(Identity::Judgement, token);
+                        let _ = client.switch_identity(Identity::Judgement);
+
                         return Ok(LoginResult::new(
                             true,
                             LoginMethod::AdminPassword,
@@ -734,10 +773,16 @@ impl LoginHandler {
     }
 }
 
+impl Default for LoginHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ==================== 认证管理器 ====================
 
 pub struct AuthManager {
-    client: Arc<Mutex<CodeMaoClient>>,
+    // 移除 client 和 auth 字段，直接使用 CodeMaoClient 的全局单例
     processor: AuthProcessor,
     handler: LoginHandler,
     current_credentials: Option<LoginCredentials>,
@@ -745,14 +790,12 @@ pub struct AuthManager {
 
 impl AuthManager {
     pub fn new() -> Self {
-        let client = Arc::new(Mutex::new(CodeMaoClient::new()));
-        let processor = AuthProcessor::new(client.clone(), PathConfig::captcha_file_path());
-        let handler = LoginHandler::new(client.clone(), processor.clone());
+        // 确保 CodeMaoClient 全局单例已初始化
+        let _client = CodeMaoClient::global();
 
         Self {
-            client,
-            processor,
-            handler,
+            processor: AuthProcessor::new(),
+            handler: LoginHandler::new(),
             current_credentials: None,
         }
     }
@@ -780,8 +823,8 @@ impl AuthManager {
             role: UserRole::from_str(role.unwrap_or("user")).unwrap_or(UserRole::User),
         };
 
-        let role = credentials.role.clone(); // 先取出 role
-        self.current_credentials = Some(credentials); // 再移动
+        let role = credentials.role;
+        self.current_credentials = Some(credentials);
 
         match role {
             UserRole::Admin => {
@@ -792,6 +835,7 @@ impl AuthManager {
             }
         }
     }
+
     fn validate_login_parameters(
         &self,
         identity: Option<&str>,
@@ -871,10 +915,9 @@ impl AuthManager {
                 Some(&credentials.password)
             },
         )
-        .map(|s| s.to_string()) // 将静态 &str 转为 String
+        .map(|s| s.to_string())
     }
 
-    // 修复生命周期问题：get_admin_login_method 返回 String
     fn get_admin_login_method(
         &self,
         credentials: &LoginCredentials,
@@ -907,7 +950,6 @@ impl AuthManager {
         .map(|s| s.to_string())
     }
 
-    // 修改 user_login 方法以使用 String
     fn user_login(
         &self,
         credentials: &LoginCredentials,
@@ -920,28 +962,27 @@ impl AuthManager {
                 &credentials.identity,
                 &credentials.password,
                 &credentials.pid,
-                &credentials.status,
+                credentials.status,
             ),
             "password_v1" => self.handler.handle_password_v1(
                 &credentials.identity,
                 &credentials.password,
                 &credentials.pid,
-                &credentials.status,
+                credentials.status,
             ),
             "password_v2" => self.handler.handle_password_v2(
                 &credentials.identity,
                 &credentials.password,
                 &credentials.pid,
-                &credentials.status,
+                credentials.status,
             ),
             "token" => self
                 .handler
-                .handle_token(&credentials.token, &credentials.status),
+                .handle_token(&credentials.token, credentials.status),
             _ => Err(format!("不支持的登录方式: {}", method).into()),
         }
     }
 
-    // 修改 admin_login 方法以使用 String
     fn admin_login(
         &self,
         credentials: &LoginCredentials,
@@ -960,7 +1001,9 @@ impl AuthManager {
 
     // 执行 v0 版本用户登出
     pub fn execute_logout_v0(&self) -> Result<bool, Box<dyn std::error::Error>> {
-        let response = self.client.lock().unwrap().send_request(
+        let client = CodeMaoClient::global(); // 使用全局单例
+
+        let response = client.send_request(
             HttpMethod::POST,
             "/tiger/accounts/logout",
             None,
@@ -972,20 +1015,19 @@ impl AuthManager {
 
     // 执行 v12 版本用户登出
     pub fn execute_logout_v12(&self, method: &str) -> Result<bool, Box<dyn std::error::Error>> {
+        let client = CodeMaoClient::global(); // 使用全局单例
+
         let endpoint = format!("/tiger/v3/{}/accounts/logout", method);
-        let response = self.client.lock().unwrap().send_request(
-            HttpMethod::POST,
-            &endpoint,
-            None,
-            Some(&json!({})),
-            None,
-        )?;
+        let response =
+            client.send_request(HttpMethod::POST, &endpoint, None, Some(&json!({})), None)?;
         Ok(response.status() == 204)
     }
 
     // 管理员登出
     pub fn admin_logout(&self) -> Result<bool, Box<dyn std::error::Error>> {
-        let response = self.client.lock().unwrap().send_request(
+        let client = CodeMaoClient::global(); // 使用全局单例
+
+        let response = client.send_request(
             HttpMethod::DELETE,
             "/admins/logout",
             None,
@@ -997,29 +1039,30 @@ impl AuthManager {
 
     // 获取管理员仪表板数据
     pub fn fetch_admin_dashboard_data(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.lock().unwrap().send_request(
-            HttpMethod::GET,
-            "/admins/info",
-            None,
-            None,
-            Some("whale"),
-        )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        let client = CodeMaoClient::global(); // 使用全局单例
+
+        let response =
+            client.send_request(HttpMethod::GET, "/admins/info", None, None, Some("whale"))?;
+        Ok(client.response_to_json(response)?)
     }
 
     // 配置认证 Token
-    pub fn configure_authentication_token(&self, token: &str, identity: &str) {
-        let _ = self.client.lock().unwrap().switch_identity(token, identity);
-    }
+    pub fn configure_authentication_token(&self, token: &str, status: AccountStatus) {
+        let client = CodeMaoClient::global(); // 使用全局单例
 
-    // 获取当前客户端
-    pub fn get_current_client(&self) -> Arc<Mutex<CodeMaoClient>> {
-        self.client.clone()
+        client.set_token(status.to_identity(), token);
+        let _ = client.switch_identity(status.to_identity());
     }
 
     // 获取当前登录凭证
     pub fn get_current_credentials(&self) -> Option<&LoginCredentials> {
         self.current_credentials.as_ref()
+    }
+}
+
+impl Default for AuthManager {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -1029,7 +1072,6 @@ pub struct CloudAuthenticator {
     authorization_token: Option<String>,
     client_id: String,
     time_difference: i64,
-    client: Arc<Mutex<CodeMaoClient>>,
     client_secret: &'static str,
 }
 
@@ -1043,7 +1085,6 @@ impl CloudAuthenticator {
             authorization_token,
             client_id,
             time_difference: 0,
-            client: Arc::new(Mutex::new(CodeMaoClient::new())),
             client_secret: Self::CLIENT_SECRET,
         }
     }
@@ -1063,7 +1104,7 @@ impl CloudAuthenticator {
     // 获取校准后的时间戳
     pub fn get_calibrated_timestamp(&mut self) -> Result<i64, Box<dyn std::error::Error>> {
         if self.time_difference == 0 {
-            let server_time = fetch_current_timestamp(&self.client.lock().unwrap())?;
+            let server_time = fetch_current_timestamp()?;
             let local_time = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
@@ -1091,16 +1132,5 @@ impl CloudAuthenticator {
             "timestamp": timestamp,
             "client_id": self.client_id,
         }))
-    }
-}
-
-// 实现Clone trait以便在需要时复制AuthProcessor
-impl Clone for AuthProcessor {
-    fn clone(&self) -> Self {
-        Self {
-            client: self.client.clone(),
-            client_secret: self.client_secret,
-            captcha_img_path: self.captcha_img_path.clone(),
-        }
     }
 }

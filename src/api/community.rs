@@ -1,9 +1,6 @@
 use crate::utils::acquire::{CodeMaoClient, HttpMethod, PaginatedIter, PaginationMethod};
-use serde_json::Value;
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
+use serde_json::{Value, json};
+use std::collections::HashMap;
 
 // 回复类型枚举
 pub enum ReplyTypes {
@@ -129,26 +126,26 @@ impl ReadStatus {
 }
 
 pub struct DataFetcher {
-    client: Arc<Mutex<CodeMaoClient>>,
+    client: &'static CodeMaoClient, // 直接使用 CodeMaoClient，不需要 Mutex
 }
 
 impl DataFetcher {
     pub fn new() -> Self {
         Self {
-            client: CodeMaoClient::global(),
+            client: CodeMaoClient::global(), // clone 获取实例
         }
     }
 
     // 获取随机昵称
     pub fn fetch_random_nickname(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.lock().unwrap().send_request(
+        let response = self.client.send_request(
             HttpMethod::GET,
             "/api/user/random/nickname",
             None,
             None,
             None,
         )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取新消息数量
@@ -161,14 +158,10 @@ impl DataFetcher {
             MessageMethod::Nemo => "/nemo/v2/user/message/count",
         };
 
-        let response = self.client.lock().unwrap().send_request(
-            HttpMethod::GET,
-            endpoint,
-            None,
-            None,
-            None,
-        )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        let response = self
+            .client
+            .send_request(HttpMethod::GET, endpoint, None, None, None)?;
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取回复
@@ -183,14 +176,14 @@ impl DataFetcher {
         params.insert("limit".to_string(), limit.to_string());
         params.insert("offset".to_string(), offset.to_string());
 
-        let response = self.client.lock().unwrap().send_request(
+        let response = self.client.send_request(
             HttpMethod::GET,
             "/web/message-record",
             Some(&params),
             None,
             None,
         )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取回复生成器
@@ -200,8 +193,6 @@ impl DataFetcher {
 
         let mut paginated = self
             .client
-            .lock()
-            .unwrap()
             .paginated("/web/message-record")
             .with_params(params)
             .with_method(HttpMethod::GET)
@@ -223,38 +214,33 @@ impl DataFetcher {
         let extra_url = if types == "like" { "1" } else { "3" };
         let endpoint = format!("/nemo/v2/user/message/{}", extra_url);
 
-        let response = self.client.lock().unwrap().send_request(
-            HttpMethod::GET,
-            &endpoint,
-            None,
-            None,
-            None,
-        )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        let response = self
+            .client
+            .send_request(HttpMethod::GET, &endpoint, None, None, None)?;
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取pc客户端更新
     pub fn fetch_pc_client(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.lock().unwrap().send_request(
+        let response = self.client.send_request(
             HttpMethod::GET,
             "/tiger/pc_client/releases/latest",
             None,
             None,
             None,
         )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取点个猫更新
     pub fn fetch_pickcat_update(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.lock().unwrap().send_request(
-            HttpMethod::GET,
-            "https://update.codemao.cn/updatev2/appsdk",
-            None,
-            None,
-            None,
-        )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        // 使用 agent 直接发送请求到外部 URL
+        let response = self
+            .client
+            .agent()
+            .get("https://update.codemao.cn/updatev2/appsdk")
+            .call()?;
+        Ok(response.into_body().read_json()?)
     }
 
     // 获取kitten4更新
@@ -263,16 +249,15 @@ impl DataFetcher {
         let time_value = timestamp["data"].as_str().unwrap_or("").to_string();
 
         let mut params = HashMap::new();
-        params.insert("TIME".to_string(), time_value);
+        params.insert("TIME".to_string(), &time_value);
 
-        let response = self.client.lock().unwrap().send_request(
-            HttpMethod::GET,
-            "https://kn-cdn.codemao.cn/kitten4/application/kitten4_update_info.json",
-            Some(&params),
-            None,
-            None,
-        )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        let response = self
+            .client
+            .agent()
+            .get("https://kn-cdn.codemao.cn/kitten4/application/kitten4_update_info.json")
+            .query("TIME", &time_value)
+            .call()?;
+        Ok(response.into_body().read_json()?)
     }
 
     // 获取kitten更新
@@ -280,17 +265,13 @@ impl DataFetcher {
         let timestamp = self.fetch_current_timestamp_10()?;
         let time_value = timestamp["data"].as_str().unwrap_or("").to_string();
 
-        let mut params = HashMap::new();
-        params.insert("timeStamp".to_string(), time_value);
-
-        let response = self.client.lock().unwrap().send_request(
-            HttpMethod::GET,
-            "https://kn-cdn.codemao.cn/application/kitten_update_info.json",
-            Some(&params),
-            None,
-            None,
-        )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        let response = self
+            .client
+            .agent()
+            .get("https://kn-cdn.codemao.cn/application/kitten_update_info.json")
+            .query("timeStamp", &time_value)
+            .call()?;
+        Ok(response.into_body().read_json()?)
     }
 
     // 获取海龟编辑器更新
@@ -298,17 +279,13 @@ impl DataFetcher {
         let timestamp = self.fetch_current_timestamp_10()?;
         let time_value = timestamp["data"].as_str().unwrap_or("").to_string();
 
-        let mut params = HashMap::new();
-        params.insert("timeStamp".to_string(), time_value);
-
-        let response = self.client.lock().unwrap().send_request(
-            HttpMethod::GET,
-            "https://static-am.codemao.cn/wood/client/xp/prod/package.json",
-            Some(&params),
-            None,
-            None,
-        )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        let response = self
+            .client
+            .agent()
+            .get("https://static-am.codemao.cn/wood/client/xp/prod/package.json")
+            .query("timeStamp", &time_value)
+            .call()?;
+        Ok(response.into_body().read_json()?)
     }
 
     // 获取源码智造编辑器更新
@@ -316,41 +293,35 @@ impl DataFetcher {
         let timestamp = self.fetch_current_timestamp_10()?;
         let time_value = timestamp["data"].as_str().unwrap_or("").to_string();
 
-        let mut params = HashMap::new();
-        params.insert("timeStamp".to_string(), time_value);
-
-        let response = self.client.lock().unwrap().send_request(
-            HttpMethod::GET,
-            "https://public-static-edu.codemao.cn/matrix/publish/desktop_matrix.json",
-            Some(&params),
-            None,
-            None,
-        )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        let response = self
+            .client
+            .agent()
+            .get("https://public-static-edu.codemao.cn/matrix/publish/desktop_matrix.json")
+            .query("timeStamp", &time_value)
+            .call()?;
+        Ok(response.into_body().read_json()?)
     }
 
     // 获取10位时间戳
     pub fn fetch_current_timestamp_10(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.lock().unwrap().send_request(
+        let response = self.client.send_request(
             HttpMethod::GET,
             "/coconut/clouddb/currentTime",
             None,
             None,
             None,
         )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取13位时间戳
     pub fn fetch_current_timestamp_13(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.lock().unwrap().send_request(
-            HttpMethod::GET,
-            "https://time.codemao.cn/time/current",
-            None,
-            None,
-            None,
-        )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        let response = self
+            .client
+            .agent()
+            .get("https://time.codemao.cn/time/current")
+            .call()?;
+        Ok(response.into_body().read_json()?)
     }
 
     // 获取Web端头图
@@ -363,7 +334,7 @@ impl DataFetcher {
             params.insert("type".to_string(), b_type.as_str().to_string());
         }
 
-        let response = self.client.lock().unwrap().send_request(
+        let response = self.client.send_request(
             HttpMethod::GET,
             "/web/banners/all",
             if params.is_empty() {
@@ -374,7 +345,7 @@ impl DataFetcher {
             None,
             None,
         )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取Nemo端头图
@@ -385,86 +356,80 @@ impl DataFetcher {
         let mut params = HashMap::new();
         params.insert("banner_type".to_string(), (banner_type as i32).to_string());
 
-        let response = self.client.lock().unwrap().send_request(
+        let response = self.client.send_request(
             HttpMethod::GET,
             "/nemo/v2/home/banners",
             Some(&params),
             None,
             None,
         )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取Coco端头图
     pub fn fetch_coco_banners(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.lock().unwrap().send_request(
+        let response = self.client.send_request(
             HttpMethod::GET,
             "/coconut/banner/list",
             None,
             None,
             Some("creation"),
         )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取Coco话题
     pub fn fetch_coco_topic(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.lock().unwrap().send_request(
+        let response = self.client.send_request(
             HttpMethod::GET,
             "/coconut/topic/list",
             None,
             None,
             Some("creation"),
         )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取举报类型
     pub fn fetch_report_reasons(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.lock().unwrap().send_request(
+        let response = self.client.send_request(
             HttpMethod::GET,
             "/web/reports/reasons/all",
             None,
             None,
             None,
         )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取nemo配置
     pub fn fetch_nemo_config(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.lock().unwrap().send_request(
-            HttpMethod::GET,
-            "https://nemo.codemao.cn/config",
-            None,
-            None,
-            None,
-        )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        let response = self
+            .client
+            .agent()
+            .get("https://nemo.codemao.cn/config")
+            .call()?;
+        Ok(response.into_body().read_json()?)
     }
 
     // 获取社区网络服务
     pub fn fetch_community_config(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.lock().unwrap().send_request(
-            HttpMethod::GET,
-            "https://c.codemao.cn/config",
-            None,
-            None,
-            None,
-        )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        let response = self
+            .client
+            .agent()
+            .get("https://c.codemao.cn/config")
+            .call()?;
+        Ok(response.into_body().read_json()?)
     }
 
     // 获取编程猫网络服务
     pub fn fetch_client_config(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.lock().unwrap().send_request(
-            HttpMethod::GET,
-            "https://player.codemao.cn/new/client_config.json",
-            None,
-            None,
-            None,
-        )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        let response = self
+            .client
+            .agent()
+            .get("https://player.codemao.cn/new/client_config.json")
+            .call()?;
+        Ok(response.into_body().read_json()?)
     }
 
     // 获取编程猫首页作品
@@ -475,14 +440,14 @@ impl DataFetcher {
         let mut params = HashMap::new();
         params.insert("type".to_string(), (recommend_type as i32).to_string());
 
-        let response = self.client.lock().unwrap().send_request(
+        let response = self.client.send_request(
             HttpMethod::GET,
             "/creation-tools/v1/pc/home/recommend-work",
             Some(&params),
             None,
             None,
         )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取nemo端新作喵喵看作品
@@ -495,26 +460,26 @@ impl DataFetcher {
         params.insert("limit".to_string(), limit.to_string());
         params.insert("offset".to_string(), offset.to_string());
 
-        let response = self.client.lock().unwrap().send_request(
+        let response = self.client.send_request(
             HttpMethod::GET,
             "/nemo/v3/new-recommend/more/list",
             Some(&params),
             None,
             None,
         )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取编程猫nemo作品推荐
     pub fn fetch_recommended_works_nemo(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.lock().unwrap().send_request(
+        let response = self.client.send_request(
             HttpMethod::GET,
             "/nemo/v2/system/recommended/pool",
             None,
             None,
             None,
         )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取编程猫首页推荐channel
@@ -525,14 +490,14 @@ impl DataFetcher {
         let mut params = HashMap::new();
         params.insert("type".to_string(), channel_type.as_str().to_string());
 
-        let response = self.client.lock().unwrap().send_request(
+        let response = self.client.send_request(
             HttpMethod::GET,
             "/web/works/channels/list",
             Some(&params),
             None,
             None,
         )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取指定channel
@@ -550,50 +515,44 @@ impl DataFetcher {
 
         let endpoint = format!("/web/works/channels/{}/works", channel_id);
 
-        let response = self.client.lock().unwrap().send_request(
-            HttpMethod::GET,
-            &endpoint,
-            Some(&params),
-            None,
-            None,
-        )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        let response =
+            self.client
+                .send_request(HttpMethod::GET, &endpoint, Some(&params), None, None)?;
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取社区星推荐
     pub fn fetch_recommended_users(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.lock().unwrap().send_request(
+        let response = self.client.send_request(
             HttpMethod::GET,
             "/web/users/recommended",
             None,
             None,
             None,
         )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取训练师小课堂
     pub fn fetch_training_courses(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.lock().unwrap().send_request(
-            HttpMethod::GET,
-            "https://backend.box3.fun/diversion/codemao/post",
-            None,
-            None,
-            None,
-        )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        let response = self
+            .client
+            .agent()
+            .get("https://backend.box3.fun/diversion/codemao/post")
+            .call()?;
+        Ok(response.into_body().read_json()?)
     }
 
     // 获取KN课程
     pub fn fetch_kn_courses(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.lock().unwrap().send_request(
+        let response = self.client.send_request(
             HttpMethod::GET,
             "/creation-tools/v1/home/especially/course",
             None,
             None,
             None,
         )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取KN公开课生成器
@@ -604,13 +563,11 @@ impl DataFetcher {
 
         let mut paginated = self
             .client
-            .lock()
-            .unwrap()
             .paginated("/neko/course/publish/list")
             .with_params(params)
             .with_total_key("total_course")
             .with_data_key("course_page.items")
-            .with_base_url("creation");
+            .with_base_url("creation".to_string());
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -629,14 +586,14 @@ impl DataFetcher {
         let mut params = HashMap::new();
         params.insert("subject_id".to_string(), (subject_id as i32).to_string());
 
-        let response = self.client.lock().unwrap().send_request(
+        let response = self.client.send_request(
             HttpMethod::GET,
             "/neko/sample/list",
             Some(&params),
             None,
             Some("creation"),
         )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取社区各个部分开启状态
@@ -649,26 +606,22 @@ impl DataFetcher {
             status_type.as_str()
         );
 
-        let response = self.client.lock().unwrap().send_request(
-            HttpMethod::GET,
-            &endpoint,
-            None,
-            None,
-            None,
-        )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        let response = self
+            .client
+            .send_request(HttpMethod::GET, &endpoint, None, None, None)?;
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取kitten编辑页面精选活动
     pub fn fetch_kitten_activities(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.lock().unwrap().send_request(
+        let response = self.client.send_request(
             HttpMethod::GET,
             "/kitten/activity/choiceness/list",
             None,
             None,
             Some("creation"),
         )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取nemo端教程合集生成器
@@ -680,8 +633,6 @@ impl DataFetcher {
 
         let mut paginated = self
             .client
-            .lock()
-            .unwrap()
             .paginated("/creation-tools/v1/course/package/list")
             .with_params(params);
 
@@ -710,8 +661,6 @@ impl DataFetcher {
 
         let mut paginated = self
             .client
-            .lock()
-            .unwrap()
             .paginated("/creation-tools/v1/course/list/search")
             .with_params(params)
             .with_data_key("course_page.items");
@@ -732,12 +681,10 @@ impl DataFetcher {
         params.insert("offset".to_string(), "0".to_string());
 
         self.client
-            .lock()
-            .unwrap()
             .paginated("/neko/teaching-plan/list/team")
             .with_params(params)
             .with_limit(limit)
-            .with_base_url("creation")
+            .with_base_url("creation".to_string())
     }
 
     // 获取未读板块消息数量
@@ -747,28 +694,20 @@ impl DataFetcher {
     ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/web/forums/boards/{}/unread-count", board_id);
 
-        let response = self.client.lock().unwrap().send_request(
-            HttpMethod::GET,
-            &endpoint,
-            None,
-            None,
-            None,
-        )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        let response = self
+            .client
+            .send_request(HttpMethod::GET, &endpoint, None, None, None)?;
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取活动页面
     pub fn fetch_studio_info(&self, studio_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/web/studios/{}", studio_id);
 
-        let response = self.client.lock().unwrap().send_request(
-            HttpMethod::GET,
-            &endpoint,
-            None,
-            None,
-            None,
-        )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        let response = self
+            .client
+            .send_request(HttpMethod::GET, &endpoint, None, None, None)?;
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取活动帖子生成器
@@ -781,8 +720,6 @@ impl DataFetcher {
 
         let mut paginated = self
             .client
-            .lock()
-            .unwrap()
             .paginated("/web/forums/posts")
             .with_params(params);
 
@@ -803,12 +740,7 @@ impl DataFetcher {
 
         let endpoint = format!("/web/studios/{}/courses", studio_id);
 
-        let mut paginated = self
-            .client
-            .lock()
-            .unwrap()
-            .paginated(&endpoint)
-            .with_params(params);
+        let mut paginated = self.client.paginated(&endpoint).with_params(params);
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -828,12 +760,7 @@ impl DataFetcher {
 
         let endpoint = format!("/web/studios/{}/works", studio_id);
 
-        let mut paginated = self
-            .client
-            .lock()
-            .unwrap()
-            .paginated(&endpoint)
-            .with_params(params);
+        let mut paginated = self.client.paginated(&endpoint).with_params(params);
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -856,12 +783,7 @@ impl DataFetcher {
 
         let endpoint = format!("/web/studios/{}/participators", studio_id);
 
-        let mut paginated = self
-            .client
-            .lock()
-            .unwrap()
-            .paginated(&endpoint)
-            .with_params(params);
+        let mut paginated = self.client.paginated(&endpoint).with_params(params);
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -874,26 +796,18 @@ impl DataFetcher {
 
     // 获取旧版全部作品标签
     pub fn fetch_work_labels(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.lock().unwrap().send_request(
-            HttpMethod::GET,
-            "/api/work/label/list",
-            None,
-            None,
-            None,
-        )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        let response =
+            self.client
+                .send_request(HttpMethod::GET, "/api/work/label/list", None, None, None)?;
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取旧版全部作品标签
     pub fn fetch_work_category(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.lock().unwrap().send_request(
-            HttpMethod::GET,
-            "/api/label/list",
-            None,
-            None,
-            None,
-        )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        let response =
+            self.client
+                .send_request(HttpMethod::GET, "/api/label/list", None, None, None)?;
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取推荐作品
@@ -908,14 +822,14 @@ impl DataFetcher {
         params.insert("page_number".to_string(), page_number.to_string());
         params.insert("amount_items".to_string(), amount_items.to_string());
 
-        let response = self.client.lock().unwrap().send_request(
+        let response = self.client.send_request(
             HttpMethod::GET,
             "/tiger/work/ide/recommended",
             Some(&params),
             None,
             None,
         )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取推荐作品
@@ -932,14 +846,14 @@ impl DataFetcher {
         params.insert("per_page".to_string(), amount_items.to_string());
         params.insert("order_by".to_string(), order_by.as_str().to_string());
 
-        let response = self.client.lock().unwrap().send_request(
+        let response = self.client.send_request(
             HttpMethod::GET,
             "/tiger/work/list/all",
             Some(&params),
             None,
             None,
         )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取素材推荐
@@ -954,14 +868,14 @@ impl DataFetcher {
         params.insert("limit".to_string(), limit.to_string());
         params.insert("offset".to_string(), offset.to_string());
 
-        let response = self.client.lock().unwrap().send_request(
+        let response = self.client.send_request(
             HttpMethod::GET,
             "/tiger/material/recommend",
             Some(&params),
             None,
             None,
         )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        Ok(self.client.response_to_json(response)?)
     }
 }
 
@@ -973,7 +887,7 @@ impl Default for DataFetcher {
 
 // UserAction结构体
 pub struct UserAction {
-    client: Arc<Mutex<CodeMaoClient>>,
+    client: &'static CodeMaoClient, // 直接使用 CodeMaoClient
 }
 
 impl UserAction {
@@ -985,11 +899,11 @@ impl UserAction {
 
     // 签订友好协议
     pub fn execute_sign_agreement(&self) -> Result<bool, Box<dyn std::error::Error>> {
-        let response = self.client.lock().unwrap().send_request(
+        let response = self.client.send_request(
             HttpMethod::POST,
             "/nemo/v3/user/level/signature",
             None,
-            None,
+            Some(&json!({})), // 发送空对象作为请求体
             None,
         )?;
         Ok(response.status() == 200)
@@ -997,14 +911,14 @@ impl UserAction {
 
     // 获取用户协议
     pub fn fetch_agreements(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.lock().unwrap().send_request(
+        let response = self.client.send_request(
             HttpMethod::GET,
             "/tiger/v3/web/accounts/agreements",
             None,
             None,
             None,
         )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 注册
@@ -1032,27 +946,23 @@ impl UserAction {
 
         let payload = Value::Object(data);
 
-        let response = self.client.lock().unwrap().send_request(
+        let response = self.client.send_request(
             HttpMethod::POST,
             "/tiger/v3/web/accounts/register/phone/with-agreement",
             None,
             Some(&payload),
             None,
         )?;
-        Ok(CodeMaoClient::response_to_json(response)?)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 删除消息
     pub fn delete_message(&self, message_id: i32) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!("/web/message-record/{}", message_id);
 
-        let response = self.client.lock().unwrap().send_request(
-            HttpMethod::DELETE,
-            &endpoint,
-            None,
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .send_request(HttpMethod::DELETE, &endpoint, None, None, None)?;
         Ok(response.status() == 204)
     }
 
@@ -1070,8 +980,6 @@ impl UserAction {
 
         let mut paginated = self
             .client
-            .lock()
-            .unwrap()
             .paginated("/web/message-record/broadcast")
             .with_params(params);
 
