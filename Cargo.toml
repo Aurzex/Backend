@@ -8,6 +8,9 @@ edition = "2024"
 name = "backend"
 crate-type = ["cdylib"]
 
+[lints.rust]
+unused = "allow"
+
 [dependencies]
 # pyo3 = "0"
 rand = "0.10.0"
