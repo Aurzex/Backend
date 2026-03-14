@@ -429,6 +429,74 @@ impl AuthProvider for LocalAuthProvider {
     }
 }
 
+// ==================== 请求构建器 ====================
+/// 请求构建器，支持链式设置可选参数
+pub struct InnerBuilder {
+    client: CodeMaoClient,
+    method: HttpMethod,
+    endpoint: String,
+    base_key: Option<String>,
+    params: Option<HashMap<String, String>>,
+    payload: Option<Value>,
+    headers: Option<HashMap<String, String>>,
+}
+
+impl InnerBuilder {
+    fn new(
+        client: CodeMaoClient,
+        method: HttpMethod,
+        endpoint: impl Into<String>,
+        base_key: Option<String>,
+    ) -> Self {
+        Self {
+            client,
+            method,
+            endpoint: endpoint.into(),
+            base_key,
+            params: None,
+            payload: None,
+            headers: None,
+        }
+    }
+
+    /// 设置查询参数，多次调用将合并参数（后添加的覆盖同名参数）
+    pub fn with_params(mut self, params: HashMap<String, String>) -> Self {
+        match self.params.as_mut() {
+            Some(map) => map.extend(params),
+            None => self.params = Some(params),
+        }
+        self
+    }
+
+    /// 设置请求体（JSON 负载），多次调用将替换之前的 payload
+    pub fn with_payload(mut self, payload: Value) -> Self {
+        self.payload = Some(payload);
+        self
+    }
+
+    /// 设置额外请求头，多次调用将合并头字段（后添加的覆盖同名头）
+    /// 这些头仅用于当前请求，不会持久化到后续请求
+    pub fn with_headers(mut self, headers: HashMap<String, String>) -> Self {
+        match self.headers.as_mut() {
+            Some(map) => map.extend(headers),
+            None => self.headers = Some(headers),
+        }
+        self
+    }
+
+    /// 发送请求，返回响应
+    pub fn send(self) -> Result<Response<Body>> {
+        self.client.inner.send_request(
+            self.method,
+            &self.endpoint,
+            self.base_key.as_deref(),
+            self.params.as_ref(),
+            self.payload.as_ref(),
+            self.headers.as_ref(),
+        )
+    }
+}
+
 // ==================== 内部客户端结构 ====================
 #[derive(Clone)]
 struct InnerClient {
@@ -465,19 +533,6 @@ impl InnerClient {
                 endpoint.trim_start_matches('/')
             )
         }
-    }
-
-    fn prepare_request<T>(&self, builder: RequestBuilder<T>) -> RequestBuilder<T> {
-        let mut builder = builder;
-        for (k, v) in DEFAULT_HEADERS {
-            builder = builder.header(*k, *v);
-        }
-
-        // 从认证提供者获取认证信息
-        if let Some((k, v)) = self.auth.auth_header() {
-            builder = builder.header(k, v);
-        }
-        builder
     }
 
     fn log_request(
@@ -545,50 +600,121 @@ impl InnerClient {
         Ok(())
     }
 
+    /// 为 RequestBuilder 添加默认头、认证头、额外头和查询参数
+    /// 使用泛型来处理不同的 Body 类型
+    fn apply_to_request_builder<B>(
+        mut builder: RequestBuilder<B>,
+        auth: &dyn AuthProvider,
+        params: Option<&HashMap<String, String>>,
+        extra_headers: Option<&HashMap<String, String>>,
+    ) -> RequestBuilder<B> {
+        // 添加默认头
+        for (k, v) in DEFAULT_HEADERS {
+            builder = builder.header(*k, *v);
+        }
+        // 添加认证头
+        if let Some((k, v)) = auth.auth_header() {
+            builder = builder.header(k, &v);
+        }
+        // 添加额外头
+        if let Some(headers) = extra_headers {
+            for (k, v) in headers {
+                builder = builder.header(k.as_str(), v.as_str());
+            }
+        }
+        // 添加查询参数
+        if let Some(params) = params {
+            for (k, v) in params {
+                builder = builder.query(k.as_str(), v.as_str());
+            }
+        }
+        builder
+    }
+
     fn send_request(
         &self,
         method: HttpMethod,
         endpoint: &str,
+        base_key: Option<&str>,
         params: Option<&HashMap<String, String>>,
         payload: Option<&Value>,
-        base_key: Option<&str>,
+        extra_headers: Option<&HashMap<String, String>>,
     ) -> Result<Response<Body>> {
         let url = self.build_url(endpoint, base_key);
-
         self.log_request(method, &url, params, payload);
 
         let response = match method {
-            HttpMethod::GET | HttpMethod::DELETE | HttpMethod::HEAD => {
-                let mut req = self.prepare_request(match method {
-                    HttpMethod::GET => self.agent.get(&url),
-                    HttpMethod::DELETE => self.agent.delete(&url),
-                    HttpMethod::HEAD => self.agent.head(&url),
-                    _ => unreachable!(),
-                });
-                if let Some(params) = params {
-                    for (k, v) in params {
-                        req = req.query(k, v);
-                    }
-                }
-                req.call()?
+            HttpMethod::GET => {
+                let builder = self.agent.get(&url);
+                let builder = Self::apply_to_request_builder(
+                    builder,
+                    self.auth.as_ref(),
+                    params,
+                    extra_headers,
+                );
+                builder.call()?
             }
-            HttpMethod::POST | HttpMethod::PUT | HttpMethod::PATCH => {
-                let mut req = self.prepare_request(match method {
-                    HttpMethod::POST => self.agent.post(&url),
-                    HttpMethod::PUT => self.agent.put(&url),
-                    HttpMethod::PATCH => self.agent.patch(&url),
-                    _ => unreachable!(),
-                });
-                if let Some(params) = params {
-                    for (k, v) in params {
-                        req = req.query(k, v);
-                    }
-                }
+            HttpMethod::POST => {
+                let builder = self.agent.post(&url);
+                let builder = Self::apply_to_request_builder(
+                    builder,
+                    self.auth.as_ref(),
+                    params,
+                    extra_headers,
+                );
                 if let Some(payload) = payload {
-                    req.send_json(payload)?
+                    builder.send_json(payload)?
                 } else {
-                    req.send_empty()?
+                    builder.send_empty()?
                 }
+            }
+            HttpMethod::DELETE => {
+                let builder = self.agent.delete(&url);
+                let builder = Self::apply_to_request_builder(
+                    builder,
+                    self.auth.as_ref(),
+                    params,
+                    extra_headers,
+                );
+                builder.call()?
+            }
+            HttpMethod::PATCH => {
+                let builder = self.agent.patch(&url);
+                let builder = Self::apply_to_request_builder(
+                    builder,
+                    self.auth.as_ref(),
+                    params,
+                    extra_headers,
+                );
+                if let Some(payload) = payload {
+                    builder.send_json(payload)?
+                } else {
+                    builder.send_empty()?
+                }
+            }
+            HttpMethod::PUT => {
+                let builder = self.agent.put(&url);
+                let builder = Self::apply_to_request_builder(
+                    builder,
+                    self.auth.as_ref(),
+                    params,
+                    extra_headers,
+                );
+                if let Some(payload) = payload {
+                    builder.send_json(payload)?
+                } else {
+                    builder.send_empty()?
+                }
+            }
+            HttpMethod::HEAD => {
+                let builder = self.agent.head(&url);
+                let builder = Self::apply_to_request_builder(
+                    builder,
+                    self.auth.as_ref(),
+                    params,
+                    extra_headers,
+                );
+                builder.call()?
             }
         };
 
@@ -630,7 +756,6 @@ impl InnerClient {
         Ok(text)
     }
 }
-
 // ==================== 公开的 CodeMaoClient ====================
 /// 主客户端，支持全局单例和独立实例两种模式
 #[derive(Clone)]
@@ -709,17 +834,14 @@ impl CodeMaoClient {
         self.inner.auth.current_token()
     }
 
-    /// 发送 HTTP 请求
+    /// 发送 HTTP 请求，返回 RequestBuilder 支持链式调用
     pub fn send_request(
         &self,
         method: HttpMethod,
         endpoint: &str,
-        params: Option<&HashMap<String, String>>,
-        payload: Option<&Value>,
         base_key: Option<&str>,
-    ) -> Result<Response<Body>> {
-        self.inner
-            .send_request(method, endpoint, params, payload, base_key)
+    ) -> InnerBuilder {
+        InnerBuilder::new(self.clone(), method, endpoint, base_key.map(String::from))
     }
 
     /// 将响应体解析为 JSON
@@ -924,13 +1046,11 @@ impl PaginatedIter {
     /// 获取指定页数据
     fn fetch_page(&self, page: usize) -> Result<Vec<Value>> {
         let params = self.build_page_params(page, self.items_per_page);
-        let response = self.client.send_request(
-            self.method,
-            &self.endpoint,
-            Some(&params),
-            self.payload.as_ref(),
-            self.base_key.as_deref(),
-        )?;
+        let response = self
+            .client
+            .send_request(self.method, &self.endpoint, self.base_key.as_deref())
+            .with_params(params)
+            .send()?;
         let json = self.client.response_to_json(response)?;
 
         let data = json
@@ -949,13 +1069,11 @@ impl PaginatedIter {
         }
 
         let first_page_params = self.build_page_params(0, Self::DEFAULT_PAGE_SIZE);
-        let response = self.client.send_request(
-            self.method,
-            &self.endpoint,
-            Some(&first_page_params),
-            self.payload.as_ref(),
-            self.base_key.as_deref(),
-        )?;
+        let response = self
+            .client
+            .send_request(self.method, &self.endpoint, self.base_key.as_deref())
+            .with_params(first_page_params.clone())
+            .send()?;
         let json = self.client.response_to_json(response)?;
 
         // 提取总数
@@ -1167,13 +1285,15 @@ impl FileUploader {
         params.insert("fileSign".to_string(), "p1".to_string());
         params.insert("cdnName".to_string(), "qiniu".to_string());
 
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "https://open-service.codemao.cn/cdn/qi-niu/tokens/uploading",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .send_request(
+                HttpMethod::GET,
+                "https://open-service.codemao.cn/cdn/qi-niu/tokens/uploading",
+                None,
+            )
+            .with_params(params)
+            .send()?;
 
         let json = self.client.response_to_json(response)?;
         let tokens = json["tokens"]
@@ -1202,13 +1322,15 @@ impl FileUploader {
         params.insert("bucket".to_string(), "static".to_string());
         params.insert("type".to_string(), extension);
 
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "https://oversea-api.code.game/tiger/kitten/cdn/token/1",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .send_request(
+                HttpMethod::GET,
+                "https://oversea-api.code.game/tiger/kitten/cdn/token/1",
+                None,
+            )
+            .with_params(params)
+            .send()?;
 
         let json = self.client.response_to_json(response)?;
         let data = json["data"]
@@ -1389,6 +1511,7 @@ impl fmt::Display for HTTPStatus {
         write!(f, "{} {}", *self as u16, self.reason_phrase())
     }
 }
+
 // ==================== 简化的工厂 ====================
 pub struct ClientFactory;
 
