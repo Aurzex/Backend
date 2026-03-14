@@ -9,9 +9,11 @@ name = "backend"
 crate-type = ["cdylib"]
 
 [lints.rust]
-unused = "allow"
+# unused = "allow"
 
 [dependencies]
+aes-gcm = "0.10.3"
+base64 = "0.22.1"
 # pyo3 = "0"
 rand = "0.10.0"
 serde = {version="1",features=["derive"]}

@@ -536,8 +536,6 @@ impl AuthProcessor {
         password: &str,
         pid: &str,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let client = self.client();
-
         let timestamp = self.fetch_current_timestamp()?;
         let ticket_response = self.get_login_ticket(identity, timestamp, pid)?;
         println!("Ticket response: {:?}", ticket_response);
