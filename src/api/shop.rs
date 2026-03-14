@@ -1,6 +1,5 @@
-use crate::utils::acquire::{CodeMaoClient, HttpMethod, PaginatedIter};
+use crate::utils::acquire::{BaseKey, CodeMaoClient, HttpMethod, PaginatedIter};
 use serde_json::{Value, json};
-use std::collections::HashMap;
 
 // ==================== 工作室相关枚举 ====================
 
@@ -60,13 +59,10 @@ impl WorkshopDataFetcher {
 
     // 获取工作室简介 (简易, 需登录工作室成员账号)
     pub fn fetch_workshop_info(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/web/work_shops/simple",
-            None,
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/web/work_shops/simple", None)
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -78,7 +74,8 @@ impl WorkshopDataFetcher {
         let endpoint = format!("/web/shops/{}", workshop_id);
         let response = self
             .client
-            .send_request(HttpMethod::GET, &endpoint, None, None, None)?;
+            .build_request(HttpMethod::GET, &endpoint, None)
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -91,32 +88,21 @@ impl WorkshopDataFetcher {
         offset: Option<i32>,
         sort: Option<Vec<String>>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        params.insert("level".to_string(), level.unwrap_or(4).to_string());
-        params.insert(
-            "works_limit".to_string(),
-            works_limit.unwrap_or(4).to_string(),
-        );
-        params.insert("limit".to_string(), limit.unwrap_or(14).to_string());
-        params.insert("offset".to_string(), offset.unwrap_or(0).to_string());
+        let mut builder = self
+            .client
+            .build_request(HttpMethod::GET, "/web/work-shops/search", None)
+            .with_param("level", level.unwrap_or(4).to_string())
+            .with_param("works_limit", works_limit.unwrap_or(4).to_string())
+            .with_param("limit", limit.unwrap_or(14).to_string())
+            .with_param("offset", offset.unwrap_or(0).to_string());
 
         if let Some(sort_vec) = sort {
-            let sort_str = sort_vec.join(",");
-            params.insert("sort".to_string(), sort_str);
+            builder = builder.with_param("sort", sort_vec.join(","));
         } else {
-            params.insert(
-                "sort".to_string(),
-                "-created_at,-latest_joined_at".to_string(),
-            );
+            builder = builder.with_param("sort", "-created_at,-latest_joined_at");
         }
 
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/web/work-shops/search",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -126,16 +112,13 @@ impl WorkshopDataFetcher {
         workshop_id: i32,
         limit: Option<usize>,
     ) -> PaginatedIter {
-        let mut params = HashMap::new();
-        params.insert("limit".to_string(), "40".to_string());
-        params.insert("offset".to_string(), "0".to_string());
-
         let endpoint = format!("/web/shops/{}/users", workshop_id);
 
         let mut paginated = self
             .client
             .paginated(&endpoint)
-            .with_params(params)
+            .with_param("limit", "40")
+            .with_param("offset", "0")
             .with_total_key("total");
 
         if let Some(limit_val) = limit {
@@ -155,33 +138,28 @@ impl WorkshopDataFetcher {
         works_limit: Option<i32>,
         sort: Option<Vec<String>>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
+        let mut builder = self
+            .client
+            .build_request(HttpMethod::GET, "/web/shops", None);
 
         if let Some(levels_vec) = levels {
             let levels_str: Vec<String> = levels_vec.iter().map(|l| l.to_string()).collect();
-            params.insert("levels".to_string(), levels_str.join(","));
+            builder = builder.with_param("levels", levels_str.join(","));
         } else {
-            params.insert("levels".to_string(), "1,2,3,4".to_string());
+            builder = builder.with_param("levels", "1,2,3,4");
         }
 
-        params.insert(
-            "max_number".to_string(),
-            max_number.unwrap_or(4).to_string(),
-        );
-        params.insert(
-            "works_limit".to_string(),
-            works_limit.unwrap_or(4).to_string(),
-        );
+        builder = builder
+            .with_param("max_number", max_number.unwrap_or(4).to_string())
+            .with_param("works_limit", works_limit.unwrap_or(4).to_string());
 
         if let Some(sort_vec) = sort {
-            params.insert("sort".to_string(), sort_vec.join(","));
+            builder = builder.with_param("sort", sort_vec.join(","));
         } else {
-            params.insert("sort".to_string(), "-ordinal,-updated_at".to_string());
+            builder = builder.with_param("sort", "-ordinal,-updated_at");
         }
 
-        let response =
-            self.client
-                .send_request(HttpMethod::GET, "/web/shops", Some(&params), None, None)?;
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -193,21 +171,15 @@ impl WorkshopDataFetcher {
         sort: Option<String>,
         limit: Option<usize>,
     ) -> PaginatedIter {
-        let mut params = HashMap::new();
-        params.insert(
-            "source".to_string(),
-            source.unwrap_or(Source::WorkShop).as_str().to_string(),
-        );
-        params.insert(
-            "sort".to_string(),
-            sort.unwrap_or_else(|| "-created_at".to_string()),
-        );
-        params.insert("limit".to_string(), "20".to_string());
-        params.insert("offset".to_string(), "0".to_string());
-
         let endpoint = format!("/web/discussions/{}/comments", shop_id);
 
-        let mut paginated = self.client.paginated(&endpoint).with_params(params);
+        let mut paginated = self
+            .client
+            .paginated(&endpoint)
+            .with_param("source", source.unwrap_or(Source::WorkShop).as_str())
+            .with_param("sort", sort.unwrap_or_else(|| "-created_at".to_string()))
+            .with_param("limit", "20")
+            .with_param("offset", "0");
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -226,19 +198,19 @@ impl WorkshopDataFetcher {
         sort: Option<String>,
         limit: Option<usize>,
     ) -> PaginatedIter {
-        let mut params = HashMap::new();
-        params.insert("limit".to_string(), "20".to_string());
-        params.insert("offset".to_string(), "0".to_string());
-        params.insert(
-            "sort".to_string(),
-            sort.unwrap_or_else(|| "-created_at,-id".to_string()),
-        );
-        params.insert("user_id".to_string(), user_id.to_string());
-        params.insert("work_subject_id".to_string(), workshop_id.to_string());
-
         let endpoint = format!("/web/works/subjects/{}/works", workshop_id);
 
-        let mut paginated = self.client.paginated(&endpoint).with_params(params);
+        let mut paginated = self
+            .client
+            .paginated(&endpoint)
+            .with_param("limit", "20")
+            .with_param("offset", "0")
+            .with_param(
+                "sort",
+                sort.unwrap_or_else(|| "-created_at,-id".to_string()),
+            )
+            .with_param("user_id", user_id.to_string())
+            .with_param("work_subject_id", workshop_id.to_string());
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -254,28 +226,23 @@ impl WorkshopDataFetcher {
         &self,
         relation_id: i32,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        params.insert("id".to_string(), relation_id.to_string());
-
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/web/work_shops/users/relation",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/web/work_shops/users/relation", None)
+            .with_param("id", relation_id.to_string())
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     // 获取工作室讨论区的帖子生成器
     pub fn fetch_workshop_posts_gen(&self, label_id: i32, limit: Option<usize>) -> PaginatedIter {
-        let mut params = HashMap::new();
-        params.insert("limit".to_string(), "20".to_string());
-        params.insert("offset".to_string(), "0".to_string());
-
         let endpoint = format!("/web/works/subjects/labels/{}/posts", label_id);
 
-        let mut paginated = self.client.paginated(&endpoint).with_params(params);
+        let mut paginated = self
+            .client
+            .paginated(&endpoint)
+            .with_param("limit", "20")
+            .with_param("offset", "0");
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -293,18 +260,17 @@ impl WorkshopDataFetcher {
         limit: Option<i32>,
         offset: Option<i32>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        params.insert("limit".to_string(), limit.unwrap_or(40).to_string());
-        params.insert("offset".to_string(), offset.unwrap_or(0).to_string());
-        params.insert("id".to_string(), workshop_id.to_string());
-
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "https://api.codemao.cn/web/work_shops/users/unaudited/list",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "https://api.codemao.cn/web/work_shops/users/unaudited/list",
+                None,
+            )
+            .with_param("limit", limit.unwrap_or(40).to_string())
+            .with_param("offset", offset.unwrap_or(0).to_string())
+            .with_param("id", workshop_id.to_string())
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 }
@@ -342,13 +308,11 @@ impl WorkshopActionHandler {
             "preview_url": preview_url,
         });
 
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "/web/work_shops/update",
-            None,
-            Some(&payload),
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, "/web/work_shops/update", None)
+            .with_payload(payload)
+            .send()?;
 
         Ok(response.status() == 200)
     }
@@ -366,13 +330,11 @@ impl WorkshopActionHandler {
             "preview_url": preview_url,
         });
 
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "/web/work_shops/create",
-            None,
-            Some(&payload),
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, "/web/work_shops/create", None)
+            .with_payload(payload)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -383,13 +345,11 @@ impl WorkshopActionHandler {
             "id": workshop_id,
         });
 
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "/web/work_shops/dissolve",
-            None,
-            Some(&payload),
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, "/web/work_shops/dissolve", None)
+            .with_payload(payload)
+            .send()?;
 
         Ok(response.status() == 200)
     }
@@ -405,13 +365,11 @@ impl WorkshopActionHandler {
             "work_id": work_id,
         });
 
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "/web/work_shops/works/contribute",
-            None,
-            Some(&payload),
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, "/web/work_shops/works/contribute", None)
+            .with_payload(payload)
+            .send()?;
 
         Ok(response.status() == 200)
     }
@@ -427,13 +385,11 @@ impl WorkshopActionHandler {
             "work_id": work_id,
         });
 
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "/web/work_shops/works/remove",
-            None,
-            Some(&payload),
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, "/web/work_shops/works/remove", None)
+            .with_payload(payload)
+            .send()?;
 
         Ok(response.status() == 200)
     }
@@ -455,13 +411,11 @@ impl WorkshopActionHandler {
 
         let payload = Value::Object(payload_map);
 
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "/web/work_shops/users/apply/join",
-            None,
-            Some(&payload),
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, "/web/work_shops/users/apply/join", None)
+            .with_payload(payload)
+            .send()?;
 
         Ok(response.status() == 200)
     }
@@ -479,13 +433,11 @@ impl WorkshopActionHandler {
             "user_id": user_id,
         });
 
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "/web/work_shops/users/audit",
-            None,
-            Some(&payload),
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, "/web/work_shops/users/audit", None)
+            .with_payload(payload)
+            .send()?;
 
         Ok(response.status() == 200)
     }
@@ -511,13 +463,11 @@ impl WorkshopActionHandler {
             "comment_source": comment_source.unwrap_or(Source::WorkShop).as_str(),
         });
 
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "/web/reports/comments",
-            None,
-            Some(&payload),
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, "/web/reports/comments", None)
+            .with_payload(payload)
+            .send()?;
 
         Ok(response.status() == 201)
     }
@@ -543,9 +493,11 @@ impl WorkshopActionHandler {
             "source": source.unwrap_or(Source::WorkShop).as_str(),
         });
 
-        let response =
-            self.client
-                .send_request(HttpMethod::POST, &endpoint, None, Some(&payload), None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, &endpoint, None)
+            .with_payload(payload)
+            .send()?;
 
         if return_data {
             Ok(self.client.response_to_json(response)?)
@@ -562,15 +514,11 @@ impl WorkshopActionHandler {
     ) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!("/web/discussions/replies/{}", comment_id);
 
-        let mut params = HashMap::new();
-        params.insert(
-            "source".to_string(),
-            source.unwrap_or(Source::WorkShop).as_str().to_string(),
-        );
-
-        let response =
-            self.client
-                .send_request(HttpMethod::DELETE, &endpoint, Some(&params), None, None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::DELETE, &endpoint, None)
+            .with_param("source", source.unwrap_or(Source::WorkShop).as_str())
+            .send()?;
 
         Ok(response.status() == 204)
     }
@@ -592,9 +540,11 @@ impl WorkshopActionHandler {
             "source": source.unwrap_or(Source::WorkShop).as_str(),
         });
 
-        let response =
-            self.client
-                .send_request(HttpMethod::POST, &endpoint, None, Some(&payload), None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, &endpoint, None)
+            .with_payload(payload)
+            .send()?;
 
         if return_data {
             Ok(self.client.response_to_json(response)?)
@@ -611,15 +561,11 @@ impl WorkshopActionHandler {
     ) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!("/web/discussions/comments/{}", comment_id);
 
-        let mut params = HashMap::new();
-        params.insert(
-            "source".to_string(),
-            source.unwrap_or(Source::WorkShop).as_str().to_string(),
-        );
-
-        let response =
-            self.client
-                .send_request(HttpMethod::DELETE, &endpoint, Some(&params), None, None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::DELETE, &endpoint, None)
+            .with_param("source", source.unwrap_or(Source::WorkShop).as_str())
+            .send()?;
 
         Ok(response.status() == 204)
     }

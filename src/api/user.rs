@@ -1,6 +1,5 @@
-use crate::utils::acquire::{CodeMaoClient, HttpMethod, PaginatedIter};
+use crate::utils::acquire::{BaseKey, CodeMaoClient, HttpMethod, PaginatedIter};
 use serde_json::{Value, json};
-use std::collections::HashMap;
 
 // ==================== 用户相关枚举 ====================
 
@@ -144,7 +143,8 @@ impl UserDataFetcher {
         let endpoint = format!("/api/user/info/detail/{}", user_id);
         let response = self
             .client
-            .send_request(HttpMethod::GET, &endpoint, None, None, None)?;
+            .build_request(HttpMethod::GET, &endpoint, None)
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -153,7 +153,8 @@ impl UserDataFetcher {
         let endpoint = format!("/tiger/user/{}", user_id);
         let response = self
             .client
-            .send_request(HttpMethod::GET, &endpoint, None, None, None)?;
+            .build_request(HttpMethod::GET, &endpoint, None)
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -162,52 +163,42 @@ impl UserDataFetcher {
         let endpoint = format!("/web/api/user/info/detail/{}", user_id);
         let response = self
             .client
-            .send_request(HttpMethod::GET, &endpoint, None, None, None)?;
+            .build_request(HttpMethod::GET, &endpoint, None)
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     // 获取用户荣誉信息
     pub fn fetch_user_honors(&self, user_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        params.insert("user_id".to_string(), user_id.to_string());
-
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/creation-tools/v1/user/center/honor",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "/creation-tools/v1/user/center/honor",
+                None,
+            )
+            .with_param("user_id", user_id.to_string())
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     // 获取用户业务数据指标
     pub fn fetch_user_metrics(&self, user_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        params.insert("user_id".to_string(), user_id.to_string());
-
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/nemo/v2/works/business/total",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/nemo/v2/works/business/total", None)
+            .with_param("user_id", user_id.to_string())
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     // 获取用户基本信息
     pub fn fetch_user_intro(&self, user_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        params.insert("user_id".to_string(), user_id.to_string());
-
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/nemo/v2/user/dynamic/info",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/nemo/v2/user/dynamic/info", None)
+            .with_param("user_id", user_id.to_string())
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -216,7 +207,8 @@ impl UserDataFetcher {
         let endpoint = format!("/api/user/dynamic/{}", user_id);
         let response = self
             .client
-            .send_request(HttpMethod::GET, &endpoint, None, None, None)?;
+            .build_request(HttpMethod::GET, &endpoint, None)
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -225,7 +217,8 @@ impl UserDataFetcher {
         let endpoint = format!("/web/work-shops/{}/participators", user_id);
         let response = self
             .client
-            .send_request(HttpMethod::GET, &endpoint, None, None, None)?;
+            .build_request(HttpMethod::GET, &endpoint, None)
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -234,32 +227,29 @@ impl UserDataFetcher {
         &self,
         user_id: i32,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        params.insert("user_id".to_string(), user_id.to_string());
-
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/web/activities/annual-summary",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/web/activities/annual-summary", None)
+            .with_param("user_id", user_id.to_string())
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     // 获取账户信息 (简略)
     pub fn get_account_info(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response =
-            self.client
-                .send_request(HttpMethod::GET, "/web/api/user/info", None, None, None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/web/api/user/info", None)
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     // 获取当前账号详细信息
     pub fn fetch_account_details(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response =
-            self.client
-                .send_request(HttpMethod::GET, "/web/users/details", None, None, None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/web/users/details", None)
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -271,91 +261,80 @@ impl UserDataFetcher {
         let endpoint = format!("/tiger/v3/{}/accounts/profile", method.as_str());
         let response = self
             .client
-            .send_request(HttpMethod::GET, &endpoint, None, None, None)?;
+            .build_request(HttpMethod::GET, &endpoint, None)
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     // 获取账号隐私设置
     pub fn fetch_account_privacy(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/tiger/v3/web/accounts/privacy",
-            None,
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/tiger/v3/web/accounts/privacy", None)
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     // 获取 Tiger 账号信息
     pub fn fetch_account_tiger(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response =
-            self.client
-                .send_request(HttpMethod::GET, "/tiger/user", None, None, None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/tiger/user", None)
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     // 获取用户评分数据
     pub fn fetch_account_scores(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/nemo/v3/user/grade/details",
-            None,
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/nemo/v3/user/grade/details", None)
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     // 获取用户等级信息
     pub fn fetch_account_level(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/nemo/v3/user/level/info",
-            None,
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/nemo/v3/user/level/info", None)
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     // 获取用户动态信息
     pub fn fetch_account_dynamic(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response =
-            self.client
-                .send_request(HttpMethod::GET, "/api/user/dynamic", None, None, None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/api/user/dynamic", None)
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     // 获取用户作品
     pub fn fetch_account_works(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response =
-            self.client
-                .send_request(HttpMethod::GET, "/api/work/list", None, None, None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/api/work/list", None)
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     // 获取用户注册时间
     pub fn fetch_account_register_time(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/nemo/new-people/user-info",
-            None,
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/nemo/new-people/user-info", None)
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     // 获取课程账号信息
     pub fn fetch_account_lesson_info(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/api/v2/pc/lesson/user/info",
-            None,
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/api/v2/pc/lesson/user/info", None)
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -366,19 +345,13 @@ impl UserDataFetcher {
         types: Option<WorksListType>,
         limit: Option<usize>,
     ) -> PaginatedIter {
-        let mut params = HashMap::new();
-        params.insert(
-            "type".to_string(),
-            types.unwrap_or(WorksListType::Newest).as_str().to_string(),
-        );
-        params.insert("user_id".to_string(), user_id.to_string());
-        params.insert("offset".to_string(), "0".to_string());
-        params.insert("limit".to_string(), "5".to_string());
-
         let mut paginated = self
             .client
             .paginated("/creation-tools/v2/user/center/work-list")
-            .with_params(params)
+            .with_param("type", types.unwrap_or(WorksListType::Newest).as_str())
+            .with_param("user_id", user_id.to_string())
+            .with_param("offset", "0")
+            .with_param("limit", "5")
             .with_total_key("total");
 
         if let Some(limit_val) = limit {
@@ -398,22 +371,14 @@ impl UserDataFetcher {
         page: Option<i32>,
         limit: Option<i32>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        params.insert("query".to_string(), query.to_string());
-        params.insert(
-            "query_type".to_string(),
-            query_type.unwrap_or("name").to_string(),
-        );
-        params.insert("page".to_string(), page.unwrap_or(1).to_string());
-        params.insert("limit".to_string(), limit.unwrap_or(10).to_string());
-
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "tiger/nemo/user/works/search",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "tiger/nemo/user/works/search", None)
+            .with_param("query", query)
+            .with_param("query_type", query_type.unwrap_or("name"))
+            .with_param("page", page.unwrap_or(1).to_string())
+            .with_param("limit", limit.unwrap_or(10).to_string())
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -424,18 +389,13 @@ impl UserDataFetcher {
         limit: Option<i32>,
         offset: Option<i32>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        params.insert("limit".to_string(), limit.unwrap_or(10).to_string());
-        params.insert("offset".to_string(), offset.unwrap_or(0).to_string());
-        params.insert("work_type".to_string(), types.as_value().to_string());
-
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/creation-tools/v1/works/list/user",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/creation-tools/v1/works/list/user", None)
+            .with_param("limit", limit.unwrap_or(10).to_string())
+            .with_param("offset", offset.unwrap_or(0).to_string())
+            .with_param("work_type", types.as_value().to_string())
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -444,29 +404,25 @@ impl UserDataFetcher {
         &self,
         user_id: i32,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        params.insert("user_id".to_string(), user_id.to_string());
-
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "https://api-wechatsbp-codemaster.codemao.cn/user/info/certificate",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "https://api-wechatsbp-codemaster.codemao.cn/user/info/certificate",
+                None,
+            )
+            .with_param("user_id", user_id.to_string())
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     // 获取用户已发布 Nemo 作品生成器
     pub fn fetch_published_nemo_works_gen(&self, limit: Option<usize>) -> PaginatedIter {
-        let mut params = HashMap::new();
-        params.insert("limit".to_string(), "15".to_string());
-        params.insert("offset".to_string(), "0".to_string());
-
         let mut paginated = self
             .client
             .paginated("/nemo/v2/works/list/user/published")
-            .with_params(params);
+            .with_param("limit", "15")
+            .with_param("offset", "0");
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -481,7 +437,7 @@ impl UserDataFetcher {
     pub fn fetch_kn_works_gen(
         &self,
         method: PublishStatus,
-        extra_params: Option<HashMap<String, String>>,
+        extra_params: Option<Vec<(String, String)>>,
         limit: Option<usize>,
     ) -> PaginatedIter {
         let url = match method {
@@ -489,21 +445,18 @@ impl UserDataFetcher {
             _ => "/neko/works/v2/list/user",
         };
 
-        let mut params = HashMap::new();
-        params.insert("offset".to_string(), "0".to_string());
-        params.insert("limit".to_string(), "15".to_string());
-
-        if let Some(extra) = extra_params {
-            for (key, value) in extra {
-                params.insert(key, value);
-            }
-        }
-
         let mut paginated = self
             .client
             .paginated(url)
-            .with_params(params)
-            .with_base_url("creation".to_string());
+            .with_param("offset", "0")
+            .with_param("limit", "15")
+            .with_base_key(BaseKey::Creation);
+
+        if let Some(extra) = extra_params {
+            for (key, value) in extra {
+                paginated = paginated.with_param(key, value);
+            }
+        }
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -522,24 +475,18 @@ impl UserDataFetcher {
         work_status: Option<WorkShowStatus>,
         limit: Option<usize>,
     ) -> PaginatedIter {
-        let mut params = HashMap::new();
-        params.insert("offset".to_string(), "0".to_string());
-        params.insert("limit".to_string(), "30".to_string());
-        params.insert("version_no".to_string(), version.as_str().to_string());
-        params.insert(
-            "work_status".to_string(),
-            work_status
-                .unwrap_or(WorkShowStatus::Show)
-                .as_str()
-                .to_string(),
-        );
-        params.insert("published_status".to_string(), status.as_str().to_string());
-
         let mut paginated = self
             .client
             .paginated("/kitten/common/work/list2")
-            .with_params(params)
-            .with_base_url("creation".to_string());
+            .with_param("offset", "0")
+            .with_param("limit", "30")
+            .with_param("version_no", version.as_str())
+            .with_param(
+                "work_status",
+                work_status.unwrap_or(WorkShowStatus::Show).as_str(),
+            )
+            .with_param("published_status", status.as_str())
+            .with_base_key(BaseKey::Creation);
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -556,15 +503,12 @@ impl UserDataFetcher {
         status: PublishStatus,
         limit: Option<usize>,
     ) -> PaginatedIter {
-        let mut params = HashMap::new();
-        params.insert("offset".to_string(), "0".to_string());
-        params.insert("limit".to_string(), "30".to_string());
-        params.insert("published_status".to_string(), status.as_str().to_string());
-
         let mut paginated = self
             .client
             .paginated("/creation-tools/v1/works/list")
-            .with_params(params);
+            .with_param("offset", "0")
+            .with_param("limit", "30")
+            .with_param("published_status", status.as_str());
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -583,27 +527,18 @@ impl UserDataFetcher {
         work_status: Option<WorkShowStatus>,
         limit: Option<usize>,
     ) -> PaginatedIter {
-        let mut params = HashMap::new();
-        params.insert("offset".to_string(), "0".to_string());
-        params.insert("limit".to_string(), "30".to_string());
-        params.insert(
-            "language_type".to_string(),
-            language_type.unwrap_or(0).to_string(),
-        );
-        params.insert(
-            "work_status".to_string(),
-            work_status
-                .unwrap_or(WorkShowStatus::Show)
-                .as_str()
-                .to_string(),
-        );
-        params.insert("published_status".to_string(), status.as_str().to_string());
-
         let mut paginated = self
             .client
             .paginated("/wood/comm/work/list")
-            .with_params(params)
-            .with_base_url("creation".to_string());
+            .with_param("offset", "0")
+            .with_param("limit", "30")
+            .with_param("language_type", language_type.unwrap_or(0).to_string())
+            .with_param(
+                "work_status",
+                work_status.unwrap_or(WorkShowStatus::Show).as_str(),
+            )
+            .with_param("published_status", status.as_str())
+            .with_base_key(BaseKey::Creation);
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -621,23 +556,17 @@ impl UserDataFetcher {
         work_status: Option<WorkShowStatus>,
         limit: Option<usize>,
     ) -> PaginatedIter {
-        let mut params = HashMap::new();
-        params.insert("offset".to_string(), "0".to_string());
-        params.insert("limit".to_string(), "30".to_string());
-        params.insert(
-            "work_status".to_string(),
-            work_status
-                .unwrap_or(WorkShowStatus::Show)
-                .as_str()
-                .to_string(),
-        );
-        params.insert("published_status".to_string(), status.as_str().to_string());
-
         let mut paginated = self
             .client
             .paginated("/box/v2/work/list")
-            .with_params(params)
-            .with_base_url("creation".to_string());
+            .with_param("offset", "0")
+            .with_param("limit", "30")
+            .with_param(
+                "work_status",
+                work_status.unwrap_or(WorkShowStatus::Show).as_str(),
+            )
+            .with_param("published_status", status.as_str())
+            .with_base_key(BaseKey::Creation);
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -654,21 +583,15 @@ impl UserDataFetcher {
         fiction_status: Option<WorkShowStatus>,
         limit: Option<usize>,
     ) -> PaginatedIter {
-        let mut params = HashMap::new();
-        params.insert("offset".to_string(), "0".to_string());
-        params.insert("limit".to_string(), "30".to_string());
-        params.insert(
-            "fiction_status".to_string(),
-            fiction_status
-                .unwrap_or(WorkShowStatus::Show)
-                .as_str()
-                .to_string(),
-        );
-
         let mut paginated = self
             .client
             .paginated("/web/fanfic/my/new")
-            .with_params(params);
+            .with_param("offset", "0")
+            .with_param("limit", "30")
+            .with_param(
+                "fiction_status",
+                fiction_status.unwrap_or(WorkShowStatus::Show).as_str(),
+            );
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -686,22 +609,19 @@ impl UserDataFetcher {
         published: Option<bool>,
         limit: Option<usize>,
     ) -> PaginatedIter {
-        let mut params = HashMap::new();
-        params.insert("offset".to_string(), "0".to_string());
-        params.insert("limit".to_string(), "30".to_string());
-        params.insert("status".to_string(), status.unwrap_or(1).to_string());
-
-        if let Some(pub_val) = published {
-            params.insert("published".to_string(), pub_val.to_string());
-        }
-
         let mut paginated = self
             .client
             .paginated("/coconut/web/work/list")
-            .with_params(params)
+            .with_param("offset", "0")
+            .with_param("limit", "30")
+            .with_param("status", status.unwrap_or(1).to_string())
             .with_data_key("data.items")
             .with_total_key("data.total")
-            .with_base_url("creation".to_string());
+            .with_base_key(BaseKey::Creation);
+
+        if let Some(pub_val) = published {
+            paginated = paginated.with_param("published", pub_val.to_string());
+        }
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -717,30 +637,26 @@ impl UserDataFetcher {
         &self,
         limit: Option<i32>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        params.insert("limit".to_string(), limit.unwrap_or(20).to_string());
-
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/coconut/web/work/list/all",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "/coconut/web/work/list/all",
+                Some(BaseKey::Creation),
+            )
+            .with_param("limit", limit.unwrap_or(20).to_string())
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     // 获取用户粉丝列表生成器
     pub fn fetch_followers_gen(&self, user_id: i32, limit: Option<usize>) -> PaginatedIter {
-        let mut params = HashMap::new();
-        params.insert("user_id".to_string(), user_id.to_string());
-        params.insert("offset".to_string(), "0".to_string());
-        params.insert("limit".to_string(), "15".to_string());
-
         let mut paginated = self
             .client
             .paginated("/creation-tools/v1/user/fans")
-            .with_params(params)
+            .with_param("user_id", user_id.to_string())
+            .with_param("offset", "0")
+            .with_param("limit", "15")
             .with_total_key("total");
 
         if let Some(limit_val) = limit {
@@ -754,15 +670,12 @@ impl UserDataFetcher {
 
     // 获取用户关注列表生成器
     pub fn fetch_following_gen(&self, user_id: i32, limit: Option<usize>) -> PaginatedIter {
-        let mut params = HashMap::new();
-        params.insert("user_id".to_string(), user_id.to_string());
-        params.insert("offset".to_string(), "0".to_string());
-        params.insert("limit".to_string(), "15".to_string());
-
         let mut paginated = self
             .client
             .paginated("/creation-tools/v1/user/followers")
-            .with_params(params)
+            .with_param("user_id", user_id.to_string())
+            .with_param("offset", "0")
+            .with_param("limit", "15")
             .with_total_key("total");
 
         if let Some(limit_val) = limit {
@@ -783,48 +696,33 @@ impl UserDataFetcher {
     ) -> Result<Value, Box<dyn std::error::Error>> {
         let types_str: Vec<String> = types.iter().map(|t| t.as_str().to_string()).collect();
 
-        let mut params = HashMap::new();
-        params.insert("user_id".to_string(), user_id.to_string());
-        params.insert("types".to_string(), types_str.join(","));
-        params.insert("limit".to_string(), limit.unwrap_or(10).to_string());
-
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/web/api/user/works/published",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/web/api/user/works/published", None)
+            .with_param("user_id", user_id.to_string())
+            .with_param("types", types_str.join(","))
+            .with_param("limit", limit.unwrap_or(10).to_string())
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     // 获取用户关注列表
     pub fn fetch_user_attention(&self, user_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        params.insert("user_id".to_string(), user_id.to_string());
-
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/web/api/user/me/attention",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/web/api/user/me/attention", None)
+            .with_param("user_id", user_id.to_string())
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     // 获取用户粉丝列表
     pub fn fetch_user_followers(&self, user_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        params.insert("user_id".to_string(), user_id.to_string());
-
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/web/api/user/attention/me",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/web/api/user/attention/me", None)
+            .with_param("user_id", user_id.to_string())
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -837,32 +735,24 @@ impl UserDataFetcher {
     ) -> Result<Value, Box<dyn std::error::Error>> {
         let types_str: Vec<String> = types.iter().map(|t| t.as_str().to_string()).collect();
 
-        let mut params = HashMap::new();
-        params.insert("user_id".to_string(), user_id.to_string());
-        params.insert("types".to_string(), types_str.join(","));
-        params.insert("limit".to_string(), limit.unwrap_or(10).to_string());
-
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/web/api/user/works/collection",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/web/api/user/works/collection", None)
+            .with_param("user_id", user_id.to_string())
+            .with_param("types", types_str.join(","))
+            .with_param("limit", limit.unwrap_or(10).to_string())
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     // 获取用户收藏作品生成器
     pub fn fetch_collections_gen(&self, user_id: i32, limit: Option<usize>) -> PaginatedIter {
-        let mut params = HashMap::new();
-        params.insert("user_id".to_string(), user_id.to_string());
-        params.insert("offset".to_string(), "0".to_string());
-        params.insert("limit".to_string(), "5".to_string());
-
         let mut paginated = self
             .client
             .paginated("/creation-tools/v2/user/center/collect/list")
-            .with_params(params)
+            .with_param("user_id", user_id.to_string())
+            .with_param("offset", "0")
+            .with_param("limit", "5")
             .with_total_key("total");
 
         if let Some(limit_val) = limit {
@@ -876,25 +766,27 @@ impl UserDataFetcher {
 
     // 获取用户头像框列表
     pub fn fetch_avatar_frames(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/creation-tools/v1/user/avatar-frame/list",
-            None,
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "/creation-tools/v1/user/avatar-frame/list",
+                None,
+            )
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     // 检查用户是否为新用户
     pub fn check_new_user_status(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/neko/works/isNewUser",
-            None,
-            None,
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "/neko/works/isNewUser",
+                Some(BaseKey::Creation),
+            )
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 }
@@ -937,13 +829,11 @@ impl UserManager {
 
         let payload = Value::Object(payload_map);
 
-        let response = self.client.send_request(
-            HttpMethod::PUT,
-            "/nemo/v2/user/basic",
-            None,
-            Some(&payload),
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::PUT, "/nemo/v2/user/basic", None)
+            .with_payload(payload)
+            .send()?;
 
         Ok(response.status() == 200)
     }
@@ -953,16 +843,15 @@ impl UserManager {
         &self,
         phone_num: i32,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        params.insert("phone_number".to_string(), phone_num.to_string());
-
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/web/users/phone_number/is_consistent",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "/web/users/phone_number/is_consistent",
+                None,
+            )
+            .with_param("phone_number", phone_num.to_string())
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -978,13 +867,11 @@ impl UserManager {
             "confirm_password": new_password,
         });
 
-        let response = self.client.send_request(
-            HttpMethod::PATCH,
-            "/tiger/v3/web/accounts/password",
-            None,
-            Some(&payload),
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::PATCH, "/tiger/v3/web/accounts/password", None)
+            .with_payload(payload)
+            .send()?;
 
         Ok(response.status() == 204)
     }
@@ -1000,13 +887,15 @@ impl UserManager {
             "old_phone_number": old_phonenum,
         });
 
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "/tiger/v3/web/accounts/captcha/phone/change",
-            None,
-            Some(&payload),
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::POST,
+                "/tiger/v3/web/accounts/captcha/phone/change",
+                None,
+            )
+            .with_payload(payload)
+            .send()?;
 
         Ok(response.status() == 204)
     }
@@ -1022,26 +911,29 @@ impl UserManager {
             "captcha": captcha,
         });
 
-        let response = self.client.send_request(
-            HttpMethod::PATCH,
-            "/tiger/v3/web/accounts/phone/change",
-            None,
-            Some(&payload),
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::PATCH,
+                "/tiger/v3/web/accounts/phone/change",
+                None,
+            )
+            .with_payload(payload)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
 
     // 移除头像框
     pub fn delete_avatar_frame(&self) -> Result<bool, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::PUT,
-            "/creation-tools/v1/user/avatar-frame/cancel",
-            None,
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::PUT,
+                "/creation-tools/v1/user/avatar-frame/cancel",
+                None,
+            )
+            .send()?;
 
         Ok(response.status() == 200)
     }
@@ -1055,7 +947,8 @@ impl UserManager {
 
         let response = self
             .client
-            .send_request(HttpMethod::PUT, &endpoint, None, None, None)?;
+            .build_request(HttpMethod::PUT, &endpoint, None)
+            .send()?;
 
         Ok(response.status() == 200)
     }
@@ -1081,13 +974,11 @@ impl UserManager {
             "sex": sex as i32,
         });
 
-        let response = self.client.send_request(
-            HttpMethod::PATCH,
-            "/tiger/v3/web/accounts/info",
-            None,
-            Some(&payload),
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::PATCH, "/tiger/v3/web/accounts/info", None)
+            .with_payload(payload)
+            .send()?;
 
         Ok(response.status() == 204)
     }
@@ -1101,13 +992,11 @@ impl UserManager {
             "preview": cover_url,
         });
 
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "/nemo/v2/user/preview",
-            None,
-            Some(&payload),
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, "/nemo/v2/user/preview", None)
+            .with_payload(payload)
+            .send()?;
 
         Ok(response.status() == 200)
     }
@@ -1122,13 +1011,11 @@ impl UserManager {
             "closeReason": reason,
         });
 
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "/tiger/v3/web/accounts/close",
-            None,
-            Some(&payload),
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, "/tiger/v3/web/accounts/close", None)
+            .with_payload(payload)
+            .send()?;
 
         if return_data {
             Ok(self.client.response_to_json(response)?)

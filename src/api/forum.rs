@@ -1,6 +1,5 @@
-use crate::utils::acquire::{CodeMaoClient, HttpMethod, PaginatedIter, PaginationMethod};
+use crate::utils::acquire::{BaseKey, CodeMaoClient, HttpMethod, PaginatedIter, PaginationMethod};
 use serde_json::{Value, json};
-use std::collections::HashMap;
 
 // 帖子类型枚举
 pub enum PostType {
@@ -131,16 +130,13 @@ impl ForumDataFetcher {
         }
 
         let ids_str: Vec<String> = post_ids.iter().map(|id| id.to_string()).collect();
-        let mut params = HashMap::new();
-        params.insert("ids".to_string(), ids_str.join(","));
 
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/web/forums/posts/all",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/web/forums/posts/all", None)
+            .with_param("ids", ids_str.join(","))
+            .send()?;
+
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -152,7 +148,8 @@ impl ForumDataFetcher {
         let endpoint = format!("/web/forums/posts/{}/details", post_id);
         let response = self
             .client
-            .send_request(HttpMethod::GET, &endpoint, None, None, None)?;
+            .build_request(HttpMethod::GET, &endpoint, None)
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -163,20 +160,14 @@ impl ForumDataFetcher {
         sort: Option<String>,
         limit: Option<usize>,
     ) -> PaginatedIter {
-        let mut params = HashMap::new();
-        params.insert("page".to_string(), "1".to_string());
-        params.insert("limit".to_string(), "10".to_string());
-        params.insert(
-            "sort".to_string(),
-            sort.unwrap_or_else(|| "-created_at".to_string()),
-        );
-
         let endpoint = format!("/web/forums/posts/{}/replies", post_id);
 
         let mut paginated = self
             .client
             .paginated(&endpoint)
-            .with_params(params)
+            .with_param("page", "1")
+            .with_param("limit", "10")
+            .with_param("sort", sort.unwrap_or_else(|| "-created_at".to_string()))
             .with_pagination_method(PaginationMethod::Page)
             .with_total_key("total")
             .with_amount_key("limit")
@@ -193,16 +184,13 @@ impl ForumDataFetcher {
 
     // 获取回帖评论生成器
     pub fn fetch_reply_comments_gen(&self, reply_id: i32, limit: Option<usize>) -> PaginatedIter {
-        let mut params = HashMap::new();
-        params.insert("page".to_string(), "1".to_string());
-        params.insert("limit".to_string(), "10".to_string());
-
         let endpoint = format!("/web/forums/replies/{}/comments", reply_id);
 
         let mut paginated = self
             .client
             .paginated(&endpoint)
-            .with_params(params)
+            .with_param("page", "1")
+            .with_param("limit", "10")
             .with_pagination_method(PaginationMethod::Page)
             .with_amount_key("limit")
             .with_offset_key("page");
@@ -218,16 +206,13 @@ impl ForumDataFetcher {
 
     // 获取我的帖子或回复的帖子生成器
     pub fn fetch_my_posts_gen(&self, post_type: PostType, limit: Option<usize>) -> PaginatedIter {
-        let mut params = HashMap::new();
-        params.insert("page".to_string(), "1".to_string());
-        params.insert("limit".to_string(), "10".to_string());
-
         let endpoint = format!("/web/forums/posts/mine/{}", post_type.as_str());
 
         let mut paginated = self
             .client
             .paginated(&endpoint)
-            .with_params(params)
+            .with_param("page", "1")
+            .with_param("limit", "10")
             .with_pagination_method(PaginationMethod::Page)
             .with_amount_key("limit")
             .with_offset_key("page");
@@ -243,25 +228,19 @@ impl ForumDataFetcher {
 
     // 获取我的帖子或回复的帖子数目
     pub fn fetch_my_post_num(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/web/forums/posts/mine/count",
-            None,
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/web/forums/posts/mine/count", None)
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     // 获取论坛帖子各个栏目
     pub fn fetch_post_boards(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/web/forums/boards/simples/all",
-            None,
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/web/forums/boards/simples/all", None)
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -270,19 +249,17 @@ impl ForumDataFetcher {
         let endpoint = format!("/web/forums/boards/{}", board_id);
         let response = self
             .client
-            .send_request(HttpMethod::GET, &endpoint, None, None, None)?;
+            .build_request(HttpMethod::GET, &endpoint, None)
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     // 获取社区所有热门帖子 ID
     pub fn fetch_hot_posts_ids(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/web/forums/posts/hots/all",
-            None,
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/web/forums/posts/hots/all", None)
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -291,16 +268,11 @@ impl ForumDataFetcher {
         &self,
         limit: Option<i32>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        params.insert("limit".to_string(), limit.unwrap_or(4).to_string());
-
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/web/forums/notice-boards",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/web/forums/notice-boards", None)
+            .with_param("limit", limit.unwrap_or(4).to_string())
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -310,17 +282,12 @@ impl ForumDataFetcher {
         content_key: &str,
         limit: Option<i32>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        params.insert("content_key".to_string(), content_key.to_string());
-        params.insert("limit".to_string(), limit.unwrap_or(4).to_string());
-
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/web/contents/get-key",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/web/contents/get-key", None)
+            .with_param("content_key", content_key)
+            .with_param("limit", limit.unwrap_or(4).to_string())
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -330,43 +297,32 @@ impl ForumDataFetcher {
         limit: Option<i32>,
         offset: Option<i32>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        params.insert("limit".to_string(), limit.unwrap_or(20).to_string());
-        params.insert("offset".to_string(), offset.unwrap_or(0).to_string());
-
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/web/forums/posts/selections",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/web/forums/posts/selections", None)
+            .with_param("limit", limit.unwrap_or(20).to_string())
+            .with_param("offset", offset.unwrap_or(0).to_string())
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     // 获取论坛举报原因
     pub fn fetch_report_reasons(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/web/reports/posts/reasons/all",
-            None,
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/web/reports/posts/reasons/all", None)
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     // 通过标题搜索帖子生成器
     pub fn search_posts_gen(&self, title: &str, limit: Option<usize>) -> PaginatedIter {
-        let mut params = HashMap::new();
-        params.insert("title".to_string(), title.to_string());
-        params.insert("page".to_string(), "1".to_string());
-        params.insert("limit".to_string(), "20".to_string());
-
         let mut paginated = self
             .client
             .paginated("/web/forums/posts/search")
-            .with_params(params)
+            .with_param("title", title)
+            .with_param("page", "1")
+            .with_param("limit", "20")
             .with_pagination_method(PaginationMethod::Page)
             .with_amount_key("limit")
             .with_offset_key("page");
@@ -386,10 +342,6 @@ impl ForumDataFetcher {
         board_id: Option<i32>,
         limit: Option<usize>,
     ) -> PaginatedIter {
-        let mut params = HashMap::new();
-        params.insert("page".to_string(), "1".to_string());
-        params.insert("limit".to_string(), "10".to_string());
-
         let endpoint = match board_id {
             Some(id) => format!("/web/forums/boards/posts/7dayHot?board_id={}", id),
             None => "/web/forums/boards/posts/7dayHot".to_string(),
@@ -398,7 +350,8 @@ impl ForumDataFetcher {
         let mut paginated = self
             .client
             .paginated(&endpoint)
-            .with_params(params)
+            .with_param("page", "1")
+            .with_param("limit", "10")
             .with_pagination_method(PaginationMethod::Page)
             .with_total_key("total")
             .with_amount_key("limit")
@@ -415,14 +368,11 @@ impl ForumDataFetcher {
 
     // 获取求助帖子生成器
     pub fn fetch_ask_help_posts_gen(&self, limit: Option<usize>) -> PaginatedIter {
-        let mut params = HashMap::new();
-        params.insert("page".to_string(), "1".to_string());
-        params.insert("limit".to_string(), "10".to_string());
-
         let mut paginated = self
             .client
             .paginated("/web/forums/boards/posts/ask-help")
-            .with_params(params)
+            .with_param("page", "1")
+            .with_param("limit", "10")
             .with_pagination_method(PaginationMethod::Page)
             .with_amount_key("limit")
             .with_offset_key("page");
@@ -467,9 +417,11 @@ impl ForumActionHandler {
             "content": content
         });
 
-        let response =
-            self.client
-                .send_request(HttpMethod::POST, &endpoint, None, Some(&payload), None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, &endpoint, None)
+            .with_payload(payload)
+            .send()?;
 
         if return_data {
             Ok(self.client.response_to_json(response)?)
@@ -492,9 +444,11 @@ impl ForumActionHandler {
             "parent_id": parent_id
         });
 
-        let response =
-            self.client
-                .send_request(HttpMethod::POST, &endpoint, None, Some(&payload), None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, &endpoint, None)
+            .with_payload(payload)
+            .send()?;
 
         if return_data {
             Ok(self.client.response_to_json(response)?)
@@ -516,14 +470,13 @@ impl ForumActionHandler {
             _ => return Err("无效的action，必须是 'like' 或 'unlike'".into()),
         };
 
-        let mut params = HashMap::new();
-        params.insert("source".to_string(), item_type.as_str().to_string());
-
         let endpoint = format!("/web/forums/comments/{}/liked", item_id);
 
         let response = self
             .client
-            .send_request(method, &endpoint, Some(&params), None, None)?;
+            .build_request(method, &endpoint, None)
+            .with_param("source", item_type.as_str())
+            .send()?;
 
         Ok(response.status() == 204)
     }
@@ -544,13 +497,11 @@ impl ForumActionHandler {
             "source": item_type.as_str(),
         });
 
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "/web/reports/posts/discussions",
-            None,
-            Some(&payload),
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, "/web/reports/posts/discussions", None)
+            .with_payload(payload)
+            .send()?;
 
         if return_data {
             Ok(self.client.response_to_json(response)?)
@@ -573,13 +524,11 @@ impl ForumActionHandler {
             "post_id": post_id,
         });
 
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "/web/reports/posts",
-            None,
-            Some(&payload),
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, "/web/reports/posts", None)
+            .with_payload(payload)
+            .send()?;
 
         if return_data {
             Ok(self.client.response_to_json(response)?)
@@ -602,7 +551,8 @@ impl ForumActionHandler {
 
         let response = self
             .client
-            .send_request(HttpMethod::DELETE, &endpoint, None, None, None)?;
+            .build_request(HttpMethod::DELETE, &endpoint, None)
+            .send()?;
 
         Ok(response.status() == 204)
     }
@@ -620,9 +570,7 @@ impl ForumActionHandler {
         };
         let endpoint = format!("/web/forums/replies/{}/top", comment_id);
 
-        let response = self
-            .client
-            .send_request(method, &endpoint, None, None, None)?;
+        let response = self.client.build_request(method, &endpoint, None).send()?;
 
         Ok(response.status() == 204)
     }
@@ -653,9 +601,11 @@ impl ForumActionHandler {
             "content": content
         });
 
-        let response =
-            self.client
-                .send_request(HttpMethod::POST, &endpoint, None, Some(&payload), None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, &endpoint, None)
+            .with_payload(payload)
+            .send()?;
 
         if return_data {
             Ok(self.client.response_to_json(response)?)

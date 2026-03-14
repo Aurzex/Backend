@@ -1,4 +1,4 @@
-use crate::utils::acquire::{CodeMaoClient, HttpMethod, Identity};
+use crate::utils::acquire::{BaseKey, CodeMaoClient, HttpMethod, Identity};
 use crate::utils::data::{CodeMaoFile, FileContent, PathConfig};
 use rand::RngExt;
 use serde_json::{Value, json};
@@ -238,13 +238,9 @@ pub fn fetch_current_timestamp_with_provider(
     provider: &dyn ClientProvider,
 ) -> Result<i64, Box<dyn std::error::Error>> {
     let client = provider.client();
-    let response = client.send_request(
-        HttpMethod::GET,
-        "/coconut/clouddb/currentTime",
-        None,
-        None,
-        None,
-    )?;
+    let response = client
+        .build_request(HttpMethod::GET, "/coconut/clouddb/currentTime", None)
+        .send()?;
     let json = client.response_to_json(response)?;
     Ok(json["data"].as_i64().unwrap_or(0))
 }
@@ -360,13 +356,14 @@ impl AuthProcessor {
             "timestamp": timestamp,
         });
 
-        let response = client.send_request(
-            HttpMethod::POST,
-            "https://open-service.codemao.cn/captcha/rule/v3",
-            None,
-            Some(&payload),
-            None,
-        )?;
+        let response = client
+            .build_request(
+                HttpMethod::POST,
+                "https://open-service.codemao.cn/captcha/rule/v3",
+                None,
+            )
+            .with_payload(payload)
+            .send()?;
         Ok(client.response_to_json(response)?)
     }
 
@@ -439,13 +436,10 @@ impl AuthProcessor {
             "code": code,
         });
 
-        let response = client.send_request(
-            HttpMethod::POST,
-            "/admins/login",
-            None,
-            Some(&payload),
-            Some("whale"),
-        )?;
+        let response = client
+            .build_request(HttpMethod::POST, "/admins/login", Some(BaseKey::Whale))
+            .with_payload(payload)
+            .send()?;
         Ok(client.response_to_json(response)?)
     }
 
@@ -458,8 +452,9 @@ impl AuthProcessor {
 
         let endpoint = format!("/admins/captcha/{}", timestamp);
 
-        let response =
-            client.send_request(HttpMethod::GET, &endpoint, None, None, Some("whale"))?;
+        let response = client
+            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Whale))
+            .send()?;
 
         if response.status() == 200 {
             let bytes = response.into_body().read_to_vec()?;
@@ -494,13 +489,10 @@ impl AuthProcessor {
             "pid": pid,
         });
 
-        let response = client.send_request(
-            HttpMethod::POST,
-            "/tiger/accounts/login",
-            None,
-            Some(&payload),
-            None,
-        )?;
+        let response = client
+            .build_request(HttpMethod::POST, "/tiger/accounts/login", None)
+            .with_payload(payload)
+            .send()?;
         Ok(client.response_to_json(response)?)
     }
 
@@ -519,13 +511,10 @@ impl AuthProcessor {
             "pid": pid,
         });
 
-        let response = client.send_request(
-            HttpMethod::POST,
-            "/tiger/v3/web/accounts/login",
-            None,
-            Some(&payload),
-            None,
-        )?;
+        let response = client
+            .build_request(HttpMethod::POST, "/tiger/v3/web/accounts/login", None)
+            .with_payload(payload)
+            .send()?;
         Ok(client.response_to_json(response)?)
     }
 
@@ -1093,13 +1082,10 @@ impl AuthManager {
     pub fn execute_logout_v0(&self) -> Result<bool, Box<dyn std::error::Error>> {
         let client = self.client();
 
-        let response = client.send_request(
-            HttpMethod::POST,
-            "/tiger/accounts/logout",
-            None,
-            Some(&json!({})),
-            None,
-        )?;
+        let response = client
+            .build_request(HttpMethod::POST, "/tiger/accounts/logout", None)
+            .with_payload(json!({}))
+            .send()?;
         Ok(response.status() == 204)
     }
 
@@ -1108,8 +1094,10 @@ impl AuthManager {
         let client = self.client();
 
         let endpoint = format!("/tiger/v3/{}/accounts/logout", method);
-        let response =
-            client.send_request(HttpMethod::POST, &endpoint, None, Some(&json!({})), None)?;
+        let response = client
+            .build_request(HttpMethod::POST, &endpoint, None)
+            .with_payload(json!({}))
+            .send()?;
         Ok(response.status() == 204)
     }
 
@@ -1117,13 +1105,9 @@ impl AuthManager {
     pub fn admin_logout(&self) -> Result<bool, Box<dyn std::error::Error>> {
         let client = self.client();
 
-        let response = client.send_request(
-            HttpMethod::DELETE,
-            "/admins/logout",
-            None,
-            None,
-            Some("whale"),
-        )?;
+        let response = client
+            .build_request(HttpMethod::DELETE, "/admins/logout", Some(BaseKey::Whale))
+            .send()?;
         Ok(response.status() == 204)
     }
 
@@ -1131,8 +1115,9 @@ impl AuthManager {
     pub fn fetch_admin_dashboard_data(&self) -> Result<Value, Box<dyn std::error::Error>> {
         let client = self.client();
 
-        let response =
-            client.send_request(HttpMethod::GET, "/admins/info", None, None, Some("whale"))?;
+        let response = client
+            .build_request(HttpMethod::GET, "/admins/info", Some(BaseKey::Whale))
+            .send()?;
         Ok(client.response_to_json(response)?)
     }
 

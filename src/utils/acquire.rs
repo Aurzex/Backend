@@ -56,15 +56,65 @@ impl From<serde_json::Error> for Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-// ==================== 常量定义 ====================
-/// 预定义的基础 URL 静态切片
-const BASE_URLS: &[(&str, &str)] = &[
-    ("default", "https://api.codemao.cn"),
-    ("creation", "https://api-creation.codemao.cn"),
-    ("whale", "https://api-whale.codemao.cn"),
-    ("education", "https://eduzone.codemao.cn"),
-];
+// ==================== 基础 URL 键枚举 ====================
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BaseKey {
+    Default,
+    Creation,
+    Whale,
+    Education,
+}
 
+impl BaseKey {
+    /// 获取枚举对应的字符串键（用于内部使用）
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            BaseKey::Default => "default",
+            BaseKey::Creation => "creation",
+            BaseKey::Whale => "whale",
+            BaseKey::Education => "education",
+        }
+    }
+
+    /// 所有可用的基础键
+    pub const ALL: [BaseKey; 4] = [
+        BaseKey::Default,
+        BaseKey::Creation,
+        BaseKey::Whale,
+        BaseKey::Education,
+    ];
+
+    /// 根据枚举值获取对应的基础 URL
+    pub fn url(&self) -> &'static str {
+        match self {
+            BaseKey::Default => "https://api.codemao.cn",
+            BaseKey::Creation => "https://api-creation.codemao.cn",
+            BaseKey::Whale => "https://api-whale.codemao.cn",
+            BaseKey::Education => "https://eduzone.codemao.cn",
+        }
+    }
+}
+
+impl FromStr for BaseKey {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self> {
+        match s {
+            "default" => Ok(BaseKey::Default),
+            "creation" => Ok(BaseKey::Creation),
+            "whale" => Ok(BaseKey::Whale),
+            "education" => Ok(BaseKey::Education),
+            _ => Err(Error::Other(format!("invalid base key: {}", s))),
+        }
+    }
+}
+
+impl Default for BaseKey {
+    fn default() -> Self {
+        BaseKey::Default
+    }
+}
+
+// ==================== 常量定义 ====================
 /// 默认请求头静态切片
 const DEFAULT_HEADERS: &[(&str, &str)] = &[
     (
@@ -194,7 +244,7 @@ fn get_global_identity_manager() -> Arc<RwLock<GlobalIdentityManager>> {
 // ==================== 客户端配置 ====================
 #[derive(Debug, Clone)]
 pub struct ClientConfig {
-    default_base_url_key: &'static str,
+    default_base_key: BaseKey,
     timeout: Duration,
     log_requests: bool,
     /// 是否使用全局身份管理器
@@ -207,19 +257,13 @@ impl ClientConfig {
     }
 
     /// 获取指定 key 的基础 URL
-    pub fn get_base_url(&self, key: Option<&str>) -> &'static str {
-        let key = key.unwrap_or(self.default_base_url_key);
-        BASE_URLS
-            .iter()
-            .find(|(k, _)| *k == key)
-            .map(|(_, v)| *v)
-            .unwrap_or_else(|| {
-                BASE_URLS
-                    .iter()
-                    .find(|(k, _)| *k == self.default_base_url_key)
-                    .expect("default base url must exist")
-                    .1
-            })
+    pub fn get_base_url(&self, key: Option<BaseKey>) -> &'static str {
+        key.unwrap_or(self.default_base_key).url()
+    }
+
+    pub fn with_default_base_key(mut self, key: BaseKey) -> Self {
+        self.default_base_key = key;
+        self
     }
 
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
@@ -242,10 +286,10 @@ impl ClientConfig {
 impl Default for ClientConfig {
     fn default() -> Self {
         Self {
-            default_base_url_key: "default",
+            default_base_key: BaseKey::Default,
             timeout: Duration::from_secs(30),
             log_requests: true,
-            use_global_auth: true, // 默认使用全局身份管理器
+            use_global_auth: true,
         }
     }
 }
@@ -435,7 +479,7 @@ pub struct InnerBuilder {
     client: CodeMaoClient,
     method: HttpMethod,
     endpoint: String,
-    base_key: Option<String>,
+    base_key: Option<BaseKey>,
     params: Option<HashMap<String, String>>,
     payload: Option<Value>,
     headers: Option<HashMap<String, String>>,
@@ -446,7 +490,7 @@ impl InnerBuilder {
         client: CodeMaoClient,
         method: HttpMethod,
         endpoint: impl Into<String>,
-        base_key: Option<String>,
+        base_key: Option<BaseKey>,
     ) -> Self {
         Self {
             client,
@@ -465,6 +509,12 @@ impl InnerBuilder {
             Some(map) => map.extend(params),
             None => self.params = Some(params),
         }
+        self
+    }
+
+    pub fn with_param(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        let map = self.params.get_or_insert_with(HashMap::new);
+        map.insert(key.into(), value.into());
         self
     }
 
@@ -489,7 +539,7 @@ impl InnerBuilder {
         self.client.inner.send_request(
             self.method,
             &self.endpoint,
-            self.base_key.as_deref(),
+            self.base_key,
             self.params.as_ref(),
             self.payload.as_ref(),
             self.headers.as_ref(),
@@ -522,7 +572,7 @@ impl InnerClient {
         &self.agent
     }
 
-    fn build_url(&self, endpoint: &str, base_key: Option<&str>) -> String {
+    fn build_url(&self, endpoint: &str, base_key: Option<BaseKey>) -> String {
         if endpoint.starts_with("http") {
             endpoint.to_string()
         } else {
@@ -635,7 +685,7 @@ impl InnerClient {
         &self,
         method: HttpMethod,
         endpoint: &str,
-        base_key: Option<&str>,
+        base_key: Option<BaseKey>,
         params: Option<&HashMap<String, String>>,
         payload: Option<&Value>,
         extra_headers: Option<&HashMap<String, String>>,
@@ -725,23 +775,20 @@ impl InnerClient {
     fn response_to_json(&self, response: Response<Body>) -> Result<Value> {
         let mut body = response.into_body();
         let bytes = body.read_to_vec()?;
-
-        if self.config.log_requests && !bytes.is_empty() {
-            if let Ok(json) = serde_json::from_slice::<Value>(&bytes) {
-                println!("响应体 (JSON):");
-                if let Ok(pretty) = serde_json::to_string_pretty(&json) {
-                    for line in pretty.lines() {
-                        println!("  {}", line);
-                    }
+        if bytes.is_empty() {
+            return Ok(Value::Null);
+        }
+        // 只解析一次
+        let json: Value = serde_json::from_slice(&bytes)?;
+        if self.config.log_requests {
+            println!("响应体 (JSON):");
+            if let Ok(pretty) = serde_json::to_string_pretty(&json) {
+                for line in pretty.lines() {
+                    println!("  {}", line);
                 }
-                return Ok(json);
-            } else if let Ok(text) = String::from_utf8(bytes.clone()) {
-                println!("响应体 (文本):");
-                println!("  {}", text);
             }
         }
-
-        Ok(serde_json::from_slice(&bytes)?)
+        Ok(json)
     }
 
     fn response_to_string(&self, response: Response<Body>) -> Result<String> {
@@ -756,6 +803,7 @@ impl InnerClient {
         Ok(text)
     }
 }
+
 // ==================== 公开的 CodeMaoClient ====================
 /// 主客户端，支持全局单例和独立实例两种模式
 #[derive(Clone)]
@@ -835,13 +883,13 @@ impl CodeMaoClient {
     }
 
     /// 发送 HTTP 请求，返回 RequestBuilder 支持链式调用
-    pub fn send_request(
+    pub fn build_request(
         &self,
         method: HttpMethod,
         endpoint: &str,
-        base_key: Option<&str>,
+        base_key: Option<BaseKey>,
     ) -> InnerBuilder {
-        InnerBuilder::new(self.clone(), method, endpoint, base_key.map(String::from))
+        InnerBuilder::new(self.clone(), method, endpoint, base_key)
     }
 
     /// 将响应体解析为 JSON
@@ -897,7 +945,7 @@ pub struct PaginatedIter {
     data_key: String,
     pagination_method: PaginationMethod,
     config: PaginationConfig,
-    base_key: Option<String>,
+    base_key: Option<BaseKey>,
 
     // 内部状态
     total_items: usize,
@@ -989,26 +1037,30 @@ impl PaginatedIter {
         self.config = config;
         self
     }
+
     pub fn with_offset_key(mut self, key: impl Into<String>) -> Self {
         let mut config = self.config.clone();
         config.offset_key = Some(key.into());
         self.config = config;
         self
     }
+
     pub fn with_response_amount_key(mut self, key: impl Into<String>) -> Self {
         let mut config = self.config.clone();
         config.response_amount_key = Some(key.into());
         self.config = config;
         self
     }
+
     pub fn with_response_offset_key(mut self, key: impl Into<String>) -> Self {
         let mut config = self.config.clone();
         config.response_offset_key = Some(key.into());
         self.config = config;
         self
     }
-    pub fn with_base_url(mut self, key: impl Into<String>) -> Self {
-        self.base_key = Some(key.into());
+
+    pub fn with_base_key(mut self, key: BaseKey) -> Self {
+        self.base_key = Some(key);
         self
     }
 
@@ -1045,20 +1097,34 @@ impl PaginatedIter {
 
     /// 获取指定页数据
     fn fetch_page(&self, page: usize) -> Result<Vec<Value>> {
-        let params = self.build_page_params(page, self.items_per_page);
-        let response = self
+        let mut builder = self
             .client
-            .send_request(self.method, &self.endpoint, self.base_key.as_deref())
-            .with_params(params)
-            .send()?;
-        let json = self.client.response_to_json(response)?;
+            .build_request(self.method, &self.endpoint, self.base_key);
 
+        // 添加基础参数（需要克隆键值，因为 builder 需要拥有所有权）
+        for (k, v) in &self.base_params {
+            builder = builder.with_param(k.clone(), v.clone());
+        }
+
+        let cfg = self.merge_config();
+        if let Some(amount_key) = &cfg.amount_key {
+            builder = builder.with_param(amount_key.clone(), self.items_per_page.to_string());
+        }
+        if let Some(offset_key) = &cfg.offset_key {
+            let offset = match self.pagination_method {
+                PaginationMethod::Offset => (page * self.items_per_page).to_string(),
+                PaginationMethod::Page => (page + 1).to_string(),
+            };
+            builder = builder.with_param(offset_key.clone(), offset);
+        }
+
+        let response = builder.send()?;
+        let json = self.client.response_to_json(response)?;
         let data = json
             .pointer(&format!("/{}", self.data_key.replace('.', "/")))
             .and_then(|v| v.as_array())
             .cloned()
             .unwrap_or_default();
-
         Ok(data)
     }
 
@@ -1071,7 +1137,7 @@ impl PaginatedIter {
         let first_page_params = self.build_page_params(0, Self::DEFAULT_PAGE_SIZE);
         let response = self
             .client
-            .send_request(self.method, &self.endpoint, self.base_key.as_deref())
+            .build_request(self.method, &self.endpoint, self.base_key)
             .with_params(first_page_params.clone())
             .send()?;
         let json = self.client.response_to_json(response)?;
@@ -1287,10 +1353,10 @@ impl FileUploader {
 
         let response = self
             .client
-            .send_request(
+            .build_request(
                 HttpMethod::GET,
                 "https://open-service.codemao.cn/cdn/qi-niu/tokens/uploading",
-                None,
+                Some(BaseKey::Default), // 使用默认基础键
             )
             .with_params(params)
             .send()?;
@@ -1324,10 +1390,10 @@ impl FileUploader {
 
         let response = self
             .client
-            .send_request(
+            .build_request(
                 HttpMethod::GET,
                 "https://oversea-api.code.game/tiger/kitten/cdn/token/1",
-                None,
+                Some(BaseKey::Default), // 使用默认基础键
             )
             .with_params(params)
             .send()?;

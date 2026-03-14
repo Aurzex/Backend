@@ -1,4 +1,4 @@
-use crate::utils::acquire::{CodeMaoClient, HTTPStatus, HttpMethod};
+use crate::utils::acquire::{BaseKey, CodeMaoClient, HTTPStatus, HttpMethod};
 use serde_json::{Value, json};
 
 /// 海外平台数据访问客户端
@@ -15,25 +15,28 @@ impl OverseaDataClient {
 
     /// 获取 Tiger 账号信息
     pub fn fetch_tiger_accounts(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "https://oversea-api.code.game/tiger/accounts",
-            None,
-            None,
-            None,
-        )?;
+        // 使用完整 URL 时 base_key 应该为 None
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "https://oversea-api.code.game/tiger/accounts",
+                None,
+            )
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     /// 获取平台配置信息
     pub fn fetch_platform_config(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "https://oversea-api.code.game/config",
-            None,
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "https://oversea-api.code.game/config",
+                None,
+            )
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 }
@@ -102,13 +105,15 @@ impl UserActionHandler {
             "pid": pid.unwrap_or(Self::DEFAULT_PID),
         });
 
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "https://oversea-api.code.game/tiger/accounts/register/email",
-            None,
-            Some(&payload),
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::POST,
+                "https://oversea-api.code.game/tiger/accounts/register/email",
+                None,
+            )
+            .with_payload(payload)
+            .send()?;
 
         Ok(response.status() == HTTPStatus::Created as u16)
     }
@@ -134,13 +139,15 @@ impl UserActionHandler {
             "pid": pid.unwrap_or(Self::DEFAULT_PID),
         });
 
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "https://oversea-api.code.game/tiger/accounts/login",
-            None,
-            Some(&payload),
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::POST,
+                "https://oversea-api.code.game/tiger/accounts/login",
+                None,
+            )
+            .with_payload(payload)
+            .send()?;
 
         Ok(response.status() == HTTPStatus::Ok as u16)
     }

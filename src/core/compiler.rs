@@ -419,20 +419,29 @@ impl Default for IdGenerator {
         Self::new()
     }
 }
+#[derive(Debug, thiserror::Error)]
+pub enum CryptoError {
+    #[error("Base64解码失败: {0}")]
+    Base64Decode(String),
+
+    #[error("AES解密失败: {0}")]
+    AesDecrypt(String),
+
+    #[error("数据太短，无法分离IV和密文")]
+    InvalidData,
+}
 
 // ============ 加密解密服务 ============
 #[derive(Clone)]
 pub struct CryptoService {
-    key: [u8; 32], // 预计算密钥
+    salt: Vec<u8>,
 }
 
 impl CryptoService {
     pub fn new(salt: &[u8]) -> Self {
-        let mut key = [0u8; 32];
-        for (i, &b) in salt.iter().cycle().take(32).enumerate() {
-            key[i] = b;
+        Self {
+            salt: salt.to_vec(),
         }
-        Self { key }
     }
 
     pub fn sha256(data: &str) -> String {
@@ -441,20 +450,56 @@ impl CryptoService {
         format!("{:x}", hasher.finalize())
     }
 
+    // 注意这里返回 Result<Vec<u8>, DecompilerError> 而不是 CryptoError
     pub fn base64_to_bytes(&self, data: &str) -> Result<Vec<u8>> {
         general_purpose::STANDARD
             .decode(data)
             .map_err(|e| DecompilerError::Crypto(format!("Base64解码失败: {}", e)))
     }
 
+    pub fn reverse_string(&self, data: &str) -> String {
+        data.chars().rev().collect()
+    }
+
+    pub fn generate_aes_key(&self) -> [u8; 32] {
+        let mut key = [0u8; 32];
+        for (i, &b) in self.salt.iter().cycle().take(32).enumerate() {
+            key[i] = b;
+        }
+        key
+    }
+
+    // 修改参数：只需要 ciphertext 和 iv，因为 key 从 self 生成
     pub fn decrypt_aes_gcm(&self, ciphertext: &[u8], iv: &[u8]) -> Result<Vec<u8>> {
-        let key = Key::<Aes256Gcm>::from_slice(&self.key);
+        let key = self.generate_aes_key();
+        let key = Key::<Aes256Gcm>::from_slice(&key);
         let cipher = Aes256Gcm::new(key);
         let nonce = Nonce::from_slice(iv);
 
         cipher
             .decrypt(nonce, ciphertext)
             .map_err(|e| DecompilerError::Crypto(format!("AES解密失败: {}", e)))
+    }
+
+    // 完整的 BCMKN 解密流程
+    pub fn decrypt_bcmkn(&self, encrypted_content: &str) -> Result<Vec<u8>> {
+        // 步骤1: 字符串反转
+        let reversed = self.reverse_string(encrypted_content);
+
+        // 步骤2: Base64解码
+        let decoded = self.base64_to_bytes(&reversed)?;
+
+        // 步骤3: 分离IV和密文
+        if decoded.len() < 13 {
+            return Err(DecompilerError::Crypto(
+                "数据太短，无法分离IV和密文".to_string(),
+            ));
+        }
+        let iv = &decoded[..12];
+        let ciphertext = &decoded[12..];
+
+        // 步骤4: AES-GCM解密（不需要传入key，方法内部会生成）
+        self.decrypt_aes_gcm(ciphertext, iv)
     }
 }
 
@@ -469,30 +514,14 @@ impl BCMKNDecryptor {
     }
 
     pub fn decrypt(&self, encrypted_content: &str) -> Result<Value> {
-        // 步骤1: 字符串反转
-        let reversed_data: String = encrypted_content.chars().rev().collect();
+        // 直接使用 decrypt_bcmkn 方法
+        let decrypted_bytes = self.crypto_service.decrypt_bcmkn(encrypted_content)?;
 
-        // 步骤2: Base64解码
-        let decoded_data = self.crypto_service.base64_to_bytes(&reversed_data)?;
-
-        // 步骤3: 分离IV和密文(IV为前12字节)
-        if decoded_data.len() < 13 {
-            return Err(DecompilerError::Crypto(
-                "数据太短,无法分离IV和密文".to_string(),
-            ));
-        }
-
-        let iv = &decoded_data[0..12];
-        let ciphertext = &decoded_data[12..];
-
-        // 步骤4: 使用预计算密钥解密
-        let decrypted_bytes = self.crypto_service.decrypt_aes_gcm(ciphertext, iv)?;
-
-        // 步骤5: 将解密后的字节转换为JSON
+        // 将解密后的字节转换为字符串再解析JSON
         let decrypted_str = String::from_utf8(decrypted_bytes)
             .map_err(|e| DecompilerError::Crypto(format!("UTF-8转换失败: {}", e)))?;
 
-        let json_value: Value = from_str(&decrypted_str)?;
+        let json_value: Value = serde_json::from_str(&decrypted_str)?;
 
         Ok(json_value)
     }
@@ -592,10 +621,17 @@ impl CodeMaoHttpClient {
 
 impl HttpClient for CodeMaoHttpClient {
     fn get_json(&self, url: &str, headers: Option<HashMap<String, String>>) -> Result<Value> {
-        let response = self
-            .client
-            .send_request(HttpMethod::GET, url, None, None, None)
+        let mut request_builder = self.client.build_request(HttpMethod::GET, url, None);
+
+        // 如果 headers 是 Some，则添加 headers
+        if let Some(headers_map) = headers {
+            request_builder = request_builder.with_headers(headers_map);
+        }
+
+        let response = request_builder
+            .send()
             .map_err(|e| DecompilerError::Http(format!("请求失败: {}", e)))?;
+
         self.client
             .response_to_json(response)
             .map_err(|e| DecompilerError::Http(format!("JSON解析失败: {}", e)))
@@ -604,7 +640,8 @@ impl HttpClient for CodeMaoHttpClient {
     fn get_binary(&self, url: &str) -> Result<Vec<u8>> {
         let response = self
             .client
-            .send_request(HttpMethod::GET, url, None, None, None)
+            .build_request(HttpMethod::GET, url, None)
+            .send()
             .map_err(|e| DecompilerError::Http(format!("请求失败: {}", e)))?;
         self.client
             .response_to_binary(response)
@@ -614,7 +651,8 @@ impl HttpClient for CodeMaoHttpClient {
     fn get_text(&self, url: &str) -> Result<String> {
         let response = self
             .client
-            .send_request(HttpMethod::GET, url, None, None, None)
+            .build_request(HttpMethod::GET, url, None)
+            .send()
             .map_err(|e| DecompilerError::Http(format!("请求失败: {}", e)))?;
         self.client
             .response_to_string(response)
@@ -691,14 +729,13 @@ impl BaseDecompiler for NekoDecompiler {
 
         // 下载并解密
         let encrypted_content = self.context.http_client.get_text(encrypted_url)?;
-
         let crypto_service = self
             .context
             .crypto_service
             .as_ref()
-            .ok_or_else(|| DecompilerError::Crypto("NEKO作品需要有效的加密服务".to_string()))?;
-
-        let decryptor = BCMKNDecryptor::new(crypto_service.clone());
+            .ok_or_else(|| DecompilerError::Crypto("NEKO作品需要有效的加密服务".to_string()))?
+            .clone();
+        let decryptor = BCMKNDecryptor::new(crypto_service);
         let decrypted = decryptor.decrypt(&encrypted_content)?;
 
         Ok(DecompileResult::Json(decrypted))

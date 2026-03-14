@@ -1,6 +1,5 @@
-use crate::utils::acquire::{CodeMaoClient, HttpMethod};
+use crate::utils::acquire::{BaseKey, CodeMaoClient, HttpMethod};
 use serde_json::{Value, json};
-use std::collections::HashMap;
 
 // ==================== 漫画相关枚举 ====================
 // 暂无特定枚举，直接使用结构体
@@ -99,9 +98,10 @@ impl CartoonDataFetcher {
 
     // 获取全部漫画
     pub fn fetch_all_cartoons(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response =
-            self.client
-                .send_request(HttpMethod::GET, "/api/comic/list/all", None, None, None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/api/comic/list/all", None)
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -110,7 +110,8 @@ impl CartoonDataFetcher {
         let endpoint = format!("/api/comic/{}", comic_id);
         let response = self
             .client
-            .send_request(HttpMethod::GET, &endpoint, None, None, None)?;
+            .build_request(HttpMethod::GET, &endpoint, None)
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -122,7 +123,8 @@ impl CartoonDataFetcher {
         let endpoint = format!("/api/comic/page/list/{}", chapter_id);
         let response = self
             .client
-            .send_request(HttpMethod::GET, &endpoint, None, None, None)?;
+            .build_request(HttpMethod::GET, &endpoint, None)
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 }
@@ -147,21 +149,19 @@ impl NovelDataFetcher {
 
     // 获取小说分类列表
     pub fn fetch_novel_categories(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response =
-            self.client
-                .send_request(HttpMethod::GET, "/api/fanfic/type", None, None, None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/api/fanfic/type", None)
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     // 获取推荐小说
     pub fn fetch_recommend_novel(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/api/fanfic/list/recommend",
-            None,
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/api/fanfic/list/recommend", None)
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -175,17 +175,18 @@ impl NovelDataFetcher {
         page: Option<i32>,
         limit: Option<i32>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        params.insert("sort_id".to_string(), (sort_id as i32).to_string());
-        params.insert("type_id".to_string(), (category_id as i32).to_string());
-        params.insert("status".to_string(), (status as i32).to_string());
-        params.insert("page".to_string(), page.unwrap_or(1).to_string());
-        params.insert("limit".to_string(), limit.unwrap_or(20).to_string());
-
         let endpoint = format!("/api/fanfic/list/{}", list_type.as_str());
-        let response =
-            self.client
-                .send_request(HttpMethod::GET, &endpoint, Some(&params), None, None)?;
+
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, &endpoint, None)
+            .with_param("sort_id", (sort_id as i32).to_string())
+            .with_param("type_id", (category_id as i32).to_string())
+            .with_param("status", (status as i32).to_string())
+            .with_param("page", page.unwrap_or(1).to_string())
+            .with_param("limit", limit.unwrap_or(20).to_string())
+            .send()?;
+
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -195,17 +196,12 @@ impl NovelDataFetcher {
         page: Option<i32>,
         limit: Option<i32>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        params.insert("page".to_string(), page.unwrap_or(1).to_string());
-        params.insert("limit".to_string(), limit.unwrap_or(10).to_string());
-
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/web/fanfic/collection",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/web/fanfic/collection", None)
+            .with_param("page", page.unwrap_or(1).to_string())
+            .with_param("limit", limit.unwrap_or(10).to_string())
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -214,7 +210,8 @@ impl NovelDataFetcher {
         let endpoint = format!("/api/fanfic/{}", novel_id);
         let response = self
             .client
-            .send_request(HttpMethod::GET, &endpoint, None, None, None)?;
+            .build_request(HttpMethod::GET, &endpoint, None)
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -226,7 +223,8 @@ impl NovelDataFetcher {
         let endpoint = format!("/api/fanfic/section/{}", chapter_id);
         let response = self
             .client
-            .send_request(HttpMethod::GET, &endpoint, None, None, None)?;
+            .build_request(HttpMethod::GET, &endpoint, None)
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -237,14 +235,14 @@ impl NovelDataFetcher {
         page: Option<i32>,
         limit: Option<i32>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        params.insert("page".to_string(), page.unwrap_or(0).to_string());
-        params.insert("limit".to_string(), limit.unwrap_or(10).to_string());
-
         let endpoint = format!("/api/fanfic/comments/list/{}", novel_id);
-        let response =
-            self.client
-                .send_request(HttpMethod::GET, &endpoint, Some(&params), None, None)?;
+
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, &endpoint, None)
+            .with_param("page", page.unwrap_or(0).to_string())
+            .with_param("limit", limit.unwrap_or(10).to_string())
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -255,18 +253,13 @@ impl NovelDataFetcher {
         page: Option<i32>,
         limit: Option<i32>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        params.insert("searchContent".to_string(), keyword.to_string());
-        params.insert("page".to_string(), page.unwrap_or(0).to_string());
-        params.insert("limit".to_string(), limit.unwrap_or(10).to_string());
-
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/api/fanfic/list/search",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/api/fanfic/list/search", None)
+            .with_param("searchContent", keyword)
+            .with_param("page", page.unwrap_or(0).to_string())
+            .with_param("limit", limit.unwrap_or(10).to_string())
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -277,14 +270,14 @@ impl NovelDataFetcher {
         limit: Option<i32>,
         page: Option<i32>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        params.insert("amount_items".to_string(), limit.unwrap_or(200).to_string());
-        params.insert("page_number".to_string(), page.unwrap_or(1).to_string());
-
         let endpoint = format!("/web/fanfic/{}/sections", novel_id);
-        let response =
-            self.client
-                .send_request(HttpMethod::GET, &endpoint, Some(&params), None, None)?;
+
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, &endpoint, None)
+            .with_param("amount_items", limit.unwrap_or(200).to_string())
+            .with_param("page_number", page.unwrap_or(1).to_string())
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -294,17 +287,12 @@ impl NovelDataFetcher {
         limit: Option<i32>,
         page: Option<i32>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        params.insert("amount_items".to_string(), limit.unwrap_or(200).to_string());
-        params.insert("page_number".to_string(), page.unwrap_or(1).to_string());
-
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/web/fanfic/my",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/web/fanfic/my", None)
+            .with_param("amount_items", limit.unwrap_or(200).to_string())
+            .with_param("page_number", page.unwrap_or(1).to_string())
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -314,17 +302,12 @@ impl NovelDataFetcher {
         limit: Option<i32>,
         page: Option<i32>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        params.insert("amount_items".to_string(), limit.unwrap_or(200).to_string());
-        params.insert("page_number".to_string(), page.unwrap_or(1).to_string());
-
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/web/fanfic/section/deleted",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/web/fanfic/section/deleted", None)
+            .with_param("amount_items", limit.unwrap_or(200).to_string())
+            .with_param("page_number", page.unwrap_or(1).to_string())
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 }
@@ -360,9 +343,7 @@ impl NovelActionHandler {
         };
         let endpoint = format!("/web/fanfic/collect/{}", novel_id);
 
-        let response = self
-            .client
-            .send_request(method, &endpoint, None, None, None)?;
+        let response = self.client.build_request(method, &endpoint, None).send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -378,9 +359,11 @@ impl NovelActionHandler {
             "content": content
         });
 
-        let response =
-            self.client
-                .send_request(HttpMethod::POST, &endpoint, None, Some(&payload), None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, &endpoint, None)
+            .with_payload(payload)
+            .send()?;
 
         if return_data {
             Ok(self.client.response_to_json(response)?)
@@ -403,9 +386,7 @@ impl NovelActionHandler {
         };
         let endpoint = format!("/api/fanfic/comments/praise/{}", comment_id);
 
-        let response = self
-            .client
-            .send_request(method, &endpoint, None, None, None)?;
+        let response = self.client.build_request(method, &endpoint, None).send()?;
 
         if return_data {
             Ok(self.client.response_to_json(response)?)
@@ -424,7 +405,8 @@ impl NovelActionHandler {
 
         let response = self
             .client
-            .send_request(HttpMethod::DELETE, &endpoint, None, None, None)?;
+            .build_request(HttpMethod::DELETE, &endpoint, None)
+            .send()?;
 
         if return_data {
             Ok(self.client.response_to_json(response)?)
@@ -448,9 +430,11 @@ impl NovelActionHandler {
             "draft_words_num": words_num,
         });
 
-        let response =
-            self.client
-                .send_request(HttpMethod::PUT, &endpoint, None, Some(&payload), None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::PUT, &endpoint, None)
+            .with_payload(payload)
+            .send()?;
 
         Ok(response.status() == 204)
     }
@@ -459,9 +443,11 @@ impl NovelActionHandler {
     pub fn publish_chapter(&self, chapter_id: i32) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!("/web/fanfic/section/{}/publish", chapter_id);
 
-        let response =
-            self.client
-                .send_request(HttpMethod::PUT, &endpoint, None, Some(&json!({})), None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::PUT, &endpoint, None)
+            .with_payload(json!({}))
+            .send()?;
 
         Ok(response.status() == 204)
     }
@@ -484,9 +470,11 @@ impl NovelActionHandler {
             "status": status,
         });
 
-        let response =
-            self.client
-                .send_request(HttpMethod::PUT, &endpoint, None, Some(&payload), None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::PUT, &endpoint, None)
+            .with_payload(payload)
+            .send()?;
 
         if return_data {
             Ok(self.client.response_to_json(response)?)
@@ -513,13 +501,11 @@ impl NovelActionHandler {
             "draft_words_num": words_num,
         });
 
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "/web/fanfic",
-            None,
-            Some(&payload),
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, "/web/fanfic", None)
+            .with_payload(payload)
+            .send()?;
 
         if return_data {
             Ok(self.client.response_to_json(response)?)
@@ -534,7 +520,8 @@ impl NovelActionHandler {
 
         let response = self
             .client
-            .send_request(HttpMethod::DELETE, &endpoint, None, None, None)?;
+            .build_request(HttpMethod::DELETE, &endpoint, None)
+            .send()?;
 
         Ok(response.status() == 204)
     }
@@ -560,25 +547,29 @@ impl BookDataFetcher {
 
     // 获取全部图鉴
     pub fn fetch_all_books(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response =
-            self.client
-                .send_request(HttpMethod::GET, "/api/sprite/list/all", None, None, None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/api/sprite/list/all", None)
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     // 获取所有属性
     pub fn fetch_all_attributes(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response =
-            self.client
-                .send_request(HttpMethod::GET, "/api/sprite/factio", None, None, None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/api/sprite/factio", None)
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     // 按星级获取图鉴
     pub fn fetch_books_by_star(&self, star: BookStar) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        params.insert("star".to_string(), (star as i32).to_string());
-        self._get_books_by_params(params)
+        self._get_books_by_params(
+            self.client
+                .build_request(HttpMethod::GET, "/api/sprite/list/all", None)
+                .with_param("star", (star as i32).to_string()),
+        )
     }
 
     // 按属性获取图鉴
@@ -586,23 +577,19 @@ impl BookDataFetcher {
         &self,
         attribute_id: BookAttributeId,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        params.insert("faction_id".to_string(), (attribute_id as i32).to_string());
-        self._get_books_by_params(params)
+        self._get_books_by_params(
+            self.client
+                .build_request(HttpMethod::GET, "/api/sprite/list/all", None)
+                .with_param("faction_id", (attribute_id as i32).to_string()),
+        )
     }
 
     // 通用获取图鉴方法
     fn _get_books_by_params(
         &self,
-        params: HashMap<String, String>,
+        builder: crate::utils::acquire::InnerBuilder,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/api/sprite/list/all",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -611,7 +598,8 @@ impl BookDataFetcher {
         let endpoint = format!("/api/sprite/{}", book_id);
         let response = self
             .client
-            .send_request(HttpMethod::GET, &endpoint, None, None, None)?;
+            .build_request(HttpMethod::GET, &endpoint, None)
+            .send()?;
         Ok(self.client.response_to_json(response)?)
     }
 }
@@ -648,9 +636,7 @@ impl BookActionHandler {
         };
         let endpoint = format!("/api/sprite/praise/{}", book_id);
 
-        let response = self
-            .client
-            .send_request(method, &endpoint, None, None, None)?;
+        let response = self.client.build_request(method, &endpoint, None).send()?;
 
         if return_data {
             Ok(self.client.response_to_json(response)?)

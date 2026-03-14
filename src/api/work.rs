@@ -1,8 +1,7 @@
 use crate::utils::acquire::{
-    CodeMaoClient, HTTPStatus, HttpMethod, PaginatedIter, PaginationMethod,
+    BaseKey, CodeMaoClient, HTTPStatus, HttpMethod, PaginatedIter, PaginationMethod,
 };
 use serde_json::{Value, json};
-use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 // 工具函数：获取13位时间戳
@@ -151,11 +150,6 @@ impl BaseWorkOperations {
         }
     }
 
-    fn add_timestamp_params(params: &mut HashMap<String, String>) {
-        let timestamp = current_timestamp_13();
-        params.insert("TIME".to_string(), timestamp.to_string());
-    }
-
     // 关注或取消关注用户
     pub fn execute_toggle_follow(
         &self,
@@ -164,13 +158,11 @@ impl BaseWorkOperations {
     ) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!("/nemo/v2/user/{}/follow", user_id);
 
-        let response = self.client.send_request(
-            method.to_http_method(),
-            &endpoint,
-            None,
-            Some(&json!({})),
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(method.to_http_method(), &endpoint, None)
+            .with_payload(json!({}))
+            .send()?;
 
         Ok(response.status() == HTTPStatus::NoContent as u16)
     }
@@ -183,13 +175,11 @@ impl BaseWorkOperations {
     ) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!("/nemo/v2/works/{}/collection", work_id);
 
-        let response = self.client.send_request(
-            method.to_http_method(),
-            &endpoint,
-            None,
-            Some(&json!({})),
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(method.to_http_method(), &endpoint, None)
+            .with_payload(json!({}))
+            .send()?;
 
         Ok(response.status() == HTTPStatus::Ok as u16)
     }
@@ -202,13 +192,11 @@ impl BaseWorkOperations {
     ) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!("/nemo/v2/works/{}/like", work_id);
 
-        let response = self.client.send_request(
-            method.to_http_method(),
-            &endpoint,
-            None,
-            Some(&json!({})),
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(method.to_http_method(), &endpoint, None)
+            .with_payload(json!({}))
+            .send()?;
 
         Ok(response.status() == HTTPStatus::Ok as u16)
     }
@@ -217,9 +205,11 @@ impl BaseWorkOperations {
     pub fn execute_fork_work(&self, work_id: i32) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!("/nemo/v2/works/{}/fork", work_id);
 
-        let response =
-            self.client
-                .send_request(HttpMethod::POST, &endpoint, None, Some(&json!({})), None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, &endpoint, None)
+            .with_payload(json!({}))
+            .send()?;
 
         Ok(response.status() == HTTPStatus::Ok as u16)
     }
@@ -228,9 +218,11 @@ impl BaseWorkOperations {
     pub fn execute_share_work(&self, work_id: i32) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!("/nemo/v2/works/{}/share", work_id);
 
-        let response =
-            self.client
-                .send_request(HttpMethod::POST, &endpoint, None, Some(&json!({})), None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, &endpoint, None)
+            .with_payload(json!({}))
+            .send()?;
 
         Ok(response.status() == HTTPStatus::Ok as u16)
     }
@@ -248,13 +240,11 @@ impl BaseWorkOperations {
             "report_describe": describe,
         });
 
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "/nemo/v2/report/work",
-            None,
-            Some(&data),
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, "/nemo/v2/report/work", None)
+            .with_payload(data)
+            .send()?;
 
         Ok(response.status() == HTTPStatus::Ok as u16)
     }
@@ -267,23 +257,21 @@ impl BaseWorkOperations {
         work_type: Option<i32>,
         is_check_name: bool,
     ) -> Result<bool, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("is_check_name".to_string(), is_check_name.to_string());
-        params.insert("name".to_string(), name.to_string());
-        if let Some(wt) = work_type {
-            params.insert("work_type".to_string(), wt.to_string());
-        }
-
+        let timestamp = current_timestamp_13();
         let endpoint = format!("/work/works/{}/rename", work_id);
 
-        let response = self.client.send_request(
-            HttpMethod::PATCH,
-            &endpoint,
-            Some(&params),
-            None,
-            Some("creation"),
-        )?;
+        let mut builder = self
+            .client
+            .build_request(HttpMethod::PATCH, &endpoint, Some(BaseKey::Creation))
+            .with_param("TIME", timestamp.to_string())
+            .with_param("is_check_name", is_check_name.to_string())
+            .with_param("name", name);
+
+        if let Some(wt) = work_type {
+            builder = builder.with_param("work_type", wt.to_string());
+        }
+
+        let response = builder.send()?;
 
         Ok(response.status() == HTTPStatus::Ok as u16)
     }
@@ -307,11 +295,6 @@ impl CommentOperations {
         }
     }
 
-    fn add_timestamp_params(params: &mut HashMap<String, String>) {
-        let timestamp = current_timestamp_13();
-        params.insert("TIME".to_string(), timestamp.to_string());
-    }
-
     // 添加作品评论
     pub fn create_work_comment(
         &self,
@@ -331,9 +314,11 @@ impl CommentOperations {
 
         let payload = Value::Object(payload_map);
 
-        let response =
-            self.client
-                .send_request(HttpMethod::POST, &endpoint, None, Some(&payload), None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, &endpoint, None)
+            .with_payload(payload)
+            .send()?;
 
         if return_data {
             Ok(self.client.response_to_json(response)?)
@@ -361,9 +346,11 @@ impl CommentOperations {
             "content": comment,
         });
 
-        let response =
-            self.client
-                .send_request(HttpMethod::POST, &endpoint, None, Some(&data), None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, &endpoint, None)
+            .with_payload(data)
+            .send()?;
 
         if return_data {
             Ok(self.client.response_to_json(response)?)
@@ -385,7 +372,8 @@ impl CommentOperations {
 
         let response = self
             .client
-            .send_request(HttpMethod::DELETE, &endpoint, None, None, None)?;
+            .build_request(HttpMethod::DELETE, &endpoint, None)
+            .send()?;
 
         Ok(response.status() == HTTPStatus::NoContent as u16)
     }
@@ -404,7 +392,9 @@ impl CommentOperations {
 
         let response = self
             .client
-            .send_request(method, &endpoint, None, Some(&json!({})), None)?;
+            .build_request(method, &endpoint, None)
+            .with_payload(json!({}))
+            .send()?;
 
         Ok(response.status() == HTTPStatus::NoContent as u16)
     }
@@ -421,13 +411,11 @@ impl CommentOperations {
             work_id, comment_id
         );
 
-        let response = self.client.send_request(
-            method.to_http_method(),
-            &endpoint,
-            None,
-            Some(&json!({})),
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(method.to_http_method(), &endpoint, None)
+            .with_payload(json!({}))
+            .send()?;
 
         Ok(response.status() == HTTPStatus::Created as u16)
     }
@@ -446,9 +434,11 @@ impl CommentOperations {
             "report_reason": reason,
         });
 
-        let response =
-            self.client
-                .send_request(HttpMethod::POST, &endpoint, None, Some(&data), None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, &endpoint, None)
+            .with_payload(data)
+            .send()?;
 
         Ok(response.status() == HTTPStatus::Ok as u16)
     }
@@ -474,11 +464,6 @@ impl KittenWorkManager {
             operations: BaseWorkOperations::new(),
             comments: CommentOperations::new(),
         }
-    }
-
-    fn add_timestamp_params(params: &mut HashMap<String, String>) {
-        let timestamp = current_timestamp_13();
-        params.insert("TIME".to_string(), timestamp.to_string());
     }
 
     // 创建 Kitten 作品
@@ -517,13 +502,11 @@ impl KittenWorkManager {
 
         let payload = Value::Object(payload_map);
 
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "/kitten/r2/work",
-            None,
-            Some(&payload),
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, "/kitten/r2/work", Some(BaseKey::Creation))
+            .with_payload(payload)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -562,13 +545,11 @@ impl KittenWorkManager {
             "user_labels": user_labels.unwrap_or_else(|| vec![]),
         });
 
-        let response = self.client.send_request(
-            HttpMethod::PUT,
-            &endpoint,
-            None,
-            Some(&payload),
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::PUT, &endpoint, Some(BaseKey::Creation))
+            .with_payload(payload)
+            .send()?;
 
         Ok(response.status() == HTTPStatus::Ok as u16)
     }
@@ -577,13 +558,10 @@ impl KittenWorkManager {
     pub fn delete_kitten_draft(&self, work_id: i32) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!("/kitten/common/work/{}/temporarily", work_id);
 
-        let response = self.client.send_request(
-            HttpMethod::DELETE,
-            &endpoint,
-            None,
-            None,
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::DELETE, &endpoint, Some(BaseKey::Creation))
+            .send()?;
 
         Ok(response.status() == HTTPStatus::Ok as u16)
     }
@@ -592,9 +570,11 @@ impl KittenWorkManager {
     pub fn execute_unpublish_work(&self, work_id: i32) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!("/tiger/work/{}/unpublish", work_id);
 
-        let response =
-            self.client
-                .send_request(HttpMethod::PATCH, &endpoint, None, Some(&json!({})), None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::PATCH, &endpoint, None)
+            .with_payload(json!({}))
+            .send()?;
 
         Ok(response.status() == HTTPStatus::NoContent as u16)
     }
@@ -606,35 +586,40 @@ impl KittenWorkManager {
     ) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!("/web/works/r2/unpublish/{}", work_id);
 
-        let response =
-            self.client
-                .send_request(HttpMethod::PUT, &endpoint, None, Some(&json!({})), None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::PUT, &endpoint, None)
+            .with_payload(json!({}))
+            .send()?;
 
         Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
     // 清空 Kitten 作品回收站
     pub fn execute_empty_kitten_trash(&self) -> Result<bool, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::DELETE,
-            "/work/user/works/permanently",
-            None,
-            None,
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::DELETE,
+                "/work/user/works/permanently",
+                Some(BaseKey::Creation),
+            )
+            .send()?;
 
         Ok(response.status() == HTTPStatus::NoContent as u16)
     }
 
     // 翻译 Kitten 作品
     pub fn translate_kitten_work(&self, data: Value) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "/kitten/work/translate",
-            None,
-            Some(&data),
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::POST,
+                "/kitten/work/translate",
+                Some(BaseKey::Creation),
+            )
+            .with_payload(data)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -660,11 +645,6 @@ impl NekoWorkManager {
             operations: BaseWorkOperations::new(),
             comments: CommentOperations::new(),
         }
-    }
-
-    fn add_timestamp_params(params: &mut HashMap<String, String>) {
-        let timestamp = current_timestamp_13();
-        params.insert("TIME".to_string(), timestamp.to_string());
     }
 
     // 创建 KN 作品
@@ -694,13 +674,11 @@ impl NekoWorkManager {
             "pic_need_check_file_url": pic_need_check_file_url.unwrap_or(""),
         });
 
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "/neko/works",
-            None,
-            Some(&payload),
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, "/neko/works", Some(BaseKey::Creation))
+            .with_payload(payload)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -735,13 +713,11 @@ impl NekoWorkManager {
             "cover_url": cover_url.unwrap_or(""),
         });
 
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            &endpoint,
-            None,
-            Some(&payload),
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, &endpoint, Some(BaseKey::Creation))
+            .with_payload(payload)
+            .send()?;
 
         Ok(response.status() == HTTPStatus::Ok as u16)
     }
@@ -752,19 +728,15 @@ impl NekoWorkManager {
         work_id: i32,
         force: i32,
     ) -> Result<bool, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("force".to_string(), force.to_string());
-
+        let timestamp = current_timestamp_13();
         let endpoint = format!("/neko/works/{}", work_id);
 
-        let response = self.client.send_request(
-            HttpMethod::DELETE,
-            &endpoint,
-            Some(&params),
-            None,
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::DELETE, &endpoint, Some(BaseKey::Creation))
+            .with_param("TIME", timestamp.to_string())
+            .with_param("force", force.to_string())
+            .send()?;
 
         Ok(response.status() == HTTPStatus::Ok as u16)
     }
@@ -776,22 +748,24 @@ impl NekoWorkManager {
     ) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!("/neko/community/work/unpublish/{}", work_id);
 
-        let response =
-            self.client
-                .send_request(HttpMethod::PUT, &endpoint, None, None, Some("creation"))?;
+        let response = self
+            .client
+            .build_request(HttpMethod::PUT, &endpoint, Some(BaseKey::Creation))
+            .send()?;
 
         Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
     // 清空 KN 作品回收站
     pub fn execute_empty_kn_trash(&self) -> Result<bool, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::DELETE,
-            "/neko/works/permanently",
-            None,
-            None,
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::DELETE,
+                "/neko/works/permanently",
+                Some(BaseKey::Creation),
+            )
+            .send()?;
 
         Ok(response.status() == HTTPStatus::Ok as u16)
     }
@@ -803,22 +777,25 @@ impl NekoWorkManager {
     ) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!("/neko/works/{}/recover", work_id);
 
-        let response =
-            self.client
-                .send_request(HttpMethod::PATCH, &endpoint, None, None, Some("creation"))?;
+        let response = self
+            .client
+            .build_request(HttpMethod::PATCH, &endpoint, Some(BaseKey::Creation))
+            .send()?;
 
         Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
     // 保存教师作品
     pub fn save_teacher_work(&self, data: Value) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "/neko/works/teacher",
-            None,
-            Some(&data),
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::POST,
+                "/neko/works/teacher",
+                Some(BaseKey::Creation),
+            )
+            .with_payload(data)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -827,13 +804,15 @@ impl NekoWorkManager {
     pub fn copy_work(&self, work_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
         let data = json!({ "work_id": work_id });
 
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "/neko/works/copy",
-            None,
-            Some(&data),
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::POST,
+                "/neko/works/copy",
+                Some(BaseKey::Creation),
+            )
+            .with_payload(data)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -845,9 +824,10 @@ impl NekoWorkManager {
     ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/neko/works/pic-troubleshoot/{}", work_id);
 
-        let response =
-            self.client
-                .send_request(HttpMethod::PUT, &endpoint, None, None, Some("creation"))?;
+        let response = self
+            .client
+            .build_request(HttpMethod::PUT, &endpoint, Some(BaseKey::Creation))
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -871,24 +851,16 @@ impl WoodWorkManager {
         }
     }
 
-    fn add_timestamp_params(params: &mut HashMap<String, String>) {
-        let timestamp = current_timestamp_13();
-        params.insert("TIME".to_string(), timestamp.to_string());
-    }
-
     // 获取海龟编辑器项目信息
     pub fn fetch_wood_project(&self, work_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("work_id".to_string(), work_id.to_string());
+        let timestamp = current_timestamp_13();
 
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/wood/project",
-            Some(&params),
-            None,
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/wood/project", Some(BaseKey::Creation))
+            .with_param("TIME", timestamp.to_string())
+            .with_param("work_id", work_id.to_string())
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -922,13 +894,11 @@ impl WoodWorkManager {
             "preview_code": preview_code.unwrap_or(""),
         });
 
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "/wood/project",
-            None,
-            Some(&payload),
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, "/wood/project", Some(BaseKey::Creation))
+            .with_payload(payload)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -937,13 +907,10 @@ impl WoodWorkManager {
     pub fn delete_wood_draft(&self, work_id: i32) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!("/wood/project/{}/temporarily", work_id);
 
-        let response = self.client.send_request(
-            HttpMethod::DELETE,
-            &endpoint,
-            None,
-            None,
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::DELETE, &endpoint, Some(BaseKey::Creation))
+            .send()?;
 
         Ok(response.status() == HTTPStatus::Ok as u16)
     }
@@ -956,23 +923,21 @@ impl WoodWorkManager {
         limit: Option<i32>,
         language_type: Option<i32>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("query".to_string(), query.unwrap_or("").to_string());
-        params.insert("page".to_string(), page.unwrap_or(1).to_string());
-        params.insert("limit".to_string(), limit.unwrap_or(15).to_string());
-        params.insert(
-            "language_type".to_string(),
-            language_type.unwrap_or(0).to_string(),
-        );
+        let timestamp = current_timestamp_13();
 
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/wood/user/project/search",
-            Some(&params),
-            None,
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "/wood/user/project/search",
+                Some(BaseKey::Creation),
+            )
+            .with_param("TIME", timestamp.to_string())
+            .with_param("query", query.unwrap_or(""))
+            .with_param("page", page.unwrap_or(1).to_string())
+            .with_param("limit", limit.unwrap_or(15).to_string())
+            .with_param("language_type", language_type.unwrap_or(0).to_string())
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -1043,41 +1008,36 @@ impl CocoWorkManager {
         }
     }
 
-    fn add_timestamp_params(params: &mut HashMap<String, String>) {
-        let timestamp = current_timestamp_13();
-        params.insert("TIME".to_string(), timestamp.to_string());
-    }
-
     // 获取 Coco 平台的主要课程列表
     pub fn fetch_coco_primary_courses(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/coconut/primary-course/list",
-            None,
-            None,
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "/coconut/primary-course/list",
+                Some(BaseKey::Creation),
+            )
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
 
     // 获取 Coco 的自定义控件列表生成器
     pub fn fetch_custom_widgets_gen(&self, limit: Option<usize>) -> PaginatedIter {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("current_page".to_string(), "1".to_string());
-        params.insert("page_size".to_string(), "100".to_string());
+        let timestamp = current_timestamp_13();
 
         let mut paginated = self
             .client
             .paginated("/coconut/web/widget/list")
-            .with_params(params)
+            .with_param("TIME", timestamp.to_string())
+            .with_param("current_page", "1")
+            .with_param("page_size", "100")
             .with_total_key("data.total")
             .with_data_key("data.items")
             .with_pagination_method(PaginationMethod::Page)
             .with_amount_key("page_size")
             .with_offset_key("current_page")
-            .with_base_url("creation".to_string());
+            .with_base_key(BaseKey::Creation);
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -1090,28 +1050,27 @@ impl CocoWorkManager {
 
     // 获取 Coco 的示范教程列表
     pub fn fetch_demo_courses(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/coconut/sample/list",
-            None,
-            None,
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "/coconut/sample/list",
+                Some(BaseKey::Creation),
+            )
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
 
     // 获取 Coco 的白名单作品链接
     pub fn fetch_whitelisted_works(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "static.bcmcdn.com/coco/whitelist.json",
-            None,
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .agent()
+            .get("https://static.bcmcdn.com/coco/whitelist.json")
+            .call()?;
 
-        Ok(self.client.response_to_json(response)?)
+        Ok(response.into_body().read_json()?)
     }
 
     // 获取 Coco 的 web 控件
@@ -1120,21 +1079,19 @@ impl CocoWorkManager {
         page: Option<i32>,
         page_size: Option<i32>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("current_page".to_string(), page.unwrap_or(1).to_string());
-        params.insert(
-            "page_size".to_string(),
-            page_size.unwrap_or(100).to_string(),
-        );
+        let timestamp = current_timestamp_13();
 
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/coconut/web/user/widget/list",
-            Some(&params),
-            None,
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "/coconut/web/user/widget/list",
+                Some(BaseKey::Creation),
+            )
+            .with_param("TIME", timestamp.to_string())
+            .with_param("current_page", page.unwrap_or(1).to_string())
+            .with_param("page_size", page_size.unwrap_or(100).to_string())
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -1158,13 +1115,15 @@ impl CocoWorkManager {
             "save_type": save_type.unwrap_or(1),
         });
 
-        let response = self.client.send_request(
-            HttpMethod::PUT,
-            "/coconut/web/work",
-            None,
-            Some(&data),
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::PUT,
+                "/coconut/web/work",
+                Some(BaseKey::Creation),
+            )
+            .with_payload(data)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -1190,13 +1149,11 @@ impl CocoWorkManager {
             "player_url": format!("https://coco.codemao.cn/editor/player/{}?channel=community", work_id),
         });
 
-        let response = self.client.send_request(
-            HttpMethod::PUT,
-            &endpoint,
-            None,
-            Some(&data),
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::PUT, &endpoint, Some(BaseKey::Creation))
+            .with_payload(data)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -1220,11 +1177,6 @@ impl CollaborationManager {
         }
     }
 
-    fn add_timestamp_params(params: &mut HashMap<String, String>) {
-        let timestamp = current_timestamp_13();
-        params.insert("TIME".to_string(), timestamp.to_string());
-    }
-
     // 获取或删除 Kitten 协作邀请码
     pub fn fetch_kitten_collaboration_code(
         &self,
@@ -1236,9 +1188,7 @@ impl CollaborationManager {
             work_id
         );
 
-        let response = self
-            .client
-            .send_request(method, &endpoint, None, None, None)?;
+        let response = self.client.build_request(method, &endpoint, None).send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -1249,21 +1199,18 @@ impl CollaborationManager {
         work_id: i32,
         permission: CollabPermission,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert(
-            "edit_permission".to_string(),
-            permission.as_code().to_string(),
-        );
-
+        let timestamp = current_timestamp_13();
         let endpoint = format!(
             "https://socketcoll.codemao.cn/coll/coco/collaborator/code/{}",
             work_id
         );
 
-        let response =
-            self.client
-                .send_request(HttpMethod::GET, &endpoint, Some(&params), None, None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, &endpoint, None)
+            .with_param("TIME", timestamp.to_string())
+            .with_param("edit_permission", permission.as_code().to_string())
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -1275,11 +1222,7 @@ impl CollaborationManager {
         work_id: i32,
         limit: Option<usize>,
     ) -> PaginatedIter {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("current_page".to_string(), "1".to_string());
-        params.insert("page_size".to_string(), "100".to_string());
-
+        let timestamp = current_timestamp_13();
         let endpoint = format!(
             "https://socketcoll.codemao.cn/coll/{}/collaborator/{}",
             work_type.as_str(),
@@ -1289,7 +1232,9 @@ impl CollaborationManager {
         let mut paginated = self
             .client
             .paginated(&endpoint)
-            .with_params(params)
+            .with_param("TIME", timestamp.to_string())
+            .with_param("current_page", "1")
+            .with_param("page_size", "100")
             .with_total_key("data.total")
             .with_data_key("data.items")
             .with_pagination_method(PaginationMethod::Page)
@@ -1312,9 +1257,10 @@ impl CollaborationManager {
     ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/collaboration/user/{}", work_id);
 
-        let response =
-            self.client
-                .send_request(HttpMethod::GET, &endpoint, None, None, Some("creation"))?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -1326,9 +1272,10 @@ impl CollaborationManager {
     ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/collaboration/user/edited/{}", work_id);
 
-        let response =
-            self.client
-                .send_request(HttpMethod::GET, &endpoint, None, None, Some("creation"))?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -1345,24 +1292,25 @@ impl CollaborationManager {
             work_id
         );
 
-        let response =
-            self.client
-                .send_request(HttpMethod::POST, &endpoint, None, Some(&json!({})), None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, &endpoint, None)
+            .with_payload(json!({}))
+            .send()?;
 
         Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
     // 获取协作的 Coco 作品生成器
     pub fn fetch_collaboration_coco_works_gen(&self, limit: Option<usize>) -> PaginatedIter {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("current_page".to_string(), "1".to_string());
-        params.insert("page_size".to_string(), "40".to_string());
+        let timestamp = current_timestamp_13();
 
         let mut paginated = self
             .client
             .paginated("https://socketcoll.codemao.cn/coll/coco/coll_works")
-            .with_params(params)
+            .with_param("TIME", timestamp.to_string())
+            .with_param("current_page", "1")
+            .with_param("page_size", "40")
             .with_total_key("data.total")
             .with_data_key("data.items")
             .with_pagination_method(PaginationMethod::Page)
@@ -1397,20 +1345,16 @@ impl AIServices {
         }
     }
 
-    fn add_timestamp_params(params: &mut HashMap<String, String>) {
-        let timestamp = current_timestamp_13();
-        params.insert("TIME".to_string(), timestamp.to_string());
-    }
-
     // 获取文生图提示词
     pub fn fetch_text2img_prompt(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/neko/text2img/prompt",
-            None,
-            None,
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "/neko/text2img/prompt",
+                Some(BaseKey::Creation),
+            )
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -1420,30 +1364,33 @@ impl AIServices {
         &self,
         template_type: &str,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("type".to_string(), template_type.to_string());
+        let timestamp = current_timestamp_13();
 
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/neko/ai-painting/templates",
-            Some(&params),
-            None,
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "/neko/ai-painting/templates",
+                Some(BaseKey::Creation),
+            )
+            .with_param("TIME", timestamp.to_string())
+            .with_param("type", template_type)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
 
     // AI 绘画匹配
     pub fn match_ai_painting(&self, data: Value) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "/neko/ai-painting/match",
-            None,
-            Some(&data),
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::POST,
+                "/neko/ai-painting/match",
+                Some(BaseKey::Creation),
+            )
+            .with_payload(data)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -1465,13 +1412,15 @@ impl AIServices {
             "generation_type": generation_type,
         });
 
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "/neko/inspiration-pool",
-            None,
-            Some(&data),
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::POST,
+                "/neko/inspiration-pool",
+                Some(BaseKey::Creation),
+            )
+            .with_payload(data)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -1495,20 +1444,17 @@ impl TeachingPlanManager {
         }
     }
 
-    fn add_timestamp_params(params: &mut HashMap<String, String>) {
-        let timestamp = current_timestamp_13();
-        params.insert("TIME".to_string(), timestamp.to_string());
-    }
-
     // 保存团队作品 (教学计划)
     pub fn save_team_work(&self, data: Value) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "/neko/teaching-plan/save/team/work",
-            None,
-            Some(&data),
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::POST,
+                "/neko/teaching-plan/save/team/work",
+                Some(BaseKey::Creation),
+            )
+            .with_payload(data)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -1520,32 +1466,35 @@ impl TeachingPlanManager {
         offset: Option<i32>,
         limit: Option<i32>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("work_id".to_string(), work_id.to_string());
-        params.insert("offset".to_string(), offset.unwrap_or(0).to_string());
-        params.insert("limit".to_string(), limit.unwrap_or(20).to_string());
+        let timestamp = current_timestamp_13();
 
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/neko/teaching-plan/list/opr/log",
-            Some(&params),
-            None,
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "/neko/teaching-plan/list/opr/log",
+                Some(BaseKey::Creation),
+            )
+            .with_param("TIME", timestamp.to_string())
+            .with_param("work_id", work_id.to_string())
+            .with_param("offset", offset.unwrap_or(0).to_string())
+            .with_param("limit", limit.unwrap_or(20).to_string())
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
 
     // 添加教学计划操作日志
     pub fn add_teaching_plan_log(&self, data: Value) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "/neko/teaching-plan/add/opr/log",
-            None,
-            Some(&data),
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::POST,
+                "/neko/teaching-plan/add/opr/log",
+                Some(BaseKey::Creation),
+            )
+            .with_payload(data)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -1557,9 +1506,10 @@ impl TeachingPlanManager {
     ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/neko/teaching-plan/work/editing-status/{}", work_id);
 
-        let response =
-            self.client
-                .send_request(HttpMethod::GET, &endpoint, None, None, Some("creation"))?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -1569,39 +1519,45 @@ impl TeachingPlanManager {
         &self,
         data: Value,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "/neko/teaching-plan/set/work/editing-status",
-            None,
-            Some(&data),
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::POST,
+                "/neko/teaching-plan/set/work/editing-status",
+                Some(BaseKey::Creation),
+            )
+            .with_payload(data)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
 
     // 更新课程进度
     pub fn update_course_progress(&self, data: Value) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "/neko/course/user/progress",
-            None,
-            Some(&data),
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::POST,
+                "/neko/course/user/progress",
+                Some(BaseKey::Creation),
+            )
+            .with_payload(data)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
 
     // 提交课程作品
     pub fn submit_course_work(&self, data: Value) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "/neko/course/user/course-work",
-            None,
-            Some(&data),
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::POST,
+                "/neko/course/user/course-work",
+                Some(BaseKey::Creation),
+            )
+            .with_payload(data)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -1611,13 +1567,15 @@ impl TeachingPlanManager {
         &self,
         data: Value,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "/neko/works/save-teacher-course-invite-url",
-            None,
-            Some(&data),
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::POST,
+                "/neko/works/save-teacher-course-invite-url",
+                Some(BaseKey::Creation),
+            )
+            .with_payload(data)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -1641,42 +1599,40 @@ impl ImageClassifyManager {
         }
     }
 
-    fn add_timestamp_params(params: &mut HashMap<String, String>) {
-        let timestamp = current_timestamp_13();
-        params.insert("TIME".to_string(), timestamp.to_string());
-    }
-
     // 获取图像分类列表
     pub fn fetch_image_classify_list(
         &self,
         limit: Option<i32>,
         offset: Option<i32>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("limit".to_string(), limit.unwrap_or(20).to_string());
-        params.insert("offset".to_string(), offset.unwrap_or(0).to_string());
+        let timestamp = current_timestamp_13();
 
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/neko/image-classify/list",
-            Some(&params),
-            None,
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "/neko/image-classify/list",
+                Some(BaseKey::Creation),
+            )
+            .with_param("TIME", timestamp.to_string())
+            .with_param("limit", limit.unwrap_or(20).to_string())
+            .with_param("offset", offset.unwrap_or(0).to_string())
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
 
     // 提交图像分类
     pub fn submit_image_classify(&self, data: Value) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "/neko/image-classify",
-            None,
-            Some(&data),
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::POST,
+                "/neko/image-classify",
+                Some(BaseKey::Creation),
+            )
+            .with_payload(data)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -1689,13 +1645,11 @@ impl ImageClassifyManager {
     ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/neko/image-classify/{}", classify_id);
 
-        let response = self.client.send_request(
-            HttpMethod::PUT,
-            &endpoint,
-            None,
-            Some(&data),
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::PUT, &endpoint, Some(BaseKey::Creation))
+            .with_payload(data)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -1707,13 +1661,10 @@ impl ImageClassifyManager {
     ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/neko/image-classify/{}", classify_id);
 
-        let response = self.client.send_request(
-            HttpMethod::DELETE,
-            &endpoint,
-            None,
-            None,
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::DELETE, &endpoint, Some(BaseKey::Creation))
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -1737,11 +1688,6 @@ impl PackageManager {
         }
     }
 
-    fn add_timestamp_params(params: &mut HashMap<String, String>) {
-        let timestamp = current_timestamp_13();
-        params.insert("TIME".to_string(), timestamp.to_string());
-    }
-
     // 获取包列表
     pub fn fetch_package_list(
         &self,
@@ -1749,32 +1695,31 @@ impl PackageManager {
         limit: Option<i32>,
         offset: Option<i32>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("type".to_string(), package_type.to_string());
-        params.insert("limit".to_string(), limit.unwrap_or(20).to_string());
-        params.insert("offset".to_string(), offset.unwrap_or(0).to_string());
+        let timestamp = current_timestamp_13();
 
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/neko/package/list",
-            Some(&params),
-            None,
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "/neko/package/list",
+                Some(BaseKey::Creation),
+            )
+            .with_param("TIME", timestamp.to_string())
+            .with_param("type", package_type)
+            .with_param("limit", limit.unwrap_or(20).to_string())
+            .with_param("offset", offset.unwrap_or(0).to_string())
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
 
     // 创建包
     pub fn create_package(&self, data: Value) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "/neko/package",
-            None,
-            Some(&data),
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, "/neko/package", Some(BaseKey::Creation))
+            .with_payload(data)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -1793,13 +1738,11 @@ impl PackageManager {
             "description": description,
         });
 
-        let response = self.client.send_request(
-            HttpMethod::PUT,
-            &endpoint,
-            None,
-            Some(&data),
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::PUT, &endpoint, Some(BaseKey::Creation))
+            .with_payload(data)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -1808,13 +1751,10 @@ impl PackageManager {
     pub fn delete_package(&self, package_id: &str) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/neko/package/{}", package_id);
 
-        let response = self.client.send_request(
-            HttpMethod::DELETE,
-            &endpoint,
-            None,
-            None,
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::DELETE, &endpoint, Some(BaseKey::Creation))
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -1838,40 +1778,43 @@ impl SampleManager {
         }
     }
 
-    fn add_timestamp_params(params: &mut HashMap<String, String>) {
-        let timestamp = current_timestamp_13();
-        params.insert("TIME".to_string(), timestamp.to_string());
-    }
-
     // 获取 Kitten N 示例详情
     pub fn fetch_sample_detail(
         &self,
-        params: HashMap<String, String>,
+        params: Vec<(String, String)>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/neko/sample/detail",
-            Some(&params),
-            None,
-            Some("creation"),
-        )?;
+        let timestamp = current_timestamp_13();
+        let mut builder = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "/neko/sample/detail",
+                Some(BaseKey::Creation),
+            )
+            .with_param("TIME", timestamp.to_string());
 
+        for (key, value) in params {
+            builder = builder.with_param(key, value);
+        }
+
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     // 获取示例列表
     pub fn fetch_sample_list(&self, subject_id: &str) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("subject_id".to_string(), subject_id.to_string());
+        let timestamp = current_timestamp_13();
 
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/neko/sample/list",
-            Some(&params),
-            None,
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "/neko/sample/list",
+                Some(BaseKey::Creation),
+            )
+            .with_param("TIME", timestamp.to_string())
+            .with_param("subject_id", subject_id)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -1895,11 +1838,6 @@ impl WorkDataFetcher {
         }
     }
 
-    fn add_timestamp_params(params: &mut HashMap<String, String>) {
-        let timestamp = current_timestamp_13();
-        params.insert("TIME".to_string(), timestamp.to_string());
-    }
-
     // ---------- 作品详情 ----------
 
     // 获取作品详细信息
@@ -1908,7 +1846,8 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .send_request(HttpMethod::GET, &endpoint, None, None, None)?;
+            .build_request(HttpMethod::GET, &endpoint, None)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -1920,9 +1859,10 @@ impl WorkDataFetcher {
     ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/kitten/work/detail/{}", work_id);
 
-        let response =
-            self.client
-                .send_request(HttpMethod::GET, &endpoint, None, None, Some("creation"))?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -1931,9 +1871,10 @@ impl WorkDataFetcher {
     pub fn fetch_kn_work_details(&self, work_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/neko/works/{}", work_id);
 
-        let response =
-            self.client
-                .send_request(HttpMethod::GET, &endpoint, None, None, Some("creation"))?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -1942,9 +1883,10 @@ impl WorkDataFetcher {
     pub fn fetch_coco_work_info(&self, work_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/coconut/web/work/{}/info", work_id);
 
-        let response =
-            self.client
-                .send_request(HttpMethod::GET, &endpoint, None, None, Some("creation"))?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -1956,9 +1898,10 @@ impl WorkDataFetcher {
     ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/neko/community/work/detail/{}", work_id);
 
-        let response =
-            self.client
-                .send_request(HttpMethod::GET, &endpoint, None, None, Some("creation"))?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -1967,9 +1910,10 @@ impl WorkDataFetcher {
     pub fn fetch_kn_work_state(&self, work_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/neko/works/status/{}", work_id);
 
-        let response =
-            self.client
-                .send_request(HttpMethod::GET, &endpoint, None, None, Some("creation"))?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -1978,9 +1922,10 @@ impl WorkDataFetcher {
     pub fn fetch_kn_work_detail(&self, work_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/neko/community/player/published-work-detail/{}", work_id);
 
-        let response =
-            self.client
-                .send_request(HttpMethod::GET, &endpoint, None, None, Some("creation"))?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -1992,9 +1937,10 @@ impl WorkDataFetcher {
     ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/neko/works/player/work-detail/{}", work_id);
 
-        let response =
-            self.client
-                .send_request(HttpMethod::GET, &endpoint, None, None, Some("creation"))?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -2004,17 +1950,18 @@ impl WorkDataFetcher {
         &self,
         course_code: &str,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("course_code".to_string(), course_code.to_string());
+        let timestamp = current_timestamp_13();
 
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/neko/works/get-player-by-course-code",
-            Some(&params),
-            None,
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "/neko/works/get-player-by-course-code",
+                Some(BaseKey::Creation),
+            )
+            .with_param("TIME", timestamp.to_string())
+            .with_param("course_code", course_code)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -2023,9 +1970,10 @@ impl WorkDataFetcher {
     pub fn fetch_work_status(&self, work_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/neko/works/status/{}", work_id);
 
-        let response =
-            self.client
-                .send_request(HttpMethod::GET, &endpoint, None, None, Some("creation"))?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -2036,7 +1984,8 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .send_request(HttpMethod::GET, &endpoint, None, None, None)?;
+            .build_request(HttpMethod::GET, &endpoint, None)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -2048,9 +1997,10 @@ impl WorkDataFetcher {
     ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/neko/community/check-user-opr-work-status/{}", work_id);
 
-        let response =
-            self.client
-                .send_request(HttpMethod::GET, &endpoint, None, None, Some("creation"))?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -2059,17 +2009,15 @@ impl WorkDataFetcher {
 
     // 获取作品评论生成器
     pub fn fetch_work_comments_gen(&self, work_id: i32, limit: Option<usize>) -> PaginatedIter {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("limit".to_string(), "15".to_string());
-        params.insert("offset".to_string(), "0".to_string());
-
+        let timestamp = current_timestamp_13();
         let endpoint = format!("/creation-tools/v1/works/{}/comments", work_id);
 
         let mut paginated = self
             .client
             .paginated(&endpoint)
-            .with_params(params)
+            .with_param("TIME", timestamp.to_string())
+            .with_param("limit", "15")
+            .with_param("offset", "0")
             .with_total_key("page_total");
 
         if let Some(limit_val) = limit {
@@ -2092,7 +2040,8 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .send_request(HttpMethod::GET, &endpoint, None, None, None)?;
+            .build_request(HttpMethod::GET, &endpoint, None)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -2104,9 +2053,10 @@ impl WorkDataFetcher {
     ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/kitten/work/ide/load/{}", work_id);
 
-        let response =
-            self.client
-                .send_request(HttpMethod::GET, &endpoint, None, None, Some("creation"))?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -2118,9 +2068,10 @@ impl WorkDataFetcher {
     ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/kitten/r2/work/player/load/{}", work_id);
 
-        let response =
-            self.client
-                .send_request(HttpMethod::GET, &endpoint, None, None, Some("creation"))?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -2132,9 +2083,10 @@ impl WorkDataFetcher {
     ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/coconut/web/work/{}/content", work_id);
 
-        let response =
-            self.client
-                .send_request(HttpMethod::GET, &endpoint, None, None, Some("creation"))?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -2146,9 +2098,10 @@ impl WorkDataFetcher {
     ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/coconut/web/work/{}/load", work_id);
 
-        let response =
-            self.client
-                .send_request(HttpMethod::GET, &endpoint, None, None, Some("creation"))?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -2158,19 +2111,15 @@ impl WorkDataFetcher {
         &self,
         work_id: i32,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("channel_type".to_string(), "0".to_string());
-
+        let timestamp = current_timestamp_13();
         let endpoint = format!("/wood/work/{}/publish", work_id);
 
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            &endpoint,
-            Some(&params),
-            None,
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .with_param("TIME", timestamp.to_string())
+            .with_param("channel_type", "0")
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -2182,9 +2131,10 @@ impl WorkDataFetcher {
     ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/neko/works/archive/{}", work_id);
 
-        let response =
-            self.client
-                .send_request(HttpMethod::GET, &endpoint, None, None, Some("creation"))?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -2200,7 +2150,8 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .send_request(HttpMethod::GET, &endpoint, None, None, None)?;
+            .build_request(HttpMethod::GET, &endpoint, None)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -2210,17 +2161,18 @@ impl WorkDataFetcher {
         &self,
         work_id: i32,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("work_id".to_string(), work_id.to_string());
+        let timestamp = current_timestamp_13();
 
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/nemo/v3/work-details/recommended/list",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "/nemo/v3/work-details/recommended/list",
+                None,
+            )
+            .with_param("TIME", timestamp.to_string())
+            .with_param("work_id", work_id.to_string())
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -2232,22 +2184,23 @@ impl WorkDataFetcher {
         offset: Option<i32>,
         origin: bool,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
+        let timestamp = current_timestamp_13();
+        let mut builder = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "/creation-tools/v1/pc/discover/newest-work",
+                None,
+            )
+            .with_param("TIME", timestamp.to_string())
+            .with_param("limit", limit.unwrap_or(15).to_string())
+            .with_param("offset", offset.unwrap_or(0).to_string());
+
         if origin {
-            params.insert("work_origin_type".to_string(), "ORIGINAL_WORK".to_string());
+            builder = builder.with_param("work_origin_type", "ORIGINAL_WORK");
         }
-        params.insert("limit".to_string(), limit.unwrap_or(15).to_string());
-        params.insert("offset".to_string(), offset.unwrap_or(0).to_string());
 
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/creation-tools/v1/pc/discover/newest-work",
-            Some(&params),
-            None,
-            None,
-        )?;
-
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -2258,34 +2211,32 @@ impl WorkDataFetcher {
         offset: Option<i32>,
         subject_id: Option<i32>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
+        let timestamp = current_timestamp_13();
+        let mut builder = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "/creation-tools/v1/pc/discover/subject-work",
+                None,
+            )
+            .with_param("TIME", timestamp.to_string())
+            .with_param("limit", limit.to_string())
+            .with_param("offset", offset.unwrap_or(0).to_string());
+
         if let Some(sid) = subject_id {
-            params.insert("subject_id".to_string(), sid.to_string());
+            builder = builder.with_param("subject_id", sid.to_string());
         }
-        params.insert("limit".to_string(), limit.to_string());
-        params.insert("offset".to_string(), offset.unwrap_or(0).to_string());
 
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/creation-tools/v1/pc/discover/subject-work",
-            Some(&params),
-            None,
-            None,
-        )?;
-
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     // 获取 Nemo 端发现页作品
     pub fn fetch_nemo_discover(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/creation-tools/v1/home/discover",
-            None,
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/creation-tools/v1/home/discover", None)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -2297,16 +2248,16 @@ impl WorkDataFetcher {
         limit: Option<i32>,
         offset: Option<i32>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("limit".to_string(), limit.unwrap_or(15).to_string());
-        params.insert("offset".to_string(), offset.unwrap_or(0).to_string());
-
+        let timestamp = current_timestamp_13();
         let endpoint = format!("/nemo/v3/newest/work/{}/list", types.as_str());
 
-        let response =
-            self.client
-                .send_request(HttpMethod::GET, &endpoint, Some(&params), None, None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, &endpoint, None)
+            .with_param("TIME", timestamp.to_string())
+            .with_param("limit", limit.unwrap_or(15).to_string())
+            .with_param("offset", offset.unwrap_or(0).to_string())
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -2317,31 +2268,29 @@ impl WorkDataFetcher {
         limit: Option<i32>,
         offset: Option<i32>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("limit".to_string(), limit.unwrap_or(15).to_string());
-        params.insert("offset".to_string(), offset.unwrap_or(0).to_string());
+        let timestamp = current_timestamp_13();
 
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/nemo/v3/work/dynamic",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/nemo/v3/work/dynamic", None)
+            .with_param("TIME", timestamp.to_string())
+            .with_param("limit", limit.unwrap_or(15).to_string())
+            .with_param("offset", offset.unwrap_or(0).to_string())
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
 
     // 获取动态推荐用户
     pub fn fetch_recommended_users(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/nemo/v3/dynamic/focus/user/recommend",
-            None,
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "/nemo/v3/dynamic/focus/user/recommend",
+                None,
+            )
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -2350,13 +2299,10 @@ impl WorkDataFetcher {
 
     // 获取随机作品主题 ID 列表
     pub fn fetch_random_subjects(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/nemo/v3/work-subject/random",
-            None,
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/nemo/v3/work-subject/random", None)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -2367,7 +2313,8 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .send_request(HttpMethod::GET, &endpoint, None, None, None)?;
+            .build_request(HttpMethod::GET, &endpoint, None)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -2379,16 +2326,16 @@ impl WorkDataFetcher {
         limit: Option<i32>,
         offset: Option<i32>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("limit".to_string(), limit.unwrap_or(15).to_string());
-        params.insert("offset".to_string(), offset.unwrap_or(0).to_string());
-
+        let timestamp = current_timestamp_13();
         let endpoint = format!("/nemo/v3/work-subject/{}/works", ids);
 
-        let response =
-            self.client
-                .send_request(HttpMethod::GET, &endpoint, Some(&params), None, None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, &endpoint, None)
+            .with_param("TIME", timestamp.to_string())
+            .with_param("limit", limit.unwrap_or(15).to_string())
+            .with_param("offset", offset.unwrap_or(0).to_string())
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -2399,18 +2346,15 @@ impl WorkDataFetcher {
         limit: Option<i32>,
         offset: Option<i32>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("limit".to_string(), limit.unwrap_or(15).to_string());
-        params.insert("offset".to_string(), offset.unwrap_or(0).to_string());
+        let timestamp = current_timestamp_13();
 
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/nemo/v3/work-subject/home",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/nemo/v3/work-subject/home", None)
+            .with_param("TIME", timestamp.to_string())
+            .with_param("limit", limit.unwrap_or(15).to_string())
+            .with_param("offset", offset.unwrap_or(0).to_string())
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -2426,7 +2370,8 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .send_request(HttpMethod::GET, &endpoint, None, None, None)?;
+            .build_request(HttpMethod::GET, &endpoint, None)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -2440,7 +2385,8 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .send_request(HttpMethod::GET, &endpoint, None, None, None)?;
+            .build_request(HttpMethod::GET, &endpoint, None)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -2454,21 +2400,17 @@ impl WorkDataFetcher {
         work_status: Option<&str>,
         limit: Option<usize>,
     ) -> PaginatedIter {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("limit".to_string(), "30".to_string());
-        params.insert("offset".to_string(), "0".to_string());
-        params.insert("version_no".to_string(), version.as_str().to_string());
-        params.insert(
-            "work_status".to_string(),
-            work_status.unwrap_or("CYCLED").to_string(),
-        );
+        let timestamp = current_timestamp_13();
 
         let mut paginated = self
             .client
             .paginated("/tiger/work/recycle/list")
-            .with_params(params)
-            .with_base_url("creation".to_string());
+            .with_param("TIME", timestamp.to_string())
+            .with_param("limit", "30")
+            .with_param("offset", "0")
+            .with_param("version_no", version.as_str())
+            .with_param("work_status", work_status.unwrap_or("CYCLED"))
+            .with_base_key(BaseKey::Creation);
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -2487,28 +2429,18 @@ impl WorkDataFetcher {
         published_status: Option<&str>,
         limit: Option<usize>,
     ) -> PaginatedIter {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("limit".to_string(), "30".to_string());
-        params.insert("offset".to_string(), "0".to_string());
-        params.insert(
-            "language_type".to_string(),
-            language_type.unwrap_or(0).to_string(),
-        );
-        params.insert(
-            "work_status".to_string(),
-            work_status.unwrap_or("CYCLED").to_string(),
-        );
-        params.insert(
-            "published_status".to_string(),
-            published_status.unwrap_or("undefined").to_string(),
-        );
+        let timestamp = current_timestamp_13();
 
         let mut paginated = self
             .client
             .paginated("/wood/comm/work/list")
-            .with_params(params)
-            .with_base_url("creation".to_string());
+            .with_param("TIME", timestamp.to_string())
+            .with_param("limit", "30")
+            .with_param("offset", "0")
+            .with_param("language_type", language_type.unwrap_or(0).to_string())
+            .with_param("work_status", work_status.unwrap_or("CYCLED"))
+            .with_param("published_status", published_status.unwrap_or("undefined"))
+            .with_base_key(BaseKey::Creation);
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -2525,20 +2457,16 @@ impl WorkDataFetcher {
         work_status: Option<&str>,
         limit: Option<usize>,
     ) -> PaginatedIter {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("limit".to_string(), "30".to_string());
-        params.insert("offset".to_string(), "0".to_string());
-        params.insert(
-            "work_status".to_string(),
-            work_status.unwrap_or("CYCLED").to_string(),
-        );
+        let timestamp = current_timestamp_13();
 
         let mut paginated = self
             .client
             .paginated("/box/v2/work/list")
-            .with_params(params)
-            .with_base_url("creation".to_string());
+            .with_param("TIME", timestamp.to_string())
+            .with_param("limit", "30")
+            .with_param("offset", "0")
+            .with_param("work_status", work_status.unwrap_or("CYCLED"))
+            .with_base_key(BaseKey::Creation);
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -2555,19 +2483,15 @@ impl WorkDataFetcher {
         fiction_status: Option<&str>,
         limit: Option<usize>,
     ) -> PaginatedIter {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("limit".to_string(), "30".to_string());
-        params.insert("offset".to_string(), "0".to_string());
-        params.insert(
-            "fiction_status".to_string(),
-            fiction_status.unwrap_or("CYCLED").to_string(),
-        );
+        let timestamp = current_timestamp_13();
 
         let mut paginated = self
             .client
             .paginated("/web/fanfic/my/new")
-            .with_params(params);
+            .with_param("TIME", timestamp.to_string())
+            .with_param("limit", "30")
+            .with_param("offset", "0")
+            .with_param("fiction_status", fiction_status.unwrap_or("CYCLED"));
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -2585,22 +2509,21 @@ impl WorkDataFetcher {
         work_business_classify: Option<i32>,
         limit: Option<usize>,
     ) -> PaginatedIter {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("name".to_string(), name.unwrap_or("").to_string());
-        params.insert("limit".to_string(), "24".to_string());
-        params.insert("offset".to_string(), "0".to_string());
-        params.insert("status".to_string(), "-99".to_string());
-        params.insert(
-            "work_business_classify".to_string(),
-            work_business_classify.unwrap_or(1).to_string(),
-        );
+        let timestamp = current_timestamp_13();
 
         let mut paginated = self
             .client
             .paginated("/neko/works/v2/list/user")
-            .with_params(params)
-            .with_base_url("creation".to_string());
+            .with_param("TIME", timestamp.to_string())
+            .with_param("name", name.unwrap_or(""))
+            .with_param("limit", "24")
+            .with_param("offset", "0")
+            .with_param("status", "-99")
+            .with_param(
+                "work_business_classify",
+                work_business_classify.unwrap_or(1).to_string(),
+            )
+            .with_base_key(BaseKey::Creation);
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -2621,22 +2544,21 @@ impl WorkDataFetcher {
         work_business_classify: Option<i32>,
         limit: Option<usize>,
     ) -> PaginatedIter {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("name".to_string(), name.to_string());
-        params.insert("limit".to_string(), "24".to_string());
-        params.insert("offset".to_string(), "0".to_string());
-        params.insert("status".to_string(), status.unwrap_or(1).to_string());
-        params.insert(
-            "work_business_classify".to_string(),
-            work_business_classify.unwrap_or(1).to_string(),
-        );
+        let timestamp = current_timestamp_13();
 
         let mut paginated = self
             .client
             .paginated("/neko/works/v2/list/user")
-            .with_params(params)
-            .with_base_url("creation".to_string());
+            .with_param("TIME", timestamp.to_string())
+            .with_param("name", name)
+            .with_param("limit", "24")
+            .with_param("offset", "0")
+            .with_param("status", status.unwrap_or(1).to_string())
+            .with_param(
+                "work_business_classify",
+                work_business_classify.unwrap_or(1).to_string(),
+            )
+            .with_base_key(BaseKey::Creation);
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -2654,21 +2576,20 @@ impl WorkDataFetcher {
         work_business_classify: Option<i32>,
         limit: Option<usize>,
     ) -> PaginatedIter {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("name".to_string(), name.to_string());
-        params.insert("limit".to_string(), "24".to_string());
-        params.insert("offset".to_string(), "0".to_string());
-        params.insert(
-            "work_business_classify".to_string(),
-            work_business_classify.unwrap_or(1).to_string(),
-        );
+        let timestamp = current_timestamp_13();
 
         let mut paginated = self
             .client
             .paginated("/neko/works/list/user/published")
-            .with_params(params)
-            .with_base_url("creation".to_string());
+            .with_param("TIME", timestamp.to_string())
+            .with_param("name", name)
+            .with_param("limit", "24")
+            .with_param("offset", "0")
+            .with_param(
+                "work_business_classify",
+                work_business_classify.unwrap_or(1).to_string(),
+            )
+            .with_base_key(BaseKey::Creation);
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -2686,19 +2607,16 @@ impl WorkDataFetcher {
         limit: Option<i32>,
         offset: Option<i32>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("query".to_string(), name.to_string());
-        params.insert("offset".to_string(), offset.unwrap_or(0).to_string());
-        params.insert("limit".to_string(), limit.unwrap_or(20).to_string());
+        let timestamp = current_timestamp_13();
 
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/nemo/community/work/name/search",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/nemo/community/work/name/search", None)
+            .with_param("TIME", timestamp.to_string())
+            .with_param("query", name)
+            .with_param("offset", offset.unwrap_or(0).to_string())
+            .with_param("limit", limit.unwrap_or(20).to_string())
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -2710,19 +2628,16 @@ impl WorkDataFetcher {
         limit: Option<i32>,
         offset: Option<i32>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("key".to_string(), name.to_string());
-        params.insert("offset".to_string(), offset.unwrap_or(0).to_string());
-        params.insert("limit".to_string(), limit.unwrap_or(20).to_string());
+        let timestamp = current_timestamp_13();
 
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/nemo/v2/work/name/search",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/nemo/v2/work/name/search", None)
+            .with_param("TIME", timestamp.to_string())
+            .with_param("key", name)
+            .with_param("offset", offset.unwrap_or(0).to_string())
+            .with_param("limit", limit.unwrap_or(20).to_string())
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -2735,50 +2650,54 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .send_request(HttpMethod::GET, &endpoint, None, None, None)?;
+            .build_request(HttpMethod::GET, &endpoint, None)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
 
     // 获取作品标签
     pub fn fetch_work_tags(&self, work_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("work_id".to_string(), work_id.to_string());
+        let timestamp = current_timestamp_13();
 
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/creation-tools/v1/work-details/work-labels",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "/creation-tools/v1/work-details/work-labels",
+                None,
+            )
+            .with_param("TIME", timestamp.to_string())
+            .with_param("work_id", work_id.to_string())
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
 
     // 获取所有 Kitten 作品标签
     pub fn fetch_kitten_tags(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/kitten/work/labels",
-            None,
-            None,
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "/kitten/work/labels",
+                Some(BaseKey::Creation),
+            )
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
 
     // 获取 Kitten 默认封面
     pub fn fetch_kitten_default_covers(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/kitten/work/cover/defaultCovers",
-            None,
-            None,
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "/kitten/work/cover/defaultCovers",
+                Some(BaseKey::Creation),
+            )
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -2787,9 +2706,10 @@ impl WorkDataFetcher {
     pub fn fetch_recent_covers(&self, work_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/kitten/work/cover/{}/recentCovers", work_id);
 
-        let response =
-            self.client
-                .send_request(HttpMethod::GET, &endpoint, None, None, Some("creation"))?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -2800,18 +2720,15 @@ impl WorkDataFetcher {
         name: &str,
         work_id: i32,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("name".to_string(), name.to_string());
-        params.insert("work_id".to_string(), work_id.to_string());
+        let timestamp = current_timestamp_13();
 
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/tiger/work/checkname",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/tiger/work/checkname", None)
+            .with_param("TIME", timestamp.to_string())
+            .with_param("name", name)
+            .with_param("work_id", work_id.to_string())
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -2827,7 +2744,8 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .send_request(HttpMethod::GET, &endpoint, None, None, None)?;
+            .build_request(HttpMethod::GET, &endpoint, None)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -2839,17 +2757,14 @@ impl WorkDataFetcher {
         &self,
         token: &str,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("token".to_string(), token.to_string());
+        let timestamp = current_timestamp_13();
 
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/tiger/nemo/miao-codes",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(HttpMethod::GET, "/tiger/nemo/miao-codes", None)
+            .with_param("TIME", timestamp.to_string())
+            .with_param("token", token)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -2863,7 +2778,8 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .send_request(HttpMethod::GET, &endpoint, None, None, None)?;
+            .build_request(HttpMethod::GET, &endpoint, None)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -2875,19 +2791,20 @@ impl WorkDataFetcher {
         limit: Option<i32>,
         offset: Option<i32>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("type".to_string(), types.as_value().to_string());
-        params.insert("limit".to_string(), limit.unwrap_or(16).to_string());
-        params.insert("offset".to_string(), offset.unwrap_or(0).to_string());
+        let timestamp = current_timestamp_13();
 
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/neko/package/list",
-            Some(&params),
-            None,
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "/neko/package/list",
+                Some(BaseKey::Creation),
+            )
+            .with_param("TIME", timestamp.to_string())
+            .with_param("type", types.as_value().to_string())
+            .with_param("limit", limit.unwrap_or(16).to_string())
+            .with_param("offset", offset.unwrap_or(0).to_string())
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -2897,17 +2814,18 @@ impl WorkDataFetcher {
         &self,
         material_type: &str,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("type".to_string(), material_type.to_string());
+        let timestamp = current_timestamp_13();
 
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/neko/material/categories",
-            Some(&params),
-            None,
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "/neko/material/categories",
+                Some(BaseKey::Creation),
+            )
+            .with_param("TIME", timestamp.to_string())
+            .with_param("type", material_type)
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }
@@ -2919,19 +2837,20 @@ impl WorkDataFetcher {
         limit: Option<i32>,
         offset: Option<i32>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("second_id".to_string(), second_id.to_string());
-        params.insert("limit".to_string(), limit.unwrap_or(20).to_string());
-        params.insert("offset".to_string(), offset.unwrap_or(0).to_string());
+        let timestamp = current_timestamp_13();
 
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "/neko/material/list",
-            Some(&params),
-            None,
-            Some("creation"),
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "/neko/material/list",
+                Some(BaseKey::Creation),
+            )
+            .with_param("TIME", timestamp.to_string())
+            .with_param("second_id", second_id)
+            .with_param("limit", limit.unwrap_or(20).to_string())
+            .with_param("offset", offset.unwrap_or(0).to_string())
+            .send()?;
 
         Ok(self.client.response_to_json(response)?)
     }

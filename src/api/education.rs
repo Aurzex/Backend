@@ -1,8 +1,7 @@
 use crate::utils::acquire::{
-    CodeMaoClient, HTTPStatus, HttpMethod, PaginatedIter, PaginationMethod,
+    BaseKey, CodeMaoClient, HTTPStatus, HttpMethod, PaginatedIter, PaginationMethod,
 };
 use serde_json::{Value, json};
-use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 // 工具函数：获取13位时间戳
@@ -31,42 +30,48 @@ impl UserAction {
         real_name: &str,
     ) -> Result<bool, Box<dyn std::error::Error>> {
         let timestamp = current_timestamp_13();
-        let mut params = HashMap::new();
-        params.insert("TIME".to_string(), timestamp.to_string());
-        params.insert("userId".to_string(), user_id.to_string());
-        params.insert("realName".to_string(), real_name.to_string());
 
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "https://eduzone.codemao.cn/edu/zone/account/updateName",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "https://eduzone.codemao.cn/edu/zone/account/updateName",
+                None,
+            )
+            .with_param("TIME", timestamp.to_string())
+            .with_param("userId", user_id.to_string())
+            .with_param("realName", real_name)
+            .send()?;
+
         Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
     pub fn create_class(&self, name: &str) -> Result<Value, Box<dyn std::error::Error>> {
         let data = json!({ "name": name });
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "https://eduzone.codemao.cn/edu/zone/class",
-            None,
-            Some(&data),
-            None,
-        )?;
+
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::POST,
+                "https://eduzone.codemao.cn/edu/zone/class",
+                None,
+            )
+            .with_payload(data)
+            .send()?;
+
         Ok(self.client.response_to_json(response)?)
     }
 
     pub fn delete_class(&self, class_id: i32) -> Result<bool, Box<dyn std::error::Error>> {
         let timestamp = current_timestamp_13();
-        let mut params = HashMap::new();
-        params.insert("TIME".to_string(), timestamp.to_string());
-
         let endpoint = format!("https://eduzone.codemao.cn/edu/zone/class/{}", class_id);
-        let response =
-            self.client
-                .send_request(HttpMethod::DELETE, &endpoint, Some(&params), None, None)?;
+
+        let response = self
+            .client
+            .build_request(HttpMethod::DELETE, &endpoint, None)
+            .with_param("TIME", timestamp.to_string())
+            .send()?;
+
         Ok(response.status() == HTTPStatus::NoContent as u16)
     }
 
@@ -80,9 +85,13 @@ impl UserAction {
             "https://eduzone.codemao.cn/edu/zone/class/{}/students",
             class_id
         );
-        let response =
-            self.client
-                .send_request(HttpMethod::POST, &endpoint, None, Some(&data), None)?;
+
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, &endpoint, None)
+            .with_payload(data)
+            .send()?;
+
         Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
@@ -91,9 +100,13 @@ impl UserAction {
             "https://eduzone.codemao.cn/edu/zone/students/{}/password",
             stu_id
         );
-        let response =
-            self.client
-                .send_request(HttpMethod::PATCH, &endpoint, None, Some(&json!({})), None)?;
+
+        let response = self
+            .client
+            .build_request(HttpMethod::PATCH, &endpoint, None)
+            .with_payload(json!({}))
+            .send()?;
+
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -102,13 +115,17 @@ impl UserAction {
         stu_list: &[i32],
     ) -> Result<Value, Box<dyn std::error::Error>> {
         let data = json!({ "student_id": stu_list });
-        let response = self.client.send_request(
-            HttpMethod::PATCH,
-            "https://eduzone.codemao.cn/edu/zone/students/password",
-            None,
-            Some(&data),
-            None,
-        )?;
+
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::PATCH,
+                "https://eduzone.codemao.cn/edu/zone/students/password",
+                None,
+            )
+            .with_payload(data)
+            .send()?;
+
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -120,9 +137,13 @@ impl UserAction {
             "https://eduzone.codemao.cn/edu/zone/student/remove/{}",
             stu_id
         );
-        let response =
-            self.client
-                .send_request(HttpMethod::POST, &endpoint, None, Some(&json!({})), None)?;
+
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, &endpoint, None)
+            .with_payload(json!({}))
+            .send()?;
+
         Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
@@ -139,13 +160,16 @@ impl UserAction {
             "description": description,
             "name": name
         });
-        let response = self.client.send_request(
-            method,
-            "https://eduzone.codemao.cn/edu/zone/lesson/customized/packages",
-            None,
-            Some(&data),
-            None,
-        )?;
+
+        let response = self
+            .client
+            .build_request(
+                method,
+                "https://eduzone.codemao.cn/edu/zone/lesson/customized/packages",
+                None,
+            )
+            .with_payload(data)
+            .send()?;
 
         if return_data {
             Ok(self.client.response_to_json(response)?)
@@ -159,9 +183,13 @@ impl UserAction {
             "https://eduzone.codemao.cn/edu/zone/work/{}/delete",
             work_id
         );
-        let response =
-            self.client
-                .send_request(HttpMethod::POST, &endpoint, None, Some(&json!({})), None)?;
+
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, &endpoint, None)
+            .with_payload(json!({}))
+            .send()?;
+
         Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
@@ -170,15 +198,17 @@ impl UserAction {
         class_id: i32,
         stu_id: i32,
     ) -> Result<bool, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        params.insert("student_ids[]".to_string(), stu_id.to_string());
         let endpoint = format!(
             "https://eduzone.codemao.cn/edu/zone/class/{}/students",
             class_id
         );
-        let response =
-            self.client
-                .send_request(HttpMethod::DELETE, &endpoint, Some(&params), None, None)?;
+
+        let response = self
+            .client
+            .build_request(HttpMethod::DELETE, &endpoint, None)
+            .with_param("student_ids[]", stu_id.to_string())
+            .send()?;
+
         Ok(response.status() == HTTPStatus::NoContent as u16)
     }
 
@@ -187,35 +217,45 @@ impl UserAction {
         package_id: i32,
     ) -> Result<Value, Box<dyn std::error::Error>> {
         let data = json!({ "packageId": package_id });
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "https://eduzone.codemao.cn/edu/zone/activity/open/package",
-            None,
-            Some(&data),
-            None,
-        )?;
+
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::POST,
+                "https://eduzone.codemao.cn/edu/zone/activity/open/package",
+                None,
+            )
+            .with_payload(data)
+            .send()?;
+
         Ok(self.client.response_to_json(response)?)
     }
 
     pub fn fetch_activity_packages(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "https://eduzone.codemao.cn/edu/zone/activity/list/activity/package",
-            None,
-            Some(&json!({})),
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::POST,
+                "https://eduzone.codemao.cn/edu/zone/activity/list/activity/package",
+                None,
+            )
+            .with_payload(json!({}))
+            .send()?;
+
         Ok(self.client.response_to_json(response)?)
     }
 
     pub fn execute_mark_all_messages_as_read(&self) -> Result<bool, Box<dyn std::error::Error>> {
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "https://eduzone.codemao.cn/edu/zone/invite/message/all/read",
-            None,
-            Some(&json!({})),
-            None,
-        )?;
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::POST,
+                "https://eduzone.codemao.cn/edu/zone/invite/message/all/read",
+                None,
+            )
+            .with_payload(json!({}))
+            .send()?;
+
         Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
@@ -238,13 +278,17 @@ impl UserAction {
             "programming_score": programming_score,
             "work_name": work_name
         });
-        let response = self.client.send_request(
-            HttpMethod::PATCH,
-            "https://eduzone.codemao.cn/edu/zone/work/manager/works/scores",
-            None,
-            Some(&data),
-            None,
-        )?;
+
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::PATCH,
+                "https://eduzone.codemao.cn/edu/zone/work/manager/works/scores",
+                None,
+            )
+            .with_payload(data)
+            .send()?;
+
         Ok(response.status() == HTTPStatus::NoContent as u16)
     }
 
@@ -259,13 +303,18 @@ impl UserAction {
             "type": types,
             "classId": class_id
         });
+
         let endpoint = format!(
             "https://eduzone.codemao.cn/edu/zone/class/{}/students/invite",
             class_id
         );
-        let response =
-            self.client
-                .send_request(HttpMethod::POST, &endpoint, None, Some(&data), None)?;
+
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, &endpoint, None)
+            .with_payload(data)
+            .send()?;
+
         Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
@@ -277,9 +326,13 @@ impl UserAction {
             "https://eduzone.codemao.cn/edu/zone/invite/student/message/{}/accept",
             message_id
         );
-        let response =
-            self.client
-                .send_request(HttpMethod::POST, &endpoint, None, Some(&json!({})), None)?;
+
+        let response = self
+            .client
+            .build_request(HttpMethod::POST, &endpoint, None)
+            .with_payload(json!({}))
+            .send()?;
+
         Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
@@ -310,13 +363,17 @@ impl UserAction {
             "district_id": district_id,
             "teacherCardNumber": teacher_card_number
         });
-        let response = self.client.send_request(
-            HttpMethod::POST,
-            "https://eduzone.codemao.cn/edu/zone/sign/login/teacher/info/improve",
-            None,
-            Some(&data),
-            None,
-        )?;
+
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::POST,
+                "https://eduzone.codemao.cn/edu/zone/sign/login/teacher/info/improve",
+                None,
+            )
+            .with_payload(data)
+            .send()?;
+
         Ok(response.status() == HTTPStatus::Ok as u16)
     }
 }
@@ -338,63 +395,55 @@ impl DataFetcher {
         }
     }
 
-    fn add_timestamp_params(params: &mut HashMap<String, String>) {
+    fn add_timestamp_to_builder(
+        builder: crate::utils::acquire::InnerBuilder,
+    ) -> crate::utils::acquire::InnerBuilder {
         let timestamp = current_timestamp_13();
-        params.insert("TIME".to_string(), timestamp.to_string());
+        builder.with_param("TIME", timestamp.to_string())
     }
 
     pub fn fetch_user_profile(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "https://eduzone.codemao.cn/edu/zone",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let builder =
+            self.client
+                .build_request(HttpMethod::GET, "https://eduzone.codemao.cn/edu/zone", None);
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     pub fn fetch_account_role(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        let response = self.client.send_request(
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/api/home/account",
-            Some(&params),
             None,
-            None,
-        )?;
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     pub fn fetch_unread_message_count(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        let response = self.client.send_request(
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/system/message/unread/num",
-            Some(&params),
             None,
-            None,
-        )?;
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     pub fn fetch_notices_gen(&self, limit: Option<usize>) -> PaginatedIter {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("page".to_string(), "1".to_string());
-        params.insert("limit".to_string(), "10".to_string());
-
         let mut paginated = self
             .client
             .paginated("https://eduzone.codemao.cn/edu/zone/system/message/list")
-            .with_params(params)
+            .with_param("page", "1")
+            .with_param("limit", "10")
             .with_pagination_method(PaginationMethod::Page)
             .with_offset_key("page")
             .with_amount_key("limit");
+
+        paginated = Self::add_timestamp_to_paginated(paginated);
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -404,19 +453,22 @@ impl DataFetcher {
         paginated
     }
 
-    pub fn fetch_reminders_gen(&self, limit: Option<usize>) -> PaginatedIter {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("page".to_string(), "1".to_string());
-        params.insert("limit".to_string(), "10".to_string());
+    fn add_timestamp_to_paginated(paginated: PaginatedIter) -> PaginatedIter {
+        let timestamp = current_timestamp_13();
+        paginated.with_param("TIME", timestamp.to_string())
+    }
 
+    pub fn fetch_reminders_gen(&self, limit: Option<usize>) -> PaginatedIter {
         let mut paginated = self
             .client
             .paginated("https://eduzone.codemao.cn/edu/zone/invite/teacher/messages")
-            .with_params(params)
+            .with_param("page", "1")
+            .with_param("limit", "10")
             .with_pagination_method(PaginationMethod::Page)
             .with_offset_key("page")
             .with_amount_key("limit");
+
+        paginated = Self::add_timestamp_to_paginated(paginated);
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -427,15 +479,13 @@ impl DataFetcher {
     }
 
     pub fn fetch_school_categories(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        let response = self.client.send_request(
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/school/open/grade/list",
-            Some(&params),
             None,
-            None,
-        )?;
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -445,28 +495,26 @@ impl DataFetcher {
         limit: Option<usize>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
         if method == "simple" {
-            let response = self.client.send_request(
-                HttpMethod::GET,
-                "https://eduzone.codemao.cn/edu/zone/classes/simple",
-                None,
-                None,
-                None,
-            )?;
+            let response = self
+                .client
+                .build_request(
+                    HttpMethod::GET,
+                    "https://eduzone.codemao.cn/edu/zone/classes/simple",
+                    None,
+                )
+                .send()?;
             Ok(self.client.response_to_json(response)?)
         } else if method == "detail" {
-            let mut params = HashMap::new();
-            Self::add_timestamp_params(&mut params);
-            params.insert("page".to_string(), "1".to_string());
-
             let paginated = self
                 .client
                 .paginated("https://eduzone.codemao.cn/edu/zone/classes/")
-                .with_params(params)
+                .with_param("page", "1")
                 .with_pagination_method(PaginationMethod::Page)
                 .with_offset_key("page")
                 .with_response_amount_key("limit")
                 .with_limit(limit.unwrap_or(20));
 
+            // Note: This returns a marker value, actual data should be fetched via iterator
             Ok(json!({ "paginated": "Use iterator to fetch data" }))
         } else {
             Ok(json!({}))
@@ -474,18 +522,16 @@ impl DataFetcher {
     }
 
     pub fn fetch_student_removal_records_gen(&self, limit: Option<usize>) -> PaginatedIter {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("page".to_string(), "1".to_string());
-        params.insert("limit".to_string(), "10".to_string());
-
         let mut paginated = self
             .client
             .paginated("https://eduzone.codemao.cn/edu/zone/student/remove/record")
-            .with_params(params)
+            .with_param("page", "1")
+            .with_param("limit", "10")
             .with_pagination_method(PaginationMethod::Page)
             .with_offset_key("page")
             .with_amount_key("limit");
+
+        paginated = Self::add_timestamp_to_paginated(paginated);
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -496,16 +542,13 @@ impl DataFetcher {
     }
 
     pub fn fetch_class_students_gen(&self, invalid: i32, limit: Option<usize>) -> PaginatedIter {
-        let mut params = HashMap::new();
-        params.insert("page".to_string(), "1".to_string());
-        params.insert("limit".to_string(), "100".to_string());
-
         let data = json!({ "invalid": invalid });
 
         let mut paginated = self
             .client
             .paginated("https://eduzone.codemao.cn/edu/zone/students")
-            .with_params(params)
+            .with_param("page", "1")
+            .with_param("limit", "100")
             .with_payload(data)
             .with_method(HttpMethod::POST)
             .with_pagination_method(PaginationMethod::Page)
@@ -521,149 +564,131 @@ impl DataFetcher {
     }
 
     pub fn fetch_navigation_menus(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        let response = self.client.send_request(
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/api/home/eduzone/menus",
-            Some(&params),
             None,
-            None,
-        )?;
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     pub fn fetch_edu_banners(&self, type_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("type_id".to_string(), type_id.to_string());
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "https://eduzone.codemao.cn/api/home/banners",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let builder = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "https://eduzone.codemao.cn/api/home/banners",
+                None,
+            )
+            .with_param("type_id", type_id.to_string());
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     pub fn fetch_server_time(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        let response = self.client.send_request(
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/base/server/time",
-            Some(&params),
             None,
-            None,
-        )?;
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     pub fn fetch_lesson_package_status(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        let response = self.client.send_request(
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/lessons/person/package/remind/status",
-            Some(&params),
             None,
-            None,
-        )?;
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     pub fn fetch_configuration(&self, tag: &str) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("tag".to_string(), tag.to_string());
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "https://eduzone.codemao.cn/edu/base/general/conf",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let builder = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "https://eduzone.codemao.cn/edu/base/general/conf",
+                None,
+            )
+            .with_param("tag", tag);
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     pub fn fetch_extended_profile(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        let response = self.client.send_request(
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/user-extend/info",
-            Some(&params),
             None,
-            None,
-        )?;
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     pub fn fetch_operation_logs(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        let response = self.client.send_request(
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/operation/records",
-            Some(&params),
             None,
-            None,
-        )?;
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     pub fn fetch_teaching_status(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        let response = self.client.send_request(
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/teaching/class/remind",
-            Some(&params),
             None,
-            None,
-        )?;
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     pub fn fetch_dashboard_stats(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        let response = self.client.send_request(
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/homepage/statistic",
-            Some(&params),
             None,
-            None,
-        )?;
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     pub fn fetch_tool_menu(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        let response = self.client.send_request(
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/homepage/menus",
-            Some(&params),
             None,
-            None,
-        )?;
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     pub fn fetch_all_works_gen(&self, limit: Option<usize>) -> PaginatedIter {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("page".to_string(), "1".to_string());
-
         let mut paginated = self
             .client
             .paginated("https://eduzone.codemao.cn/edu/zone/work/manager/student/works")
-            .with_params(params)
+            .with_param("page", "1")
             .with_pagination_method(PaginationMethod::Page)
             .with_offset_key("page")
             .with_response_amount_key("limit");
+
+        paginated = Self::add_timestamp_to_paginated(paginated);
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -674,17 +699,15 @@ impl DataFetcher {
     }
 
     pub fn fetch_managed_works_gen(&self, limit: Option<usize>) -> PaginatedIter {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("page".to_string(), "1".to_string());
-
         let mut paginated = self
             .client
             .paginated("https://eduzone.codemao.cn/edu/zone/work/manager/works")
-            .with_params(params)
+            .with_param("page", "1")
             .with_pagination_method(PaginationMethod::Page)
             .with_offset_key("page")
             .with_response_amount_key("limit");
+
+        paginated = Self::add_timestamp_to_paginated(paginated);
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -695,17 +718,15 @@ impl DataFetcher {
     }
 
     pub fn fetch_personal_works_gen(&self, limit: Option<usize>) -> PaginatedIter {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("page".to_string(), "1".to_string());
-
         let mut paginated = self
             .client
             .paginated("https://eduzone.codemao.cn/edu/zone/work/manager/self/works")
-            .with_params(params)
+            .with_param("page", "1")
             .with_pagination_method(PaginationMethod::Page)
             .with_offset_key("page")
             .with_response_amount_key("limit");
+
+        paginated = Self::add_timestamp_to_paginated(paginated);
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -721,36 +742,36 @@ impl DataFetcher {
         year: i32,
         month: i32,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("year".to_string(), year.to_string());
-        params.insert("month".to_string(), format!("{:02}", month));
+        let mut builder = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "https://eduzone.codemao.cn/edu/zone/work/manager/works/statistics",
+                None,
+            )
+            .with_param("year", year.to_string())
+            .with_param("month", format!("{:02}", month));
+
         if let Some(cid) = class_id {
-            params.insert("class_id".to_string(), cid.to_string());
+            builder = builder.with_param("class_id", cid.to_string());
         }
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "https://eduzone.codemao.cn/edu/zone/work/manager/works/statistics",
-            Some(&params),
-            None,
-            None,
-        )?;
+
+        builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     pub fn fetch_teaching_records_gen(&self, limit: Option<usize>) -> PaginatedIter {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("page".to_string(), "1".to_string());
-        params.insert("limit".to_string(), "10".to_string());
-
         let mut paginated = self
             .client
             .paginated("https://eduzone.codemao.cn/edu/zone/teaching/record/list")
-            .with_params(params)
+            .with_param("page", "1")
+            .with_param("limit", "10")
             .with_pagination_method(PaginationMethod::Page)
             .with_offset_key("page")
             .with_amount_key("limit");
+
+        paginated = Self::add_timestamp_to_paginated(paginated);
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -761,49 +782,45 @@ impl DataFetcher {
     }
 
     pub fn fetch_teaching_classes(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        let response = self.client.send_request(
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/teaching/class/teacher/list",
-            Some(&params),
             None,
-            None,
-        )?;
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     pub fn fetch_school_info(&self, unit_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("unitId".to_string(), unit_id.to_string());
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "https://eduzone.codemao.cn/edu/zone/school/info",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let builder = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "https://eduzone.codemao.cn/edu/zone/school/info",
+                None,
+            )
+            .with_param("unitId", unit_id.to_string());
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     pub fn fetch_official_lesson_packages_gen(&self, limit: Option<usize>) -> PaginatedIter {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("pacakgeEntryType".to_string(), "0".to_string());
-        params.insert("topicType".to_string(), "all".to_string());
-        params.insert("topicId".to_string(), "all".to_string());
-        params.insert("tagId".to_string(), "all".to_string());
-        params.insert("page".to_string(), "1".to_string());
-        params.insert("limit".to_string(), "150".to_string());
-
         let mut paginated = self
             .client
             .paginated("https://eduzone.codemao.cn/edu/zone/lesson/offical/packages")
-            .with_params(params)
+            .with_param("pacakgeEntryType", "0")
+            .with_param("topicType", "all")
+            .with_param("topicId", "all")
+            .with_param("tagId", "all")
+            .with_param("page", "1")
+            .with_param("limit", "150")
             .with_pagination_method(PaginationMethod::Page)
             .with_offset_key("page")
             .with_amount_key("limit");
+
+        paginated = Self::add_timestamp_to_paginated(paginated);
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -814,48 +831,46 @@ impl DataFetcher {
     }
 
     pub fn fetch_lesson_topics(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("pacakgeEntryType".to_string(), "0".to_string());
-        params.insert("topicType".to_string(), "all".to_string());
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "https://eduzone.codemao.cn/edu/zone/lessons/official/packages/topics",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let builder = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "https://eduzone.codemao.cn/edu/zone/lessons/official/packages/topics",
+                None,
+            )
+            .with_param("pacakgeEntryType", "0")
+            .with_param("topicType", "all");
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     pub fn fetch_lesson_tags(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("pacakgeEntryType".to_string(), "0".to_string());
-        params.insert("topicType".to_string(), "all".to_string());
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "https://eduzone.codemao.cn/edu/zone/lessons/official/packages/topics/all/tags",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let builder = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "https://eduzone.codemao.cn/edu/zone/lessons/official/packages/topics/all/tags",
+                None,
+            )
+            .with_param("pacakgeEntryType", "0")
+            .with_param("topicType", "all");
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     pub fn fetch_custom_lesson_packages_gen(&self, limit: Option<usize>) -> PaginatedIter {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("page".to_string(), "1".to_string());
-        params.insert("limit".to_string(), "100".to_string());
-
         let mut paginated = self
             .client
             .paginated("https://eduzone.codemao.cn/edu/zone/lesson/offical/packages")
-            .with_params(params)
+            .with_param("page", "1")
+            .with_param("limit", "100")
             .with_pagination_method(PaginationMethod::Page)
             .with_offset_key("page")
             .with_amount_key("limit");
+
+        paginated = Self::add_timestamp_to_paginated(paginated);
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -870,15 +885,14 @@ impl DataFetcher {
         package_id: i32,
         method: HttpMethod,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
         let endpoint = format!(
             "https://eduzone.codemao.cn/edu/zone/lesson/customized/packages/{}",
             package_id
         );
-        let response = self
-            .client
-            .send_request(method, &endpoint, Some(&params), None, None)?;
+
+        let builder = self.client.build_request(method, &endpoint, None);
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
 
         if method == HttpMethod::GET {
             Ok(self.client.response_to_json(response)?)
@@ -892,200 +906,173 @@ impl DataFetcher {
         package_id: i32,
         limit: i32,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("limit".to_string(), limit.to_string());
-        params.insert("package_id".to_string(), package_id.to_string());
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "https://eduzone.codemao.cn/edu/zone/lesson/customized/package/lessons",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let builder = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "https://eduzone.codemao.cn/edu/zone/lesson/customized/package/lessons",
+                None,
+            )
+            .with_param("limit", limit.to_string())
+            .with_param("package_id", package_id.to_string());
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     pub fn fetch_class_invites(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        let response = self.client.send_request(
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/invite/student/message/next",
-            Some(&params),
             None,
-            None,
-        )?;
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     pub fn fetch_expiring_lessons(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        let response = self.client.send_request(
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/lesson/offical/packages/expired",
-            Some(&params),
             None,
-            None,
-        )?;
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     pub fn fetch_organization_ids(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
         let timestamp = current_timestamp_13();
-        params.insert("CMTIME".to_string(), timestamp.to_string());
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "https://static.codemao.cn/teacher-edu/organization_ids.json",
-            Some(&params),
-            None,
-            None,
-        )?;
-        Ok(self.client.response_to_json(response)?)
+
+        let response = self
+            .client
+            .agent()
+            .get("https://static.codemao.cn/teacher-edu/organization_ids.json")
+            .query("CMTIME", &timestamp.to_string())
+            .call()?;
+
+        Ok(response.into_body().read_json()?)
     }
 
     pub fn fetch_report_metadata(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        let response = self.client.send_request(
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/analysis/report/info",
-            Some(&params),
             None,
-            None,
-        )?;
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     pub fn fetch_course_analytics(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        let response = self.client.send_request(
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/course",
-            Some(&params),
             None,
-            None,
-        )?;
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     pub fn fetch_lesson_package_analytics(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        let response = self.client.send_request(
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/packages",
-            Some(&params),
             None,
-            None,
-        )?;
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     pub fn fetch_classroom_analytics(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        let response = self.client.send_request(
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/class/info",
-            Some(&params),
             None,
-            None,
-        )?;
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     pub fn fetch_work_performance(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        let response = self.client.send_request(
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/works/situations",
-            Some(&params),
             None,
-            None,
-        )?;
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     pub fn fetch_work_ratings(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        let response = self.client.send_request(
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/works/star/info",
-            Some(&params),
             None,
-            None,
-        )?;
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     pub fn fetch_skill_assessment(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        let response = self.client.send_request(
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/ability/dimensions",
-            Some(&params),
             None,
-            None,
-        )?;
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     pub fn fetch_skill_radar(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        let response = self.client.send_request(
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/ability/radars",
-            Some(&params),
             None,
-            None,
-        )?;
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     pub fn fetch_art_skills(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        let response = self.client.send_request(
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/ability/artistic/dimensions",
-            Some(&params),
             None,
-            None,
-        )?;
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     pub fn fetch_logic_skills(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        let response = self.client.send_request(
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/ability/logical/dimensions",
-            Some(&params),
             None,
-            None,
-        )?;
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
     pub fn fetch_coding_skills(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        let response = self.client.send_request(
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/ability/programming/dimensions",
-            Some(&params),
             None,
-            None,
-        )?;
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 }

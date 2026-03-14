@@ -1,8 +1,7 @@
 use crate::utils::acquire::{
-    CodeMaoClient, HTTPStatus, HttpMethod, PaginatedIter, PaginationMethod,
+    BaseKey, CodeMaoClient, HTTPStatus, HttpMethod, PaginatedIter, PaginationMethod,
 };
 use serde_json::{Value, json};
-use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 // 工具函数：获取13位时间戳
@@ -13,6 +12,7 @@ fn current_timestamp_13() -> u128 {
         .expect("Time went backwards");
     since_the_epoch.as_millis()
 }
+
 // ==================== 举报相关枚举 ====================
 
 // 作品来源类型枚举
@@ -154,9 +154,16 @@ impl ReportFetcher {
         }
     }
 
-    fn add_timestamp_params(params: &mut HashMap<String, String>) {
+    fn add_timestamp_to_builder(
+        builder: crate::utils::acquire::InnerBuilder,
+    ) -> crate::utils::acquire::InnerBuilder {
         let timestamp = current_timestamp_13();
-        params.insert("TIME".to_string(), timestamp.to_string());
+        builder.with_param("TIME", timestamp.to_string())
+    }
+
+    fn add_timestamp_to_paginated(paginated: PaginatedIter) -> PaginatedIter {
+        let timestamp = current_timestamp_13();
+        paginated.with_param("TIME", timestamp.to_string())
     }
 
     // 获取作品举报列表生成器
@@ -168,24 +175,22 @@ impl ReportFetcher {
         target_id: Option<i32>,
         limit: Option<usize>,
     ) -> PaginatedIter {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("type".to_string(), source_type.as_str().to_string());
-        params.insert("status".to_string(), status.as_str().to_string());
-        params.insert("offset".to_string(), "0".to_string());
-        params.insert("limit".to_string(), "15".to_string());
-
-        if let (Some(filter), Some(id)) = (filter_type, target_id) {
-            params.insert(filter.as_str().to_string(), id.to_string());
-        }
-
         let mut paginated = self
             .client
             .paginated("https://whale.codemao.cn/reports/works/search")
-            .with_params(params)
+            .with_param("type", source_type.as_str())
+            .with_param("status", status.as_str())
+            .with_param("offset", "0")
+            .with_param("limit", "15")
             .with_pagination_method(PaginationMethod::Offset)
             .with_offset_key("offset")
             .with_amount_key("limit");
+
+        paginated = Self::add_timestamp_to_paginated(paginated);
+
+        if let (Some(filter), Some(id)) = (filter_type, target_id) {
+            paginated = paginated.with_param(filter.as_str(), id.to_string());
+        }
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -204,24 +209,25 @@ impl ReportFetcher {
         filter_type: Option<WorkReportFilterType>,
         target_id: Option<i32>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("type".to_string(), source_type.as_str().to_string());
-        params.insert("status".to_string(), status.as_str().to_string());
-        params.insert("offset".to_string(), "0".to_string());
-        params.insert("limit".to_string(), "15".to_string());
+        let mut builder = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "https://whale.codemao.cn/reports/works/search",
+                None,
+            )
+            .with_param("type", source_type.as_str())
+            .with_param("status", status.as_str())
+            .with_param("offset", "0")
+            .with_param("limit", "15");
+
+        builder = Self::add_timestamp_to_builder(builder);
 
         if let (Some(filter), Some(id)) = (filter_type, target_id) {
-            params.insert(filter.as_str().to_string(), id.to_string());
+            builder = builder.with_param(filter.as_str(), id.to_string());
         }
 
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "https://whale.codemao.cn/reports/works/search",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -233,24 +239,25 @@ impl ReportFetcher {
         filter_type: Option<WorkReportFilterType>,
         target_id: Option<i32>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("type".to_string(), source_type.as_str().to_string());
-        params.insert("status".to_string(), status.as_str().to_string());
-        params.insert("offset".to_string(), "0".to_string());
-        params.insert("limit".to_string(), "15".to_string());
+        let mut builder = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "https://whale.codemao.cn/reports/works",
+                None,
+            )
+            .with_param("type", source_type.as_str())
+            .with_param("status", status.as_str())
+            .with_param("offset", "0")
+            .with_param("limit", "15");
+
+        builder = Self::add_timestamp_to_builder(builder);
 
         if let (Some(filter), Some(id)) = (filter_type, target_id) {
-            params.insert(filter.as_str().to_string(), id.to_string());
+            builder = builder.with_param(filter.as_str(), id.to_string());
         }
 
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "https://whale.codemao.cn/reports/works",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -263,24 +270,22 @@ impl ReportFetcher {
         target_id: Option<i32>,
         limit: Option<usize>,
     ) -> PaginatedIter {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("source".to_string(), source_type.as_str().to_string());
-        params.insert("status".to_string(), status.as_str().to_string());
-        params.insert("offset".to_string(), "0".to_string());
-        params.insert("limit".to_string(), "15".to_string());
-
-        if let (Some(filter), Some(id)) = (filter_type, target_id) {
-            params.insert(filter.as_str().to_string(), id.to_string());
-        }
-
         let mut paginated = self
             .client
             .paginated("https://whale.codemao.cn/reports/comments/search")
-            .with_params(params)
+            .with_param("source", source_type.as_str())
+            .with_param("status", status.as_str())
+            .with_param("offset", "0")
+            .with_param("limit", "15")
             .with_pagination_method(PaginationMethod::Offset)
             .with_offset_key("offset")
             .with_amount_key("limit");
+
+        paginated = Self::add_timestamp_to_paginated(paginated);
+
+        if let (Some(filter), Some(id)) = (filter_type, target_id) {
+            paginated = paginated.with_param(filter.as_str(), id.to_string());
+        }
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -299,24 +304,25 @@ impl ReportFetcher {
         filter_type: Option<CommentReportFilterType>,
         target_id: Option<i32>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("source".to_string(), source_type.as_str().to_string());
-        params.insert("status".to_string(), status.as_str().to_string());
-        params.insert("offset".to_string(), "0".to_string());
-        params.insert("limit".to_string(), "15".to_string());
+        let mut builder = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "https://whale.codemao.cn/reports/comments/search",
+                None,
+            )
+            .with_param("source", source_type.as_str())
+            .with_param("status", status.as_str())
+            .with_param("offset", "0")
+            .with_param("limit", "15");
+
+        builder = Self::add_timestamp_to_builder(builder);
 
         if let (Some(filter), Some(id)) = (filter_type, target_id) {
-            params.insert(filter.as_str().to_string(), id.to_string());
+            builder = builder.with_param(filter.as_str(), id.to_string());
         }
 
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "https://whale.codemao.cn/reports/comments/search",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -329,27 +335,25 @@ impl ReportFetcher {
         target_id: Option<i32>,
         limit: Option<usize>,
     ) -> PaginatedIter {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("status".to_string(), status.as_str().to_string());
-        params.insert("offset".to_string(), "0".to_string());
-        params.insert("limit".to_string(), "15".to_string());
-
-        if let Some(board) = board_id {
-            params.insert("board_id".to_string(), board.to_string());
-        }
-
-        if let (Some(filter), Some(id)) = (filter_type, target_id) {
-            params.insert(filter.as_str().to_string(), id.to_string());
-        }
-
         let mut paginated = self
             .client
             .paginated("https://whale.codemao.cn/reports/posts")
-            .with_params(params)
+            .with_param("status", status.as_str())
+            .with_param("offset", "0")
+            .with_param("limit", "15")
             .with_pagination_method(PaginationMethod::Offset)
             .with_offset_key("offset")
             .with_amount_key("limit");
+
+        paginated = Self::add_timestamp_to_paginated(paginated);
+
+        if let Some(board) = board_id {
+            paginated = paginated.with_param("board_id", board.to_string());
+        }
+
+        if let (Some(filter), Some(id)) = (filter_type, target_id) {
+            paginated = paginated.with_param(filter.as_str(), id.to_string());
+        }
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -368,27 +372,28 @@ impl ReportFetcher {
         filter_type: Option<PostReportFilterType>,
         target_id: Option<i32>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("status".to_string(), status.as_str().to_string());
-        params.insert("offset".to_string(), "0".to_string());
-        params.insert("limit".to_string(), "15".to_string());
+        let mut builder = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "https://whale.codemao.cn/reports/posts",
+                None,
+            )
+            .with_param("status", status.as_str())
+            .with_param("offset", "0")
+            .with_param("limit", "15");
+
+        builder = Self::add_timestamp_to_builder(builder);
 
         if let Some(board) = board_id {
-            params.insert("board_id".to_string(), board.to_string());
+            builder = builder.with_param("board_id", board.to_string());
         }
 
         if let (Some(filter), Some(id)) = (filter_type, target_id) {
-            params.insert(filter.as_str().to_string(), id.to_string());
+            builder = builder.with_param(filter.as_str(), id.to_string());
         }
 
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "https://whale.codemao.cn/reports/posts",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 
@@ -401,27 +406,25 @@ impl ReportFetcher {
         target_id: Option<i32>,
         limit: Option<usize>,
     ) -> PaginatedIter {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("status".to_string(), status.as_str().to_string());
-        params.insert("offset".to_string(), "0".to_string());
-        params.insert("limit".to_string(), "15".to_string());
-
-        if let Some(board) = board_id {
-            params.insert("board_id".to_string(), board.to_string());
-        }
-
-        if let (Some(filter), Some(id)) = (filter_type, target_id) {
-            params.insert(filter.as_str().to_string(), id.to_string());
-        }
-
         let mut paginated = self
             .client
             .paginated("https://whale.codemao.cn/reports/posts/discussions")
-            .with_params(params)
+            .with_param("status", status.as_str())
+            .with_param("offset", "0")
+            .with_param("limit", "15")
             .with_pagination_method(PaginationMethod::Offset)
             .with_offset_key("offset")
             .with_amount_key("limit");
+
+        paginated = Self::add_timestamp_to_paginated(paginated);
+
+        if let Some(board) = board_id {
+            paginated = paginated.with_param("board_id", board.to_string());
+        }
+
+        if let (Some(filter), Some(id)) = (filter_type, target_id) {
+            paginated = paginated.with_param(filter.as_str(), id.to_string());
+        }
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -440,27 +443,28 @@ impl ReportFetcher {
         filter_type: Option<PostReportFilterType>,
         target_id: Option<i32>,
     ) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut params = HashMap::new();
-        Self::add_timestamp_params(&mut params);
-        params.insert("status".to_string(), status.as_str().to_string());
-        params.insert("offset".to_string(), "0".to_string());
-        params.insert("limit".to_string(), "15".to_string());
+        let mut builder = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "https://whale.codemao.cn/reports/posts/discussions",
+                None,
+            )
+            .with_param("status", status.as_str())
+            .with_param("offset", "0")
+            .with_param("limit", "15");
+
+        builder = Self::add_timestamp_to_builder(builder);
 
         if let Some(board) = board_id {
-            params.insert("board_id".to_string(), board.to_string());
+            builder = builder.with_param("board_id", board.to_string());
         }
 
         if let (Some(filter), Some(id)) = (filter_type, target_id) {
-            params.insert(filter.as_str().to_string(), id.to_string());
+            builder = builder.with_param(filter.as_str(), id.to_string());
         }
 
-        let response = self.client.send_request(
-            HttpMethod::GET,
-            "https://whale.codemao.cn/reports/posts/discussions",
-            Some(&params),
-            None,
-            None,
-        )?;
+        let response = builder.send()?;
         Ok(self.client.response_to_json(response)?)
     }
 }
@@ -483,11 +487,6 @@ impl ReportHandler {
         }
     }
 
-    fn add_timestamp_params(params: &mut HashMap<String, String>) {
-        let timestamp = current_timestamp_13();
-        params.insert("TIME".to_string(), timestamp.to_string());
-    }
-
     // 处理帖子举报
     pub fn execute_process_post_report(
         &self,
@@ -502,9 +501,11 @@ impl ReportHandler {
             "status": resolution.as_str(),
         });
 
-        let response =
-            self.client
-                .send_request(HttpMethod::PATCH, &endpoint, None, Some(&payload), None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::PATCH, &endpoint, None)
+            .with_payload(payload)
+            .send()?;
 
         Ok(response.status() == HTTPStatus::NoContent as u16)
     }
@@ -526,9 +527,11 @@ impl ReportHandler {
             "status": resolution.as_str(),
         });
 
-        let response =
-            self.client
-                .send_request(HttpMethod::PATCH, &endpoint, None, Some(&payload), None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::PATCH, &endpoint, None)
+            .with_payload(payload)
+            .send()?;
 
         Ok(response.status() == HTTPStatus::NoContent as u16)
     }
@@ -547,9 +550,11 @@ impl ReportHandler {
             "status": resolution.as_str(),
         });
 
-        let response =
-            self.client
-                .send_request(HttpMethod::PATCH, &endpoint, None, Some(&payload), None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::PATCH, &endpoint, None)
+            .with_payload(payload)
+            .send()?;
 
         Ok(response.status() == HTTPStatus::NoContent as u16)
     }
@@ -576,9 +581,11 @@ impl ReportHandler {
             "status": resolution_str,
         });
 
-        let response =
-            self.client
-                .send_request(HttpMethod::PATCH, &endpoint, None, Some(&payload), None)?;
+        let response = self
+            .client
+            .build_request(HttpMethod::PATCH, &endpoint, None)
+            .with_payload(payload)
+            .send()?;
 
         Ok(response.status() == HTTPStatus::NoContent as u16)
     }
