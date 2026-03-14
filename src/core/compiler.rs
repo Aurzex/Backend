@@ -6,11 +6,13 @@ use aes_gcm::{
     aead::{Aead, KeyInit},
 };
 use base64::{Engine as _, engine::general_purpose};
-use rand::seq::IndexedRandom;
+use rand::RngExt;
 use serde_json::{Value, from_str, json, to_string_pretty};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::OnceLock;
 
 use thiserror::Error;
 
@@ -52,114 +54,136 @@ pub struct DecompilerConfig {
     // 工具箱分类顺序
     pub toolbox_categories: Vec<String>,
 
-    // 阴影积木类型
-    pub shadow_types: HashSet<String>,
+    // 阴影积木类型 (共享)
+    pub shadow_types: Arc<HashSet<String>>,
 
-    // 阴影积木字段配置
-    pub shadow_fields: HashMap<String, HashMap<String, String>>,
+    // 阴影积木字段配置 (共享)
+    pub shadow_fields: Arc<HashMap<String, HashMap<String, String>>>,
 
-    // 作品类型映射
-    pub file_extensions: HashMap<String, String>,
+    // 作品类型映射 (共享)
+    pub file_extensions: Arc<HashMap<String, String>>,
 }
+
+// 全局静态配置缓存，避免重复构建
+static SHADOW_TYPES: OnceLock<Arc<HashSet<String>>> = OnceLock::new();
+static SHADOW_FIELDS: OnceLock<Arc<HashMap<String, HashMap<String, String>>>> = OnceLock::new();
+static FILE_EXTENSIONS: OnceLock<Arc<HashMap<String, String>>> = OnceLock::new();
 
 impl Default for DecompilerConfig {
     fn default() -> Self {
-        let mut shadow_types = HashSet::new();
-        for st in [
-            "broadcast_input",
-            "controller_shadow",
-            "default_value",
-            "get_audios",
-            "get_current_costume",
-            "get_current_scene",
-            "get_sensing_current_scene",
-            "get_whole_audios",
-            "lists_get",
-            "logic_empty",
-            "math_number",
-            "text",
-        ] {
-            shadow_types.insert(st.to_string());
-        }
+        // 初始化静态数据（仅首次执行）
+        let shadow_types = SHADOW_TYPES
+            .get_or_init(|| {
+                let mut set = HashSet::new();
+                for st in [
+                    "broadcast_input",
+                    "controller_shadow",
+                    "default_value",
+                    "get_audios",
+                    "get_current_costume",
+                    "get_current_scene",
+                    "get_sensing_current_scene",
+                    "get_whole_audios",
+                    "lists_get",
+                    "logic_empty",
+                    "math_number",
+                    "text",
+                ] {
+                    set.insert(st.to_string());
+                }
+                Arc::new(set)
+            })
+            .clone();
 
-        let mut shadow_fields = HashMap::new();
+        let shadow_fields = SHADOW_FIELDS
+            .get_or_init(|| {
+                let mut fields = HashMap::new();
 
-        let mut math_number = HashMap::new();
-        math_number.insert("name".to_string(), "NUM".to_string());
-        math_number.insert("text".to_string(), "0".to_string());
-        math_number.insert(
-            "constraints".to_string(),
-            "-Infinity,Infinity,0,".to_string(),
-        );
-        math_number.insert("allow_text".to_string(), "true".to_string());
-        shadow_fields.insert("math_number".to_string(), math_number);
+                let mut math_number = HashMap::new();
+                math_number.insert("name".to_string(), "NUM".to_string());
+                math_number.insert("text".to_string(), "0".to_string());
+                math_number.insert(
+                    "constraints".to_string(),
+                    "-Infinity,Infinity,0,".to_string(),
+                );
+                math_number.insert("allow_text".to_string(), "true".to_string());
+                fields.insert("math_number".to_string(), math_number);
 
-        let mut controller_shadow = HashMap::new();
-        controller_shadow.insert("name".to_string(), "NUM".to_string());
-        controller_shadow.insert("text".to_string(), "0".to_string());
-        controller_shadow.insert(
-            "constraints".to_string(),
-            "-Infinity,Infinity,0,false".to_string(),
-        );
-        shadow_fields.insert("controller_shadow".to_string(), controller_shadow);
+                let mut controller_shadow = HashMap::new();
+                controller_shadow.insert("name".to_string(), "NUM".to_string());
+                controller_shadow.insert("text".to_string(), "0".to_string());
+                controller_shadow.insert(
+                    "constraints".to_string(),
+                    "-Infinity,Infinity,0,false".to_string(),
+                );
+                fields.insert("controller_shadow".to_string(), controller_shadow);
 
-        let mut text = HashMap::new();
-        text.insert("name".to_string(), "TEXT".to_string());
-        text.insert("text".to_string(), "".to_string());
-        shadow_fields.insert("text".to_string(), text);
+                let mut text = HashMap::new();
+                text.insert("name".to_string(), "TEXT".to_string());
+                text.insert("text".to_string(), "".to_string());
+                fields.insert("text".to_string(), text);
 
-        let mut lists_get = HashMap::new();
-        lists_get.insert("name".to_string(), "VAR".to_string());
-        lists_get.insert("text".to_string(), "?".to_string());
-        shadow_fields.insert("lists_get".to_string(), lists_get);
+                let mut lists_get = HashMap::new();
+                lists_get.insert("name".to_string(), "VAR".to_string());
+                lists_get.insert("text".to_string(), "?".to_string());
+                fields.insert("lists_get".to_string(), lists_get);
 
-        let mut broadcast_input = HashMap::new();
-        broadcast_input.insert("name".to_string(), "MESSAGE".to_string());
-        broadcast_input.insert("text".to_string(), "Hi".to_string());
-        shadow_fields.insert("broadcast_input".to_string(), broadcast_input);
+                let mut broadcast_input = HashMap::new();
+                broadcast_input.insert("name".to_string(), "MESSAGE".to_string());
+                broadcast_input.insert("text".to_string(), "Hi".to_string());
+                fields.insert("broadcast_input".to_string(), broadcast_input);
 
-        let mut get_audios = HashMap::new();
-        get_audios.insert("name".to_string(), "sound_id".to_string());
-        get_audios.insert("text".to_string(), "?".to_string());
-        shadow_fields.insert("get_audios".to_string(), get_audios);
+                let mut get_audios = HashMap::new();
+                get_audios.insert("name".to_string(), "sound_id".to_string());
+                get_audios.insert("text".to_string(), "?".to_string());
+                fields.insert("get_audios".to_string(), get_audios);
 
-        let mut get_whole_audios = HashMap::new();
-        get_whole_audios.insert("name".to_string(), "sound_id".to_string());
-        get_whole_audios.insert("text".to_string(), "all".to_string());
-        shadow_fields.insert("get_whole_audios".to_string(), get_whole_audios);
+                let mut get_whole_audios = HashMap::new();
+                get_whole_audios.insert("name".to_string(), "sound_id".to_string());
+                get_whole_audios.insert("text".to_string(), "all".to_string());
+                fields.insert("get_whole_audios".to_string(), get_whole_audios);
 
-        let mut get_current_costume = HashMap::new();
-        get_current_costume.insert("name".to_string(), "style_id".to_string());
-        get_current_costume.insert("text".to_string(), "".to_string());
-        shadow_fields.insert("get_current_costume".to_string(), get_current_costume);
+                let mut get_current_costume = HashMap::new();
+                get_current_costume.insert("name".to_string(), "style_id".to_string());
+                get_current_costume.insert("text".to_string(), "".to_string());
+                fields.insert("get_current_costume".to_string(), get_current_costume);
 
-        let mut default_value = HashMap::new();
-        default_value.insert("name".to_string(), "TEXT".to_string());
-        default_value.insert("text".to_string(), "0".to_string());
-        default_value.insert("has_been_edited".to_string(), "false".to_string());
-        shadow_fields.insert("default_value".to_string(), default_value);
+                let mut default_value = HashMap::new();
+                default_value.insert("name".to_string(), "TEXT".to_string());
+                default_value.insert("text".to_string(), "0".to_string());
+                default_value.insert("has_been_edited".to_string(), "false".to_string());
+                fields.insert("default_value".to_string(), default_value);
 
-        let mut get_current_scene = HashMap::new();
-        get_current_scene.insert("name".to_string(), "scene".to_string());
-        get_current_scene.insert("text".to_string(), "".to_string());
-        shadow_fields.insert("get_current_scene".to_string(), get_current_scene);
+                let mut get_current_scene = HashMap::new();
+                get_current_scene.insert("name".to_string(), "scene".to_string());
+                get_current_scene.insert("text".to_string(), "".to_string());
+                fields.insert("get_current_scene".to_string(), get_current_scene);
 
-        let mut get_sensing_current_scene = HashMap::new();
-        get_sensing_current_scene.insert("name".to_string(), "scene".to_string());
-        get_sensing_current_scene.insert("text".to_string(), "".to_string());
-        shadow_fields.insert(
-            "get_sensing_current_scene".to_string(),
-            get_sensing_current_scene,
-        );
+                let mut get_sensing_current_scene = HashMap::new();
+                get_sensing_current_scene.insert("name".to_string(), "scene".to_string());
+                get_sensing_current_scene.insert("text".to_string(), "".to_string());
+                fields.insert(
+                    "get_sensing_current_scene".to_string(),
+                    get_sensing_current_scene,
+                );
 
-        let mut file_extensions = HashMap::new();
-        file_extensions.insert("KITTEN2".to_string(), ".bcm".to_string());
-        file_extensions.insert("KITTEN3".to_string(), ".bcm".to_string());
-        file_extensions.insert("KITTEN4".to_string(), ".bcm4".to_string());
-        file_extensions.insert("COCO".to_string(), ".json".to_string());
-        file_extensions.insert("NEKO".to_string(), ".bcmkn".to_string());
-        file_extensions.insert("NEMO".to_string(), "".to_string());
-        file_extensions.insert("WOOD".to_string(), "".to_string());
+                Arc::new(fields)
+            })
+            .clone();
+
+        let file_extensions = FILE_EXTENSIONS
+            .get_or_init(|| {
+                let mut map = HashMap::new();
+                map.insert("KITTEN2".to_string(), ".bcm".to_string());
+                map.insert("KITTEN3".to_string(), ".bcm".to_string());
+                map.insert("KITTEN4".to_string(), ".bcm4".to_string());
+                map.insert("COCO".to_string(), ".json".to_string());
+                map.insert("NEKO".to_string(), ".bcmkn".to_string());
+                map.insert("NEMO".to_string(), "".to_string());
+                map.insert("WOOD".to_string(), "".to_string());
+                Arc::new(map)
+            })
+            .clone();
 
         Self {
             base_url: "https://api.codemao.cn".to_string(),
@@ -305,7 +329,7 @@ impl WorkInfo {
         })
     }
 
-    pub fn file_extension(&self, config: &DecompilerConfig) -> String {
+    pub fn file_extension(&self, config: &Arc<DecompilerConfig>) -> String {
         config
             .file_extensions
             .get(self.work_type.as_str())
@@ -317,11 +341,11 @@ impl WorkInfo {
 // ============ 文件操作服务 ============
 #[derive(Clone)]
 pub struct FileService {
-    config: DecompilerConfig,
+    config: Arc<DecompilerConfig>,
 }
 
 impl FileService {
-    pub fn new(config: DecompilerConfig) -> Self {
+    pub fn new(config: Arc<DecompilerConfig>) -> Self {
         Self { config }
     }
 
@@ -382,7 +406,10 @@ impl IdGenerator {
     pub fn generate(&self, length: usize) -> String {
         let mut rng = rand::rng();
         (0..length)
-            .map(|_| *self.chars.choose(&mut rng).unwrap())
+            .map(|_| {
+                let idx = rng.random_range(0..self.chars.len());
+                self.chars[idx]
+            })
             .collect()
     }
 }
@@ -396,12 +423,16 @@ impl Default for IdGenerator {
 // ============ 加密解密服务 ============
 #[derive(Clone)]
 pub struct CryptoService {
-    salt: Vec<u8>,
+    key: [u8; 32], // 预计算密钥
 }
 
 impl CryptoService {
-    pub fn new(salt: Vec<u8>) -> Self {
-        Self { salt }
+    pub fn new(salt: &[u8]) -> Self {
+        let mut key = [0u8; 32];
+        for (i, &b) in salt.iter().cycle().take(32).enumerate() {
+            key[i] = b;
+        }
+        Self { key }
     }
 
     pub fn sha256(data: &str) -> String {
@@ -416,17 +447,8 @@ impl CryptoService {
             .map_err(|e| DecompilerError::Crypto(format!("Base64解码失败: {}", e)))
     }
 
-    pub fn generate_aes_key(&self) -> [u8; 32] {
-        // 简化的密钥生成，实际可能需要更复杂的逻辑
-        let mut key = [0u8; 32];
-        for (i, &b) in self.salt.iter().cycle().take(32).enumerate() {
-            key[i] = b;
-        }
-        key
-    }
-
-    pub fn decrypt_aes_gcm(&self, ciphertext: &[u8], key: &[u8; 32], iv: &[u8]) -> Result<Vec<u8>> {
-        let key = Key::<Aes256Gcm>::from_slice(key);
+    pub fn decrypt_aes_gcm(&self, ciphertext: &[u8], iv: &[u8]) -> Result<Vec<u8>> {
+        let key = Key::<Aes256Gcm>::from_slice(&self.key);
         let cipher = Aes256Gcm::new(key);
         let nonce = Nonce::from_slice(iv);
 
@@ -463,13 +485,10 @@ impl BCMKNDecryptor {
         let iv = &decoded_data[0..12];
         let ciphertext = &decoded_data[12..];
 
-        // 步骤4: 生成AES密钥
-        let key = self.crypto_service.generate_aes_key();
+        // 步骤4: 使用预计算密钥解密
+        let decrypted_bytes = self.crypto_service.decrypt_aes_gcm(ciphertext, iv)?;
 
-        // 步骤5: AES-GCM解密
-        let decrypted_bytes = self.crypto_service.decrypt_aes_gcm(ciphertext, &key, iv)?;
-
-        // 步骤6: 将解密后的字节转换为JSON
+        // 步骤5: 将解密后的字节转换为JSON
         let decrypted_str = String::from_utf8(decrypted_bytes)
             .map_err(|e| DecompilerError::Crypto(format!("UTF-8转换失败: {}", e)))?;
 
@@ -482,12 +501,12 @@ impl BCMKNDecryptor {
 // ============ 阴影积木构建器 ============
 #[derive(Clone)]
 pub struct ShadowBuilder {
-    config: DecompilerConfig,
+    config: Arc<DecompilerConfig>,
     id_generator: IdGenerator,
 }
 
 impl ShadowBuilder {
-    pub fn new(config: DecompilerConfig, id_generator: IdGenerator) -> Self {
+    pub fn new(config: Arc<DecompilerConfig>, id_generator: IdGenerator) -> Self {
         Self {
             config,
             id_generator,
@@ -576,17 +595,32 @@ impl HttpClient for CodeMaoHttpClient {
         let response = self
             .client
             .send_request(HttpMethod::GET, url, None, None, None)
-            .unwrap();
-        Ok(self.client.response_to_json(response).unwrap())
+            .map_err(|e| DecompilerError::Http(format!("请求失败: {}", e)))?;
+        self.client
+            .response_to_json(response)
+            .map_err(|e| DecompilerError::Http(format!("JSON解析失败: {}", e)))
     }
 
     fn get_binary(&self, url: &str) -> Result<Vec<u8>> {
-        Err(DecompilerError::Http("需要实现HTTP请求".to_string()))
+        let response = self
+            .client
+            .send_request(HttpMethod::GET, url, None, None, None)
+            .map_err(|e| DecompilerError::Http(format!("请求失败: {}", e)))?;
+        self.client
+            .response_to_binary(response)
+            .map_err(|e| DecompilerError::Http(format!("Binary解析失败: {}", e)))
     }
 
     fn get_text(&self, url: &str) -> Result<String> {
-        Err(DecompilerError::Http("需要实现HTTP请求".to_string()))
+        let response = self
+            .client
+            .send_request(HttpMethod::GET, url, None, None, None)
+            .map_err(|e| DecompilerError::Http(format!("请求失败: {}", e)))?;
+        self.client
+            .response_to_string(response)
+            .map_err(|e| DecompilerError::Http(format!("String解析失败: {}", e)))
     }
+
     fn box_clone(&self) -> Box<dyn HttpClient> {
         Box::new(self.clone())
     }
@@ -598,7 +632,7 @@ pub struct DecompilerContext {
     pub http_client: Box<dyn HttpClient>,
     pub file_service: FileService,
     pub id_generator: IdGenerator,
-    pub config: DecompilerConfig,
+    pub config: Arc<DecompilerConfig>,
     pub crypto_service: Option<CryptoService>,
 }
 
@@ -969,7 +1003,7 @@ impl BaseDecompiler for NemoDecompiler {
 #[derive(Clone)]
 pub struct BlockContext {
     pub actor_data: Value,
-    pub functions: HashMap<String, Value>,
+    pub functions: Arc<HashMap<String, Value>>,
     pub shadow_builder: ShadowBuilder,
     pub blocks: HashMap<String, Value>,
     pub connections: HashMap<String, Value>,
@@ -978,7 +1012,7 @@ pub struct BlockContext {
 impl BlockContext {
     pub fn new(
         actor_data: Value,
-        functions: HashMap<String, Value>,
+        functions: Arc<HashMap<String, Value>>,
         shadow_builder: ShadowBuilder,
     ) -> Self {
         Self {
@@ -1002,11 +1036,11 @@ const OUTPUT_BLOCK_TYPES: &[&str] = &["logic_boolean", "procedures_2_stable_para
 // ============ 默认积木反编译器 ============
 pub struct DefaultBlockDecompiler {
     compiled: Value,
-    config: DecompilerConfig,
+    config: Arc<DecompilerConfig>,
 }
 
 impl DefaultBlockDecompiler {
-    pub fn new(compiled: Value, config: DecompilerConfig) -> Self {
+    pub fn new(compiled: Value, config: Arc<DecompilerConfig>) -> Self {
         Self { compiled, config }
     }
 }
@@ -1067,11 +1101,11 @@ impl BlockDecompiler for DefaultBlockDecompiler {
 // ============ 条件积木反编译器 ============
 pub struct IfBlockDecompiler {
     compiled: Value,
-    config: DecompilerConfig,
+    config: Arc<DecompilerConfig>,
 }
 
 impl IfBlockDecompiler {
-    pub fn new(compiled: Value, config: DecompilerConfig) -> Self {
+    pub fn new(compiled: Value, config: Arc<DecompilerConfig>) -> Self {
         Self { compiled, config }
     }
 }
@@ -1127,11 +1161,11 @@ impl BlockDecompiler for IfBlockDecompiler {
 // ============ 文本连接积木反编译器 ============
 pub struct TextJoinDecompiler {
     compiled: Value,
-    config: DecompilerConfig,
+    config: Arc<DecompilerConfig>,
 }
 
 impl TextJoinDecompiler {
-    pub fn new(compiled: Value, config: DecompilerConfig) -> Self {
+    pub fn new(compiled: Value, config: Arc<DecompilerConfig>) -> Self {
         Self { compiled, config }
     }
 }
@@ -1161,14 +1195,15 @@ impl BlockDecompiler for TextJoinDecompiler {
 // ============ 函数定义积木反编译器 ============
 pub struct FunctionDefDecompiler {
     compiled: Value,
-    config: DecompilerConfig,
+    config: Arc<DecompilerConfig>,
 }
 
 impl FunctionDefDecompiler {
-    pub fn new(compiled: Value, config: DecompilerConfig) -> Self {
+    pub fn new(compiled: Value, config: Arc<DecompilerConfig>) -> Self {
         Self { compiled, config }
     }
 }
+
 impl BlockDecompiler for FunctionDefDecompiler {
     fn decompile(&mut self, context: &mut BlockContext) -> Result<Value> {
         let mut default_decompiler =
@@ -1207,7 +1242,7 @@ impl BlockDecompiler for FunctionDefDecompiler {
             ),
         ];
 
-        let mut fields_inserts = vec![("NAME".to_string(), Value::String(procedure_name))];
+        let fields_inserts = vec![("NAME".to_string(), Value::String(procedure_name))];
 
         let mut mutation_args = Vec::new();
         let mut param_blocks = Vec::new();
@@ -1291,17 +1326,19 @@ impl BlockDecompiler for FunctionDefDecompiler {
         Ok(block_value)
     }
 }
+
 // ============ 函数调用积木反编译器 ============
 pub struct FunctionCallDecompiler {
     compiled: Value,
-    config: DecompilerConfig,
+    config: Arc<DecompilerConfig>,
 }
 
 impl FunctionCallDecompiler {
-    pub fn new(compiled: Value, config: DecompilerConfig) -> Self {
+    pub fn new(compiled: Value, config: Arc<DecompilerConfig>) -> Self {
         Self { compiled, config }
     }
 }
+
 impl BlockDecompiler for FunctionCallDecompiler {
     fn decompile(&mut self, context: &mut BlockContext) -> Result<Value> {
         let mut default_decompiler =
@@ -1385,7 +1422,7 @@ impl BlockDecompiler for FunctionCallDecompiler {
         } // block 的可变借用在这里结束
 
         // 现在可以安全地处理参数块，block 只有不可变借用
-        for (i, (param_name, param_value)) in params.iter().enumerate() {
+        for (i, (_param_name, param_value)) in params.iter().enumerate() {
             let input_name = format!("ARG {}", i);
 
             let mut param_decompiler =
@@ -1422,11 +1459,11 @@ impl BlockDecompiler for FunctionCallDecompiler {
 
 // ============ 积木反编译器工厂 ============
 pub struct BlockDecompilerFactory {
-    config: DecompilerConfig,
+    config: Arc<DecompilerConfig>,
 }
 
 impl BlockDecompilerFactory {
-    pub fn new(config: DecompilerConfig) -> Self {
+    pub fn new(config: Arc<DecompilerConfig>) -> Self {
         Self { config }
     }
 
@@ -1582,8 +1619,6 @@ impl BaseDecompiler for KittenDecompiler {
             self.context.id_generator.clone(),
         );
 
-        let mut functions = HashMap::new();
-
         let compile_result = work
             .get("compile_result")
             .and_then(|v| v.as_array())
@@ -1591,6 +1626,7 @@ impl BaseDecompiler for KittenDecompiler {
             .clone();
 
         // 第一遍: 收集函数定义
+        let mut functions = HashMap::new();
         for actor_compiled in &compile_result {
             if let Some(procedures) = actor_compiled.get("procedures").and_then(|v| v.as_object()) {
                 for (name, func_data) in procedures {
@@ -1598,15 +1634,15 @@ impl BaseDecompiler for KittenDecompiler {
                 }
             }
         }
+        let functions = Arc::new(functions);
 
         // 第二遍: 反编译函数定义
         let factory = BlockDecompilerFactory::new(self.context.config.clone());
         let mut functions_result = HashMap::new();
-
-        for (name, func_data) in &functions {
+        for (name, func_data) in functions.iter() {
             let mut func_context = BlockContext::new(
                 json!({}),
-                functions.clone(),
+                Arc::clone(&functions),
                 ShadowBuilder::new(
                     self.context.config.clone(),
                     self.context.id_generator.clone(),
@@ -1616,6 +1652,7 @@ impl BaseDecompiler for KittenDecompiler {
             let decompiled = decompiler.decompile(&mut func_context)?;
             functions_result.insert(name.clone(), decompiled);
         }
+        let functions_result = Arc::new(functions_result);
 
         // 第三遍: 反编译角色积木
         for actor_compiled in &compile_result {
@@ -1628,7 +1665,7 @@ impl BaseDecompiler for KittenDecompiler {
             let actor_info = self.get_actor_info(&work, &actor_id);
             let mut actor_context = BlockContext::new(
                 actor_info,
-                functions_result.clone(),
+                Arc::clone(&functions_result),
                 ShadowBuilder::new(
                     self.context.config.clone(),
                     self.context.id_generator.clone(),
@@ -2190,15 +2227,16 @@ impl DecompilerFactory {
 
 // ============ 主接口 ============
 pub struct CodemaoDecompiler {
-    config: DecompilerConfig,
+    config: Arc<DecompilerConfig>,
     client: CodeMaoClient,
     id_generator: IdGenerator,
 }
 
 impl CodemaoDecompiler {
     pub fn new(config: Option<DecompilerConfig>) -> Self {
+        let config = Arc::new(config.unwrap_or_default());
         Self {
-            config: config.unwrap_or_default(),
+            config,
             client: ClientFactory::create_global_client(None),
             id_generator: IdGenerator::new(),
         }
@@ -2222,7 +2260,7 @@ impl CodemaoDecompiler {
         let work_info = self.fetch_work_info(&http_client, work_id)?;
 
         let crypto_service = if work_info.work_type.is_neko() {
-            Some(CryptoService::new(self.config.crypto_salt.clone()))
+            Some(CryptoService::new(&self.config.crypto_salt))
         } else {
             None
         };
@@ -2252,18 +2290,4 @@ impl CodemaoDecompiler {
 pub fn decompile_work(work_id: i64, output_dir: Option<&Path>) -> Result<String> {
     let decompiler = CodemaoDecompiler::new(None);
     decompiler.decompile(work_id, output_dir)
-}
-
-// ============ 辅助trait ============
-pub trait HttpClientExt: HttpClient {
-    fn box_clone(&self) -> Box<dyn HttpClient>;
-}
-
-impl<T> HttpClientExt for T
-where
-    T: HttpClient + Clone + 'static,
-{
-    fn box_clone(&self) -> Box<dyn HttpClient> {
-        Box::new(self.clone())
-    }
 }

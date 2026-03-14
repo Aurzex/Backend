@@ -621,12 +621,12 @@ impl InnerClient {
     fn response_to_string(&self, response: Response<Body>) -> Result<String> {
         let mut body = response.into_body();
         let text = body.read_to_string()?;
+        Ok(text)
+    }
 
-        if self.config.log_requests && !text.is_empty() {
-            println!("响应体 (文本):");
-            println!("  {}", text);
-        }
-
+    fn response_to_binary(&self, response: Response<Body>) -> Result<Vec<u8>> {
+        let mut body = response.into_body();
+        let text = body.read_to_vec()?;
         Ok(text)
     }
 }
@@ -730,6 +730,11 @@ impl CodeMaoClient {
     /// 将响应体读取为字符串
     pub fn response_to_string(&self, response: Response<Body>) -> Result<String> {
         self.inner.response_to_string(response)
+    }
+
+    /// 将响应体读取为字符串
+    pub fn response_to_binary(&self, response: Response<Body>) -> Result<Vec<u8>> {
+        self.inner.response_to_binary(response)
     }
 
     /// 创建分页迭代器
