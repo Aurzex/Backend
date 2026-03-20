@@ -462,13 +462,13 @@ impl CryptoService {
     }
 
     pub fn generate_aes_key(&self) -> [u8; 32] {
+        let mut hasher = Sha256::new();
+        hasher.update(&self.salt);
+        let hash = hasher.finalize();
         let mut key = [0u8; 32];
-        for (i, &b) in self.salt.iter().cycle().take(32).enumerate() {
-            key[i] = b;
-        }
+        key.copy_from_slice(&hash);
         key
     }
-
     // 修改参数：只需要 ciphertext 和 iv，因为 key 从 self 生成
     pub fn decrypt_aes_gcm(&self, ciphertext: &[u8], iv: &[u8]) -> Result<Vec<u8>> {
         let key = self.generate_aes_key();
