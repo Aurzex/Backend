@@ -6,7 +6,7 @@ use aes_gcm::{
     aead::{Aead, KeyInit},
 };
 use base64::{Engine as _, engine::general_purpose};
-use rand::RngExt;
+use rand::{Rng, RngExt};
 use serde_json::{Value, from_str, json, to_string_pretty};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
@@ -493,7 +493,7 @@ impl BCMKNDecryptor {
     }
 }
 
-// ============ 阴影积木构建器 ============
+// ============ 阴影积木构建器（修复版） ============
 #[derive(Clone)]
 pub struct ShadowBuilder {
     config: Arc<DecompilerConfig>,
@@ -531,24 +531,28 @@ impl ShadowBuilder {
         let block_id = block_id.unwrap_or_else(|| self.id_generator.generate(20));
         let display_text = text.unwrap_or(config.get("text").map(|s| s.as_str()).unwrap_or(""));
 
-        let mut result = format!(
+        let mut xml = String::new();
+
+        xml.push_str(&format!(
             r#"<shadow type="{}" id="{}" visible="visible" editable="true">"#,
             shadow_type, block_id
-        );
-        result.push_str(&format!(
-            r#"<field name="{}">{}</field>"#,
-            config.get("name").map(|s| s.as_str()).unwrap_or(""),
-            display_text
         ));
-        let mut attrs = String::new();
+
+        xml.push_str(&format!(
+            r#"<field name="{}""#,
+            config.get("name").map(|s| s.as_str()).unwrap_or("")
+        ));
+
         for attr in ["constraints", "allow_text", "has_been_edited"] {
             if let Some(value) = config.get(attr) {
-                attrs.push_str(&format!(r#" {}="{}""#, attr, value));
+                xml.push_str(&format!(r#" {}="{}""#, attr, value));
             }
         }
-        result = result.replace(">", &format!("{}>", attrs));
-        result.push_str("</shadow>");
-        result
+
+        xml.push_str(&format!(">{}</field>", display_text));
+        xml.push_str("</shadow>");
+
+        xml
     }
 }
 
@@ -618,6 +622,341 @@ impl HttpClient for CodeMaoHttpClient {
     }
 }
 
+// ============ 积木反编译器行为 trait ============
+pub trait BlockDecompilerBehavior: Send + Sync {
+    fn get_child_input_name(&self, index: usize, conditions_count: usize) -> String;
+}
+
+pub struct DefaultBlockBehavior;
+
+impl BlockDecompilerBehavior for DefaultBlockBehavior {
+    fn get_child_input_name(&self, _index: usize, _conditions_count: usize) -> String {
+        "DO".to_string()
+    }
+}
+
+pub struct IfBlockBehavior {
+    conditions_count: usize,
+}
+
+impl IfBlockBehavior {
+    pub fn new(conditions_count: usize) -> Self {
+        Self { conditions_count }
+    }
+}
+
+impl BlockDecompilerBehavior for IfBlockBehavior {
+    fn get_child_input_name(&self, index: usize, _conditions_count: usize) -> String {
+        if index < self.conditions_count {
+            format!("DO {}", index)
+        } else {
+            "ELSE".to_string()
+        }
+    }
+}
+
+// ============ 积木反编译上下文（修复版） ============
+#[derive(Clone)]
+pub struct BlockContext {
+    pub actor_data: Value,
+    pub functions: Arc<HashMap<String, Value>>,
+    pub shadow_builder: ShadowBuilder,
+    pub blocks: HashMap<String, Value>,
+    pub connections: HashMap<String, Value>,
+    pub shadows: HashMap<String, String>,
+}
+
+impl BlockContext {
+    pub fn new(
+        actor_data: Value,
+        functions: Arc<HashMap<String, Value>>,
+        shadow_builder: ShadowBuilder,
+    ) -> Self {
+        Self {
+            actor_data,
+            functions,
+            shadow_builder,
+            blocks: HashMap::new(),
+            connections: HashMap::new(),
+            shadows: HashMap::new(),
+        }
+    }
+}
+
+// ============ 积木反编译器核心（递归处理，修复版） ============
+const OUTPUT_BLOCK_TYPES: &[&str] = &["logic_boolean", "procedures_2_stable_parameter"];
+
+pub struct BlockDecompilerCore {
+    compiled: Value,
+    config: Arc<DecompilerConfig>,
+    id_generator: IdGenerator,
+    behavior: Box<dyn BlockDecompilerBehavior>,
+}
+
+impl BlockDecompilerCore {
+    pub fn new(
+        compiled: Value,
+        config: Arc<DecompilerConfig>,
+        id_generator: IdGenerator,
+        behavior: Box<dyn BlockDecompilerBehavior>,
+    ) -> Self {
+        Self {
+            compiled,
+            config,
+            id_generator,
+            behavior,
+        }
+    }
+
+    pub fn decompile(&mut self, context: &mut BlockContext) -> Result<Value> {
+        let id = self
+            .compiled
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let block_type = self
+            .compiled
+            .get("type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let is_shadow = self.config.shadow_types.contains(&block_type);
+        let is_output = is_shadow || OUTPUT_BLOCK_TYPES.contains(&block_type.as_str());
+
+        let mut block = serde_json::Map::new();
+        block.insert("id".to_string(), Value::String(id.clone()));
+        block.insert("type".to_string(), Value::String(block_type.clone()));
+        block.insert("location".to_string(), json!([0, 0]));
+        block.insert("is_shadow".to_string(), Value::Bool(is_shadow));
+        block.insert("is_output".to_string(), Value::Bool(is_output));
+        block.insert("collapsed".to_string(), Value::Bool(false));
+        block.insert("disabled".to_string(), Value::Bool(false));
+        block.insert("deletable".to_string(), Value::Bool(true));
+        block.insert("movable".to_string(), Value::Bool(true));
+        block.insert("editable".to_string(), Value::Bool(true));
+        block.insert("visible".to_string(), Value::String("visible".to_string()));
+        block.insert("shadows".to_string(), Value::Object(serde_json::Map::new()));
+        block.insert("fields".to_string(), Value::Object(serde_json::Map::new()));
+        block.insert(
+            "field_constraints".to_string(),
+            Value::Object(serde_json::Map::new()),
+        );
+        block.insert(
+            "field_extra_attr".to_string(),
+            Value::Object(serde_json::Map::new()),
+        );
+        block.insert("comment".to_string(), Value::Null);
+        block.insert("mutation".to_string(), Value::String("".to_string()));
+        block.insert("parent_id".to_string(), Value::Null);
+
+        let block_value = Value::Object(block);
+        context.blocks.insert(id.clone(), block_value.clone());
+
+        let mut block_value = block_value;
+        self.process_next(context, &mut block_value)?;
+        self.process_children(context, &mut block_value)?;
+        self.process_conditions(context, &mut block_value)?;
+        self.process_params(context, &mut block_value)?;
+
+        if let Some(obj) = block_value.as_object_mut() {
+            if let Some(shadows_obj) = obj.get_mut("shadows").and_then(|v| v.as_object_mut()) {
+                for (name, xml) in &context.shadows {
+                    shadows_obj.insert(name.clone(), Value::String(xml.clone()));
+                }
+            }
+        }
+
+        context.blocks.insert(id, block_value.clone());
+        Ok(block_value)
+    }
+
+    fn process_next(&self, context: &mut BlockContext, block_value: &mut Value) -> Result<()> {
+        if let Some(next_compiled) = self.compiled.get("next_block") {
+            if !next_compiled.is_null() {
+                let mut decompiler = BlockDecompilerCore::new(
+                    next_compiled.clone(),
+                    self.config.clone(),
+                    self.id_generator.clone(),
+                    Box::new(DefaultBlockBehavior),
+                );
+                let mut next_block = decompiler.decompile(context)?;
+                if let Some(obj) = next_block.as_object_mut() {
+                    obj.insert(
+                        "parent_id".to_string(),
+                        block_value.get("id").unwrap().clone(),
+                    );
+                }
+                let next_id = next_block.get("id").unwrap().as_str().unwrap().to_string();
+                context.blocks.insert(next_id.clone(), next_block);
+                context.connections.insert(next_id, json!({"type": "next"}));
+            }
+        }
+        Ok(())
+    }
+
+    fn process_children(&self, context: &mut BlockContext, block_value: &mut Value) -> Result<()> {
+        if let Some(children) = self.compiled.get("child_block").and_then(|v| v.as_array()) {
+            let conditions_count = self
+                .compiled
+                .get("conditions")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.len())
+                .unwrap_or(0);
+
+            for (i, child) in children.iter().enumerate() {
+                if !child.is_null() {
+                    let mut decompiler = BlockDecompilerCore::new(
+                        child.clone(),
+                        self.config.clone(),
+                        self.id_generator.clone(),
+                        Box::new(DefaultBlockBehavior),
+                    );
+                    let mut child_block = decompiler.decompile(context)?;
+                    if let Some(obj) = child_block.as_object_mut() {
+                        obj.insert(
+                            "parent_id".to_string(),
+                            block_value.get("id").unwrap().clone(),
+                        );
+                    }
+                    let child_id = child_block.get("id").unwrap().as_str().unwrap().to_string();
+                    context.blocks.insert(child_id.clone(), child_block);
+                    let input_name = self.behavior.get_child_input_name(i, conditions_count);
+                    context.connections.insert(
+                        child_id,
+                        json!({
+                            "type": "input",
+                            "input_type": "statement",
+                            "input_name": input_name
+                        }),
+                    );
+                    context.shadows.insert(input_name, String::new());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn process_conditions(
+        &self,
+        context: &mut BlockContext,
+        block_value: &mut Value,
+    ) -> Result<()> {
+        if let Some(conditions) = self.compiled.get("conditions").and_then(|v| v.as_array()) {
+            for (i, condition) in conditions.iter().enumerate() {
+                let input_name = format!("IF{}", i);
+                if condition.is_null() {
+                    let shadow_xml = context.shadow_builder.create("logic_empty", None, None);
+                    context.shadows.insert(input_name, shadow_xml);
+                } else {
+                    let mut decompiler = BlockDecompilerCore::new(
+                        condition.clone(),
+                        self.config.clone(),
+                        self.id_generator.clone(),
+                        Box::new(DefaultBlockBehavior),
+                    );
+                    let mut condition_block = decompiler.decompile(context)?;
+                    if let Some(obj) = condition_block.as_object_mut() {
+                        obj.insert(
+                            "parent_id".to_string(),
+                            block_value.get("id").unwrap().clone(),
+                        );
+                    }
+                    let cond_id = condition_block
+                        .get("id")
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_string();
+                    context.blocks.insert(cond_id.clone(), condition_block);
+                    context.connections.insert(
+                        cond_id.clone(),
+                        json!({
+                            "type": "input",
+                            "input_type": "value",
+                            "input_name": input_name
+                        }),
+                    );
+                    let shadow_xml =
+                        context
+                            .shadow_builder
+                            .create("logic_empty", Some(cond_id), None);
+                    context.shadows.insert(input_name, shadow_xml);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn process_params(&self, context: &mut BlockContext, block_value: &mut Value) -> Result<()> {
+        if let Some(params) = self.compiled.get("params").and_then(|v| v.as_object()) {
+            for (name, value) in params {
+                if value.is_object() {
+                    let mut decompiler = BlockDecompilerCore::new(
+                        value.clone(),
+                        self.config.clone(),
+                        self.id_generator.clone(),
+                        Box::new(DefaultBlockBehavior),
+                    );
+                    let mut param_block = decompiler.decompile(context)?;
+                    if let Some(obj) = param_block.as_object_mut() {
+                        obj.insert(
+                            "parent_id".to_string(),
+                            block_value.get("id").unwrap().clone(),
+                        );
+                    }
+                    let param_id = param_block.get("id").unwrap().as_str().unwrap().to_string();
+                    context.blocks.insert(param_id.clone(), param_block.clone());
+                    let input_name = name.clone();
+                    context.connections.insert(
+                        param_id.clone(),
+                        json!({
+                            "type": "input",
+                            "input_type": "value",
+                            "input_name": input_name
+                        }),
+                    );
+
+                    let param_type = param_block
+                        .get("type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    if self.config.shadow_types.contains(param_type) {
+                        let field_value = param_block
+                            .get("fields")
+                            .and_then(|v| v.as_object())
+                            .and_then(|fields| fields.values().next())
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        let shadow_xml = context.shadow_builder.create(
+                            param_type,
+                            Some(param_id),
+                            Some(field_value),
+                        );
+                        context.shadows.insert(input_name, shadow_xml);
+                    } else {
+                        let shadow_type = if name == "condition" || name == "BOOL" {
+                            "logic_empty"
+                        } else {
+                            "math_number"
+                        };
+                        let shadow_xml = context.shadow_builder.create(shadow_type, None, None);
+                        context.shadows.insert(input_name, shadow_xml);
+                    }
+                } else {
+                    if let Some(fields) = block_value
+                        .as_object_mut()
+                        .and_then(|v| v.get_mut("fields").and_then(|v| v.as_object_mut()))
+                    {
+                        fields.insert(name.clone(), value.clone());
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 // ============ 反编译器上下文 ============
 pub struct DecompilerContext {
     pub work_info: WorkInfo,
@@ -653,7 +992,6 @@ impl NekoDecompiler {
 
 impl BaseDecompiler for NekoDecompiler {
     fn decompile(&mut self) -> Result<DecompileResult> {
-        // 获取作品详情
         let detail_url = format!(
             "{}/neko/community/player/published-work-detail/{}",
             self.context.config.creation_base_url, self.context.work_info.id
@@ -681,7 +1019,6 @@ impl BaseDecompiler for NekoDecompiler {
             .and_then(|v| v.as_str())
             .ok_or_else(|| DecompilerError::InvalidResponse("无法获取source_urls".to_string()))?;
 
-        // 下载并解密
         let encrypted_content = self.context.http_client.get_text(encrypted_url)?;
         let crypto_service = self
             .context
@@ -766,7 +1103,6 @@ impl NemoResourceManager {
         bcm_data: &Value,
         source_info: &Value,
     ) -> Result<()> {
-        // 保存BCM文件
         let bcm_path = self
             .dirs
             .get("works")
@@ -774,7 +1110,6 @@ impl NemoResourceManager {
             .join(format!("{}.bcm", work_id));
         FileService::write_json(&bcm_path, bcm_data)?;
 
-        // 保存用户图片配置
         let user_images = self.build_user_images(bcm_data)?;
         let userimg_path = self
             .dirs
@@ -783,7 +1118,6 @@ impl NemoResourceManager {
             .join(format!("{}.userimg", work_id));
         FileService::write_json(&userimg_path, &user_images)?;
 
-        // 保存元数据
         let meta_data = self.build_metadata(work_id, source_info)?;
         let meta_path = self
             .dirs
@@ -792,7 +1126,6 @@ impl NemoResourceManager {
             .join(format!("{}.meta", work_id));
         FileService::write_json(&meta_path, &meta_data)?;
 
-        // 下载封面
         if let Some(preview) = source_info.get("preview").and_then(|v| v.as_str()) {
             if !preview.is_empty() {
                 match self.context.http_client.get_binary(preview) {
@@ -990,287 +1323,12 @@ impl BaseDecompiler for NemoDecompiler {
     }
 }
 
-// ============ 积木反编译上下文 ============
-#[derive(Clone)]
-pub struct BlockContext {
-    pub actor_data: Value,
-    pub functions: Arc<HashMap<String, Value>>,
-    pub shadow_builder: ShadowBuilder,
-    pub blocks: HashMap<String, Value>,
-    pub connections: HashMap<String, Value>,
-}
-
-impl BlockContext {
-    pub fn new(
-        actor_data: Value,
-        functions: Arc<HashMap<String, Value>>,
-        shadow_builder: ShadowBuilder,
-    ) -> Self {
-        Self {
-            actor_data,
-            functions,
-            shadow_builder,
-            blocks: HashMap::new(),
-            connections: HashMap::new(),
-        }
-    }
-}
-
-// ============ 积木反编译器核心（递归处理） ============
-const OUTPUT_BLOCK_TYPES: &[&str] = &["logic_boolean", "procedures_2_stable_parameter"];
-
-pub struct BlockDecompilerCore {
-    compiled: Value,
-    config: Arc<DecompilerConfig>,
-    id_generator: IdGenerator,
-}
-
-impl BlockDecompilerCore {
-    pub fn new(compiled: Value, config: Arc<DecompilerConfig>, id_generator: IdGenerator) -> Self {
-        Self {
-            compiled,
-            config,
-            id_generator,
-        }
-    }
-
-    /// 执行积木反编译的核心流程，返回反编译后的积木 Value
-    pub fn decompile(&mut self, context: &mut BlockContext) -> Result<Value> {
-        let id = self
-            .compiled
-            .get("id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let block_type = self
-            .compiled
-            .get("type")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let is_shadow = self.config.shadow_types.contains(&block_type);
-        let is_output = is_shadow || OUTPUT_BLOCK_TYPES.contains(&block_type.as_str());
-
-        let mut block = serde_json::Map::new();
-        block.insert("id".to_string(), Value::String(id.clone()));
-        block.insert("type".to_string(), Value::String(block_type.clone()));
-        block.insert("location".to_string(), json!([0, 0]));
-        block.insert("is_shadow".to_string(), Value::Bool(is_shadow));
-        block.insert("is_output".to_string(), Value::Bool(is_output));
-        block.insert("collapsed".to_string(), Value::Bool(false));
-        block.insert("disabled".to_string(), Value::Bool(false));
-        block.insert("deletable".to_string(), Value::Bool(true));
-        block.insert("movable".to_string(), Value::Bool(true));
-        block.insert("editable".to_string(), Value::Bool(true));
-        block.insert("visible".to_string(), Value::String("visible".to_string()));
-        block.insert("shadows".to_string(), Value::Object(serde_json::Map::new()));
-        block.insert("fields".to_string(), Value::Object(serde_json::Map::new()));
-        block.insert(
-            "field_constraints".to_string(),
-            Value::Object(serde_json::Map::new()),
-        );
-        block.insert(
-            "field_extra_attr".to_string(),
-            Value::Object(serde_json::Map::new()),
-        );
-        block.insert("comment".to_string(), Value::Null);
-        block.insert("mutation".to_string(), Value::String("".to_string()));
-        block.insert("parent_id".to_string(), Value::Null);
-
-        let block_value = Value::Object(block);
-        context.blocks.insert(id.clone(), block_value.clone());
-
-        let mut block_value = block_value; // 转为可变的
-        self.process_next(context, &mut block_value)?;
-        self.process_children(context, &mut block_value)?;
-        self.process_conditions(context, &mut block_value)?;
-        self.process_params(context, &mut block_value)?;
-
-        context.blocks.insert(id, block_value.clone());
-        Ok(block_value)
-    }
-
-    fn process_next(&self, context: &mut BlockContext, block_value: &mut Value) -> Result<()> {
-        if let Some(next_compiled) = self.compiled.get("next_block") {
-            if !next_compiled.is_null() {
-                let mut decompiler = BlockDecompilerCore::new(
-                    next_compiled.clone(),
-                    self.config.clone(),
-                    self.id_generator.clone(),
-                );
-                let mut next_block = decompiler.decompile(context)?;
-                if let Some(obj) = next_block.as_object_mut() {
-                    obj.insert(
-                        "parent_id".to_string(),
-                        block_value.get("id").unwrap().clone(),
-                    );
-                }
-                let next_id = next_block.get("id").unwrap().as_str().unwrap().to_string();
-                context.blocks.insert(next_id.clone(), next_block);
-                context.connections.insert(next_id, json!({"type": "next"}));
-            }
-        }
-        Ok(())
-    }
-
-    fn process_children(&self, context: &mut BlockContext, block_value: &mut Value) -> Result<()> {
-        if let Some(children) = self.compiled.get("child_block").and_then(|v| v.as_array()) {
-            for (i, child) in children.iter().enumerate() {
-                if !child.is_null() {
-                    let mut decompiler = BlockDecompilerCore::new(
-                        child.clone(),
-                        self.config.clone(),
-                        self.id_generator.clone(),
-                    );
-                    let mut child_block = decompiler.decompile(context)?;
-                    if let Some(obj) = child_block.as_object_mut() {
-                        obj.insert(
-                            "parent_id".to_string(),
-                            block_value.get("id").unwrap().clone(),
-                        );
-                    }
-                    let child_id = child_block.get("id").unwrap().as_str().unwrap().to_string();
-                    context.blocks.insert(child_id.clone(), child_block);
-                    let input_name = self.get_child_input_name(i);
-                    context.connections.insert(
-                        child_id,
-                        json!({
-                            "type": "input",
-                            "input_type": "statement",
-                            "input_name": input_name
-                        }),
-                    );
-                    if let Some(shadows) = block_value
-                        .as_object_mut()
-                        .and_then(|v| v.get_mut("shadows").and_then(|v| v.as_object_mut()))
-                    {
-                        shadows.insert(input_name, Value::String("".to_string()));
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn process_conditions(
-        &self,
-        context: &mut BlockContext,
-        block_value: &mut Value,
-    ) -> Result<()> {
-        if let Some(conditions) = self.compiled.get("conditions").and_then(|v| v.as_array()) {
-            for (i, condition) in conditions.iter().enumerate() {
-                let input_name = format!("IF{}", i);
-                if condition.is_null() {
-                    let shadow_xml = context.shadow_builder.create("logic_empty", None, None);
-                    if let Some(shadows) = block_value
-                        .as_object_mut()
-                        .and_then(|v| v.get_mut("shadows").and_then(|v| v.as_object_mut()))
-                    {
-                        shadows.insert(input_name, Value::String(shadow_xml));
-                    }
-                } else {
-                    let mut decompiler = BlockDecompilerCore::new(
-                        condition.clone(),
-                        self.config.clone(),
-                        self.id_generator.clone(),
-                    );
-                    let mut condition_block = decompiler.decompile(context)?;
-                    if let Some(obj) = condition_block.as_object_mut() {
-                        obj.insert(
-                            "parent_id".to_string(),
-                            block_value.get("id").unwrap().clone(),
-                        );
-                    }
-                    let cond_id = condition_block
-                        .get("id")
-                        .unwrap()
-                        .as_str()
-                        .unwrap()
-                        .to_string();
-                    context.blocks.insert(cond_id.clone(), condition_block);
-                    context.connections.insert(
-                        cond_id,
-                        json!({
-                            "type": "input",
-                            "input_type": "value",
-                            "input_name": input_name
-                        }),
-                    );
-                    if let Some(shadows) = block_value
-                        .as_object_mut()
-                        .and_then(|v| v.get_mut("shadows").and_then(|v| v.as_object_mut()))
-                    {
-                        shadows.insert(input_name, Value::String("".to_string()));
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn process_params(&self, context: &mut BlockContext, block_value: &mut Value) -> Result<()> {
-        if let Some(params) = self.compiled.get("params").and_then(|v| v.as_object()) {
-            for (name, value) in params {
-                if value.is_object() {
-                    let mut decompiler = BlockDecompilerCore::new(
-                        value.clone(),
-                        self.config.clone(),
-                        self.id_generator.clone(),
-                    );
-                    let mut param_block = decompiler.decompile(context)?;
-                    if let Some(obj) = param_block.as_object_mut() {
-                        obj.insert(
-                            "parent_id".to_string(),
-                            block_value.get("id").unwrap().clone(),
-                        );
-                    }
-                    let param_id = param_block.get("id").unwrap().as_str().unwrap().to_string();
-                    context.blocks.insert(param_id.clone(), param_block);
-                    let input_name = name.clone();
-                    context.connections.insert(
-                        param_id,
-                        json!({
-                            "type": "input",
-                            "input_type": "value",
-                            "input_name": input_name
-                        }),
-                    );
-                    let shadow_type = if name == "condition" || name == "BOOL" {
-                        "logic_empty"
-                    } else {
-                        "math_number"
-                    };
-                    let shadow_xml = context.shadow_builder.create(shadow_type, None, None);
-                    if let Some(shadows) = block_value
-                        .as_object_mut()
-                        .and_then(|v| v.get_mut("shadows").and_then(|v| v.as_object_mut()))
-                    {
-                        shadows.insert(input_name, Value::String(shadow_xml));
-                    }
-                } else {
-                    if let Some(fields) = block_value
-                        .as_object_mut()
-                        .and_then(|v| v.get_mut("fields").and_then(|v| v.as_object_mut()))
-                    {
-                        fields.insert(name.clone(), value.clone());
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn get_child_input_name(&self, index: usize) -> String {
-        "DO".to_string()
-    }
-}
-
-// ============ 积木反编译器 trait ============
+// ============ 积木反编译器接口 ============
 pub trait BlockDecompiler: Send + Sync {
     fn decompile(&mut self, context: &mut BlockContext) -> Result<Value>;
 }
 
-// ============ 默认积木反编译器（直接使用核心逻辑） ============
+// ============ 具体积木反编译器实现 ============
 pub struct DefaultBlockDecompiler {
     core: BlockDecompilerCore,
 }
@@ -1278,7 +1336,12 @@ pub struct DefaultBlockDecompiler {
 impl DefaultBlockDecompiler {
     pub fn new(compiled: Value, config: Arc<DecompilerConfig>, id_generator: IdGenerator) -> Self {
         Self {
-            core: BlockDecompilerCore::new(compiled, config, id_generator),
+            core: BlockDecompilerCore::new(
+                compiled,
+                config,
+                id_generator,
+                Box::new(DefaultBlockBehavior),
+            ),
         }
     }
 }
@@ -1289,7 +1352,6 @@ impl BlockDecompiler for DefaultBlockDecompiler {
     }
 }
 
-// ============ 条件积木反编译器 ============
 pub struct IfBlockDecompiler {
     core: BlockDecompilerCore,
     compiled: Value,
@@ -1298,23 +1360,21 @@ pub struct IfBlockDecompiler {
 
 impl IfBlockDecompiler {
     pub fn new(compiled: Value, config: Arc<DecompilerConfig>, id_generator: IdGenerator) -> Self {
+        let conditions_count = compiled
+            .get("conditions")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.len())
+            .unwrap_or(0);
+
+        let behavior = Box::new(IfBlockBehavior::new(conditions_count));
+        let core =
+            BlockDecompilerCore::new(compiled.clone(), config.clone(), id_generator, behavior);
+
         Self {
-            core: BlockDecompilerCore::new(compiled.clone(), config.clone(), id_generator),
+            core,
             compiled,
             config,
         }
-    }
-
-    fn get_child_input_name(&self, index: usize) -> String {
-        if let Some(conditions) = self.compiled.get("conditions").and_then(|v| v.as_array()) {
-            let conditions_count = conditions.len();
-            if index < conditions_count {
-                return format!("DO {}", index);
-            } else {
-                return "ELSE".to_string();
-            }
-        }
-        "DO".to_string()
     }
 }
 
@@ -1334,12 +1394,9 @@ impl BlockDecompiler for IfBlockDecompiler {
             .unwrap_or(0);
 
         if children.len() == 2 && children[1].is_null() {
-            let block = block_value.as_object_mut().unwrap();
-            let shadows = block
-                .get_mut("shadows")
-                .and_then(|v| v.as_object_mut())
-                .unwrap();
-            shadows.insert("EXTRA_ADD_ELSE".to_string(), Value::String("".to_string()));
+            context
+                .shadows
+                .insert("EXTRA_ADD_ELSE".to_string(), String::new());
         } else {
             let mutation = format!(
                 r#"<mutation elseif="{}" else="1"></mutation>"#,
@@ -1347,38 +1404,15 @@ impl BlockDecompiler for IfBlockDecompiler {
             );
             let block = block_value.as_object_mut().unwrap();
             block.insert("mutation".to_string(), Value::String(mutation));
-            let shadows = block
-                .get_mut("shadows")
-                .and_then(|v| v.as_object_mut())
-                .unwrap();
-            shadows.insert("ELSE_TEXT".to_string(), Value::String("".to_string()));
-        }
-
-        // 修正子积木的输入名称（因为基类用的是默认"DO"）
-        if let Some(children) = self.compiled.get("child_block").and_then(|v| v.as_array()) {
-            let conditions_count = conditions_len;
-            for (i, child) in children.iter().enumerate() {
-                if !child.is_null() {
-                    let child_id = child.get("id").and_then(|v| v.as_str()).unwrap_or("");
-                    let input_name = if i < conditions_count {
-                        format!("DO {}", i)
-                    } else {
-                        "ELSE".to_string()
-                    };
-                    if let Some(conn) = context.connections.get_mut(child_id) {
-                        if let Some(obj) = conn.as_object_mut() {
-                            obj.insert("input_name".to_string(), Value::String(input_name));
-                        }
-                    }
-                }
-            }
+            context
+                .shadows
+                .insert("ELSE_TEXT".to_string(), String::new());
         }
 
         Ok(block_value)
     }
 }
 
-// ============ 文本连接积木反编译器 ============
 pub struct TextJoinDecompiler {
     core: BlockDecompilerCore,
     compiled: Value,
@@ -1388,7 +1422,12 @@ pub struct TextJoinDecompiler {
 impl TextJoinDecompiler {
     pub fn new(compiled: Value, config: Arc<DecompilerConfig>, id_generator: IdGenerator) -> Self {
         Self {
-            core: BlockDecompilerCore::new(compiled.clone(), config.clone(), id_generator),
+            core: BlockDecompilerCore::new(
+                compiled.clone(),
+                config.clone(),
+                id_generator,
+                Box::new(DefaultBlockBehavior),
+            ),
             compiled,
             config,
         }
@@ -1412,7 +1451,6 @@ impl BlockDecompiler for TextJoinDecompiler {
     }
 }
 
-// ============ 函数定义积木反编译器 ============
 pub struct FunctionDefDecompiler {
     core: BlockDecompilerCore,
     compiled: Value,
@@ -1423,7 +1461,12 @@ pub struct FunctionDefDecompiler {
 impl FunctionDefDecompiler {
     pub fn new(compiled: Value, config: Arc<DecompilerConfig>, id_generator: IdGenerator) -> Self {
         Self {
-            core: BlockDecompilerCore::new(compiled.clone(), config.clone(), id_generator.clone()),
+            core: BlockDecompilerCore::new(
+                compiled.clone(),
+                config.clone(),
+                id_generator.clone(),
+                Box::new(DefaultBlockBehavior),
+            ),
             compiled,
             config,
             id_generator,
@@ -1433,7 +1476,6 @@ impl FunctionDefDecompiler {
 
 impl BlockDecompiler for FunctionDefDecompiler {
     fn decompile(&mut self, context: &mut BlockContext) -> Result<Value> {
-        // 先反编译函数体（child_block），核心已经处理
         let mut block_value = self.core.decompile(context)?;
 
         let procedure_name = self
@@ -1457,80 +1499,62 @@ impl BlockDecompiler for FunctionDefDecompiler {
 
         let block = block_value.as_object_mut().unwrap();
 
-        // 处理 shadows 和 mutation
-        {
-            let shadows = block
-                .get_mut("shadows")
-                .and_then(|v| v.as_object_mut())
-                .unwrap();
-            shadows.insert(
-                "PROCEDURES_2_DEFNORETURN_DEFINE".to_string(),
-                Value::String("".to_string()),
-            );
-            shadows.insert(
-                "PROCEDURES_2_DEFNORETURN_MUTATOR".to_string(),
-                Value::String("".to_string()),
-            );
+        context
+            .shadows
+            .insert("PROCEDURES_2_DEFNORETURN_DEFINE".to_string(), String::new());
+        context.shadows.insert(
+            "PROCEDURES_2_DEFNORETURN_MUTATOR".to_string(),
+            String::new(),
+        );
 
-            let mut mutation_args = Vec::new();
-            for (i, (param_name, _)) in params.iter().enumerate() {
-                let input_name = format!("PARAMS {}", i);
+        let mut mutation_args = Vec::new();
+        for (i, (param_name, _)) in params.iter().enumerate() {
+            let input_name = format!("PARAMS {}", i);
 
-                // 步骤1：只读借用，用于 mutation_args
-                mutation_args.push(format!(r#"<arg name="{}"/>"#, input_name));
+            mutation_args.push(format!(r#"<arg name="{}"/>"#, input_name));
 
-                // 步骤2：克隆一份用于连接（如果连接中需要）
-                let input_name_clone = input_name.clone();
+            let shadow_value = context.shadow_builder.create("math_number", None, None);
+            context.shadows.insert(input_name.clone(), shadow_value);
 
-                // 步骤3：创建阴影值
-                let shadow_value = context.shadow_builder.create("math_number", None, None);
-
-                // 步骤4：移动原始 input_name 到 shadows 中
-                shadows.insert(input_name, Value::String(shadow_value));
-
-                // 创建参数定义块
-                let param_block_id = self.id_generator.generate(20);
-                let param_block_id_clone = param_block_id.clone();
-                let param_block = json!({
-                    "id": param_block_id,
-                    "kind": "domain_block",
-                    "type": "procedures_2_stable_parameter",
-                    "params": {
-                        "param_name": param_name,
-                        "param_default_value": "",
-                    }
-                });
-                let mut param_decompiler = DefaultBlockDecompiler::new(
-                    param_block,
-                    self.config.clone(),
-                    self.id_generator.clone(),
-                );
-                let mut param_block_value = param_decompiler.decompile(context)?;
-                if let Some(obj) = param_block_value.as_object_mut() {
-                    obj.insert("parent_id".to_string(), Value::String(block_id.clone()));
+            let param_block_id = self.id_generator.generate(20);
+            let param_block = json!({
+                "id": param_block_id,
+                "kind": "domain_block",
+                "type": "procedures_2_stable_parameter",
+                "params": {
+                    "param_name": param_name,
+                    "param_default_value": "",
                 }
-                context
-                    .blocks
-                    .insert(param_block_id_clone, param_block_value);
-                context.connections.insert(
-                    param_block_id,
-                    json!({
-                        "type": "input",
-                        "input_type": "value",
-                        "input_name": input_name_clone  // 使用克隆后的值
-                    }),
-                );
+            });
+            let mut param_decompiler = DefaultBlockDecompiler::new(
+                param_block,
+                self.config.clone(),
+                self.id_generator.clone(),
+            );
+            let mut param_block_value = param_decompiler.decompile(context)?;
+            if let Some(obj) = param_block_value.as_object_mut() {
+                obj.insert("parent_id".to_string(), Value::String(block_id.clone()));
             }
+            context
+                .blocks
+                .insert(param_block_id.clone(), param_block_value);
+            context.connections.insert(
+                param_block_id,
+                json!({
+                    "type": "input",
+                    "input_type": "value",
+                    "input_name": input_name
+                }),
+            );
+        }
 
-            let mutation = if mutation_args.is_empty() {
-                "<mutation></mutation>".to_string()
-            } else {
-                format!("<mutation>{}</mutation>", mutation_args.join(""))
-            };
-            block.insert("mutation".to_string(), Value::String(mutation));
-        } // shadows 作用域结束
+        let mutation = if mutation_args.is_empty() {
+            "<mutation></mutation>".to_string()
+        } else {
+            format!("<mutation>{}</mutation>", mutation_args.join(""))
+        };
+        block.insert("mutation".to_string(), Value::String(mutation));
 
-        // 处理 fields
         let fields = block
             .get_mut("fields")
             .and_then(|v| v.as_object_mut())
@@ -1541,7 +1565,6 @@ impl BlockDecompiler for FunctionDefDecompiler {
     }
 }
 
-// ============ 函数调用积木反编译器 ============
 pub struct FunctionCallDecompiler {
     core: BlockDecompilerCore,
     compiled: Value,
@@ -1552,7 +1575,12 @@ pub struct FunctionCallDecompiler {
 impl FunctionCallDecompiler {
     pub fn new(compiled: Value, config: Arc<DecompilerConfig>, id_generator: IdGenerator) -> Self {
         Self {
-            core: BlockDecompilerCore::new(compiled.clone(), config.clone(), id_generator.clone()),
+            core: BlockDecompilerCore::new(
+                compiled.clone(),
+                config.clone(),
+                id_generator.clone(),
+                Box::new(DefaultBlockBehavior),
+            ),
             compiled,
             config,
             id_generator,
@@ -1562,7 +1590,6 @@ impl FunctionCallDecompiler {
 
 impl BlockDecompiler for FunctionCallDecompiler {
     fn decompile(&mut self, context: &mut BlockContext) -> Result<Value> {
-        // 先反编译参数内部的积木（核心的 process_params 会处理）
         let mut block_value = self.core.decompile(context)?;
 
         let procedure_name = self
@@ -1598,7 +1625,6 @@ impl BlockDecompiler for FunctionCallDecompiler {
             block.insert("disabled".to_string(), Value::Bool(true));
         }
 
-        // 构建 mutation
         let mut mutation = String::from("<mutation");
         mutation.push_str(&format!(r#" name="{}""#, procedure_name));
         mutation.push_str(&format!(r#" def_id="{}""#, func_id));
@@ -1612,17 +1638,48 @@ impl BlockDecompiler for FunctionCallDecompiler {
         mutation.push_str("</mutation>");
         block.insert("mutation".to_string(), Value::String(mutation));
 
-        let shadows = block
-            .get_mut("shadows")
-            .and_then(|v| v.as_object_mut())
-            .unwrap();
-        shadows.insert("NAME".to_string(), Value::String("".to_string()));
-        for (i, _) in params.iter().enumerate() {
-            let input_name = format!("ARG {}", i);
-            shadows.insert(
-                input_name,
-                Value::String(context.shadow_builder.create("default_value", None, None)),
-            );
+        context.shadows.insert("NAME".to_string(), String::new());
+
+        let mut param_index = 0;
+        for (param_name, param_value) in params.iter() {
+            let input_name = format!("ARG {}", param_index);
+
+            if let Some(param_block_data) = param_value.as_object() {
+                let mut param_decompiler = BlockDecompilerCore::new(
+                    param_value.clone(),
+                    self.config.clone(),
+                    self.id_generator.clone(),
+                    Box::new(DefaultBlockBehavior),
+                );
+                let mut param_block = param_decompiler.decompile(context)?;
+
+                if let Some(obj) = param_block.as_object_mut() {
+                    obj.insert("parent_id".to_string(), Value::String(block_id.clone()));
+                }
+
+                let param_id = param_block.get("id").unwrap().as_str().unwrap().to_string();
+                context.blocks.insert(param_id.clone(), param_block);
+
+                context.connections.insert(
+                    param_id.clone(),
+                    json!({
+                        "type": "input",
+                        "input_type": "value",
+                        "input_name": input_name
+                    }),
+                );
+
+                let shadow_xml =
+                    context
+                        .shadow_builder
+                        .create("default_value", Some(param_id), None);
+                context.shadows.insert(input_name, shadow_xml);
+            } else {
+                let shadow_xml = context.shadow_builder.create("default_value", None, None);
+                context.shadows.insert(input_name, shadow_xml);
+            }
+
+            param_index += 1;
         }
 
         let fields = block
@@ -1630,25 +1687,6 @@ impl BlockDecompiler for FunctionCallDecompiler {
             .and_then(|v| v.as_object_mut())
             .unwrap();
         fields.insert("NAME".to_string(), Value::String(procedure_name.clone()));
-
-        // 核心的 process_params 已经为每个参数创建了 connection 和阴影，但我们需要修正输入名称格式（ARG 0, ARG 1 ...）
-        // 核心中使用的是原始参数名，这里根据参数顺序重新映射连接
-        let mut i = 0;
-        for (param_name, _) in params.iter() {
-            // 查找原始连接中 input_name = param_name 的项，将其改为 ARG i
-            for (_, conn) in context.connections.iter_mut() {
-                if let Some(obj) = conn.as_object_mut() {
-                    if obj.get("input_name").and_then(|v| v.as_str()) == Some(param_name) {
-                        obj.insert(
-                            "input_name".to_string(),
-                            Value::String(format!("ARG {}", i)),
-                        );
-                        break;
-                    }
-                }
-            }
-            i += 1;
-        }
 
         Ok(block_value)
     }
@@ -1832,7 +1870,6 @@ impl BaseDecompiler for KittenDecompiler {
             .ok_or_else(|| DecompilerError::InvalidResponse("compile_result不存在".to_string()))?
             .clone();
 
-        // 第一遍: 收集函数定义
         let mut functions = HashMap::new();
         for actor_compiled in &compile_result {
             if let Some(procedures) = actor_compiled.get("procedures").and_then(|v| v.as_object()) {
@@ -1843,7 +1880,6 @@ impl BaseDecompiler for KittenDecompiler {
         }
         let functions = Arc::new(functions);
 
-        // 第二遍: 反编译函数定义
         let block_factory = BlockDecompilerFactory::new(
             self.context.config.clone(),
             self.context.id_generator.clone(),
@@ -1864,7 +1900,6 @@ impl BaseDecompiler for KittenDecompiler {
         }
         let functions_result = Arc::new(functions_result);
 
-        // 第三遍: 反编译角色积木
         for actor_compiled in &compile_result {
             let actor_id = actor_compiled
                 .get("id")
@@ -1912,7 +1947,7 @@ impl BaseDecompiler for KittenDecompiler {
     }
 }
 
-// ============ COCO数据重组器 ============
+// ============ COCO数据重组器（修复版） ============
 pub struct CocoDataReorganizer {
     context: DecompilerContext,
 }
@@ -1934,6 +1969,7 @@ impl CocoDataReorganizer {
         work_obj.insert("screenIds".to_string(), json!([]));
 
         self.process_screens(work_obj)?;
+        self.process_blocks(work_obj)?;
         self.process_resources(work_obj);
         self.process_variables(work_obj)?;
 
@@ -2016,6 +2052,31 @@ impl CocoDataReorganizer {
         work.insert("screens".to_string(), Value::Object(screens));
         work.insert("screenIds".to_string(), Value::Array(screen_ids));
         work.insert("widgetMap".to_string(), Value::Object(widget_map));
+
+        Ok(())
+    }
+
+    fn process_blocks(&self, work: &mut serde_json::Map<String, Value>) -> Result<()> {
+        let block_json_map = work
+            .get("blockJsonMap")
+            .and_then(|v| v.as_object())
+            .ok_or_else(|| DecompilerError::InvalidResponse("blockJsonMap不存在".to_string()))?;
+
+        let mut blockly = serde_json::Map::new();
+
+        for (screen_id, blocks) in block_json_map {
+            let screen_data = json!({
+                "screenId": screen_id,
+                "workspaceJson": blocks,
+                "workspaceOffset": {
+                    "x": 0,
+                    "y": 0
+                }
+            });
+            blockly.insert(screen_id.clone(), screen_data);
+        }
+
+        work.insert("blockly".to_string(), Value::Object(blockly));
 
         Ok(())
     }
@@ -2300,14 +2361,6 @@ impl WoodResourceManager {
             return filename_part.to_string();
         }
 
-        String::new()
-    }
-
-    fn get_file_extension(&self, url: &str) -> String {
-        let filename = self.extract_filename_from_url(url);
-        if let Some(last_dot) = filename.rfind('.') {
-            return filename[last_dot..].to_string();
-        }
         String::new()
     }
 
