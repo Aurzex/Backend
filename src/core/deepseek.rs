@@ -140,7 +140,7 @@ struct ClientState {
     user_id: Option<u64>,
     search_session: Option<String>,
     connected: bool,
-    joined: bool, // 是否已成功加入房间
+    joined: bool,
 }
 
 impl Default for ClientState {
@@ -289,8 +289,7 @@ impl CodeMaoChatClient {
     pub fn quick_chat(token: &str, message: &str) -> Result<String, ChatError> {
         let mut client = CodeMaoChatClient::builder().token(token).build()?;
         client.connect()?;
-        // 等待额外一秒确保状态稳定
-        std::thread::sleep(Duration::from_secs(1));
+        thread::sleep(Duration::from_secs(1));
         let response = client.send_message(message).send_and_wait()?;
         client.close();
         Ok(response)
@@ -382,7 +381,7 @@ impl<'a> MessageRequestBuilder<'a> {
             None
         };
 
-        // 3. 等待回复
+        // 3. 等待回复开始
         let timeout = Duration::from_secs(self.timeout);
         let (lock, cvar) = self.client.state_condvar();
         let mut state = lock.lock().unwrap();
@@ -400,6 +399,7 @@ impl<'a> MessageRequestBuilder<'a> {
             return Err(ChatError::Timeout("等待回复开始超时".to_string()));
         }
 
+        // 4. 等待回复完成
         if state.response_complete {
             return Ok(state.current_response.clone());
         }
@@ -417,9 +417,8 @@ impl<'a> MessageRequestBuilder<'a> {
         }
 
         let result = state.current_response.clone();
-        drop(state);
 
-        // 4. 清理临时回调
+        // 5. 清理临时回调
         if let Some((original_len, callbacks_arc)) = _cleanup {
             let mut guard = callbacks_arc.lock().unwrap();
             guard.truncate(original_len);
@@ -447,20 +446,22 @@ impl<'a> MessageRequestBuilder<'a> {
             }
         }
 
-        let messages = if self.include_history {
-            let state = self.client.state.0.lock().unwrap();
+        // 构建消息历史
+        let state = self.client.state.0.lock().unwrap();
+        let mut messages = if self.include_history {
             state.conversation_history.clone()
         } else {
             vec![]
         };
+        drop(state);
 
+        // 添加当前用户消息
         let mut user_msg = HashMap::new();
         user_msg.insert("role".to_string(), "user".to_string());
         user_msg.insert("content".to_string(), self.content.clone());
-        let mut messages = messages;
         messages.push(user_msg);
 
-        // 更新状态，重置响应标志
+        // 更新状态
         {
             let mut state = self.client.state.0.lock().unwrap();
             state.conversation_history = messages.clone();
@@ -469,15 +470,17 @@ impl<'a> MessageRequestBuilder<'a> {
             state.current_response.clear();
         }
 
+        let conversation_id = self.client.state.0.lock().unwrap().conversation_id.clone();
+
         let chat_data = json!({
-            "session_id": self.client.state.0.lock().unwrap().conversation_id,
+            "session_id": conversation_id,
             "messages": messages,
             "chat_type": "chat_v3",
             "msg_channel": 0
         });
 
-        // 重要：消息格式必须带空格：42 ["chat",...]
-        let message_str = format!(r#"42 ["chat",{}]"#, serde_json::to_string(&chat_data)?);
+        // 修复：移除空格，正确的格式是 42["chat",...]
+        let message_str = format!(r#"42["chat",{}]"#, serde_json::to_string(&chat_data)?);
         self.client.ws_send(message_str)?;
 
         if self.client.config.verbose {
@@ -588,6 +591,9 @@ fn run_ws_loop(
             if msg == "__CLOSE__" {
                 break;
             }
+            if verbose && msg != "2" && msg != "3" && !msg.starts_with("40") {
+                println!("[SEND] {}", msg);
+            }
             let mut guard = ws_writer.lock().unwrap();
             if let Err(e) = guard.send(Message::Text(msg.into())) {
                 if verbose {
@@ -616,6 +622,9 @@ fn run_ws_loop(
                 }
             }
             Ok(Message::Close(_)) => {
+                if verbose {
+                    println!("连接关闭");
+                }
                 let _ = reader_tx.send("__CLOSE__".to_string());
                 break;
             }
@@ -644,11 +653,13 @@ fn handle_message(
     let (lock, cvar) = state;
     let mut state_guard = lock.lock().unwrap();
 
-    if verbose {
+    if verbose && !text.starts_with("3") {
         println!("[RECV] {}", text);
     }
 
+    // Socket.IO 协议处理
     if text.starts_with('0') {
+        // 连接确认
         if verbose {
             println!("收到连接确认");
         }
@@ -658,18 +669,29 @@ fn handle_message(
         // 发送 "40" 进行 Socket.IO 握手
         let _ = sender.send("40".to_string());
 
-        // 1秒后发送 join 事件（注意空格）
+        // 1秒后发送 join 事件
         let sender_clone = sender.clone();
         thread::spawn(move || {
             thread::sleep(Duration::from_secs(1));
-            let _ = sender_clone.send(r#"42 ["join"]"#.to_string());
+            let _ = sender_clone.send(r#"42["join"]"#.to_string());
         });
     } else if text == "40" {
         if verbose {
             println!("Socket.IO 连接确认");
         }
+    } else if text == "2" {
+        // 服务器发送 PING (2)，客户端回复 PONG (3)
+        if verbose {
+            println!("收到 PING，回复 PONG");
+        }
+        let _ = sender.send("3".to_string());
+    } else if text == "3" {
+        // 收到 PONG，忽略
+        if verbose {
+            println!("收到 PONG");
+        }
     } else if text.starts_with("42") {
-        // 解析事件
+        // 解析事件，移除 "42" 前缀
         let payload = &text[2..];
         if let Ok(arr) = serde_json::from_str::<Vec<Value>>(payload) {
             if arr.len() >= 2 {
@@ -710,14 +732,14 @@ fn handle_message(
                                 state_guard.joined = true;
                                 cvar.notify_all();
 
-                                // 发送预设消息（注意空格）
+                                // 发送预设消息
                                 let sender_clone = sender.clone();
                                 let _ = sender_clone.send(
-                                    r#"42 ["preset_chat_message",{"turn_count":5,"system_content_enum":"default"}]"#
+                                    r#"42["preset_chat_message",{"turn_count":5,"system_content_enum":"default"}]"#
                                         .to_string(),
                                 );
                                 let _ = sender_clone
-                                    .send(r#"42 ["get_text2Img_remaining_times"]"#.to_string());
+                                    .send(r#"42["get_text2Img_remaining_times"]"#.to_string());
                             }
                         }
                     }
@@ -794,7 +816,7 @@ fn handle_message(
                                     }
                                 }
                             } else {
-                                // 处理错误响应（如"非法操作"）
+                                // 处理错误响应
                                 if let Some(code_msg) =
                                     event_data.get("code_msg").and_then(|v| v.as_str())
                                 {
@@ -817,11 +839,6 @@ fn handle_message(
                 }
             }
         }
-    } else if text == "2" {
-        // ping，回复 pong
-        let _ = sender.send("3".to_string());
-    } else if text == "3" {
-        // pong
     }
 
     true
