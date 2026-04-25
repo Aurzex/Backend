@@ -12,10 +12,10 @@ use std::sync::{
 };
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
-use tungstenite::ClientHandshake;
-use tungstenite::{Message, client::IntoClientRequest, connect};
-
+use tungstenite::Message;
+use tungstenite::{client::IntoClientRequest, connect};
 use url::Url;
+
 // ==================== 错误类型 ====================
 #[derive(Debug)]
 pub enum ChatError {
@@ -147,7 +147,7 @@ struct ClientState {
     search_session: Option<String>,
     connected: bool,
     joined: bool,
-    join_sent: bool, // 新增：标记 join 消息是否已发送
+    join_sent: bool, // ← 新增：标记 join 是否已发送
 }
 
 impl Default for ClientState {
@@ -163,7 +163,7 @@ impl Default for ClientState {
             search_session: None,
             connected: false,
             joined: false,
-            join_sent: false,
+            join_sent: false, // ← 初始未发送
         }
     }
 }
@@ -700,20 +700,31 @@ fn handle_message(
 
     // Socket.IO 协议处理
     if text.starts_with('0') {
-        // 连接确认
+        // 收到服务器的 Engine.IO open 包，连接已建立
         if verbose {
             println!("收到连接确认");
         }
         state_guard.connected = true;
         cvar.notify_all();
 
-        // 发送 "40" 进行 Socket.IO 握手
+        // 发送 "40" 发起 Socket.IO 握手
         let _ = sender.send("40".to_string());
-
-        // 注意：不再从这里发送 join，join 将在 on_connect_ack 成功后发送
     } else if text == "40" {
+        // Socket.IO 握手成功，立即延迟发送 join 消息（仅一次，不依赖 on_connect_ack）
         if verbose {
-            println!("Socket.IO 连接确认");
+            println!("Socket.IO 连接确认，即将发送 join");
+        }
+        if !state_guard.join_sent && !state_guard.joined {
+            state_guard.join_sent = true; // ← 立即标记，防止重复发送
+            drop(state_guard); // 释放锁，避免在新线程中死锁
+            let sender_clone = sender.clone();
+            thread::spawn(move || {
+                // 延迟 1 秒，与 Python 版本行为一致
+                thread::sleep(Duration::from_secs(1));
+                let _ = sender_clone.send(r#"42 ["join"]"#.to_string());
+            });
+            // 重新获取锁，但不做额外操作
+            state_guard = lock.lock().unwrap();
         }
     } else if text == "2" {
         // 服务器发送 PING (2)，客户端回复 PONG (3)
@@ -748,17 +759,7 @@ fn handle_message(
                                         }
                                     }
                                 }
-
-                                if !state_guard.join_sent {
-                                    state_guard.join_sent = true;
-                                    drop(state_guard);
-                                    let sender_clone = sender.clone();
-                                    thread::spawn(move || {
-                                        thread::sleep(Duration::from_secs(1));
-                                        let _ = sender_clone.send(r#"42 ["join"]"#.to_string());
-                                    });
-                                    state_guard = lock.lock().unwrap();
-                                }
+                                // join 已在收到 "40" 时发送，此处不再发送
                             }
                         }
                     }
