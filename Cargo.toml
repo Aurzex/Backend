@@ -22,4 +22,5 @@ sha2 = "0.10.9"
 thiserror = "2"
 ureq = {version="3",features=["json","multipart"]}
 url = "2"
-tungstenite = { version = "0.29", features = ["native-tls"] }
+tungstenite = { version = "0.29", features = ["native-tls","handshake"] }
+http = "1.4.0"

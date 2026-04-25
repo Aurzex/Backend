@@ -1,15 +1,21 @@
+use http::header::HeaderName;
+use http::header::{
+    ACCEPT_ENCODING, ACCEPT_LANGUAGE, CACHE_CONTROL, HeaderValue, ORIGIN, PRAGMA, USER_AGENT,
+};
 use rand::{Rng, RngExt};
 use serde_json::{Value, json};
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::sync::{
     Arc, Condvar, Mutex,
     mpsc::{self, Receiver, Sender},
 };
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
-use tungstenite::{Message, connect};
-use url::Url;
+use tungstenite::ClientHandshake;
+use tungstenite::{Message, client::IntoClientRequest, connect};
 
+use url::Url;
 // ==================== 错误类型 ====================
 #[derive(Debug)]
 pub enum ChatError {
@@ -481,7 +487,7 @@ impl<'a> MessageRequestBuilder<'a> {
             "msg_channel": 0
         });
 
-        let message_str = format!(r#"42["chat",{}]"#, serde_json::to_string(&chat_data)?);
+        let message_str = format!(r#"42 ["chat",{}]"#, serde_json::to_string(&chat_data)?);
         self.client.ws_send(message_str)?;
 
         if self.client.config.verbose {
@@ -581,7 +587,41 @@ fn run_ws_loop(
     callbacks: Arc<Mutex<Vec<StreamCallback>>>,
     verbose: bool,
 ) -> Result<(), ChatError> {
-    let (ws, _) = connect(url.as_str())?;
+    // 1. 构建带自定义头的 HTTP 请求
+    let mut request = url
+        .as_str()
+        .into_client_request()
+        .map_err(|e| ChatError::Connection(format!("构建请求失败: {}", e)))?;
+
+    let headers = request.headers_mut();
+    headers.insert(
+        HeaderName::from_static("origin"),
+        HeaderValue::from_static("https://kn.codemao.cn"),
+    );
+    headers.insert(
+        HeaderName::from_static("user-agent"),
+        HeaderValue::from_static("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 Edg/140.0.0.0"),
+    );
+    headers.insert(
+        HeaderName::from_static("accept-encoding"),
+        HeaderValue::from_static("gzip, deflate, br, zstd"),
+    );
+    headers.insert(
+        HeaderName::from_static("accept-language"),
+        HeaderValue::from_static("zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6"),
+    );
+    headers.insert(
+        HeaderName::from_static("cache-control"),
+        HeaderValue::from_static("no-cache"),
+    );
+    headers.insert(
+        HeaderName::from_static("pragma"),
+        HeaderValue::from_static("no-cache"),
+    );
+
+    // 2. 建立 WebSocket 连接（带自定义头）
+    let (ws, _) = connect(request)?;
+
     let ws = Arc::new(Mutex::new(ws));
     let ws_writer = Arc::clone(&ws);
     let state_writer = Arc::clone(&state);
@@ -709,16 +749,14 @@ fn handle_message(
                                     }
                                 }
 
-                                // 仅当尚未发送 join 时才发送
                                 if !state_guard.join_sent {
                                     state_guard.join_sent = true;
                                     drop(state_guard);
                                     let sender_clone = sender.clone();
                                     thread::spawn(move || {
-                                        thread::sleep(Duration::from_millis(200));
-                                        let _ = sender_clone.send(r#"42["join"]"#.to_string());
+                                        thread::sleep(Duration::from_secs(1));
+                                        let _ = sender_clone.send(r#"42 ["join"]"#.to_string());
                                     });
-                                    // 重新获取锁（后续继续使用 state_guard 需要重新锁定）
                                     state_guard = lock.lock().unwrap();
                                 }
                             }
@@ -744,11 +782,11 @@ fn handle_message(
                                 // 发送预设消息
                                 let sender_clone = sender.clone();
                                 let _ = sender_clone.send(
-                                    r#"42["preset_chat_message",{"turn_count":5,"system_content_enum":"default"}]"#
+                                    r#"42 ["preset_chat_message",{"turn_count":5,"system_content_enum":"default"}]"#
                                         .to_string(),
                                 );
                                 let _ = sender_clone
-                                    .send(r#"42["get_text2Img_remaining_times"]"#.to_string());
+                                    .send(r#"42 ["get_text2Img_remaining_times"]"#.to_string());
                             }
                         }
                     }
