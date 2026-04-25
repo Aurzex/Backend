@@ -10,8 +10,7 @@ use ureq::http::HeaderValue;
 
 // ==================== 枚举定义 ====================
 
-// 登录方法枚举
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoginMethod {
     PasswordV0,
     PasswordV1,
@@ -22,7 +21,7 @@ pub enum LoginMethod {
 }
 
 impl LoginMethod {
-    fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             LoginMethod::PasswordV0 => "password_v0",
             LoginMethod::PasswordV1 => "password_v1",
@@ -33,7 +32,7 @@ impl LoginMethod {
         }
     }
 
-    fn from_str(s: &str) -> Option<Self> {
+    pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "password_v0" => Some(LoginMethod::PasswordV0),
             "password_v1" => Some(LoginMethod::PasswordV1),
@@ -44,9 +43,24 @@ impl LoginMethod {
             _ => None,
         }
     }
+
+    /// 判断该登录方法是否属于用户
+    pub fn is_user_method(&self) -> bool {
+        matches!(
+            self,
+            LoginMethod::PasswordV0
+                | LoginMethod::PasswordV1
+                | LoginMethod::PasswordV2
+                | LoginMethod::Token
+        )
+    }
+
+    /// 判断该登录方法是否属于管理员
+    pub fn is_admin_method(&self) -> bool {
+        matches!(self, LoginMethod::AdminToken | LoginMethod::AdminPassword)
+    }
 }
 
-// 用户角色枚举
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UserRole {
     User,
@@ -70,7 +84,6 @@ impl UserRole {
     }
 }
 
-// 账号状态枚举 - 映射到 Identity
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccountStatus {
     Judgement,
@@ -96,7 +109,6 @@ impl AccountStatus {
         }
     }
 
-    // 转换为 Identity
     pub fn to_identity(&self) -> Identity {
         match self {
             AccountStatus::Judgement => Identity::Judgement,
@@ -108,7 +120,6 @@ impl AccountStatus {
 
 // ==================== 数据结构 ====================
 
-// 登录凭证
 #[derive(Debug, Clone)]
 pub struct LoginCredentials {
     pub identity: String,
@@ -132,7 +143,6 @@ impl Default for LoginCredentials {
     }
 }
 
-// 登录结果
 #[derive(Debug, Clone)]
 pub struct LoginResult {
     pub success: bool,
@@ -173,12 +183,8 @@ impl LoginResult {
 
 // ==================== 客户端提供者特质 ====================
 
-/// 客户端提供者特质，用于依赖注入
 pub trait ClientProvider: Send + Sync + std::fmt::Debug {
-    /// 获取客户端实例
     fn client(&self) -> &CodeMaoClient;
-
-    /// 克隆客户端提供者
     fn clone_box(&self) -> Box<dyn ClientProvider>;
 }
 
@@ -188,7 +194,6 @@ impl Clone for Box<dyn ClientProvider> {
     }
 }
 
-/// 全局客户端提供者（默认实现）
 #[derive(Debug, Clone)]
 pub struct GlobalClientProvider;
 
@@ -216,24 +221,20 @@ impl Default for GlobalClientProvider {
 
 // ==================== 全局单例 ====================
 
-// 全局 AuthManager 单例（使用默认的全局客户端提供者）
 static GLOBAL_AUTH_MANAGER: OnceLock<Arc<AuthManager>> = OnceLock::new();
 
-// 获取全局 AuthManager 实例
 pub fn global_auth_manager() -> Arc<AuthManager> {
     GLOBAL_AUTH_MANAGER
         .get_or_init(|| Arc::new(AuthManager::new()))
         .clone()
 }
 
-// 初始化全局 AuthManager（带配置）
 pub fn init_global_auth_manager() -> Arc<AuthManager> {
-    global_auth_manager() // 直接返回已初始化的实例
+    global_auth_manager()
 }
 
 // ==================== 辅助函数 ====================
 
-// 获取当前服务器时间戳（接受客户端提供者）
 pub fn fetch_current_timestamp_with_provider(
     provider: &dyn ClientProvider,
 ) -> Result<i64, Box<dyn std::error::Error>> {
@@ -245,44 +246,41 @@ pub fn fetch_current_timestamp_with_provider(
     Ok(json["data"].as_i64().unwrap_or(0))
 }
 
-// 获取当前服务器时间戳（使用默认全局客户端）
 pub fn fetch_current_timestamp() -> Result<i64, Box<dyn std::error::Error>> {
     fetch_current_timestamp_with_provider(&GlobalClientProvider::new())
 }
 
-// 确定用户登录方法
 fn determine_user_login_method(
     token: Option<&str>,
     identity: Option<&str>,
     password: Option<&str>,
-) -> Result<&'static str, Box<dyn std::error::Error>> {
+) -> Result<LoginMethod, Box<dyn std::error::Error>> {
     if token.is_some() {
-        return Ok("token");
+        return Ok(LoginMethod::Token);
     }
     if identity.is_some() && password.is_some() {
-        return Ok("password_v2");
+        return Ok(LoginMethod::PasswordV2);
     }
     Err("缺少必要的登录凭据".into())
 }
 
-// 确定管理员登录方法
 fn determine_admin_login_method(
     token: Option<&str>,
     identity: Option<&str>,
     password: Option<&str>,
-) -> Result<&'static str, Box<dyn std::error::Error>> {
+) -> Result<LoginMethod, Box<dyn std::error::Error>> {
     if token.is_some() {
-        return Ok("admin_token");
+        return Ok(LoginMethod::AdminToken);
     }
     if identity.is_some() || password.is_some() {
-        return Ok("admin_password");
+        return Ok(LoginMethod::AdminPassword);
     }
     Err("缺少必要的管理员登录凭据".into())
 }
 
 // ==================== 认证处理器 ====================
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct AuthProcessor {
     client_provider: Box<dyn ClientProvider>,
     client_secret: &'static str,
@@ -291,7 +289,6 @@ pub struct AuthProcessor {
 impl AuthProcessor {
     const CLIENT_SECRET: &'static str = "pBlYqXbJDu";
 
-    /// 创建新的认证处理器（使用指定的客户端提供者）
     pub fn new_with_provider(provider: Box<dyn ClientProvider>) -> Self {
         Self {
             client_provider: provider,
@@ -299,40 +296,31 @@ impl AuthProcessor {
         }
     }
 
-    /// 创建新的认证处理器（使用默认的全局客户端）
     pub fn new() -> Self {
         Self::new_with_provider(Box::new(GlobalClientProvider::new()))
     }
 
-    // 获取客户端
     fn client(&self) -> &CodeMaoClient {
         self.client_provider.client()
     }
 
-    // 获取认证详情
     pub fn fetch_auth_details(&self, token: &str) -> Result<Value, Box<dyn std::error::Error>> {
         let client = self.client();
-
-        // 先切换到 blank 身份发送请求，然后手动添加 cookie
         let cookie_str = format!("authorization={}", token);
 
-        // 通过 agent 发送自定义请求
         let response = client
             .agent()
             .get("https://api.codemao.cn/web/users/details")
             .header("Cookie", &cookie_str)
             .call()?;
 
-        // 处理 cookies
         let headers = response.headers();
         let set_cookie_headers = headers.get_all("set-cookie");
-
         let cookies: Vec<String> = set_cookie_headers
             .iter()
             .map(|header: &HeaderValue| header.to_str().unwrap_or("").to_string())
             .collect();
 
-        // 如果需要，可以存储 cookies 供后续使用
         for cookie in &cookies {
             println!("Received cookie: {}", cookie);
         }
@@ -341,7 +329,6 @@ impl AuthProcessor {
         Ok(json)
     }
 
-    // 获取登录票据
     pub fn get_login_ticket(
         &self,
         identity: &str,
@@ -349,7 +336,6 @@ impl AuthProcessor {
         pid: &str,
     ) -> Result<Value, Box<dyn std::error::Error>> {
         let client = self.client();
-
         let payload = json!({
             "identity": identity,
             "pid": pid,
@@ -375,7 +361,6 @@ impl AuthProcessor {
         pid: &str,
     ) -> Result<Value, Box<dyn std::error::Error>> {
         let client = self.client();
-
         let payload = json!({
             "identity": identity,
             "password": password,
@@ -383,43 +368,23 @@ impl AuthProcessor {
             "agreement_ids": [-1],
         });
 
-        // 由于 CodeMaoClient 的 send_request 不支持自定义头，需要使用 agent
         let response = client
             .agent()
             .post("https://api.codemao.cn/tiger/v3/web/accounts/login/security")
             .header("x-captcha-ticket", ticket)
             .send_json(&payload)?;
 
-        // 检查状态码
         let status = response.status();
-
         if status != 200 {
             let body = response.into_body().read_to_string().unwrap_or_default();
             return Err(format!("API返回错误状态码: {}, Body: {}", status, body).into());
         }
 
-        // 读取响应体
-        let body = match response.into_body().read_to_string() {
-            Ok(b) => b,
-            Err(e) => {
-                println!("读取响应体失败: {}", e);
-                return Err(Box::new(e));
-            }
-        };
-
-        // 解析JSON
-        let json_value: Value = match serde_json::from_str(&body) {
-            Ok(v) => v,
-            Err(e) => {
-                println!("JSON解析失败: {}", e);
-                return Err(Box::new(e));
-            }
-        };
-
+        let body = response.into_body().read_to_string()?;
+        let json_value: Value = serde_json::from_str(&body)?;
         Ok(json_value)
     }
 
-    // 管理员用户认证
     pub fn authenticate_admin_user(
         &self,
         username: &str,
@@ -428,7 +393,6 @@ impl AuthProcessor {
         code: &str,
     ) -> Result<Value, Box<dyn std::error::Error>> {
         let client = self.client();
-
         let payload = json!({
             "username": username,
             "password": password,
@@ -443,13 +407,11 @@ impl AuthProcessor {
         Ok(client.response_to_json(response)?)
     }
 
-    // 获取管理员验证码
     pub fn fetch_admin_captcha(
         &self,
         timestamp: i64,
     ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         let client = self.client();
-
         let endpoint = format!("/admins/captcha/{}", timestamp);
 
         let response = client
@@ -474,7 +436,6 @@ impl AuthProcessor {
         }
     }
 
-    // 处理 v0 版本密码登录
     pub fn handle_password_v0(
         &self,
         identity: &str,
@@ -482,7 +443,6 @@ impl AuthProcessor {
         pid: &str,
     ) -> Result<Value, Box<dyn std::error::Error>> {
         let client = self.client();
-
         let payload = json!({
             "identity": identity,
             "password": password,
@@ -496,7 +456,6 @@ impl AuthProcessor {
         Ok(client.response_to_json(response)?)
     }
 
-    // 处理 v1 版本密码登录
     pub fn handle_password_v1(
         &self,
         identity: &str,
@@ -504,7 +463,6 @@ impl AuthProcessor {
         pid: &str,
     ) -> Result<Value, Box<dyn std::error::Error>> {
         let client = self.client();
-
         let payload = json!({
             "identity": identity,
             "password": password,
@@ -518,7 +476,6 @@ impl AuthProcessor {
         Ok(client.response_to_json(response)?)
     }
 
-    // 处理 v2 版本密码登录
     pub fn handle_password_v2(
         &self,
         identity: &str,
@@ -531,7 +488,6 @@ impl AuthProcessor {
 
         let ticket = ticket_response["ticket"].as_str().ok_or("无法获取ticket")?;
 
-        // 调用第三个 API 并打印完整返回数据
         let security_response = self.get_login_security_info(identity, password, ticket, pid)?;
         println!(
             "Security API response: {}",
@@ -541,7 +497,6 @@ impl AuthProcessor {
         Ok(security_response)
     }
 
-    // 获取当前时间戳（使用当前客户端）
     fn fetch_current_timestamp(&self) -> Result<i64, Box<dyn std::error::Error>> {
         fetch_current_timestamp_with_provider(&*self.client_provider)
     }
@@ -554,30 +509,26 @@ impl Default for AuthProcessor {
 }
 
 // ==================== 登录处理器 ====================
-
+#[derive(Debug)]
 pub struct LoginHandler {
     processor: AuthProcessor,
 }
 
 impl LoginHandler {
-    /// 创建新的登录处理器（使用指定的客户端提供者）
     pub fn new_with_provider(provider: Box<dyn ClientProvider>) -> Self {
         Self {
             processor: AuthProcessor::new_with_provider(provider),
         }
     }
 
-    /// 创建新的登录处理器（使用默认的全局客户端）
     pub fn new() -> Self {
         Self::new_with_provider(Box::new(GlobalClientProvider::new()))
     }
 
-    // 获取客户端
     fn client(&self) -> &CodeMaoClient {
         self.processor.client()
     }
 
-    // 处理 v0 版本密码登录
     pub fn handle_password_v0(
         &self,
         identity: &str,
@@ -586,14 +537,11 @@ impl LoginHandler {
         status: AccountStatus,
     ) -> Result<LoginResult, Box<dyn std::error::Error>> {
         let client = self.client();
-
-        // 切换到 blank 身份
         let _ = client.switch_identity(Identity::Blank);
 
         match self.processor.handle_password_v0(identity, password, pid) {
             Ok(data) => {
                 if let Some(token) = data.get("token").and_then(|t| t.as_str()) {
-                    // 设置令牌并切换到对应身份
                     client.set_token(status.to_identity(), token)?;
                     let _ = client.switch_identity(status.to_identity());
 
@@ -617,7 +565,6 @@ impl LoginHandler {
         }
     }
 
-    // 处理 v1 版本密码登录
     pub fn handle_password_v1(
         &self,
         identity: &str,
@@ -626,8 +573,6 @@ impl LoginHandler {
         status: AccountStatus,
     ) -> Result<LoginResult, Box<dyn std::error::Error>> {
         let client = self.client();
-
-        // 切换到 blank 身份
         let _ = client.switch_identity(Identity::Blank);
 
         match self.processor.handle_password_v1(identity, password, pid) {
@@ -637,7 +582,6 @@ impl LoginHandler {
                     .and_then(|a| a.get("token"))
                     .and_then(|t| t.as_str())
                 {
-                    // 设置令牌并切换到对应身份
                     client.set_token(status.to_identity(), token)?;
                     let _ = client.switch_identity(status.to_identity());
 
@@ -661,7 +605,6 @@ impl LoginHandler {
         }
     }
 
-    // 处理 v2 版本密码登录
     pub fn handle_password_v2(
         &self,
         identity: &str,
@@ -670,8 +613,6 @@ impl LoginHandler {
         status: AccountStatus,
     ) -> Result<LoginResult, Box<dyn std::error::Error>> {
         let client = self.client();
-
-        // 切换到 blank 身份
         let _ = client.switch_identity(Identity::Blank);
 
         match self.processor.handle_password_v2(identity, password, pid) {
@@ -681,7 +622,6 @@ impl LoginHandler {
                     .and_then(|a| a.get("token"))
                     .and_then(|t| t.as_str())
                 {
-                    // 设置令牌并切换到对应身份
                     client.set_token(status.to_identity(), token)?;
                     let _ = client.switch_identity(status.to_identity());
 
@@ -697,24 +637,18 @@ impl LoginHandler {
                     )
                 }
             }
-            Err(e) => {
-                // 返回真正的错误，而不是 Ok
-                return Err(format!("password_v2 登录失败: {}", e).into());
-            }
+            Err(e) => Err(format!("password_v2 登录失败: {}", e).into()),
         }
     }
 
-    // 处理 token 登录
     pub fn handle_token(
         &self,
         token: &str,
         status: AccountStatus,
     ) -> Result<LoginResult, Box<dyn std::error::Error>> {
         let client = self.client();
-
         let auth_details = self.processor.fetch_auth_details(token)?;
 
-        // 设置令牌并切换到对应身份
         client.set_token(status.to_identity(), token)?;
         let _ = client.switch_identity(status.to_identity());
 
@@ -723,7 +657,6 @@ impl LoginHandler {
             .with_auth_details(auth_details))
     }
 
-    // 处理管理员 token 登录
     pub fn handle_admin_token(
         &self,
         token: Option<&str>,
@@ -740,7 +673,6 @@ impl LoginHandler {
             }
         };
 
-        // 设置令牌并切换到 Judgement 身份
         client.set_token(Identity::Judgement, &token)?;
         let _ = client.switch_identity(Identity::Judgement);
 
@@ -750,7 +682,6 @@ impl LoginHandler {
         )
     }
 
-    // 处理管理员密码登录
     pub fn handle_admin_password(
         &self,
         username: Option<&str>,
@@ -779,8 +710,8 @@ impl LoginHandler {
         };
 
         loop {
-            let timestamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
+            let timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_millis() as i64;
 
@@ -798,7 +729,6 @@ impl LoginHandler {
             {
                 Ok(response) => {
                     if let Some(token) = response.get("token").and_then(|t| t.as_str()) {
-                        // 设置令牌并切换到 Judgement 身份
                         client.set_token(Identity::Judgement, token)?;
                         let _ = client.switch_identity(Identity::Judgement);
 
@@ -847,7 +777,7 @@ impl Default for LoginHandler {
 }
 
 // ==================== 认证管理器 ====================
-
+#[derive(Debug)]
 pub struct AuthManager {
     client_provider: Box<dyn ClientProvider>,
     processor: AuthProcessor,
@@ -856,7 +786,6 @@ pub struct AuthManager {
 }
 
 impl AuthManager {
-    /// 创建新的认证管理器（使用指定的客户端提供者）
     pub fn new_with_provider(provider: Box<dyn ClientProvider>) -> Self {
         let processor = AuthProcessor::new_with_provider(provider.clone_box());
         let handler = LoginHandler::new_with_provider(provider.clone_box());
@@ -869,112 +798,77 @@ impl AuthManager {
         }
     }
 
-    /// 创建新的认证管理器（使用默认的全局客户端）
     pub fn new() -> Self {
         Self::new_with_provider(Box::new(GlobalClientProvider::new()))
     }
 
-    // 获取客户端
     fn client(&self) -> &CodeMaoClient {
         self.client_provider.client()
     }
 
-    // 统一的登录接口
+    /// 核心登录方法，现在接收 `Option<LoginMethod>` 枚举
     pub fn login(
         &mut self,
-        identity: Option<&str>,
-        password: Option<&str>,
-        token: Option<&str>,
-        pid: Option<&str>,
-        status: Option<&str>,
-        role: Option<&str>,
-        prefer_method: Option<&str>,
+        credentials: &LoginCredentials,
+        prefer_method: Option<LoginMethod>,
     ) -> Result<LoginResult, Box<dyn std::error::Error>> {
-        self.validate_login_parameters(identity, password, token, role, prefer_method)?;
+        self.validate_login_parameters(credentials, prefer_method)?;
+        self.current_credentials = Some(credentials.clone());
 
-        let credentials = LoginCredentials {
-            identity: identity.unwrap_or("").to_string(),
-            password: password.unwrap_or("").to_string(),
-            token: token.unwrap_or("").to_string(),
-            pid: pid.unwrap_or("65edCTyg").to_string(),
-            status: AccountStatus::from_str(status.unwrap_or("average"))
-                .unwrap_or(AccountStatus::Average),
-            role: UserRole::from_str(role.unwrap_or("user")).unwrap_or(UserRole::User),
-        };
-
-        let role = credentials.role;
-        self.current_credentials = Some(credentials);
-
-        match role {
-            UserRole::Admin => {
-                self.admin_login(self.current_credentials.as_ref().unwrap(), prefer_method)
-            }
-            UserRole::User => {
-                self.user_login(self.current_credentials.as_ref().unwrap(), prefer_method)
-            }
+        match credentials.role {
+            UserRole::Admin => self.admin_login(credentials, prefer_method),
+            UserRole::User => self.user_login(credentials, prefer_method),
         }
     }
 
     fn validate_login_parameters(
         &self,
-        identity: Option<&str>,
-        password: Option<&str>,
-        token: Option<&str>,
-        role: Option<&str>,
-        prefer_method: Option<&str>,
+        credentials: &LoginCredentials,
+        prefer_method: Option<LoginMethod>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(method) = prefer_method {
-            let user_methods = ["password_v0", "password_v1", "password_v2", "token"];
-            let admin_methods = ["admin_token", "admin_password"];
-
-            match role.unwrap_or("user") {
-                "user" if !user_methods.contains(&method) => {
-                    return Err(format!(
-                        "用户角色不支持登录方法 '{}', 可用方法: {:?}",
-                        method, user_methods
-                    )
-                    .into());
+            match credentials.role {
+                UserRole::User if !method.is_user_method() => {
+                    return Err(format!("用户角色不支持登录方法 '{}'", method.as_str()).into());
                 }
-                "admin" if !admin_methods.contains(&method) => {
-                    return Err(format!(
-                        "管理员角色不支持登录方法 '{}', 可用方法: {:?}",
-                        method, admin_methods
-                    )
-                    .into());
+                UserRole::Admin if !method.is_admin_method() => {
+                    return Err(format!("管理员角色不支持登录方法 '{}'", method.as_str()).into());
                 }
                 _ => {}
             }
 
             match method {
-                "password_v0" | "password_v1" | "password_v2" | "admin_password"
-                    if identity.is_none() || password.is_none() =>
+                LoginMethod::PasswordV0
+                | LoginMethod::PasswordV1
+                | LoginMethod::PasswordV2
+                | LoginMethod::AdminPassword
+                    if credentials.identity.is_empty() || credentials.password.is_empty() =>
                 {
                     return Err(format!(
-                        "登录方法 '{}' 需要提供 identity 和 password 参数",
-                        method
+                        "登录方法 '{}' 需要提供 identity 和 password",
+                        method.as_str()
                     )
                     .into());
                 }
-                "token" | "admin_token" if token.is_none() => {
-                    return Err(format!("登录方法 '{}' 需要提供 token 参数", method).into());
+                LoginMethod::Token | LoginMethod::AdminToken if credentials.token.is_empty() => {
+                    return Err(format!("登录方法 '{}' 需要提供 token", method.as_str()).into());
                 }
                 _ => {}
             }
         }
-
         Ok(())
     }
 
     fn get_user_login_method(
         &self,
         credentials: &LoginCredentials,
-        prefer_method: Option<&str>,
-    ) -> Result<String, Box<dyn std::error::Error>> {
+        prefer_method: Option<LoginMethod>,
+    ) -> Result<LoginMethod, Box<dyn std::error::Error>> {
         if let Some(method) = prefer_method {
-            if ["password_v0", "password_v1", "password_v2", "token"].contains(&method) {
-                return Ok(method.to_string());
+            if method.is_user_method() {
+                return Ok(method);
             }
-            return Err(format!("'{}' 不是有效的用户登录方法", method).into());
+            return Err(format!("'{}' 不是有效的用户登录方法", method.as_str()).into());
         }
 
         determine_user_login_method(
@@ -994,19 +888,18 @@ impl AuthManager {
                 Some(&credentials.password)
             },
         )
-        .map(|s| s.to_string())
     }
 
     fn get_admin_login_method(
         &self,
         credentials: &LoginCredentials,
-        prefer_method: Option<&str>,
-    ) -> Result<String, Box<dyn std::error::Error>> {
+        prefer_method: Option<LoginMethod>,
+    ) -> Result<LoginMethod, Box<dyn std::error::Error>> {
         if let Some(method) = prefer_method {
-            if ["admin_token", "admin_password"].contains(&method) {
-                return Ok(method.to_string());
+            if method.is_admin_method() {
+                return Ok(method);
             }
-            return Err(format!("'{}' 不是有效的管理员登录方法", method).into());
+            return Err(format!("'{}' 不是有效的管理员登录方法", method.as_str()).into());
         }
 
         determine_admin_login_method(
@@ -1026,62 +919,59 @@ impl AuthManager {
                 Some(&credentials.password)
             },
         )
-        .map(|s| s.to_string())
     }
 
     fn user_login(
         &self,
         credentials: &LoginCredentials,
-        prefer_method: Option<&str>,
+        prefer_method: Option<LoginMethod>,
     ) -> Result<LoginResult, Box<dyn std::error::Error>> {
         let method = self.get_user_login_method(credentials, prefer_method)?;
 
-        match method.as_str() {
-            "password_v0" => self.handler.handle_password_v0(
+        match method {
+            LoginMethod::PasswordV0 => self.handler.handle_password_v0(
                 &credentials.identity,
                 &credentials.password,
                 &credentials.pid,
                 credentials.status,
             ),
-            "password_v1" => self.handler.handle_password_v1(
+            LoginMethod::PasswordV1 => self.handler.handle_password_v1(
                 &credentials.identity,
                 &credentials.password,
                 &credentials.pid,
                 credentials.status,
             ),
-            "password_v2" => self.handler.handle_password_v2(
+            LoginMethod::PasswordV2 => self.handler.handle_password_v2(
                 &credentials.identity,
                 &credentials.password,
                 &credentials.pid,
                 credentials.status,
             ),
-            "token" => self
+            LoginMethod::Token => self
                 .handler
                 .handle_token(&credentials.token, credentials.status),
-            _ => Err(format!("不支持的登录方式: {}", method).into()),
+            _ => Err(format!("不支持的登录方式: {}", method.as_str()).into()),
         }
     }
 
     fn admin_login(
         &self,
         credentials: &LoginCredentials,
-        prefer_method: Option<&str>,
+        prefer_method: Option<LoginMethod>,
     ) -> Result<LoginResult, Box<dyn std::error::Error>> {
         let method = self.get_admin_login_method(credentials, prefer_method)?;
 
-        match method.as_str() {
-            "admin_token" => self.handler.handle_admin_token(Some(&credentials.token)),
-            "admin_password" => self
+        match method {
+            LoginMethod::AdminToken => self.handler.handle_admin_token(Some(&credentials.token)),
+            LoginMethod::AdminPassword => self
                 .handler
                 .handle_admin_password(Some(&credentials.identity), Some(&credentials.password)),
-            _ => Err(format!("不支持的管理员登录方式: {}", method).into()),
+            _ => Err(format!("不支持的管理员登录方式: {}", method.as_str()).into()),
         }
     }
 
-    // 执行 v0 版本用户登出
     pub fn execute_logout_v0(&self) -> Result<bool, Box<dyn std::error::Error>> {
         let client = self.client();
-
         let response = client
             .build_request(HttpMethod::POST, "/tiger/accounts/logout", None)
             .with_payload(json!({}))
@@ -1089,10 +979,8 @@ impl AuthManager {
         Ok(response.status() == 204)
     }
 
-    // 执行 v12 版本用户登出
     pub fn execute_logout_v12(&self, method: &str) -> Result<bool, Box<dyn std::error::Error>> {
         let client = self.client();
-
         let endpoint = format!("/tiger/v3/{}/accounts/logout", method);
         let response = client
             .build_request(HttpMethod::POST, &endpoint, None)
@@ -1101,40 +989,33 @@ impl AuthManager {
         Ok(response.status() == 204)
     }
 
-    // 管理员登出
     pub fn admin_logout(&self) -> Result<bool, Box<dyn std::error::Error>> {
         let client = self.client();
-
         let response = client
             .build_request(HttpMethod::DELETE, "/admins/logout", Some(BaseKey::Whale))
             .send()?;
         Ok(response.status() == 204)
     }
 
-    // 获取管理员仪表板数据
     pub fn fetch_admin_dashboard_data(&self) -> Result<Value, Box<dyn std::error::Error>> {
         let client = self.client();
-
         let response = client
             .build_request(HttpMethod::GET, "/admins/info", Some(BaseKey::Whale))
             .send()?;
         Ok(client.response_to_json(response)?)
     }
 
-    // 配置认证 Token
     pub fn configure_authentication_token(
         &self,
         token: &str,
         status: AccountStatus,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let client = self.client();
-
         client.set_token(status.to_identity(), token)?;
         let _ = client.switch_identity(status.to_identity());
         Ok(())
     }
 
-    // 获取当前登录凭证
     pub fn get_current_credentials(&self) -> Option<&LoginCredentials> {
         self.current_credentials.as_ref()
     }
@@ -1159,13 +1040,11 @@ pub struct CloudAuthenticator {
 impl CloudAuthenticator {
     const CLIENT_SECRET: &'static str = "pBlYqXbJDu";
 
-    /// 创建新的云服务认证器（使用指定的客户端提供者）
     pub fn new_with_provider(
         provider: Box<dyn ClientProvider>,
         authorization_token: Option<String>,
     ) -> Self {
         let client_id = Self::generate_client_id(8);
-
         Self {
             client_provider: provider,
             authorization_token,
@@ -1175,12 +1054,10 @@ impl CloudAuthenticator {
         }
     }
 
-    /// 创建新的云服务认证器（使用默认的全局客户端）
     pub fn new(authorization_token: Option<String>) -> Self {
         Self::new_with_provider(Box::new(GlobalClientProvider::new()), authorization_token)
     }
 
-    // 获取客户端
     fn client(&self) -> &CodeMaoClient {
         self.client_provider.client()
     }
@@ -1188,7 +1065,6 @@ impl CloudAuthenticator {
     fn generate_client_id(length: usize) -> String {
         const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
         let mut rng = rand::rng();
-
         (0..length)
             .map(|_| {
                 let idx = rng.random_range(0..CHARSET.len());
@@ -1197,7 +1073,6 @@ impl CloudAuthenticator {
             .collect()
     }
 
-    // 获取校准后的时间戳
     pub fn get_calibrated_timestamp(&mut self) -> Result<i64, Box<dyn std::error::Error>> {
         if self.time_difference == 0 {
             let server_time = fetch_current_timestamp_with_provider(&*self.client_provider)?;
@@ -1207,7 +1082,6 @@ impl CloudAuthenticator {
                 .as_secs() as i64;
             self.time_difference = local_time - server_time;
         }
-
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -1215,7 +1089,6 @@ impl CloudAuthenticator {
         Ok(now - self.time_difference)
     }
 
-    // 生成设备认证信息
     pub fn generate_x_device_auth(&mut self) -> Result<Value, Box<dyn std::error::Error>> {
         let timestamp = self.get_calibrated_timestamp()?;
         let sign_str = format!("{}{}{}", self.client_secret, timestamp, self.client_id);
@@ -1231,18 +1104,94 @@ impl CloudAuthenticator {
     }
 }
 
-// ==================== 便捷函数 ====================
+// ==================== 链式调用构建器 ====================
 
-/// 使用默认全局客户端执行登录
-pub fn login(
-    identity: Option<&str>,
-    password: Option<&str>,
-    token: Option<&str>,
-    pid: Option<&str>,
-    status: Option<&str>,
-    role: Option<&str>,
-    prefer_method: Option<&str>,
-) -> Result<LoginResult, Box<dyn std::error::Error>> {
-    let mut auth_manager = AuthManager::new();
-    auth_manager.login(identity, password, token, pid, status, role, prefer_method)
+/// 登录请求构建器，支持链式调用并强制使用 LoginMethod 枚举
+#[derive(Debug)]
+pub struct LoginBuilder {
+    auth_manager: AuthManager,
+    identity: Option<String>,
+    password: Option<String>,
+    token: Option<String>,
+    pid: Option<String>,
+    status: AccountStatus,
+    role: UserRole,
+    prefer_method: Option<LoginMethod>,
+}
+
+impl LoginBuilder {
+    pub fn new() -> Self {
+        Self {
+            auth_manager: AuthManager::new(),
+            identity: None,
+            password: None,
+            token: None,
+            pid: None,
+            status: AccountStatus::Average,
+            role: UserRole::User,
+            prefer_method: None,
+        }
+    }
+
+    /// 设置登录标识
+    pub fn identity(mut self, val: impl Into<String>) -> Self {
+        self.identity = Some(val.into());
+        self
+    }
+
+    /// 设置密码
+    pub fn password(mut self, val: impl Into<String>) -> Self {
+        self.password = Some(val.into());
+        self
+    }
+
+    /// 设置 bearer token
+    pub fn token(mut self, val: impl Into<String>) -> Self {
+        self.token = Some(val.into());
+        self
+    }
+
+    /// 设置客户端 PID
+    pub fn pid(mut self, val: impl Into<String>) -> Self {
+        self.pid = Some(val.into());
+        self
+    }
+
+    /// 设置账号状态
+    pub fn status(mut self, val: AccountStatus) -> Self {
+        self.status = val;
+        self
+    }
+
+    /// 设置用户角色
+    pub fn role(mut self, val: UserRole) -> Self {
+        self.role = val;
+        self
+    }
+
+    /// 强制指定登录方法（使用 LoginMethod 枚举），不调用则自动推断
+    pub fn method(mut self, val: LoginMethod) -> Self {
+        self.prefer_method = Some(val);
+        self
+    }
+
+    /// 执行登录
+    pub fn execute(mut self) -> Result<LoginResult, Box<dyn std::error::Error>> {
+        let credentials = LoginCredentials {
+            identity: self.identity.unwrap_or_default(),
+            password: self.password.unwrap_or_default(),
+            token: self.token.unwrap_or_default(),
+            pid: self.pid.unwrap_or_else(|| "65edCTyg".to_string()),
+            status: self.status,
+            role: self.role,
+        };
+
+        self.auth_manager.login(&credentials, self.prefer_method)
+    }
+}
+
+impl Default for LoginBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
 }

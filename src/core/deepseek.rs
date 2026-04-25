@@ -147,7 +147,6 @@ struct ClientState {
     search_session: Option<String>,
     connected: bool,
     joined: bool,
-    join_sent: bool, // ← 新增：标记 join 是否已发送
 }
 
 impl Default for ClientState {
@@ -163,7 +162,6 @@ impl Default for ClientState {
             search_session: None,
             connected: false,
             joined: false,
-            join_sent: false, // ← 初始未发送
         }
     }
 }
@@ -375,10 +373,8 @@ impl<'a> MessageRequestBuilder<'a> {
 
     /// 发送消息并阻塞等待完整回复
     pub fn send_and_wait(self) -> Result<String, ChatError> {
-        // 1. 先发送消息
         self.send_internal()?;
 
-        // 2. 临时注册本次请求的回调
         let callbacks = self.callbacks;
         let _cleanup = if !callbacks.is_empty() {
             let mut guard = self.client.global_callbacks.lock().unwrap();
@@ -389,7 +385,6 @@ impl<'a> MessageRequestBuilder<'a> {
             None
         };
 
-        // 3. 等待回复开始
         let timeout = Duration::from_secs(self.timeout);
         let (lock, cvar) = self.client.state_condvar();
         let mut state = lock.lock().unwrap();
@@ -407,7 +402,6 @@ impl<'a> MessageRequestBuilder<'a> {
             return Err(ChatError::Timeout("等待回复开始超时".to_string()));
         }
 
-        // 4. 等待回复完成
         if state.response_complete {
             return Ok(state.current_response.clone());
         }
@@ -426,7 +420,6 @@ impl<'a> MessageRequestBuilder<'a> {
 
         let result = state.current_response.clone();
 
-        // 5. 清理临时回调
         if let Some((original_len, callbacks_arc)) = _cleanup {
             let mut guard = callbacks_arc.lock().unwrap();
             guard.truncate(original_len);
@@ -435,13 +428,11 @@ impl<'a> MessageRequestBuilder<'a> {
         Ok(result)
     }
 
-    /// 发送消息但不等待
     pub fn send(self) -> Result<(), ChatError> {
         self.send_internal()
     }
 
     fn send_internal(&self) -> Result<(), ChatError> {
-        // 检查是否已加入房间
         {
             let state = self.client.state.0.lock().unwrap();
             if !state.joined {
@@ -454,7 +445,6 @@ impl<'a> MessageRequestBuilder<'a> {
             }
         }
 
-        // 构建消息历史
         let state = self.client.state.0.lock().unwrap();
         let mut messages = if self.include_history {
             state.conversation_history.clone()
@@ -463,13 +453,11 @@ impl<'a> MessageRequestBuilder<'a> {
         };
         drop(state);
 
-        // 添加当前用户消息
         let mut user_msg = HashMap::new();
         user_msg.insert("role".to_string(), "user".to_string());
         user_msg.insert("content".to_string(), self.content.clone());
         messages.push(user_msg);
 
-        // 更新状态
         {
             let mut state = self.client.state.0.lock().unwrap();
             state.conversation_history = messages.clone();
@@ -587,7 +575,6 @@ fn run_ws_loop(
     callbacks: Arc<Mutex<Vec<StreamCallback>>>,
     verbose: bool,
 ) -> Result<(), ChatError> {
-    // 1. 构建带自定义头的 HTTP 请求
     let mut request = url
         .as_str()
         .into_client_request()
@@ -619,14 +606,31 @@ fn run_ws_loop(
         HeaderValue::from_static("no-cache"),
     );
 
-    // 2. 建立 WebSocket 连接（带自定义头）
     let (ws, _) = connect(request)?;
+    let (lock, _cvar) = &*state;
+    // 标记 WebSocket 连接已建立（Python 在 on_open 中做）
+    {
+        let mut st = lock.lock().unwrap();
+        st.connected = true;
+        _cvar.notify_all();
+    }
 
-    let ws = Arc::new(Mutex::new(ws));
-    let ws_writer = Arc::clone(&ws);
-    let state_writer = Arc::clone(&state);
+    // ★ 立即发送 "40"（不等待任何消息）
+    let ws_writer = Arc::new(Mutex::new(ws));
+    let mut ws_guard = ws_writer.lock().unwrap();
+    ws_guard.send(Message::Text("40".into()))?;
+    drop(ws_guard);
 
-    // writer 线程
+    // ★ 延迟 1 秒发送 join（完全复制 Python）
+    let sender_for_join = reader_tx.clone();
+    thread::spawn(move || {
+        thread::sleep(Duration::from_secs(1));
+        let _ = sender_for_join.send(r#"42 ["join"]"#.to_string());
+    });
+
+    let ws_writer_clone = Arc::clone(&ws_writer);
+
+    // writer 线程处理后续发送
     let writer_handle = thread::spawn(move || {
         for msg in rx {
             if msg == "__CLOSE__" {
@@ -635,7 +639,7 @@ fn run_ws_loop(
             if verbose && msg != "2" && msg != "3" && !msg.starts_with("40") {
                 println!("[SEND] {}", msg);
             }
-            let mut guard = ws_writer.lock().unwrap();
+            let mut guard = ws_writer_clone.lock().unwrap();
             if let Err(e) = guard.send(Message::Text(msg.into())) {
                 if verbose {
                     eprintln!("发送失败: {}", e);
@@ -643,7 +647,7 @@ fn run_ws_loop(
                 break;
             }
         }
-        if let Ok(mut ws_guard) = ws_writer.lock() {
+        if let Ok(mut ws_guard) = ws_writer_clone.lock() {
             let _ = ws_guard.close(None);
         }
     });
@@ -651,7 +655,7 @@ fn run_ws_loop(
     // 读循环
     loop {
         let msg = {
-            let mut ws_guard = ws.lock().unwrap();
+            let mut ws_guard = ws_writer.lock().unwrap();
             ws_guard.read()
         };
         match msg {
@@ -698,47 +702,28 @@ fn handle_message(
         println!("[RECV] {}", text);
     }
 
-    // Socket.IO 协议处理
+    // 协议消息处理
     if text.starts_with('0') {
-        // 收到服务器的 Engine.IO open 包，连接已建立
         if verbose {
-            println!("收到连接确认");
+            println!("收到服务器 open 包");
         }
-        state_guard.connected = true;
-        cvar.notify_all();
-
-        // 发送 "40" 发起 Socket.IO 握手
-        let _ = sender.send("40".to_string());
+        // 不再从这里发 40，因为已经在连接建立时发送
     } else if text == "40" {
-        // Socket.IO 握手成功，立即延迟发送 join 消息（仅一次，不依赖 on_connect_ack）
         if verbose {
-            println!("Socket.IO 连接确认，即将发送 join");
+            println!("Socket.IO 握手确认");
         }
-        if !state_guard.join_sent && !state_guard.joined {
-            state_guard.join_sent = true; // ← 立即标记，防止重复发送
-            drop(state_guard); // 释放锁，避免在新线程中死锁
-            let sender_clone = sender.clone();
-            thread::spawn(move || {
-                // 延迟 1 秒，与 Python 版本行为一致
-                thread::sleep(Duration::from_secs(1));
-                let _ = sender_clone.send(r#"42 ["join"]"#.to_string());
-            });
-            // 重新获取锁，但不做额外操作
-            state_guard = lock.lock().unwrap();
-        }
+        // join 已在连接后异步发送，此处不再处理
     } else if text == "2" {
-        // 服务器发送 PING (2)，客户端回复 PONG (3)
+        // 服务器 ping，回复 pong
         if verbose {
             println!("收到 PING，回复 PONG");
         }
         let _ = sender.send("3".to_string());
     } else if text == "3" {
-        // 收到 PONG，忽略
         if verbose {
             println!("收到 PONG");
         }
     } else if text.starts_with("42") {
-        // 解析事件，移除 "42" 前缀
         let payload = &text[2..];
         if let Ok(arr) = serde_json::from_str::<Vec<Value>>(payload) {
             if arr.len() >= 2 {
@@ -759,7 +744,6 @@ fn handle_message(
                                         }
                                     }
                                 }
-                                // join 已在收到 "40" 时发送，此处不再发送
                             }
                         }
                     }
@@ -780,7 +764,6 @@ fn handle_message(
                                 state_guard.joined = true;
                                 cvar.notify_all();
 
-                                // 发送预设消息
                                 let sender_clone = sender.clone();
                                 let _ = sender_clone.send(
                                     r#"42 ["preset_chat_message",{"turn_count":5,"system_content_enum":"default"}]"#
@@ -864,7 +847,6 @@ fn handle_message(
                                     }
                                 }
                             } else {
-                                // 处理错误响应
                                 if let Some(code_msg) =
                                     event_data.get("code_msg").and_then(|v| v.as_str())
                                 {
