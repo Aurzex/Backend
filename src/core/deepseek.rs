@@ -175,16 +175,19 @@ impl CodeMaoChatClient {
         ChatClientBuilder::new()
     }
 
+    // 修复后的完整 connect 方法（保留此版本，删除之前的错误版本）
     pub fn connect(&mut self) -> Result<(), ChatError> {
         let url = self.config.build_ws_url(&self.token)?;
         let state = Arc::clone(&self.state);
         let global_callbacks = Arc::clone(&self.global_callbacks);
         let verbose = self.config.verbose;
 
-        let (ws_sender, ws_receiver) = mpsc::channel::<String>();
+        // 统一的 channel：writer 从 rx 接收消息，外部和 reader 通过 tx 发送
+        let (tx, rx) = mpsc::channel::<String>();
+        let reader_tx = tx.clone(); // reader 使用
 
         let handle = thread::spawn(move || {
-            if let Err(e) = run_ws_loop(url, ws_receiver, state, global_callbacks, verbose) {
+            if let Err(e) = run_ws_loop(url, rx, reader_tx, state, global_callbacks, verbose) {
                 if verbose {
                     eprintln!("WebSocket loop error: {}", e);
                 }
@@ -192,10 +195,11 @@ impl CodeMaoChatClient {
         });
 
         self.ws_handle = Some(WsHandle {
-            sender: ws_sender,
+            sender: tx,
             thread_handle: handle,
         });
 
+        // 等待连接成功
         let timeout = Duration::from_secs(self.config.connect_timeout);
         let (lock, cvar) = &*self.state;
         let mut guard = lock.lock().unwrap();
@@ -254,6 +258,16 @@ impl CodeMaoChatClient {
         if let Some(ws) = self.ws_handle.take() {
             ws.shutdown();
         }
+    }
+
+    // 便捷工具函数
+    pub fn quick_chat(token: &str, message: &str) -> Result<String, ChatError> {
+        let mut client = CodeMaoChatClient::builder().token(token).build()?;
+        client.connect()?;
+        std::thread::sleep(Duration::from_secs(2));
+        let response = client.send_message(message).send_and_wait()?;
+        client.close();
+        Ok(response)
     }
 }
 
@@ -328,13 +342,11 @@ impl<'a> MessageRequestBuilder<'a> {
 
     /// 发送消息并阻塞等待完整回复
     pub fn send_and_wait(self) -> Result<String, ChatError> {
-        // 1. 先发送消息（此时 self 还完整）
+        // 1. 先发送消息
         self.send_internal()?;
 
-        // 2. 提取 callbacks 字段（部分移动），剩余字段仍可单独使用
+        // 2. 临时注册本次请求的回调
         let callbacks = self.callbacks;
-
-        // 3. 临时注册本次请求的回调
         let _cleanup = if !callbacks.is_empty() {
             let mut guard = self.client.global_callbacks.lock().unwrap();
             let original_len = guard.len();
@@ -344,7 +356,7 @@ impl<'a> MessageRequestBuilder<'a> {
             None
         };
 
-        // 4. 等待回复（直接使用 self 的剩余字段）
+        // 3. 等待回复
         let timeout = Duration::from_secs(self.timeout);
         let (lock, cvar) = self.client.state_condvar();
         let mut state = lock.lock().unwrap();
@@ -381,7 +393,7 @@ impl<'a> MessageRequestBuilder<'a> {
         let result = state.current_response.clone();
         drop(state);
 
-        // 5. 清理临时回调
+        // 4. 清理临时回调
         if let Some((original_len, callbacks_arc)) = _cleanup {
             let mut guard = callbacks_arc.lock().unwrap();
             guard.truncate(original_len);
@@ -492,13 +504,12 @@ impl ChatClientBuilder {
     }
 
     pub fn on_text<F>(self, mut f: F) -> Self
-    // 也可以在参数中直接加 mut
     where
         F: FnMut(&str) + Send + 'static,
     {
         self.on_event(move |text, event| {
             if event == StreamEventType::Text {
-                f(text) // 现在 f 是可变的
+                f(text)
             }
         })
     }
@@ -524,32 +535,40 @@ impl ChatClientBuilder {
     }
 }
 
-// ==================== WebSocket 事件循环 ====================
+// ==================== WebSocket 事件循环（完整实现） ====================
 fn run_ws_loop(
     url: Url,
-    rx: Receiver<String>,
+    rx: Receiver<String>,      // 接收外部消息
+    reader_tx: Sender<String>, // reader 线程可以用此发送消息
     state: Arc<(Mutex<ClientState>, Condvar)>,
     callbacks: Arc<Mutex<Vec<StreamCallback>>>,
     verbose: bool,
 ) -> Result<(), ChatError> {
     let (ws, _) = connect(url.as_str())?;
     let ws = Arc::new(Mutex::new(ws));
-
-    // 独立写线程：所有通过 channel 收到的消息都由它发送
     let ws_writer = Arc::clone(&ws);
+    let state_writer = Arc::clone(&state);
+
+    // writer 线程：从 channel 接收消息写入 WebSocket
     let writer_handle = thread::spawn(move || {
         for msg in rx {
             if msg == "__CLOSE__" {
                 break;
             }
             let mut guard = ws_writer.lock().unwrap();
-            // 修复：将动态字符串转为 Message，不再使用 from_static
             if let Err(e) = guard.send(Message::Text(msg.into())) {
-                eprintln!("发送失败: {}", e);
+                if verbose {
+                    eprintln!("发送失败: {}", e);
+                }
+                // 发送失败，标记连接断开并退出
+                {
+                    let (lock, cvar) = &*state_writer;
+                    let mut state = lock.lock().unwrap();
+                    state.connected = false;
+                    cvar.notify_all();
+                }
                 break;
             }
-            // 立即释放锁，避免阻塞读线程
-            drop(guard);
         }
         // 关闭连接
         if let Ok(mut ws_guard) = ws_writer.lock() {
@@ -557,22 +576,29 @@ fn run_ws_loop(
         }
     });
 
-    // 读循环 —— 每次读取时短暂持有锁，读取完毕后立即释放，以便写线程可以发送。
+    // 读循环
     loop {
         let msg = {
             let mut ws_guard = ws.lock().unwrap();
             ws_guard.read()
-        }; // 锁在这里释放
-
+        };
         match msg {
             Ok(Message::Text(text)) => {
-                handle_message(&text, &state, &callbacks, verbose, &ws)?;
+                let keep_going = handle_message(&text, &state, &callbacks, verbose, &reader_tx);
+                if !keep_going {
+                    let _ = reader_tx.send("__CLOSE__".to_string());
+                    break;
+                }
             }
-            Ok(Message::Close(_)) => break,
+            Ok(Message::Close(_)) => {
+                let _ = reader_tx.send("__CLOSE__".to_string());
+                break;
+            }
             Err(e) => {
                 if verbose {
                     eprintln!("WebSocket read error: {}", e);
                 }
+                let _ = reader_tx.send("__CLOSE__".to_string());
                 break;
             }
             _ => {}
@@ -588,10 +614,8 @@ fn handle_message(
     state: &(Mutex<ClientState>, Condvar),
     callbacks: &Arc<Mutex<Vec<StreamCallback>>>,
     verbose: bool,
-    ws: &Arc<
-        Mutex<tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<std::net::TcpStream>>>,
-    >,
-) -> Result<(), ChatError> {
+    sender: &Sender<String>,
+) -> bool {
     let (lock, cvar) = state;
     let mut state_guard = lock.lock().unwrap();
 
@@ -605,10 +629,11 @@ fn handle_message(
         if verbose {
             println!("Socket.IO 连接成功");
         }
-        // 通过全局 ws 发送 join（这里直接使用写锁，短暂的锁不会长期阻塞读）
-        ws.lock()
-            .unwrap()
-            .send(Message::Text(r#"42 ["join"]"#.into()))?;
+        let sender_clone = sender.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_secs(1));
+            let _ = sender_clone.send(r#"42 ["join"]"#.to_string());
+        });
     } else if text.starts_with("42") {
         let payload = &text[2..];
         if let Ok(event) = serde_json::from_str::<Value>(payload) {
@@ -635,13 +660,12 @@ fn handle_message(
                                     .and_then(|v| v.as_str())
                                     .map(String::from);
                             }
-                            // 发送预设消息
-                            ws.lock().unwrap().send(Message::Text(
-                                r#"42 ["preset_chat_message",{"turn_count":5,"system_content_enum":"default"}]"#.into(),
-                            ))?;
-                            ws.lock().unwrap().send(Message::Text(
-                                r#"42 ["get_text2Img_remaining_times"]"#.into(),
-                            ))?;
+                            let _ = sender.send(
+                                r#"42 ["preset_chat_message",{"turn_count":5,"system_content_enum":"default"}]"#
+                                    .to_string(),
+                            );
+                            let _ =
+                                sender.send(r#"42 ["get_text2Img_remaining_times"]"#.to_string());
                         }
                     }
                     "chat_ack" => {
@@ -691,10 +715,10 @@ fn handle_message(
             }
         }
     } else if text.starts_with('3') {
-        let _ = ws.lock().unwrap().send(Message::Text("2".into()));
+        let _ = sender.send("2".to_string());
     }
 
-    Ok(())
+    true
 }
 
 fn notify_callbacks(
@@ -714,18 +738,6 @@ fn generate_session_id(length: usize) -> String {
     (0..length)
         .map(|_| CHARSET[rng.random_range(0..CHARSET.len())] as char)
         .collect()
-}
-
-// ==================== 便捷工具函数 ====================
-impl CodeMaoChatClient {
-    pub fn quick_chat(token: &str, message: &str) -> Result<String, ChatError> {
-        let mut client = CodeMaoChatClient::builder().token(token).build()?;
-        client.connect()?;
-        std::thread::sleep(Duration::from_secs(2));
-        let response = client.send_message(message).send_and_wait()?;
-        client.close();
-        Ok(response)
-    }
 }
 
 // ==================== 示例测试 ====================
