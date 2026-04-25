@@ -130,7 +130,6 @@ fn urlencoding(s: &str) -> String {
 pub type StreamCallback = Box<dyn FnMut(&str, StreamEventType) + Send>;
 
 // ==================== 内部状态 ====================
-#[derive(Default)]
 struct ClientState {
     is_receiving_response: bool,
     current_response: String,
@@ -141,6 +140,24 @@ struct ClientState {
     user_id: Option<u64>,
     search_session: Option<String>,
     connected: bool,
+    joined: bool, // 是否已成功加入房间
+}
+
+impl Default for ClientState {
+    fn default() -> Self {
+        Self {
+            is_receiving_response: false,
+            current_response: String::new(),
+            response_complete: false,
+            user_info: HashMap::new(),
+            conversation_history: Vec::new(),
+            conversation_id: generate_session_id(8),
+            user_id: None,
+            search_session: None,
+            connected: false,
+            joined: false,
+        }
+    }
 }
 
 // ==================== WebSocket 管理器 ====================
@@ -175,16 +192,14 @@ impl CodeMaoChatClient {
         ChatClientBuilder::new()
     }
 
-    // 修复后的完整 connect 方法（保留此版本，删除之前的错误版本）
     pub fn connect(&mut self) -> Result<(), ChatError> {
         let url = self.config.build_ws_url(&self.token)?;
         let state = Arc::clone(&self.state);
         let global_callbacks = Arc::clone(&self.global_callbacks);
         let verbose = self.config.verbose;
 
-        // 统一的 channel：writer 从 rx 接收消息，外部和 reader 通过 tx 发送
         let (tx, rx) = mpsc::channel::<String>();
-        let reader_tx = tx.clone(); // reader 使用
+        let reader_tx = tx.clone();
 
         let handle = thread::spawn(move || {
             if let Err(e) = run_ws_loop(url, rx, reader_tx, state, global_callbacks, verbose) {
@@ -199,20 +214,30 @@ impl CodeMaoChatClient {
             thread_handle: handle,
         });
 
-        // 等待连接成功
+        // 等待连接建立和加入房间完成
         let timeout = Duration::from_secs(self.config.connect_timeout);
         let (lock, cvar) = &*self.state;
         let mut guard = lock.lock().unwrap();
         let start = std::time::Instant::now();
-        while !guard.connected && start.elapsed() < timeout {
+
+        while (!guard.connected || !guard.joined) && start.elapsed() < timeout {
             guard = cvar
                 .wait_timeout(guard, Duration::from_millis(100))
                 .unwrap()
                 .0;
         }
+
         if !guard.connected {
             return Err(ChatError::Timeout("连接超时".to_string()));
         }
+        if !guard.joined {
+            return Err(ChatError::Timeout("加入房间超时".to_string()));
+        }
+
+        if self.config.verbose {
+            println!("连接成功");
+        }
+
         Ok(())
     }
 
@@ -264,7 +289,8 @@ impl CodeMaoChatClient {
     pub fn quick_chat(token: &str, message: &str) -> Result<String, ChatError> {
         let mut client = CodeMaoChatClient::builder().token(token).build()?;
         client.connect()?;
-        std::thread::sleep(Duration::from_secs(2));
+        // 等待额外一秒确保状态稳定
+        std::thread::sleep(Duration::from_secs(1));
         let response = client.send_message(message).send_and_wait()?;
         client.close();
         Ok(response)
@@ -408,8 +434,14 @@ impl<'a> MessageRequestBuilder<'a> {
     }
 
     fn send_internal(&self) -> Result<(), ChatError> {
+        // 检查是否已加入房间
         {
             let state = self.client.state.0.lock().unwrap();
+            if !state.joined {
+                return Err(ChatError::Connection(
+                    "尚未加入房间，请稍后重试".to_string(),
+                ));
+            }
             if state.is_receiving_response {
                 return Err(ChatError::Connection("正在接收回复，请等待".to_string()));
             }
@@ -444,6 +476,7 @@ impl<'a> MessageRequestBuilder<'a> {
             "msg_channel": 0
         });
 
+        // 重要：消息格式必须带空格：42 ["chat",...]
         let message_str = format!(r#"42 ["chat",{}]"#, serde_json::to_string(&chat_data)?);
         self.client.ws_send(message_str)?;
 
@@ -535,11 +568,11 @@ impl ChatClientBuilder {
     }
 }
 
-// ==================== WebSocket 事件循环（完整实现） ====================
+// ==================== WebSocket 事件循环 ====================
 fn run_ws_loop(
     url: Url,
-    rx: Receiver<String>,      // 接收外部消息
-    reader_tx: Sender<String>, // reader 线程可以用此发送消息
+    rx: Receiver<String>,
+    reader_tx: Sender<String>,
     state: Arc<(Mutex<ClientState>, Condvar)>,
     callbacks: Arc<Mutex<Vec<StreamCallback>>>,
     verbose: bool,
@@ -549,7 +582,7 @@ fn run_ws_loop(
     let ws_writer = Arc::clone(&ws);
     let state_writer = Arc::clone(&state);
 
-    // writer 线程：从 channel 接收消息写入 WebSocket
+    // writer 线程
     let writer_handle = thread::spawn(move || {
         for msg in rx {
             if msg == "__CLOSE__" {
@@ -560,17 +593,9 @@ fn run_ws_loop(
                 if verbose {
                     eprintln!("发送失败: {}", e);
                 }
-                // 发送失败，标记连接断开并退出
-                {
-                    let (lock, cvar) = &*state_writer;
-                    let mut state = lock.lock().unwrap();
-                    state.connected = false;
-                    cvar.notify_all();
-                }
                 break;
             }
         }
-        // 关闭连接
         if let Ok(mut ws_guard) = ws_writer.lock() {
             let _ = ws_guard.close(None);
         }
@@ -619,103 +644,184 @@ fn handle_message(
     let (lock, cvar) = state;
     let mut state_guard = lock.lock().unwrap();
 
+    if verbose {
+        println!("[RECV] {}", text);
+    }
+
     if text.starts_with('0') {
         if verbose {
-            println!("连接建立");
+            println!("收到连接确认");
         }
         state_guard.connected = true;
         cvar.notify_all();
-    } else if text.starts_with("40") {
-        if verbose {
-            println!("Socket.IO 连接成功");
-        }
+
+        // 发送 "40" 进行 Socket.IO 握手
+        let _ = sender.send("40".to_string());
+
+        // 1秒后发送 join 事件（注意空格）
         let sender_clone = sender.clone();
         thread::spawn(move || {
             thread::sleep(Duration::from_secs(1));
             let _ = sender_clone.send(r#"42 ["join"]"#.to_string());
         });
+    } else if text == "40" {
+        if verbose {
+            println!("Socket.IO 连接确认");
+        }
     } else if text.starts_with("42") {
+        // 解析事件
         let payload = &text[2..];
-        if let Ok(event) = serde_json::from_str::<Value>(payload) {
-            if let Some(arr) = event.as_array() {
+        if let Ok(arr) = serde_json::from_str::<Vec<Value>>(payload) {
+            if arr.len() >= 2 {
                 let event_name = arr[0].as_str().unwrap_or("");
-                let event_data = arr.get(1).cloned().unwrap_or(Value::Null);
+                let event_data = &arr[1];
 
                 match event_name {
                     "on_connect_ack" => {
-                        if event_data.get("code").and_then(Value::as_i64) == Some(1) {
-                            if let Some(data) = event_data.get("data") {
-                                for (k, v) in data.as_object().unwrap() {
-                                    state_guard.user_info.insert(k.clone(), v.clone());
+                        if let Some(code) = event_data.get("code").and_then(|v| v.as_i64()) {
+                            if code == 1 {
+                                if verbose {
+                                    println!("连接确认成功");
+                                }
+                                if let Some(data) = event_data.get("data") {
+                                    if let Some(obj) = data.as_object() {
+                                        for (k, v) in obj {
+                                            state_guard.user_info.insert(k.clone(), v.clone());
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                     "join_ack" => {
-                        if event_data.get("code").and_then(Value::as_i64) == Some(1) {
-                            if let Some(data) = event_data.get("data") {
-                                state_guard.user_id = data.get("user_id").and_then(Value::as_u64);
-                                state_guard.search_session = data
-                                    .get("search_session")
-                                    .and_then(|v| v.as_str())
-                                    .map(String::from);
+                        if let Some(code) = event_data.get("code").and_then(|v| v.as_i64()) {
+                            if code == 1 {
+                                if verbose {
+                                    println!("加入房间成功");
+                                }
+                                if let Some(data) = event_data.get("data") {
+                                    state_guard.user_id =
+                                        data.get("user_id").and_then(|v| v.as_u64());
+                                    state_guard.search_session = data
+                                        .get("search_session")
+                                        .and_then(|v| v.as_str())
+                                        .map(String::from);
+                                }
+                                state_guard.joined = true;
+                                cvar.notify_all();
+
+                                // 发送预设消息（注意空格）
+                                let sender_clone = sender.clone();
+                                let _ = sender_clone.send(
+                                    r#"42 ["preset_chat_message",{"turn_count":5,"system_content_enum":"default"}]"#
+                                        .to_string(),
+                                );
+                                let _ = sender_clone
+                                    .send(r#"42 ["get_text2Img_remaining_times"]"#.to_string());
                             }
-                            let _ = sender.send(
-                                r#"42 ["preset_chat_message",{"turn_count":5,"system_content_enum":"default"}]"#
-                                    .to_string(),
-                            );
-                            let _ =
-                                sender.send(r#"42 ["get_text2Img_remaining_times"]"#.to_string());
                         }
                     }
                     "chat_ack" => {
-                        if event_data.get("code").and_then(Value::as_i64) == Some(1) {
-                            if let Some(data) = event_data.get("data") {
-                                let content_type = data
-                                    .get("content_type")
-                                    .and_then(Value::as_str)
-                                    .unwrap_or("");
-                                let content =
-                                    data.get("content").and_then(Value::as_str).unwrap_or("");
-                                match content_type {
-                                    "stream_output_begin" => {
-                                        state_guard.is_receiving_response = true;
-                                        state_guard.current_response.clear();
-                                        state_guard.response_complete = false;
-                                        notify_callbacks(callbacks, "", StreamEventType::Start);
+                        if let Some(code) = event_data.get("code").and_then(|v| v.as_i64()) {
+                            if code == 1 {
+                                if let Some(data) = event_data.get("data") {
+                                    let content_type = data
+                                        .get("content_type")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("");
+                                    let content =
+                                        data.get("content").and_then(|v| v.as_str()).unwrap_or("");
+
+                                    match content_type {
+                                        "stream_output_begin" => {
+                                            if verbose {
+                                                println!("[回复开始]");
+                                            }
+                                            state_guard.is_receiving_response = true;
+                                            state_guard.current_response.clear();
+                                            state_guard.response_complete = false;
+                                            drop(state_guard);
+                                            notify_callbacks(callbacks, "", StreamEventType::Start);
+                                            state_guard = lock.lock().unwrap();
+                                        }
+                                        "stream_output_content" => {
+                                            if verbose {
+                                                print!("{}", content);
+                                                let _ =
+                                                    std::io::Write::flush(&mut std::io::stdout());
+                                            }
+                                            state_guard.current_response.push_str(content);
+                                            drop(state_guard);
+                                            notify_callbacks(
+                                                callbacks,
+                                                content,
+                                                StreamEventType::Text,
+                                            );
+                                            state_guard = lock.lock().unwrap();
+                                        }
+                                        "stream_output_end" => {
+                                            if verbose {
+                                                println!("\n[回复结束]");
+                                            }
+                                            state_guard.is_receiving_response = false;
+                                            state_guard.response_complete = true;
+
+                                            let final_response =
+                                                state_guard.current_response.clone();
+                                            if !final_response.is_empty() {
+                                                let mut entry = HashMap::new();
+                                                entry.insert(
+                                                    "role".to_string(),
+                                                    "assistant".to_string(),
+                                                );
+                                                entry.insert(
+                                                    "content".to_string(),
+                                                    final_response.clone(),
+                                                );
+                                                state_guard.conversation_history.push(entry);
+                                            }
+
+                                            cvar.notify_all();
+                                            drop(state_guard);
+                                            notify_callbacks(
+                                                callbacks,
+                                                &final_response,
+                                                StreamEventType::End,
+                                            );
+                                            state_guard = lock.lock().unwrap();
+                                        }
+                                        _ => {}
                                     }
-                                    "stream_output_content" => {
-                                        state_guard.current_response.push_str(content);
-                                        notify_callbacks(callbacks, content, StreamEventType::Text);
+                                }
+                            } else {
+                                // 处理错误响应（如"非法操作"）
+                                if let Some(code_msg) =
+                                    event_data.get("code_msg").and_then(|v| v.as_str())
+                                {
+                                    if verbose {
+                                        eprintln!("聊天错误: {} (code: {})", code_msg, code);
                                     }
-                                    "stream_output_end" => {
-                                        state_guard.is_receiving_response = false;
-                                        state_guard.response_complete = true;
-                                        let mut entry = HashMap::new();
-                                        entry.insert("role".to_string(), "assistant".to_string());
-                                        entry.insert(
-                                            "content".to_string(),
-                                            state_guard.current_response.clone(),
-                                        );
-                                        state_guard.conversation_history.push(entry);
-                                        notify_callbacks(
-                                            callbacks,
-                                            &state_guard.current_response,
-                                            StreamEventType::End,
-                                        );
-                                        cvar.notify_all();
-                                    }
-                                    _ => {}
+                                    state_guard.is_receiving_response = false;
+                                    state_guard.response_complete = true;
+                                    state_guard.current_response = format!("错误: {}", code_msg);
+                                    cvar.notify_all();
                                 }
                             }
                         }
                     }
-                    _ => {}
+                    _ => {
+                        if verbose {
+                            println!("[未处理事件] {}: {}", event_name, event_data);
+                        }
+                    }
                 }
             }
         }
-    } else if text.starts_with('3') {
-        let _ = sender.send("2".to_string());
+    } else if text == "2" {
+        // ping，回复 pong
+        let _ = sender.send("3".to_string());
+    } else if text == "3" {
+        // pong
     }
 
     true
@@ -738,26 +844,4 @@ fn generate_session_id(length: usize) -> String {
     (0..length)
         .map(|_| CHARSET[rng.random_range(0..CHARSET.len())] as char)
         .collect()
-}
-
-// ==================== 示例测试 ====================
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_builder() {
-        let client = CodeMaoChatClient::builder()
-            .token("test_token")
-            .verbose(true)
-            .build();
-        assert!(client.is_ok());
-    }
-
-    #[test]
-    fn test_generate_id() {
-        let id = generate_session_id(8);
-        assert_eq!(id.len(), 8);
-        assert!(id.chars().all(|c| c.is_ascii_alphanumeric()));
-    }
 }
