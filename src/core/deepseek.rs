@@ -141,6 +141,7 @@ struct ClientState {
     search_session: Option<String>,
     connected: bool,
     joined: bool,
+    join_sent: bool, // 新增：标记 join 消息是否已发送
 }
 
 impl Default for ClientState {
@@ -156,6 +157,7 @@ impl Default for ClientState {
             search_session: None,
             connected: false,
             joined: false,
+            join_sent: false,
         }
     }
 }
@@ -479,7 +481,6 @@ impl<'a> MessageRequestBuilder<'a> {
             "msg_channel": 0
         });
 
-        // 修复：移除空格，正确的格式是 42["chat",...]
         let message_str = format!(r#"42["chat",{}]"#, serde_json::to_string(&chat_data)?);
         self.client.ws_send(message_str)?;
 
@@ -669,12 +670,7 @@ fn handle_message(
         // 发送 "40" 进行 Socket.IO 握手
         let _ = sender.send("40".to_string());
 
-        // 1秒后发送 join 事件
-        let sender_clone = sender.clone();
-        thread::spawn(move || {
-            thread::sleep(Duration::from_secs(1));
-            let _ = sender_clone.send(r#"42["join"]"#.to_string());
-        });
+        // 注意：不再从这里发送 join，join 将在 on_connect_ack 成功后发送
     } else if text == "40" {
         if verbose {
             println!("Socket.IO 连接确认");
@@ -711,6 +707,19 @@ fn handle_message(
                                             state_guard.user_info.insert(k.clone(), v.clone());
                                         }
                                     }
+                                }
+
+                                // 仅当尚未发送 join 时才发送
+                                if !state_guard.join_sent {
+                                    state_guard.join_sent = true;
+                                    drop(state_guard);
+                                    let sender_clone = sender.clone();
+                                    thread::spawn(move || {
+                                        thread::sleep(Duration::from_millis(200));
+                                        let _ = sender_clone.send(r#"42["join"]"#.to_string());
+                                    });
+                                    // 重新获取锁（后续继续使用 state_guard 需要重新锁定）
+                                    state_guard = lock.lock().unwrap();
                                 }
                             }
                         }
