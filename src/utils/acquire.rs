@@ -288,7 +288,7 @@ impl Default for ClientConfig {
         Self {
             default_base_key: BaseKey::Default,
             timeout: Duration::from_secs(30),
-            log_requests: true,
+            log_requests: false,
             use_global_auth: true,
         }
     }
