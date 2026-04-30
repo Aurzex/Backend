@@ -1089,21 +1089,34 @@ impl CloudAuthenticator {
         Ok(now - self.time_difference)
     }
 
-    pub fn generate_x_device_auth(&mut self) -> Result<Value, Box<dyn std::error::Error>> {
+    /// 生成设备认证（返回 JSON 字符串）
+    pub fn generate_x_device_auth(&mut self) -> Result<String, Box<dyn std::error::Error>> {
         let timestamp = self.get_calibrated_timestamp()?;
         let sign_str = format!("{}{}{}", self.client_secret, timestamp, self.client_id);
         let mut hasher = Sha256::new();
         hasher.update(sign_str.as_bytes());
         let sign = format!("{:X}", hasher.finalize());
 
-        Ok(json!({
+        let auth_json = json!({
             "sign": sign,
             "timestamp": timestamp,
             "client_id": self.client_id,
-        }))
+        });
+
+        // 返回 JSON 字符串
+        Ok(serde_json::to_string(&auth_json)?)
+    }
+
+    /// 获取授权 token
+    pub fn authorization_token(&self) -> Option<&String> {
+        self.authorization_token.as_ref()
+    }
+
+    /// 设置授权 token
+    pub fn set_authorization_token(&mut self, token: Option<String>) {
+        self.authorization_token = token;
     }
 }
-
 // ==================== 链式调用构建器 ====================
 
 /// 登录请求构建器，支持链式调用并强制使用 LoginMethod 枚举
