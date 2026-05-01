@@ -1284,6 +1284,29 @@ impl CloudConnection {
             }
         }
     }
+    pub fn get_all_private_variable_names(&self) -> Vec<String> {
+        self.private_variables
+            .read()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    /// 获取所有公共变量名称
+    pub fn get_all_public_variable_names(&self) -> Vec<String> {
+        self.public_variables
+            .read()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    /// 获取所有列表名称
+    pub fn get_all_list_names(&self) -> Vec<String> {
+        self.lists.read().unwrap().keys().cloned().collect()
+    }
 }
 
 // ==================== Builder ====================
@@ -1377,15 +1400,5 @@ pub fn truncate_value(value: &Value) -> String {
             }
         }
         _ => value.to_string(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_builder() {
-        // 仅示例，需要实际网络环境
     }
 }
