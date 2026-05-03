@@ -2,6 +2,7 @@ use crate::utils::acquire::{BaseKey, CodeMaoClient, HttpMethod, PaginatedIter, P
 use serde_json::{Value, json};
 
 // 回复类型枚举
+#[derive(Clone, Copy)]
 pub enum ReplyTypes {
     LikeFork,
     CommentReply,
@@ -916,4 +917,3 @@ impl Default for UserAction {
         Self::new()
     }
 }
-
