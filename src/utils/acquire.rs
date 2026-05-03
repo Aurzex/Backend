@@ -1,10 +1,12 @@
-use rand::RngExt;
+use rand::Rng;
 use serde_json::Value;
-use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
 use std::str::FromStr;
-use std::sync::{Arc, OnceLock, RwLock};
+use std::sync::{
+    Arc, OnceLock, RwLock,
+    atomic::{AtomicUsize, Ordering},
+};
 use std::time::Duration;
 use ureq::http::Response;
 use ureq::unversioned::multipart::Form;
@@ -181,48 +183,52 @@ impl AsRef<str> for Identity {
     }
 }
 
-// ==================== 身份管理器（核心单例）====================
+// ==================== 身份管理器（核心单例 - 扁平化设计）====================
 /// 全局身份管理器，使用固定长度数组存储令牌
+/// 采用 RwLock + AtomicUsize 分离 token 存储和 current 索引
 #[derive(Debug)]
 pub struct GlobalIdentityManager {
-    tokens: [Option<String>; 4],
-    current: Identity,
+    tokens: RwLock<[Option<Arc<str>>; 4]>,
+    current: AtomicUsize,
 }
 
 impl GlobalIdentityManager {
     fn new() -> Self {
         Self {
-            tokens: Default::default(),
-            current: Identity::Average,
+            tokens: RwLock::new(Default::default()),
+            current: AtomicUsize::new(Identity::Average.index()),
         }
     }
 
     /// 设置指定身份的令牌
-    fn set_token(&mut self, identity: Identity, token: impl Into<String>) {
-        let token = token.into();
+    fn set_token(&self, identity: Identity, token: String) {
+        let mut tokens = self.tokens.write().unwrap();
         if !token.is_empty() {
-            self.tokens[identity.index()] = Some(token);
+            tokens[identity.index()] = Some(Arc::from(token));
         }
     }
 
     /// 切换到指定身份
-    fn switch_identity(&mut self, identity: Identity) -> Result<()> {
-        if identity == Identity::Blank || self.tokens[identity.index()].is_some() {
-            self.current = identity;
+    fn switch_identity(&self, identity: Identity) -> Result<()> {
+        if identity == Identity::Blank || self.tokens.read().unwrap()[identity.index()].is_some() {
+            self.current.store(identity.index(), Ordering::Relaxed);
             Ok(())
         } else {
             Err(Error::Auth(format!("No token for identity {:?}", identity)))
         }
     }
 
-    /// 当前身份
+    /// 当前身份（无锁读取）
     fn current_identity(&self) -> Identity {
-        self.current
+        let idx = self.current.load(Ordering::Relaxed);
+        Identity::ALL[idx]
     }
 
     /// 当前身份对应的令牌
-    fn current_token(&self) -> Option<&str> {
-        self.tokens[self.current.index()].as_deref()
+    fn current_token(&self) -> Option<Arc<str>> {
+        let idx = self.current.load(Ordering::Relaxed);
+        let tokens = self.tokens.read().unwrap();
+        tokens[idx].clone()
     }
 
     /// 生成认证头
@@ -233,12 +239,10 @@ impl GlobalIdentityManager {
 }
 
 /// 全局身份管理器单例
-static GLOBAL_IDENTITY_MANAGER: OnceLock<Arc<RwLock<GlobalIdentityManager>>> = OnceLock::new();
+static GLOBAL_IDENTITY_MANAGER: OnceLock<GlobalIdentityManager> = OnceLock::new();
 
-fn get_global_identity_manager() -> Arc<RwLock<GlobalIdentityManager>> {
-    GLOBAL_IDENTITY_MANAGER
-        .get_or_init(|| Arc::new(RwLock::new(GlobalIdentityManager::new())))
-        .clone()
+fn get_global_identity_manager() -> &'static GlobalIdentityManager {
+    GLOBAL_IDENTITY_MANAGER.get_or_init(|| GlobalIdentityManager::new())
 }
 
 // ==================== 客户端配置 ====================
@@ -318,58 +322,15 @@ impl From<HttpMethod> for &'static str {
     }
 }
 
-// ==================== 独立身份管理器 ====================
-/// 用于独立客户端的身份管理器
-#[derive(Debug, Clone)]
-pub struct LocalIdentityManager {
-    tokens: [Option<String>; 4],
-    current: Identity,
-}
-
-impl LocalIdentityManager {
-    pub fn new() -> Self {
-        Self {
-            tokens: Default::default(),
-            current: Identity::Average,
-        }
-    }
-
-    pub fn set_token(&mut self, identity: Identity, token: impl Into<String>) {
-        let token = token.into();
-        if !token.is_empty() {
-            self.tokens[identity.index()] = Some(token);
-        }
-    }
-
-    pub fn switch_identity(&mut self, identity: Identity) -> Result<()> {
-        if identity == Identity::Blank || self.tokens[identity.index()].is_some() {
-            self.current = identity;
-            Ok(())
-        } else {
-            Err(Error::Auth(format!("No token for identity {:?}", identity)))
-        }
-    }
-
-    pub fn current_identity(&self) -> Identity {
-        self.current
-    }
-
-    pub fn current_token(&self) -> Option<&str> {
-        self.tokens[self.current.index()].as_deref()
-    }
-
-    pub fn auth_header(&self) -> Option<(&'static str, String)> {
-        self.current_token()
-            .map(|token| ("Authorization", format!("Bearer {}", token)))
-    }
-}
-
 // ==================== 认证特质 ====================
 /// 认证提供者特质，允许不同的认证实现
 pub trait AuthProvider: Send + Sync + std::fmt::Debug {
     fn current_identity(&self) -> Identity;
-    fn current_token(&self) -> Option<String>;
-    fn auth_header(&self) -> Option<(&'static str, String)>;
+    fn current_token(&self) -> Option<Arc<str>>;
+    fn auth_header(&self) -> Option<(&'static str, String)> {
+        self.current_token()
+            .map(|token| ("Authorization", format!("Bearer {}", token)))
+    }
     fn set_token(&self, identity: Identity, token: String) -> Result<()>;
     fn switch_identity(&self, identity: Identity) -> Result<()>;
 }
@@ -386,90 +347,53 @@ impl GlobalAuthProvider {
 
 impl AuthProvider for GlobalAuthProvider {
     fn current_identity(&self) -> Identity {
-        get_global_identity_manager()
-            .read()
-            .map(|guard| guard.current_identity())
-            .unwrap_or(Identity::Blank)
+        get_global_identity_manager().current_identity()
     }
 
-    fn current_token(&self) -> Option<String> {
-        get_global_identity_manager()
-            .read()
-            .ok()
-            .and_then(|guard| guard.current_token().map(String::from))
-    }
-
-    fn auth_header(&self) -> Option<(&'static str, String)> {
-        get_global_identity_manager()
-            .read()
-            .ok()
-            .and_then(|guard| guard.auth_header())
+    fn current_token(&self) -> Option<Arc<str>> {
+        get_global_identity_manager().current_token()
     }
 
     fn set_token(&self, identity: Identity, token: String) -> Result<()> {
-        get_global_identity_manager()
-            .write()
-            .map(|mut guard| {
-                guard.set_token(identity, token);
-            })
-            .map_err(|_| Error::Auth("Failed to acquire write lock".into()))
+        get_global_identity_manager().set_token(identity, token);
+        Ok(())
     }
 
     fn switch_identity(&self, identity: Identity) -> Result<()> {
-        get_global_identity_manager()
-            .write()
-            .map_err(|_| Error::Auth("Failed to acquire write lock".into()))?
-            .switch_identity(identity)
+        get_global_identity_manager().switch_identity(identity)
     }
 }
 
-/// 本地认证提供者
+/// 本地认证提供者（独立实例）
 #[derive(Debug, Clone)]
 pub struct LocalAuthProvider {
-    inner: Arc<RwLock<LocalIdentityManager>>,
+    inner: Arc<GlobalIdentityManager>,
 }
 
 impl LocalAuthProvider {
     pub fn new() -> Self {
         Self {
-            inner: Arc::new(RwLock::new(LocalIdentityManager::new())),
+            inner: Arc::new(GlobalIdentityManager::new()),
         }
     }
 }
 
 impl AuthProvider for LocalAuthProvider {
     fn current_identity(&self) -> Identity {
-        self.inner
-            .read()
-            .map(|guard| guard.current_identity())
-            .unwrap_or(Identity::Blank)
+        self.inner.current_identity()
     }
 
-    fn current_token(&self) -> Option<String> {
-        self.inner
-            .read()
-            .ok()
-            .and_then(|guard| guard.current_token().map(String::from))
-    }
-
-    fn auth_header(&self) -> Option<(&'static str, String)> {
-        self.inner.read().ok().and_then(|guard| guard.auth_header())
+    fn current_token(&self) -> Option<Arc<str>> {
+        self.inner.current_token()
     }
 
     fn set_token(&self, identity: Identity, token: String) -> Result<()> {
-        self.inner
-            .write()
-            .map(|mut guard| {
-                guard.set_token(identity, token);
-            })
-            .map_err(|_| Error::Auth("Failed to acquire write lock".into()))
+        self.inner.set_token(identity, token);
+        Ok(())
     }
 
     fn switch_identity(&self, identity: Identity) -> Result<()> {
-        self.inner
-            .write()
-            .map_err(|_| Error::Auth("Failed to acquire write lock".into()))?
-            .switch_identity(identity)
+        self.inner.switch_identity(identity)
     }
 }
 
@@ -480,9 +404,9 @@ pub struct InnerBuilder {
     method: HttpMethod,
     endpoint: String,
     base_key: Option<BaseKey>,
-    params: Option<HashMap<String, String>>,
+    params: Vec<(String, String)>,
     payload: Option<Value>,
-    headers: Option<HashMap<String, String>>,
+    headers: Vec<(String, String)>,
 }
 
 impl InnerBuilder {
@@ -497,24 +421,20 @@ impl InnerBuilder {
             method,
             endpoint: endpoint.into(),
             base_key,
-            params: None,
+            params: Vec::new(),
             payload: None,
-            headers: None,
+            headers: Vec::new(),
         }
     }
 
-    /// 设置查询参数，多次调用将合并参数（后添加的覆盖同名参数）
-    pub fn with_params(mut self, params: HashMap<String, String>) -> Self {
-        match self.params.as_mut() {
-            Some(map) => map.extend(params),
-            None => self.params = Some(params),
-        }
+    /// 设置查询参数，多次调用将合并参数（后添加的覆盖同名参数需要自行处理）
+    pub fn with_params(mut self, params: Vec<(String, String)>) -> Self {
+        self.params.extend(params);
         self
     }
 
     pub fn with_param(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        let map = self.params.get_or_insert_with(HashMap::new);
-        map.insert(key.into(), value.into());
+        self.params.push((key.into(), value.into()));
         self
     }
 
@@ -524,13 +444,15 @@ impl InnerBuilder {
         self
     }
 
-    /// 设置额外请求头，多次调用将合并头字段（后添加的覆盖同名头）
+    /// 设置额外请求头，多次调用将合并头字段
     /// 这些头仅用于当前请求，不会持久化到后续请求
-    pub fn with_headers(mut self, headers: HashMap<String, String>) -> Self {
-        match self.headers.as_mut() {
-            Some(map) => map.extend(headers),
-            None => self.headers = Some(headers),
-        }
+    pub fn with_headers(mut self, headers: Vec<(String, String)>) -> Self {
+        self.headers.extend(headers);
+        self
+    }
+
+    pub fn with_header(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.headers.push((key.into(), value.into()));
         self
     }
 
@@ -540,9 +462,9 @@ impl InnerBuilder {
             self.method,
             &self.endpoint,
             self.base_key,
-            self.params.as_ref(),
+            &self.params,
             self.payload.as_ref(),
-            self.headers.as_ref(),
+            &self.headers,
         )
     }
 }
@@ -589,7 +511,7 @@ impl InnerClient {
         &self,
         method: HttpMethod,
         url: &str,
-        params: Option<&HashMap<String, String>>,
+        params: &[(String, String)],
         payload: Option<&Value>,
     ) {
         if !self.config.log_requests {
@@ -608,12 +530,10 @@ impl InnerClient {
             println!("  Authorization: Bearer [已隐藏]");
         }
 
-        if let Some(params) = params {
-            if !params.is_empty() {
-                println!("查询参数:");
-                for (k, v) in params {
-                    println!("  {}: {}", k, v);
-                }
+        if !params.is_empty() {
+            println!("查询参数:");
+            for (k, v) in params {
+                println!("  {}: {}", k, v);
             }
         }
 
@@ -651,12 +571,11 @@ impl InnerClient {
     }
 
     /// 为 RequestBuilder 添加默认头、认证头、额外头和查询参数
-    /// 使用泛型来处理不同的 Body 类型
     fn apply_to_request_builder<B>(
         mut builder: RequestBuilder<B>,
         auth: &dyn AuthProvider,
-        params: Option<&HashMap<String, String>>,
-        extra_headers: Option<&HashMap<String, String>>,
+        params: &[(String, String)],
+        extra_headers: &[(String, String)],
     ) -> RequestBuilder<B> {
         // 添加默认头
         for (k, v) in DEFAULT_HEADERS {
@@ -667,16 +586,12 @@ impl InnerClient {
             builder = builder.header(k, &v);
         }
         // 添加额外头
-        if let Some(headers) = extra_headers {
-            for (k, v) in headers {
-                builder = builder.header(k.as_str(), v.as_str());
-            }
+        for (k, v) in extra_headers {
+            builder = builder.header(k.as_str(), v.as_str());
         }
         // 添加查询参数
-        if let Some(params) = params {
-            for (k, v) in params {
-                builder = builder.query(k.as_str(), v.as_str());
-            }
+        for (k, v) in params {
+            builder = builder.query(k.as_str(), v.as_str());
         }
         builder
     }
@@ -686,9 +601,9 @@ impl InnerClient {
         method: HttpMethod,
         endpoint: &str,
         base_key: Option<BaseKey>,
-        params: Option<&HashMap<String, String>>,
+        params: &[(String, String)],
         payload: Option<&Value>,
-        extra_headers: Option<&HashMap<String, String>>,
+        extra_headers: &[(String, String)],
     ) -> Result<Response<Body>> {
         let url = self.build_url(endpoint, base_key);
         self.log_request(method, &url, params, payload);
@@ -879,7 +794,7 @@ impl CodeMaoClient {
 
     /// 获取当前令牌
     pub fn current_token(&self) -> Option<String> {
-        self.inner.auth.current_token()
+        self.inner.auth.current_token().map(|t| t.to_string())
     }
 
     /// 发送 HTTP 请求，返回 RequestBuilder 支持链式调用
@@ -902,7 +817,7 @@ impl CodeMaoClient {
         self.inner.response_to_string(response)
     }
 
-    /// 将响应体读取为字符串
+    /// 将响应体读取为二进制数据
     pub fn response_to_binary(&self, response: Response<Body>) -> Result<Vec<u8>> {
         self.inner.response_to_binary(response)
     }
@@ -933,12 +848,12 @@ pub struct PaginationConfig {
     pub response_offset_key: Option<String>,
 }
 
-// ==================== 分页迭代器 ====================
+// ==================== 分页迭代器（使用 Arc<Vec> 共享参数） ====================
 pub struct PaginatedIter {
     client: CodeMaoClient,
     method: HttpMethod,
     endpoint: String,
-    base_params: HashMap<String, String>,
+    base_params: Arc<Vec<(String, String)>>,
     payload: Option<Value>,
     limit: Option<usize>,
     total_key: String,
@@ -966,7 +881,7 @@ impl PaginatedIter {
             client,
             method: HttpMethod::GET,
             endpoint: endpoint.into(),
-            base_params: HashMap::new(),
+            base_params: Arc::new(Vec::new()),
             payload: None,
             limit: None,
             total_key: "total".to_string(),
@@ -992,12 +907,16 @@ impl PaginatedIter {
     }
 
     pub fn with_param(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.base_params.insert(key.into(), value.into());
+        let mut params = (*self.base_params).clone();
+        params.push((key.into(), value.into()));
+        self.base_params = Arc::new(params);
         self
     }
 
-    pub fn with_params(mut self, params: HashMap<String, String>) -> Self {
-        self.base_params.extend(params);
+    pub fn with_params(mut self, params: Vec<(String, String)>) -> Self {
+        let mut existing_params = (*self.base_params).clone();
+        existing_params.extend(params);
+        self.base_params = Arc::new(existing_params);
         self
     }
 
@@ -1032,30 +951,22 @@ impl PaginatedIter {
     }
 
     pub fn with_amount_key(mut self, key: impl Into<String>) -> Self {
-        let mut config = self.config.clone();
-        config.amount_key = Some(key.into());
-        self.config = config;
+        self.config.amount_key = Some(key.into());
         self
     }
 
     pub fn with_offset_key(mut self, key: impl Into<String>) -> Self {
-        let mut config = self.config.clone();
-        config.offset_key = Some(key.into());
-        self.config = config;
+        self.config.offset_key = Some(key.into());
         self
     }
 
     pub fn with_response_amount_key(mut self, key: impl Into<String>) -> Self {
-        let mut config = self.config.clone();
-        config.response_amount_key = Some(key.into());
-        self.config = config;
+        self.config.response_amount_key = Some(key.into());
         self
     }
 
     pub fn with_response_offset_key(mut self, key: impl Into<String>) -> Self {
-        let mut config = self.config.clone();
-        config.response_offset_key = Some(key.into());
-        self.config = config;
+        self.config.response_offset_key = Some(key.into());
         self
     }
 
@@ -1064,53 +975,22 @@ impl PaginatedIter {
         self
     }
 
-    // 内部辅助方法
-    fn merge_config(&self) -> PaginationConfig {
-        self.config.clone()
-    }
-
-    /// 构建指定页的请求参数
-    fn build_page_params(&self, page: usize, size: usize) -> HashMap<String, String> {
-        let mut params = self.base_params.clone();
-        let cfg = self.merge_config();
-
-        if let Some(amount_key) = &cfg.amount_key {
-            params.insert(amount_key.clone(), size.to_string());
-        }
-        if let Some(offset_key) = &cfg.offset_key {
-            match self.pagination_method {
-                PaginationMethod::Offset => {
-                    let base_offset = self
-                        .base_params
-                        .get(offset_key)
-                        .and_then(|v| v.parse::<usize>().ok())
-                        .unwrap_or(0);
-                    params.insert(offset_key.clone(), (base_offset + page * size).to_string());
-                }
-                PaginationMethod::Page => {
-                    params.insert(offset_key.clone(), (page + 1).to_string());
-                }
-            }
-        }
-        params
-    }
-
     /// 获取指定页数据
     fn fetch_page(&self, page: usize) -> Result<Vec<Value>> {
         let mut builder = self
             .client
             .build_request(self.method, &self.endpoint, self.base_key);
 
-        // 添加基础参数（需要克隆键值，因为 builder 需要拥有所有权）
-        for (k, v) in &self.base_params {
+        // 添加所有基础参数（从 Arc 中读取，不克隆整个 Vec）
+        for (k, v) in self.base_params.iter() {
             builder = builder.with_param(k.clone(), v.clone());
         }
 
-        let cfg = self.merge_config();
-        if let Some(amount_key) = &cfg.amount_key {
+        // 添加分页相关参数
+        if let Some(amount_key) = &self.config.amount_key {
             builder = builder.with_param(amount_key.clone(), self.items_per_page.to_string());
         }
-        if let Some(offset_key) = &cfg.offset_key {
+        if let Some(offset_key) = &self.config.offset_key {
             let offset = match self.pagination_method {
                 PaginationMethod::Offset => (page * self.items_per_page).to_string(),
                 PaginationMethod::Page => (page + 1).to_string(),
@@ -1134,11 +1014,23 @@ impl PaginatedIter {
             return Ok(());
         }
 
-        let first_page_params = self.build_page_params(0, Self::DEFAULT_PAGE_SIZE);
+        // 构建第一页请求的参数
+        let mut first_page_params: Vec<(String, String)> = (*self.base_params).clone();
+        if let Some(amount_key) = &self.config.amount_key {
+            first_page_params.push((amount_key.clone(), Self::DEFAULT_PAGE_SIZE.to_string()));
+        }
+        if let Some(offset_key) = &self.config.offset_key {
+            let offset = match self.pagination_method {
+                PaginationMethod::Offset => "0".to_string(),
+                PaginationMethod::Page => "1".to_string(),
+            };
+            first_page_params.push((offset_key.clone(), offset));
+        }
+
         let response = self
             .client
             .build_request(self.method, &self.endpoint, self.base_key)
-            .with_params(first_page_params.clone())
+            .with_params(first_page_params)
             .send()?;
         let json = self.client.response_to_json(response)?;
 
@@ -1146,16 +1038,9 @@ impl PaginatedIter {
         self.total_items = Self::extract_total(&json, &self.total_key)?;
 
         // 尝试从响应中获取实际每页大小
-        if let Some(response_amount_key) = &self.merge_config().response_amount_key {
+        if let Some(response_amount_key) = &self.config.response_amount_key {
             if let Some(amount) = Self::extract_nested_u64(&json, response_amount_key) {
                 self.items_per_page = amount as usize;
-            }
-        } else if let Some(amount_key) = &self.merge_config().amount_key {
-            if let Some(amount) = first_page_params
-                .get(amount_key)
-                .and_then(|v| v.parse().ok())
-            {
-                self.items_per_page = amount;
             }
         }
 
@@ -1343,22 +1228,19 @@ impl FileUploader {
     }
 
     fn get_codemao_token(&self, file_path: &str) -> Result<CodeMaoTokenInfo> {
-        let mut params = HashMap::new();
-        params.insert("projectName".to_string(), "community_frontend".to_string());
-        params.insert("filePaths".to_string(), file_path.to_string());
-        params.insert("filePath".to_string(), file_path.to_string());
-        params.insert("tokensCount".to_string(), "1".to_string());
-        params.insert("fileSign".to_string(), "p1".to_string());
-        params.insert("cdnName".to_string(), "qiniu".to_string());
-
         let response = self
             .client
             .build_request(
                 HttpMethod::GET,
                 "https://open-service.codemao.cn/cdn/qi-niu/tokens/uploading",
-                Some(BaseKey::Default), // 使用默认基础键
+                Some(BaseKey::Default),
             )
-            .with_params(params)
+            .with_param("projectName", "community_frontend")
+            .with_param("filePaths", file_path)
+            .with_param("filePath", file_path)
+            .with_param("tokensCount", "1")
+            .with_param("fileSign", "p1")
+            .with_param("cdnName", "qiniu")
             .send()?;
 
         let json = self.client.response_to_json(response)?;
@@ -1383,19 +1265,16 @@ impl FileUploader {
             .map(|ext| format!(".{}", ext.to_string_lossy()))
             .unwrap_or_default();
 
-        let mut params = HashMap::new();
-        params.insert("prefix".to_string(), prefix.to_string());
-        params.insert("bucket".to_string(), "static".to_string());
-        params.insert("type".to_string(), extension);
-
         let response = self
             .client
             .build_request(
                 HttpMethod::GET,
                 "https://oversea-api.code.game/tiger/kitten/cdn/token/1",
-                Some(BaseKey::Default), // 使用默认基础键
+                Some(BaseKey::Default),
             )
-            .with_params(params)
+            .with_param("prefix", prefix)
+            .with_param("bucket", "static")
+            .with_param("type", extension)
             .send()?;
 
         let json = self.client.response_to_json(response)?;
@@ -1434,12 +1313,12 @@ struct CodeGameTokenInfo {
 fn generate_id(length: usize) -> String {
     const CHARSET: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
     let mut rng = rand::rng();
-    (0..length)
-        .map(|_| {
-            let idx = rng.random_range(0..CHARSET.len());
-            CHARSET[idx] as char
-        })
-        .collect()
+    let mut bytes = vec![0u8; length];
+    rng.fill_bytes(&mut bytes);
+    for b in &mut bytes {
+        *b = CHARSET[(*b as usize) % CHARSET.len()];
+    }
+    String::from_utf8(bytes).unwrap_or_default()
 }
 
 // 定义HTTP状态码枚举
@@ -1608,7 +1487,7 @@ impl ClientFactory {
     }
 
     /// 获取全局身份管理器
-    pub fn global_identity_manager() -> Arc<RwLock<GlobalIdentityManager>> {
+    pub fn global_identity_manager() -> &'static GlobalIdentityManager {
         get_global_identity_manager()
     }
 }

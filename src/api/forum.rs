@@ -1,4 +1,4 @@
-use crate::utils::acquire::{BaseKey, CodeMaoClient, HttpMethod, PaginatedIter, PaginationMethod};
+use crate::utils::acquire::{CodeMaoClient, HttpMethod, PaginatedIter, PaginationMethod};
 use serde_json::{Value, json};
 
 // 帖子类型枚举

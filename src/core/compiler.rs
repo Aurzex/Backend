@@ -6,8 +6,8 @@ use aes_gcm::{
     aead::{Aead, KeyInit},
 };
 use base64::{Engine as _, engine::general_purpose};
-use rand::{Rng, RngExt};
-use serde_json::{Value, from_str, json, to_string_pretty};
+use rand::RngExt;
+use serde_json::{Value, json, to_string_pretty};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -558,7 +558,7 @@ impl ShadowBuilder {
 
 // ============ HTTP客户端协议 ============
 pub trait HttpClient: Send + Sync {
-    fn get_json(&self, url: &str, headers: Option<HashMap<String, String>>) -> Result<Value>;
+    fn get_json(&self, url: &str, headers: Option<Vec<(String, String)>>) -> Result<Value>;
     fn get_binary(&self, url: &str) -> Result<Vec<u8>>;
     fn get_text(&self, url: &str) -> Result<String>;
     fn box_clone(&self) -> Box<dyn HttpClient>;
@@ -582,7 +582,7 @@ impl CodeMaoHttpClient {
 }
 
 impl HttpClient for CodeMaoHttpClient {
-    fn get_json(&self, url: &str, headers: Option<HashMap<String, String>>) -> Result<Value> {
+    fn get_json(&self, url: &str, headers: Option<Vec<(String, String)>>) -> Result<Value> {
         let mut request_builder = self.client.build_request(HttpMethod::GET, url, None);
         if let Some(headers_map) = headers {
             request_builder = request_builder.with_headers(headers_map);
@@ -1004,8 +1004,8 @@ impl BaseDecompiler for NekoDecompiler {
 
         let device_auth_str = serde_json::to_string(&device_auth)?;
 
-        let mut headers = HashMap::new();
-        headers.insert("x-creation-tools-device-auth".to_string(), device_auth_str);
+        let mut headers: Vec<(String, String)> = Vec::new();
+        headers.push(("x-creation-tools-device-auth".to_string(), device_auth_str));
 
         let detail = self
             .context
@@ -1641,10 +1641,10 @@ impl BlockDecompiler for FunctionCallDecompiler {
         context.shadows.insert("NAME".to_string(), String::new());
 
         let mut param_index = 0;
-        for (param_name, param_value) in params.iter() {
+        for (_param_name, param_value) in params.iter() {
             let input_name = format!("ARG {}", param_index);
 
-            if let Some(param_block_data) = param_value.as_object() {
+            if let Some(_param_block_data) = param_value.as_object() {
                 let mut param_decompiler = BlockDecompilerCore::new(
                     param_value.clone(),
                     self.config.clone(),
@@ -1860,7 +1860,7 @@ impl KittenDecompiler {
 impl BaseDecompiler for KittenDecompiler {
     fn decompile(&mut self) -> Result<DecompileResult> {
         let mut work = self.fetch_compiled_data()?;
-        let shadow_builder = ShadowBuilder::new(
+        let _shadow_builder = ShadowBuilder::new(
             self.context.config.clone(),
             self.context.id_generator.clone(),
         );

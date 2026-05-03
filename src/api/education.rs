@@ -1,5 +1,5 @@
 use crate::utils::acquire::{
-    BaseKey, CodeMaoClient, HTTPStatus, HttpMethod, PaginatedIter, PaginationMethod,
+    CodeMaoClient, HTTPStatus, HttpMethod, PaginatedIter, PaginationMethod,
 };
 use serde_json::{Value, json};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -505,7 +505,7 @@ impl DataFetcher {
                 .send()?;
             Ok(self.client.response_to_json(response)?)
         } else if method == "detail" {
-            let paginated = self
+            let _paginated = self
                 .client
                 .paginated("https://eduzone.codemao.cn/edu/zone/classes/")
                 .with_param("page", "1")

@@ -1,6 +1,5 @@
 use crate::utils::acquire::{BaseKey, CodeMaoClient, HttpMethod, PaginatedIter, PaginationMethod};
 use serde_json::{Value, json};
-use std::collections::HashMap;
 
 // 回复类型枚举
 pub enum ReplyTypes {

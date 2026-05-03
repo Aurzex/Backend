@@ -1,5 +1,5 @@
 use crate::utils::acquire::{
-    BaseKey, CodeMaoClient, HTTPStatus, HttpMethod, PaginatedIter, PaginationMethod,
+    CodeMaoClient, HTTPStatus, HttpMethod, PaginatedIter, PaginationMethod,
 };
 use serde_json::{Value, json};
 use std::time::{SystemTime, UNIX_EPOCH};

@@ -1,22 +1,16 @@
 use std::collections::HashMap;
-use std::fmt;
-use std::io::{self, Read, Write};
+use std::io::{self};
 use std::net::TcpStream;
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Condvar, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use crate::api::auth::{AuthManager, CloudAuthenticator};
-use crate::api::work::WorkDataFetcher;
-use serde::{Deserialize, Serialize};
-use serde_json::{Map, Number, Value, json};
+use crate::api::auth::CloudAuthenticator;
+use serde_json::{Value, json};
 use tungstenite::WebSocket;
 use tungstenite::client::IntoClientRequest;
-use tungstenite::handshake::client::Response;
 use tungstenite::protocol::Message;
 use tungstenite::stream::MaybeTlsStream;
-use url::Url;
 
 // ==================== 错误类型 ====================
 #[derive(Debug, thiserror::Error)]
@@ -928,7 +922,7 @@ impl CloudConnection {
 
     fn process_message(
         msg: Message,
-        connected: &Arc<(Mutex<bool>, Condvar)>,
+        _connected: &Arc<(Mutex<bool>, Condvar)>,
         conn_data: &Arc<CloudConnectionData>,
         shutdown: &Arc<Mutex<bool>>,
     ) {
@@ -1361,7 +1355,7 @@ impl CloudConnectionBuilder {
         }
 
         let (mut ws, _resp) = tungstenite::connect(req)?;
-        let handshake_msg = ws.read()?;
+        let _handshake_msg = ws.read()?;
         ws.send(Message::Text(WS_CONNECT_MESSAGE.into()))?;
         Ok(CloudConnection::new_connected(
             self.work_id,

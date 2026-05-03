@@ -1,11 +1,8 @@
 use http::header::HeaderName;
-use http::header::{
-    ACCEPT_ENCODING, ACCEPT_LANGUAGE, CACHE_CONTROL, HeaderValue, ORIGIN, PRAGMA, USER_AGENT,
-};
-use rand::{Rng, RngExt};
+use http::header::HeaderValue;
+use rand::RngExt;
 use serde_json::{Value, json};
 use std::collections::HashMap;
-use std::str::FromStr;
 use std::sync::{
     Arc, Condvar, Mutex,
     mpsc::{self, Receiver, Sender},
@@ -357,7 +354,7 @@ impl<'a> MessageRequestBuilder<'a> {
         })
     }
 
-    pub fn on_end<F>(self, mut f: F) -> Self
+    pub fn on_end<F>(self, f: F) -> Self
     where
         F: FnOnce(String) + Send + 'static,
     {

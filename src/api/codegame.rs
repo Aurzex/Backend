@@ -1,4 +1,4 @@
-use crate::utils::acquire::{BaseKey, CodeMaoClient, HTTPStatus, HttpMethod};
+use crate::utils::acquire::{CodeMaoClient, HTTPStatus, HttpMethod};
 use serde_json::{Value, json};
 
 /// 海外平台数据访问客户端

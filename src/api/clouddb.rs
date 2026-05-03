@@ -1,6 +1,5 @@
 use crate::utils::acquire::{BaseKey, CodeMaoClient, HttpMethod};
 use serde_json::{Value, json};
-use std::collections::HashMap;
 
 // Ranking struct
 pub struct Ranking {

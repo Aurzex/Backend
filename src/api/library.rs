@@ -1,4 +1,4 @@
-use crate::utils::acquire::{BaseKey, CodeMaoClient, HttpMethod};
+use crate::utils::acquire::{CodeMaoClient, HttpMethod};
 use serde_json::{Value, json};
 
 // ==================== 漫画相关枚举 ====================
