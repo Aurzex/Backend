@@ -8,7 +8,7 @@ name = "backend"
 crate-type = ["cdylib"]
 
 [lints.rust]
-# unused = "allow"
+unused = "allow"
 
 [dependencies]
 aes-gcm = "0.10.3"
