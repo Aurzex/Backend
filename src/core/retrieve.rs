@@ -1,11 +1,10 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use rand::RngExt; // 导入随机扩展 trait
+use rand::RngExt;
 use serde_json::{Map, Value};
 use thiserror::Error;
 
-// ==================== 导入真实的 API 模块 ====================
 use crate::api::auth::AuthManager;
 use crate::api::community::{
     DataFetcher as CommunityDataFetcher, MessageMethod, ReplyTypes,
@@ -21,31 +20,49 @@ use crate::api::whale::{
     WorkReportFilterType, WorkSourceType,
 };
 use crate::api::work::{KittenWorkManager, NemoWorkType, WorkDataFetcher};
-// ==================== 导入工具模块 ====================
-use crate::utils::acquire::{BaseKey, ClientFactory, CodeMaoClient, HttpMethod, Identity}; // 移除了未使用的 PaginatedIter
+use crate::utils::acquire::{BaseKey, ClientFactory, CodeMaoClient, HttpMethod, Identity};
 use crate::utils::data::{
     CacheManager, CodeMaoFile, DataManager, HistoryManager, PathConfig, SettingManager,
 };
 
-// ==================== Coordinator 单例 ====================// 新增 Debug 派生
+/// 全局协调器：集中管理所有 API 模块和全局资源
 pub struct Coordinator {
+    // 认证模块
     pub auth: AuthManager,
-    pub community_motion: CommunityUserAction,
-    pub community_obtain: CommunityDataFetcher,
-    pub edu_motion: EduUserAction,
-    pub edu_obtain: EduDataFetcher,
-    pub forum_motion: ForumActionHandler,
-    pub forum_obtain: ForumDataFetcher,
-    pub novel_motion: NovelActionHandler,
-    pub novel_obtain: NovelDataFetcher,
-    pub shop_motion: WorkshopActionHandler,
-    pub shop_obtain: WorkshopDataFetcher,
-    pub user_motion: UserManager,
-    pub user_obtain: UserDataFetcher,
-    pub whale_motion: ReportHandler,
-    pub whale_obtain: ReportFetcher,
-    pub work_motion: KittenWorkManager,
-    pub work_obtain: WorkDataFetcher,
+
+    // 社区模块
+    pub community_action: CommunityUserAction,
+    pub community_fetcher: CommunityDataFetcher,
+
+    // 教育模块
+    pub edu_action: EduUserAction,
+    pub edu_fetcher: EduDataFetcher,
+
+    // 论坛模块
+    pub forum_action: ForumActionHandler,
+    pub forum_fetcher: ForumDataFetcher,
+
+    // 小说模块
+    pub novel_action: NovelActionHandler,
+    pub novel_fetcher: NovelDataFetcher,
+
+    // 工坊模块
+    pub shop_action: WorkshopActionHandler,
+    pub shop_fetcher: WorkshopDataFetcher,
+
+    // 用户模块
+    pub user_action: UserManager,
+    pub user_fetcher: UserDataFetcher,
+
+    // 举报模块（鲸鱼系统）
+    pub report_action: ReportHandler,
+    pub report_fetcher: ReportFetcher,
+
+    // 作品模块
+    pub work_action: KittenWorkManager,
+    pub work_fetcher: WorkDataFetcher,
+
+    // 全局资源
     pub client: &'static CodeMaoClient,
     pub data_manager: &'static DataManager,
     pub path_config: PathConfig,
@@ -57,26 +74,27 @@ pub struct Coordinator {
 
 static COORDINATOR: OnceLock<Coordinator> = OnceLock::new();
 
+/// 初始化全局协调器
 pub fn init_coordinator() {
     let coordinator = Coordinator {
         auth: AuthManager::new(),
-        community_motion: CommunityUserAction::new(),
-        community_obtain: CommunityDataFetcher::new(),
+        community_action: CommunityUserAction::new(),
+        community_fetcher: CommunityDataFetcher::new(),
         client: ClientFactory::global_client(),
-        edu_motion: EduUserAction::new(),
-        edu_obtain: EduDataFetcher::new(),
-        forum_motion: ForumActionHandler::new(),
-        forum_obtain: ForumDataFetcher::new(),
-        novel_motion: NovelActionHandler::new(),
-        novel_obtain: NovelDataFetcher::new(),
-        shop_motion: WorkshopActionHandler::new(),
-        shop_obtain: WorkshopDataFetcher::new(),
-        user_motion: UserManager::new(),
-        user_obtain: UserDataFetcher::new(),
-        whale_motion: ReportHandler::new(),
-        whale_obtain: ReportFetcher::new(),
-        work_motion: KittenWorkManager::new(),
-        work_obtain: WorkDataFetcher::new(),
+        edu_action: EduUserAction::new(),
+        edu_fetcher: EduDataFetcher::new(),
+        forum_action: ForumActionHandler::new(),
+        forum_fetcher: ForumDataFetcher::new(),
+        novel_action: NovelActionHandler::new(),
+        novel_fetcher: NovelDataFetcher::new(),
+        shop_action: WorkshopActionHandler::new(),
+        shop_fetcher: WorkshopDataFetcher::new(),
+        user_action: UserManager::new(),
+        user_fetcher: UserDataFetcher::new(),
+        report_action: ReportHandler::new(),
+        report_fetcher: ReportFetcher::new(),
+        work_action: KittenWorkManager::new(),
+        work_fetcher: WorkDataFetcher::new(),
         data_manager: DataManager::global(),
         path_config: PathConfig,
         setting_manager: SettingManager::global(),
@@ -88,13 +106,15 @@ pub fn init_coordinator() {
     COORDINATOR.set(coordinator);
 }
 
+/// 获取全局协调器实例
 pub fn coordinator() -> &'static Coordinator {
     COORDINATOR.get().expect("Coordinator not initialized")
 }
 
 // ==================== 错误类型 ====================
+
 #[derive(Error, Debug)]
-pub enum ObtainError {
+pub enum DataQueryError {
     #[error("无效的来源类型: {0}")]
     InvalidSource(String),
     #[error("无效的查询方法: {0}")]
@@ -112,123 +132,132 @@ pub enum ObtainError {
 }
 
 // ==================== 枚举定义 ====================
+
+/// 评论来源类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum QuerySource {
-    Work,
-    Forum,
-    Shop,
+pub enum CommentSource {
+    Work,  // 作品评论
+    Forum, // 论坛帖子评论
+    Shop,  // 工坊讨论评论
 }
 
-impl QuerySource {
+impl CommentSource {
     pub fn as_str(&self) -> &'static str {
         match self {
-            QuerySource::Work => "work",
-            QuerySource::Forum => "forum",
-            QuerySource::Shop => "shop",
+            CommentSource::Work => "work",
+            CommentSource::Forum => "forum",
+            CommentSource::Shop => "shop",
         }
     }
 }
 
-impl std::str::FromStr for QuerySource {
-    type Err = ObtainError;
+impl std::str::FromStr for CommentSource {
+    type Err = DataQueryError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "work" => Ok(QuerySource::Work),
-            "forum" => Ok(QuerySource::Forum),
-            "shop" => Ok(QuerySource::Shop),
-            _ => Err(ObtainError::InvalidSource(s.to_string())),
+            "work" => Ok(CommentSource::Work),
+            "forum" => Ok(CommentSource::Forum),
+            "shop" => Ok(CommentSource::Shop),
+            _ => Err(DataQueryError::InvalidSource(s.to_string())),
         }
     }
 }
 
+/// 评论查询模式
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum QueryMethod {
-    UserId,
-    CommentId,
-    Comments,
+pub enum CommentQueryMode {
+    UserId,    // 提取用户ID列表
+    CommentId, // 提取评论ID列表
+    Comments,  // 获取详细评论数据
 }
 
-impl QueryMethod {
+impl CommentQueryMode {
     pub fn as_str(&self) -> &'static str {
         match self {
-            QueryMethod::UserId => "user_id",
-            QueryMethod::CommentId => "comment_id",
-            QueryMethod::Comments => "comments",
+            CommentQueryMode::UserId => "user_id",
+            CommentQueryMode::CommentId => "comment_id",
+            CommentQueryMode::Comments => "comments",
         }
     }
 }
 
-impl std::str::FromStr for QueryMethod {
-    type Err = ObtainError;
+impl std::str::FromStr for CommentQueryMode {
+    type Err = DataQueryError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "user_id" => Ok(QueryMethod::UserId),
-            "comment_id" => Ok(QueryMethod::CommentId),
-            "comments" => Ok(QueryMethod::Comments),
-            _ => Err(ObtainError::InvalidMethod(s.to_string())),
+            "user_id" => Ok(CommentQueryMode::UserId),
+            "comment_id" => Ok(CommentQueryMode::CommentId),
+            "comments" => Ok(CommentQueryMode::Comments),
+            _ => Err(DataQueryError::InvalidMethod(s.to_string())),
         }
     }
 }
 
+/// 通知类型分类
 #[derive(Debug, Clone, Copy)]
-pub enum TypeItem {
-    LikeFork,
-    CommentReply,
-    System,
+pub enum NotificationCategory {
+    LikeFork,     // 点赞/收藏
+    CommentReply, // 评论/回复
+    System,       // 系统通知
 }
 
-impl TypeItem {
+impl NotificationCategory {
     pub fn as_str(&self) -> &'static str {
         match self {
-            TypeItem::LikeFork => "LIKE_FORK",
-            TypeItem::CommentReply => "COMMENT_REPLY",
-            TypeItem::System => "SYSTEM",
+            NotificationCategory::LikeFork => "LIKE_FORK",
+            NotificationCategory::CommentReply => "COMMENT_REPLY",
+            NotificationCategory::System => "SYSTEM",
         }
     }
 }
 
 // ==================== 数据类型别名 ====================
+
 pub type JsonValue = Value;
 pub type JsonObject = Map<String, Value>;
 
 // ==================== 结果类型 ====================
+
+/// 评论查询结果枚举
 #[derive(Debug, Clone)]
 pub enum CommentsResult {
-    UserIdList(Vec<String>),
-    CommentIdList(Vec<String>),
-    DetailedComments(Vec<JsonObject>),
+    UserIdList(Vec<String>),           // 用户ID列表
+    CommentIdList(Vec<String>),        // 评论ID列表
+    DetailedComments(Vec<JsonObject>), // 详细评论数据
 }
 
 // ==================== 查询构建器 ====================
-pub struct QueryBuilder {
-    source: Option<QuerySource>,
-    source_id: Option<i32>,
-    method: QueryMethod,
+
+/// 评论查询构建器
+pub struct CommentQueryBuilder {
+    source: Option<CommentSource>,
+    target_id: Option<i32>,
+    mode: CommentQueryMode,
     limit: Option<usize>,
 }
 
-impl QueryBuilder {
+impl CommentQueryBuilder {
     fn new() -> Self {
         Self {
             source: None,
-            source_id: None,
-            method: QueryMethod::UserId,
+            target_id: None,
+            mode: CommentQueryMode::UserId,
             limit: Some(500),
         }
     }
 
-    pub fn source(mut self, source: QuerySource) -> Self {
+    pub fn source(mut self, source: CommentSource) -> Self {
         self.source = Some(source);
         self
     }
 
-    pub fn source_id(mut self, id: i32) -> Self {
-        self.source_id = Some(id);
+    pub fn target_id(mut self, id: i32) -> Self {
+        self.target_id = Some(id);
         self
     }
 
-    pub fn method(mut self, method: QueryMethod) -> Self {
-        self.method = method;
+    pub fn mode(mut self, mode: CommentQueryMode) -> Self {
+        self.mode = mode;
         self
     }
 
@@ -237,57 +266,57 @@ impl QueryBuilder {
         self
     }
 
-    /// 根据 source 获取评论数据的惰性迭代器
-    fn comments_iter(
+    /// 根据来源获取评论数据的惰性迭代器
+    fn build_comment_stream(
         &self,
-    ) -> Result<Box<dyn Iterator<Item = Result<JsonValue, ObtainError>>>, ObtainError> {
+    ) -> Result<Box<dyn Iterator<Item = Result<JsonValue, DataQueryError>>>, DataQueryError> {
         let source = self
             .source
-            .ok_or_else(|| ObtainError::InvalidSource("未设置来源".into()))?;
-        let source_id = self
-            .source_id
-            .ok_or_else(|| ObtainError::InvalidSource("未设置源ID".into()))?;
+            .ok_or_else(|| DataQueryError::InvalidSource("未设置来源".into()))?;
+        let target_id = self
+            .target_id
+            .ok_or_else(|| DataQueryError::InvalidSource("未设置源ID".into()))?;
         let limit = self.limit;
         let coord = coordinator();
 
         match source {
-            QuerySource::Work => {
+            CommentSource::Work => {
                 let iter = coord
-                    .work_obtain
-                    .fetch_work_comments_gen(source_id, limit)
-                    .map(|item| item.map_err(|e| ObtainError::External(e.into())));
+                    .work_fetcher
+                    .fetch_work_comments_gen(target_id, limit)
+                    .map(|item| item.map_err(|e| DataQueryError::External(e.into())));
                 Ok(Box::new(iter))
             }
-            QuerySource::Forum => {
+            CommentSource::Forum => {
                 let iter = coord
-                    .forum_obtain
-                    .fetch_post_replies_gen(source_id, None, limit)
-                    .map(|item| item.map_err(|e| ObtainError::External(e.into())));
+                    .forum_fetcher
+                    .fetch_post_replies_gen(target_id, None, limit)
+                    .map(|item| item.map_err(|e| DataQueryError::External(e.into())));
                 Ok(Box::new(iter))
             }
-            QuerySource::Shop => {
+            CommentSource::Shop => {
                 let iter = coord
-                    .shop_obtain
-                    .fetch_workshop_discussions_gen(source_id, None, None, limit)
-                    .map(|item| item.map_err(|e| ObtainError::External(e.into())));
+                    .shop_fetcher
+                    .fetch_workshop_discussions_gen(target_id, None, None, limit)
+                    .map(|item| item.map_err(|e| DataQueryError::External(e.into())));
                 Ok(Box::new(iter))
             }
         }
     }
 
-    pub fn execute(self) -> Result<CommentsResult, ObtainError> {
+    /// 执行评论查询
+    pub fn execute(self) -> Result<CommentsResult, DataQueryError> {
         let source = self
             .source
-            .ok_or_else(|| ObtainError::InvalidSource("未设置来源".into()))?;
-        let method = self.method;
+            .ok_or_else(|| DataQueryError::InvalidSource("未设置来源".into()))?;
+        let mode = self.mode;
 
-        let comments_iter = self.comments_iter()?;
-        // 惰性收集成 Vec 以便聚合
-        let comments: Vec<JsonValue> = comments_iter.collect::<Result<Vec<_>, _>>()?;
+        let comment_stream = self.build_comment_stream()?;
+        let comments: Vec<JsonValue> = comment_stream.collect::<Result<Vec<_>, _>>()?;
 
         let user_field = match source {
-            QuerySource::Work | QuerySource::Shop => "reply_user",
-            QuerySource::Forum => "user",
+            CommentSource::Work | CommentSource::Shop => "reply_user",
+            CommentSource::Forum => "user",
         };
 
         let mut reply_cache: HashMap<i64, Vec<JsonObject>> = HashMap::new();
@@ -300,20 +329,20 @@ impl QueryBuilder {
                 .and_then(|id| id.as_i64())
         };
 
-        let mut get_replies = |comment: &Value| -> Result<Vec<JsonObject>, ObtainError> {
+        let mut fetch_replies = |comment: &Value| -> Result<Vec<JsonObject>, DataQueryError> {
             let comment_obj = comment
                 .as_object()
-                .ok_or_else(|| ObtainError::ParseError("评论数据格式错误".into()))?;
+                .ok_or_else(|| DataQueryError::ParseError("评论数据格式错误".into()))?;
 
-            if source == QuerySource::Forum {
+            if source == CommentSource::Forum {
                 let comment_id = comment_obj
                     .get("id")
                     .and_then(|id| id.as_i64())
-                    .ok_or(ObtainError::ParseError("缺少评论ID".into()))?;
+                    .ok_or(DataQueryError::ParseError("缺少评论ID".into()))?;
 
                 if !reply_cache.contains_key(&comment_id) {
                     let replies_iter = coordinator()
-                        .forum_obtain
+                        .forum_fetcher
                         .fetch_reply_comments_gen(comment_id as i32, None);
                     let replies: Vec<JsonObject> = replies_iter
                         .filter_map(|item| match item {
@@ -336,8 +365,8 @@ impl QueryBuilder {
             }
         };
 
-        match method {
-            QueryMethod::UserId => {
+        match mode {
+            CommentQueryMode::UserId => {
                 let mut user_ids = Vec::new();
                 for comment in &comments {
                     if let Some(id) = comment
@@ -348,7 +377,7 @@ impl QueryBuilder {
                     {
                         user_ids.push(id.to_string());
                     }
-                    for reply in get_replies(comment)? {
+                    for reply in fetch_replies(comment)? {
                         if let Some(uid) = extract_reply_user_id(&reply) {
                             user_ids.push(uid.to_string());
                         }
@@ -356,14 +385,14 @@ impl QueryBuilder {
                 }
                 Ok(CommentsResult::UserIdList(deduplicate(&user_ids)))
             }
-            QueryMethod::CommentId => {
+            CommentQueryMode::CommentId => {
                 let mut comment_ids = Vec::new();
                 for comment in &comments {
                     if let Some(id) = comment.get("id").and_then(|id| id.as_i64()) {
                         comment_ids.push(id.to_string());
                     }
                     let comment_id = comment.get("id").and_then(|id| id.as_i64());
-                    for reply in get_replies(comment)? {
+                    for reply in fetch_replies(comment)? {
                         if let (Some(cid), Some(rid)) =
                             (comment_id, reply.get("id").and_then(|id| id.as_i64()))
                         {
@@ -373,10 +402,10 @@ impl QueryBuilder {
                 }
                 Ok(CommentsResult::CommentIdList(deduplicate(&comment_ids)))
             }
-            QueryMethod::Comments => {
+            CommentQueryMode::Comments => {
                 let mut detailed = Vec::new();
                 for comment in &comments {
-                    let replies: Vec<JsonObject> = get_replies(comment)?
+                    let replies: Vec<JsonObject> = fetch_replies(comment)?
                         .into_iter()
                         .filter_map(|reply| {
                             let id = reply.get("id")?.as_i64()?;
@@ -449,44 +478,48 @@ impl QueryBuilder {
     }
 }
 
-// ==================== Obtain 主结构体 ====================
-pub struct Obtain;
+// ==================== 数据查询主结构体 ====================
 
-impl Obtain {
+/// 数据查询与统计入口
+pub struct DataQuery;
+
+impl DataQuery {
     pub fn new() -> Self {
-        Obtain
+        DataQuery
     }
 
-    pub fn query(&self) -> QueryBuilder {
-        QueryBuilder::new()
+    /// 创建评论查询构建器
+    pub fn query_comments(&self) -> CommentQueryBuilder {
+        CommentQueryBuilder::new()
     }
 
-    pub fn get_comments(
+    /// 获取评论数据（快捷方法）
+    pub fn fetch_comments(
         &self,
-        source: QuerySource,
-        source_id: i32,
-        method: QueryMethod,
+        source: CommentSource,
+        target_id: i32,
+        mode: CommentQueryMode,
         limit: Option<usize>,
-    ) -> Result<CommentsResult, ObtainError> {
-        self.query()
+    ) -> Result<CommentsResult, DataQueryError> {
+        self.query_comments()
             .source(source)
-            .source_id(source_id)
-            .method(method)
+            .target_id(target_id)
+            .mode(mode)
             .limit(limit)
             .execute()
     }
 
-    // ==================== 社区新回复（迭代器版本） ====================
-    pub fn get_new_replies_iter(
+    /// 获取社区新回复流（惰性迭代器）
+    pub fn stream_new_replies(
         &self,
-        type_item: ReplyTypes,
+        reply_type: ReplyTypes,
         limit: i32,
-    ) -> Box<dyn Iterator<Item = Result<JsonObject, ObtainError>> + 'static> {
+    ) -> Box<dyn Iterator<Item = Result<JsonObject, DataQueryError>> + 'static> {
         let coord = coordinator();
         let total = match coord
-            .community_obtain
+            .community_fetcher
             .fetch_message_count(MessageMethod::Web)
-            .map_err(|e| ObtainError::External(e.into()))
+            .map_err(|e| DataQueryError::External(e.into()))
         {
             Ok(data) => data.get("count").and_then(|c| c.as_i64()).unwrap_or(0) as i32,
             Err(e) => return Box::new(std::iter::once(Err(e))),
@@ -494,40 +527,40 @@ impl Obtain {
 
         let remaining = if limit == 0 { total } else { limit.min(total) };
 
-        Box::new(NewRepliesIter {
+        Box::new(CommunityReplyStream {
             coord,
-            type_item,
+            reply_type,
             remaining,
             offset: 0,
             buffer: std::collections::VecDeque::new(),
         })
     }
 
-    // ==================== 评论总数 ====================
-    pub fn get_comment_total(
+    /// 获取评论总数
+    pub fn count_comments(
         &self,
-        source_type: QuerySource,
-        source_id: i32,
-    ) -> Result<i32, ObtainError> {
+        source: CommentSource,
+        target_id: i32,
+    ) -> Result<i32, DataQueryError> {
         let coord = coordinator();
-        match source_type {
-            QuerySource::Work => {
+        match source {
+            CommentSource::Work => {
                 let comments_response = coord
                     .client
                     .build_request(
                         HttpMethod::GET,
-                        &format!("/creation-tools/v1/works/{}/comments", source_id),
+                        &format!("/creation-tools/v1/works/{}/comments", target_id),
                         Some(BaseKey::Default),
                     )
                     .with_param("offset", "0")
                     .with_param("limit", "15")
                     .send()
-                    .map_err(|e| ObtainError::External(e.into()))?;
+                    .map_err(|e| DataQueryError::External(e.into()))?;
 
                 let json = coord
                     .client
                     .response_to_json(comments_response)
-                    .map_err(|e| ObtainError::External(e.into()))?;
+                    .map_err(|e| DataQueryError::External(e.into()))?;
 
                 if let Some(total) = json.get("total").and_then(|t| t.as_i64()) {
                     return Ok(total as i32);
@@ -537,28 +570,28 @@ impl Obtain {
                     .client
                     .build_request(
                         HttpMethod::GET,
-                        &format!("/creation-tools/v1/works/{}", source_id),
+                        &format!("/creation-tools/v1/works/{}", target_id),
                         Some(BaseKey::Default),
                     )
                     .send()
-                    .map_err(|e| ObtainError::External(e.into()))?;
+                    .map_err(|e| DataQueryError::External(e.into()))?;
 
                 let work_json = coord
                     .client
                     .response_to_json(work_response)
-                    .map_err(|e| ObtainError::External(e.into()))?;
+                    .map_err(|e| DataQueryError::External(e.into()))?;
 
                 Ok(work_json
                     .get("comment_times")
                     .and_then(|t| t.as_i64())
                     .unwrap_or(0) as i32)
             }
-            QuerySource::Shop => {
+            CommentSource::Shop => {
                 let response = coord
                     .client
                     .build_request(
                         HttpMethod::GET,
-                        &format!("/web/discussions/{}/comments", source_id),
+                        &format!("/web/discussions/{}/comments", target_id),
                         Some(BaseKey::Default),
                     )
                     .with_param("source", "WORK_SHOP")
@@ -566,33 +599,33 @@ impl Obtain {
                     .with_param("limit", "15")
                     .with_param("offset", "0")
                     .send()
-                    .map_err(|e| ObtainError::External(e.into()))?;
+                    .map_err(|e| DataQueryError::External(e.into()))?;
 
                 let json = coord
                     .client
                     .response_to_json(response)
-                    .map_err(|e| ObtainError::External(e.into()))?;
+                    .map_err(|e| DataQueryError::External(e.into()))?;
 
                 let total = json.get("total").and_then(|t| t.as_i64()).unwrap_or(0) as i32;
                 let total_reply =
                     json.get("totalReply").and_then(|t| t.as_i64()).unwrap_or(0) as i32;
                 Ok(total + total_reply)
             }
-            QuerySource::Forum => {
+            CommentSource::Forum => {
                 let response = coord
                     .client
                     .build_request(
                         HttpMethod::GET,
-                        &format!("/web/forums/posts/{}/details", source_id),
+                        &format!("/web/forums/posts/{}/details", target_id),
                         Some(BaseKey::Default),
                     )
                     .send()
-                    .map_err(|e| ObtainError::External(e.into()))?;
+                    .map_err(|e| DataQueryError::External(e.into()))?;
 
                 let json = coord
                     .client
                     .response_to_json(response)
-                    .map_err(|e| ObtainError::External(e.into()))?;
+                    .map_err(|e| DataQueryError::External(e.into()))?;
 
                 let n_replies = json.get("n_replies").and_then(|r| r.as_i64()).unwrap_or(0) as i32;
                 let n_comments =
@@ -602,15 +635,15 @@ impl Obtain {
         }
     }
 
-    // ==================== 作品数据集成（返回惰性迭代器） ====================
-    pub fn integrate_work_data_iter(
+    /// 合并 Nemo 和 Web 来源的作品数据流
+    pub fn stream_works_from_both_sources(
         &self,
         limit: i32,
-    ) -> Box<dyn Iterator<Item = Result<JsonObject, ObtainError>> + 'static> {
+    ) -> Box<dyn Iterator<Item = Result<JsonObject, DataQueryError>> + 'static> {
         let coord = coordinator();
         let per_source_limit = Some(limit / 2);
 
-        let nemo_mapping: HashMap<&str, &str> = [
+        let nemo_field_mapping: HashMap<&str, &str> = [
             ("work_id", "work_id"),
             ("work_name", "work_name"),
             ("user_name", "user_name"),
@@ -621,7 +654,7 @@ impl Obtain {
         .into_iter()
         .collect();
 
-        let web_mapping: HashMap<&str, &str> = [
+        let web_field_mapping: HashMap<&str, &str> = [
             ("work_id", "work_id"),
             ("work_name", "work_name"),
             ("user_name", "nickname"),
@@ -632,16 +665,14 @@ impl Obtain {
         .into_iter()
         .collect();
 
-        // 获取原始数据（可能为错误）
         let nemo_result =
             coord
-                .work_obtain
+                .work_fetcher
                 .fetch_new_works_nemo(NemoWorkType::Original, per_source_limit, None);
         let web_result = coord
-            .work_obtain
+            .work_fetcher
             .fetch_new_works_web(per_source_limit, None, true);
 
-        // 提取 items 数组并映射，错误直接转为单元素错误迭代器
         let process_result = |res: Result<Value, _>, mapping: HashMap<&str, &str>| match res {
             Ok(val) => {
                 let items = val
@@ -649,7 +680,7 @@ impl Obtain {
                     .and_then(|i| i.as_array())
                     .cloned()
                     .unwrap_or_default();
-                let mapped: Vec<Result<JsonObject, ObtainError>> = items
+                let mapped: Vec<Result<JsonObject, DataQueryError>> = items
                     .into_iter()
                     .filter_map(|v| v.as_object().cloned())
                     .map(move |obj| {
@@ -663,32 +694,35 @@ impl Obtain {
                     })
                     .collect();
                 Box::new(mapped.into_iter())
-                    as Box<dyn Iterator<Item = Result<JsonObject, ObtainError>>>
+                    as Box<dyn Iterator<Item = Result<JsonObject, DataQueryError>>>
             }
-            Err(e) => Box::new(std::iter::once::<Result<JsonObject, ObtainError>>(Err(
-                ObtainError::External(e),
+            Err(e) => Box::new(std::iter::once::<Result<JsonObject, DataQueryError>>(Err(
+                DataQueryError::External(e),
             ))),
         };
 
-        let nemo_iter = process_result(nemo_result, nemo_mapping);
-        let web_iter = process_result(web_result, web_mapping);
+        let nemo_stream = process_result(nemo_result, nemo_field_mapping);
+        let web_stream = process_result(web_result, web_field_mapping);
 
-        Box::new(nemo_iter.chain(web_iter))
+        Box::new(nemo_stream.chain(web_stream))
     }
 
-    // ==================== 收集作品评论（返回聚合后的 Vec） ====================
-    pub fn collect_work_comments(&self, limit: i32) -> Result<Vec<JsonObject>, ObtainError> {
+    /// 从作品中收集用户评论并聚合统计
+    pub fn aggregate_user_comments_from_works(
+        &self,
+        work_limit: i32,
+    ) -> Result<Vec<JsonObject>, DataQueryError> {
         let works: Vec<JsonObject> = self
-            .integrate_work_data_iter(limit)
+            .stream_works_from_both_sources(work_limit)
             .collect::<Result<Vec<_>, _>>()?;
 
         let mut all_comments = Vec::new();
         for work in &works {
             if let Some(work_id) = work.get("work_id").and_then(|id| id.as_i64()) {
-                if let Ok(CommentsResult::DetailedComments(comments)) = self.get_comments(
-                    QuerySource::Work,
+                if let Ok(CommentsResult::DetailedComments(comments)) = self.fetch_comments(
+                    CommentSource::Work,
                     work_id as i32,
-                    QueryMethod::Comments,
+                    CommentQueryMode::Comments,
                     Some(20),
                 ) {
                     all_comments.extend(comments);
@@ -696,7 +730,8 @@ impl Obtain {
             }
         }
 
-        let mut user_map: HashMap<String, (String, String, Vec<String>, i32)> = HashMap::new();
+        let mut user_comment_map: HashMap<String, (String, String, Vec<String>, i32)> =
+            HashMap::new();
         for comment in &all_comments {
             let user_id = comment.get("user_id").and_then(|v| {
                 if v.is_number() {
@@ -715,7 +750,7 @@ impl Obtain {
                 .map(|s| s.to_string());
 
             if let (Some(uid), Some(cont), Some(nick)) = (user_id, content, nickname) {
-                let entry = user_map
+                let entry = user_comment_map
                     .entry(uid.clone())
                     .or_insert_with(|| (uid, nick, Vec::new(), 0));
                 entry.2.push(cont);
@@ -723,15 +758,15 @@ impl Obtain {
             }
         }
 
-        let mut result: Vec<JsonObject> = user_map
+        let mut result: Vec<JsonObject> = user_comment_map
             .into_values()
-            .map(|(uid, nick, coms, count)| {
+            .map(|(uid, nick, comments, count)| {
                 let mut obj = JsonObject::new();
                 obj.insert("user_id".into(), Value::String(uid));
                 obj.insert("nickname".into(), Value::String(nick));
                 obj.insert(
                     "comments".into(),
-                    Value::Array(coms.into_iter().map(Value::String).collect()),
+                    Value::Array(comments.into_iter().map(Value::String).collect()),
                 );
                 obj.insert("comment_count".into(), Value::Number(count.into()));
                 obj
@@ -747,8 +782,8 @@ impl Obtain {
         Ok(result)
     }
 
-    // ==================== 管理员统计 ====================
-    pub fn get_admin_statistics(&self) -> Result<AdminStatistics, ObtainError> {
+    /// 获取管理员举报处理统计
+    pub fn compute_admin_report_stats(&self) -> Result<AdminReportStatistics, DataQueryError> {
         let coord = coordinator();
         let admins = [
             (220, "石榴 Grant"),
@@ -762,44 +797,44 @@ impl Obtain {
         ];
 
         let mut stats = Vec::new();
-        let mut total_comment = 0;
-        let mut total_work = 0;
+        let mut total_comment_reports = 0;
+        let mut total_work_reports = 0;
 
-        for &(id, name) in &admins {
+        for &(admin_id, admin_name) in &admins {
             let comment_count = coord
-                .whale_obtain
+                .report_fetcher
                 .fetch_comment_reports_total(
                     CommentSourceType::All,
                     ReportStatus::All,
                     Some(CommentReportFilterType::AdminId),
-                    Some(id),
+                    Some(admin_id),
                 )
-                .map_err(|e| ObtainError::External(e.into()))?
+                .map_err(|e| DataQueryError::External(e.into()))?
                 .get("total")
                 .and_then(|t| t.as_i64())
                 .unwrap_or(0) as i32;
 
             let work_count = coord
-                .whale_obtain
+                .report_fetcher
                 .fetch_work_reports_total(
                     WorkSourceType::All,
                     ReportStatus::All,
                     Some(WorkReportFilterType::AdminId),
-                    Some(id),
+                    Some(admin_id),
                 )
-                .map_err(|e| ObtainError::External(e.into()))?
+                .map_err(|e| DataQueryError::External(e.into()))?
                 .get("total")
                 .and_then(|t| t.as_i64())
                 .unwrap_or(0) as i32;
 
             let total = comment_count + work_count;
 
-            total_comment += comment_count;
-            total_work += work_count;
+            total_comment_reports += comment_count;
+            total_work_reports += work_count;
 
-            stats.push(AdminStatEntry {
-                admin_id: id,
-                admin_name: name.to_string(),
+            stats.push(AdminReportStatsEntry {
+                admin_id,
+                admin_name: admin_name.to_string(),
                 comment_reports: comment_count,
                 work_reports: work_count,
                 total_reports: total,
@@ -807,7 +842,7 @@ impl Obtain {
             });
         }
 
-        let grand_total = total_comment + total_work;
+        let grand_total = total_comment_reports + total_work_reports;
         for stat in &mut stats {
             stat.percentage = if grand_total > 0 {
                 ((stat.total_reports as f64 / grand_total as f64) * 1000.0).round() / 10.0
@@ -818,126 +853,124 @@ impl Obtain {
 
         stats.sort_by(|a, b| b.total_reports.cmp(&a.total_reports));
 
-        Ok(AdminStatistics {
+        Ok(AdminReportStatistics {
             total_admins: stats.len() as i32,
-            total_comment_reports: total_comment,
-            total_work_reports: total_work,
+            total_comment_reports,
+            total_work_reports,
             total_all_reports: grand_total,
             statistics: stats,
         })
     }
 
-    // ==================== 粉丝统计 ====================
-    pub fn get_fans_statistics(
+    /// 获取粉丝统计（基于点赞数阈值）
+    pub fn compute_fans_by_like_threshold(
         &self,
         user_id: i32,
-        like_num: i32,
-    ) -> Result<FanStatistics, ObtainError> {
+        like_threshold: i32,
+    ) -> Result<FanByLikesStatistics, DataQueryError> {
         let coord = coordinator();
-        let fans_iter = coord.user_obtain.fetch_followers_gen(user_id, None);
+        let fans_stream = coord.user_fetcher.fetch_followers_gen(user_id, None);
 
-        let mut qualified = Vec::new();
+        let mut qualified_fans = Vec::new();
         let mut total_fans = 0;
 
-        for fan_result in fans_iter {
-            let fan = fan_result.map_err(|e| ObtainError::External(e.into()))?;
+        for fan_result in fans_stream {
+            let fan = fan_result.map_err(|e| DataQueryError::External(e.into()))?;
             total_fans += 1;
 
             let total_likes = fan.get("total_likes").and_then(|l| l.as_i64()).unwrap_or(0) as i32;
 
-            if total_likes >= like_num {
-                let mut obj = JsonObject::new();
+            if total_likes >= like_threshold {
+                let mut fan_obj = JsonObject::new();
                 if let Some(id) = fan.get("id").and_then(|i| i.as_i64()) {
-                    obj.insert("user_id".into(), Value::Number(id.into()));
+                    fan_obj.insert("user_id".into(), Value::Number(id.into()));
                     let honors = coord
-                        .user_obtain
+                        .user_fetcher
                         .fetch_user_honors(id as i32)
-                        .map_err(|e| ObtainError::External(e.into()));
-                    if let Ok(ref h) = honors {
-                        if let Some(f) = h.get("fans_total") {
-                            obj.insert("fans_total".into(), f.clone());
+                        .map_err(|e| DataQueryError::External(e.into()));
+                    if let Ok(ref honors_data) = honors {
+                        if let Some(fans_total) = honors_data.get("fans_total") {
+                            fan_obj.insert("fans_total".into(), fans_total.clone());
                         } else {
-                            obj.insert("fans_total".into(), Value::String("N/A".into()));
+                            fan_obj.insert("fans_total".into(), Value::String("N/A".into()));
                         }
-                        if let Some(c) = h.get("collected_total") {
-                            obj.insert("collected_total".into(), c.clone());
+                        if let Some(collected_total) = honors_data.get("collected_total") {
+                            fan_obj.insert("collected_total".into(), collected_total.clone());
                         } else {
-                            obj.insert("collected_total".into(), Value::String("N/A".into()));
+                            fan_obj.insert("collected_total".into(), Value::String("N/A".into()));
                         }
-                        if let Some(l) = h.get("author_level") {
-                            obj.insert("author_level".into(), l.clone());
+                        if let Some(author_level) = honors_data.get("author_level") {
+                            fan_obj.insert("author_level".into(), author_level.clone());
                         } else {
-                            obj.insert("author_level".into(), Value::String("N/A".into()));
+                            fan_obj.insert("author_level".into(), Value::String("N/A".into()));
                         }
                     } else {
-                        obj.insert("fans_total".into(), Value::String("N/A".into()));
-                        obj.insert("collected_total".into(), Value::String("N/A".into()));
-                        obj.insert("author_level".into(), Value::String("N/A".into()));
+                        fan_obj.insert("fans_total".into(), Value::String("N/A".into()));
+                        fan_obj.insert("collected_total".into(), Value::String("N/A".into()));
+                        fan_obj.insert("author_level".into(), Value::String("N/A".into()));
                     }
-                    if let Some(nick) = fan.get("nickname") {
-                        obj.insert("nickname".into(), nick.clone());
+                    if let Some(nickname) = fan.get("nickname") {
+                        fan_obj.insert("nickname".into(), nickname.clone());
                     }
-                    obj.insert("total_likes".into(), Value::Number(total_likes.into()));
-                    obj.insert(
+                    fan_obj.insert("total_likes".into(), Value::Number(total_likes.into()));
+                    fan_obj.insert(
                         "n_works".into(),
                         fan.get("n_works")
                             .cloned()
                             .unwrap_or(Value::Number(0.into())),
                     );
-                    qualified.push(obj);
+                    qualified_fans.push(fan_obj);
                 }
             }
         }
 
-        Ok(FanStatistics {
+        Ok(FanByLikesStatistics {
             target_user_id: user_id,
-            like_threshold: like_num,
+            like_threshold,
             total_fans,
-            qualified_fans_count: qualified.len() as i32,
-            qualified_fans: qualified,
+            qualified_fans_count: qualified_fans.len() as i32,
+            qualified_fans,
         })
     }
 
-    // ==================== 教育账号迭代器 ====================
-    pub fn switch_edu_account_iter(
+    /// 获取教育账号流（切换身份、重置密码）
+    pub fn stream_edu_accounts_with_reset_passwords(
         &self,
         limit: Option<usize>,
-    ) -> Box<dyn Iterator<Item = Result<(String, String), ObtainError>> + 'static> {
+    ) -> Box<dyn Iterator<Item = Result<(String, String), DataQueryError>> + 'static> {
         let coord = coordinator();
 
-        // 切换身份（仅一次）
         if let Err(e) = coord.client.switch_identity(Identity::Edu) {
-            return Box::new(std::iter::once(Err(ObtainError::External(e.into()))));
+            return Box::new(std::iter::once(Err(DataQueryError::External(e.into()))));
         }
 
         let students = match coord
-            .edu_obtain
+            .edu_fetcher
             .fetch_class_students_gen(1, limit)
             .collect()
-            .map_err(|e| ObtainError::External(e.into()))
+            .map_err(|e| DataQueryError::External(e.into()))
         {
-            Ok(s) => s,
+            Ok(students) => students,
             Err(e) => return Box::new(std::iter::once(Err(e))),
         };
 
         let mut rng = rand::rng();
-        let mut students = students;
-        // 随机打乱顺序
-        students.sort_by(|_, _| rng.random::<u8>().cmp(&128));
+        let mut shuffled_students = students;
+        shuffled_students.sort_by(|_, _| rng.random::<u8>().cmp(&128));
 
-        let iter = students.into_iter().filter_map(move |student| {
-            let id = student.get("id").and_then(|i| i.as_i64())? as i32;
+        let stream = shuffled_students.into_iter().filter_map(move |student| {
+            let student_id = student.get("id").and_then(|i| i.as_i64())? as i32;
             let username = student
                 .get("username")
                 .and_then(|u| u.as_str())?
                 .to_string();
-            let pwd_response = coord
-                .edu_motion
-                .reset_student_password(id)
-                .map_err(|e| ObtainError::External(e.into()));
-            match pwd_response {
-                Ok(pwd) => {
-                    let password = pwd
+            let password_result = coord
+                .edu_action
+                .reset_student_password(student_id)
+                .map_err(|e| DataQueryError::External(e.into()));
+            match password_result {
+                Ok(password_data) => {
+                    let password = password_data
                         .get("password")
                         .and_then(|p| p.as_str())
                         .unwrap_or("")
@@ -948,19 +981,21 @@ impl Obtain {
             }
         });
 
-        Box::new(iter)
+        Box::new(stream)
     }
 }
 
-impl Default for Obtain {
+impl Default for DataQuery {
     fn default() -> Self {
         Self::new()
     }
 }
 
 // ==================== 辅助数据结构 ====================
+
+/// 管理员举报统计条目
 #[derive(Debug, Clone)]
-pub struct AdminStatEntry {
+pub struct AdminReportStatsEntry {
     pub admin_id: i32,
     pub admin_name: String,
     pub comment_reports: i32,
@@ -969,17 +1004,19 @@ pub struct AdminStatEntry {
     pub percentage: f64,
 }
 
+/// 管理员举报统计汇总
 #[derive(Debug, Clone)]
-pub struct AdminStatistics {
+pub struct AdminReportStatistics {
     pub total_admins: i32,
     pub total_comment_reports: i32,
     pub total_work_reports: i32,
     pub total_all_reports: i32,
-    pub statistics: Vec<AdminStatEntry>,
+    pub statistics: Vec<AdminReportStatsEntry>,
 }
 
+/// 粉丝点赞统计
 #[derive(Debug, Clone)]
-pub struct FanStatistics {
+pub struct FanByLikesStatistics {
     pub target_user_id: i32,
     pub like_threshold: i32,
     pub total_fans: i32,
@@ -988,17 +1025,18 @@ pub struct FanStatistics {
 }
 
 // ==================== 辅助迭代器实现 ====================
-/// 社区新回复分页迭代器
-struct NewRepliesIter {
+
+/// 社区新回复分页流
+struct CommunityReplyStream {
     coord: &'static Coordinator,
-    type_item: ReplyTypes,
+    reply_type: ReplyTypes,
     remaining: i32,
     offset: i32,
     buffer: std::collections::VecDeque<JsonObject>,
 }
 
-impl Iterator for NewRepliesIter {
-    type Item = Result<JsonObject, ObtainError>;
+impl Iterator for CommunityReplyStream {
+    type Item = Result<JsonObject, DataQueryError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(obj) = self.buffer.pop_front() {
@@ -1010,9 +1048,9 @@ impl Iterator for NewRepliesIter {
         let batch_size = self.remaining.min(200).max(5);
         match self
             .coord
-            .community_obtain
-            .fetch_replies(self.type_item, batch_size, self.offset)
-            .map_err(|e| ObtainError::External(e.into()))
+            .community_fetcher
+            .fetch_replies(self.reply_type, batch_size, self.offset)
+            .map_err(|e| DataQueryError::External(e.into()))
         {
             Ok(response) => {
                 let items: Vec<JsonObject> = response
@@ -1021,10 +1059,10 @@ impl Iterator for NewRepliesIter {
                     .into_iter()
                     .flat_map(|arr| arr.iter().filter_map(|v| v.as_object().cloned()))
                     .collect();
-                let take_cnt = items.len().min(self.remaining as usize);
-                self.remaining -= take_cnt as i32;
+                let take_count = items.len().min(self.remaining as usize);
+                self.remaining -= take_count as i32;
                 self.offset += batch_size;
-                self.buffer.extend(items.into_iter().take(take_cnt));
+                self.buffer.extend(items.into_iter().take(take_count));
                 self.buffer.pop_front().map(Ok)
             }
             Err(e) => Some(Err(e)),
@@ -1033,6 +1071,8 @@ impl Iterator for NewRepliesIter {
 }
 
 // ==================== 工具函数 ====================
+
+/// 字符串数组去重
 fn deduplicate(items: &[String]) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
     let mut result = Vec::new();
