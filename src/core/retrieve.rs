@@ -491,6 +491,9 @@ impl CommentQueryBuilder {
                     if let Some(content) = comment.get("content") {
                         comment_data.insert("content".into(), content.clone());
                     }
+                    if let Some(content) = comment.get("emoji_content") {
+                        comment_data.insert("emoji_content".into(), content.clone());
+                    }
                     if let Some(created_at) = comment.get("created_at") {
                         comment_data.insert("created_at".into(), created_at.clone());
                     }
@@ -541,13 +544,18 @@ fn build_compact_reply(
         .and_then(|n| n.as_str())
         .unwrap_or("")
         .to_string();
-
+    let emoji_content = reply
+        .get("emoji_content")
+        .and_then(|c| c.as_str())
+        .unwrap_or("")
+        .to_string();
     let mut obj = JsonObject::new();
     obj.insert("id".into(), Value::Number(id.into()));
     obj.insert("content".into(), Value::String(content));
     obj.insert("created_at".into(), Value::String(created_at));
     obj.insert("user_id".into(), Value::Number(user_id.into()));
     obj.insert("nickname".into(), Value::String(nickname));
+    obj.insert("emoji_content".into(), Value::String(emoji_content));
     Some(obj)
 }
 
