@@ -13,11 +13,11 @@ fn current_timestamp_13() -> u128 {
     since_the_epoch.as_millis()
 }
 
-pub struct UserAction {
+pub struct EduUserAction {
     client: &'static CodeMaoClient,
 }
 
-impl UserAction {
+impl EduUserAction {
     pub fn new() -> Self {
         Self {
             client: CodeMaoClient::global(),
@@ -378,17 +378,17 @@ impl UserAction {
     }
 }
 
-impl Default for UserAction {
+impl Default for EduUserAction {
     fn default() -> Self {
         Self::new()
     }
 }
 
-pub struct DataFetcher {
+pub struct EduDataFetcher {
     client: &'static CodeMaoClient,
 }
 
-impl DataFetcher {
+impl EduDataFetcher {
     pub fn new() -> Self {
         Self {
             client: CodeMaoClient::global(),
@@ -1077,7 +1077,7 @@ impl DataFetcher {
     }
 }
 
-impl Default for DataFetcher {
+impl Default for EduDataFetcher {
     fn default() -> Self {
         Self::new()
     }

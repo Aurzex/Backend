@@ -125,11 +125,11 @@ impl ReadStatus {
     }
 }
 
-pub struct DataFetcher {
+pub struct CommunityDataFetcher {
     client: &'static CodeMaoClient,
 }
 
-impl DataFetcher {
+impl CommunityDataFetcher {
     pub fn new() -> Self {
         Self {
             client: CodeMaoClient::global(),
@@ -803,7 +803,7 @@ impl DataFetcher {
     }
 }
 
-impl Default for DataFetcher {
+impl Default for CommunityDataFetcher {
     fn default() -> Self {
         Self::new()
     }

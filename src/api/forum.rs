@@ -65,7 +65,7 @@ impl TargetType {
 
 // 举报原因ID枚举
 #[repr(i32)]
-pub enum ReportReasonId {
+pub enum ForumReportReasonId {
     Custom = 0,
     Reason1 = 1,
     Reason2 = 2,
@@ -485,7 +485,7 @@ impl ForumActionHandler {
     pub fn report_item(
         &self,
         item_id: i32,
-        reason_id: ReportReasonId,
+        reason_id: ForumReportReasonId,
         description: &str,
         item_type: ItemType,
         return_data: bool,

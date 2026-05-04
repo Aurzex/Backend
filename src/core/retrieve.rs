@@ -4,115 +4,17 @@ use std::sync::{Mutex, OnceLock};
 use serde_json::{Map, Value};
 use thiserror::Error;
 
-use crate::api::auth::AuthManager;
-use crate::api::community::{
-    DataFetcher as CommunityDataFetcher, MessageMethod, ReplyTypes,
-    UserAction as CommunityUserAction,
-};
-use crate::api::education::{DataFetcher as EduDataFetcher, UserAction as EduUserAction};
-use crate::api::forum::{ForumActionHandler, ForumDataFetcher};
-use crate::api::library::{NovelActionHandler, NovelDataFetcher};
-use crate::api::shop::{WorkshopActionHandler, WorkshopDataFetcher};
-use crate::api::user::{UserDataFetcher, UserManager};
+use crate::api::community::{CommunityDataFetcher, MessageMethod, ReplyTypes};
+use crate::api::education::{EduDataFetcher, EduUserAction};
+use crate::api::forum::ForumDataFetcher;
+use crate::api::shop::WorkshopDataFetcher;
+use crate::api::user::UserDataFetcher;
 use crate::api::whale::{
-    CommentReportFilterType, CommentSourceType, ReportFetcher, ReportHandler, ReportStatus,
+    CommentReportFilterType, CommentSourceType, ReportStatus, WhaleReportFetcher,
     WorkReportFilterType, WorkSourceType,
 };
-use crate::api::work::{KittenWorkManager, NemoWorkType, WorkDataFetcher};
+use crate::api::work::{NemoWorkType, WorkDataFetcher};
 use crate::utils::acquire::{BaseKey, ClientFactory, CodeMaoClient, HttpMethod, Identity};
-use crate::utils::data::{
-    CacheManager, CodeMaoFile, DataManager, HistoryManager, PathConfig, SettingManager,
-};
-
-/// 全局协调器：集中管理所有 API 模块和全局资源
-pub struct Coordinator {
-    // 认证模块
-    pub auth: AuthManager,
-
-    // 社区模块
-    pub community_action: CommunityUserAction,
-    pub community_fetcher: CommunityDataFetcher,
-
-    // 教育模块
-    pub edu_action: EduUserAction,
-    pub edu_fetcher: EduDataFetcher,
-
-    // 论坛模块
-    pub forum_action: ForumActionHandler,
-    pub forum_fetcher: ForumDataFetcher,
-
-    // 小说模块
-    pub novel_action: NovelActionHandler,
-    pub novel_fetcher: NovelDataFetcher,
-
-    // 工坊模块
-    pub shop_action: WorkshopActionHandler,
-    pub shop_fetcher: WorkshopDataFetcher,
-
-    // 用户模块
-    pub user_action: UserManager,
-    pub user_fetcher: UserDataFetcher,
-
-    // 举报模块（鲸鱼系统）
-    pub report_action: ReportHandler,
-    pub report_fetcher: ReportFetcher,
-
-    // 作品模块
-    pub work_action: KittenWorkManager,
-    pub work_fetcher: WorkDataFetcher,
-
-    // 全局资源
-    pub client: &'static CodeMaoClient,
-    pub data_manager: &'static DataManager,
-    pub path_config: PathConfig,
-    pub setting_manager: &'static SettingManager,
-    pub cache_manager: &'static CacheManager,
-    pub history_manager: &'static HistoryManager,
-    pub file_manager: CodeMaoFile,
-
-    // 可选全局缓存：用于减少 N+1 重复请求（由调用方决定是否启用）
-    pub reply_cache: Mutex<HashMap<i64, Vec<JsonObject>>>,
-}
-
-static COORDINATOR: OnceLock<Coordinator> = OnceLock::new();
-
-/// 初始化全局协调器
-pub fn init_coordinator() {
-    let coordinator = Coordinator {
-        auth: AuthManager::new(),
-        community_action: CommunityUserAction::new(),
-        community_fetcher: CommunityDataFetcher::new(),
-        client: ClientFactory::global_client(),
-        edu_action: EduUserAction::new(),
-        edu_fetcher: EduDataFetcher::new(),
-        forum_action: ForumActionHandler::new(),
-        forum_fetcher: ForumDataFetcher::new(),
-        novel_action: NovelActionHandler::new(),
-        novel_fetcher: NovelDataFetcher::new(),
-        shop_action: WorkshopActionHandler::new(),
-        shop_fetcher: WorkshopDataFetcher::new(),
-        user_action: UserManager::new(),
-        user_fetcher: UserDataFetcher::new(),
-        report_action: ReportHandler::new(),
-        report_fetcher: ReportFetcher::new(),
-        work_action: KittenWorkManager::new(),
-        work_fetcher: WorkDataFetcher::new(),
-        data_manager: DataManager::global(),
-        path_config: PathConfig,
-        setting_manager: SettingManager::global(),
-        cache_manager: CacheManager::global(),
-        history_manager: HistoryManager::global(),
-        file_manager: CodeMaoFile,
-        reply_cache: Mutex::new(HashMap::new()),
-    };
-
-    COORDINATOR.set(coordinator);
-}
-
-/// 获取全局协调器实例
-pub fn coordinator() -> &'static Coordinator {
-    COORDINATOR.get().expect("Coordinator not initialized")
-}
 
 // ==================== 错误类型 ====================
 
@@ -285,26 +187,22 @@ impl CommentQueryBuilder {
             .target_id
             .ok_or_else(|| DataQueryError::InvalidSource("未设置源ID".into()))?;
         let limit = self.limit;
-        let coord = coordinator();
 
         match source {
             CommentSource::Work => {
-                let iter = coord
-                    .work_fetcher
+                let iter = WorkDataFetcher::new()
                     .fetch_work_comments_gen(target_id, limit)
                     .map(|item| item.map_err(to_external_err));
                 Ok(Box::new(iter))
             }
             CommentSource::Forum => {
-                let iter = coord
-                    .forum_fetcher
+                let iter = ForumDataFetcher::new()
                     .fetch_post_replies_gen(target_id, None, limit)
                     .map(|item| item.map_err(to_external_err));
                 Ok(Box::new(iter))
             }
             CommentSource::Shop => {
-                let iter = coord
-                    .shop_fetcher
+                let iter = WorkshopDataFetcher::new()
                     .fetch_workshop_discussions_gen(target_id, None, None, limit)
                     .map(|item| item.map_err(to_external_err));
                 Ok(Box::new(iter))
@@ -360,8 +258,7 @@ impl CommentQueryBuilder {
                     // 提取回复中的用户ID，不构造完整对象
                     if source == CommentSource::Forum {
                         // Forum 需要拉取子回复流
-                        let reply_stream = coordinator()
-                            .forum_fetcher
+                        let reply_stream = ForumDataFetcher::new()
                             .fetch_reply_comments_gen(comment_id as i32, None);
                         for reply_result in reply_stream {
                             if let Ok(reply_val) = reply_result {
@@ -402,8 +299,7 @@ impl CommentQueryBuilder {
 
                     // 仅提取回复ID，不构建完整对象
                     if source == CommentSource::Forum {
-                        let reply_stream = coordinator()
-                            .forum_fetcher
+                        let reply_stream = ForumDataFetcher::new()
                             .fetch_reply_comments_gen(comment_id as i32, None);
                         for reply_result in reply_stream {
                             if let Ok(reply_val) = reply_result {
@@ -444,8 +340,7 @@ impl CommentQueryBuilder {
 
                     // 获取回复流，直接构建精简对象
                     let replies: Vec<JsonObject> = if source == CommentSource::Forum {
-                        let reply_stream = coordinator()
-                            .forum_fetcher
+                        let reply_stream = ForumDataFetcher::new()
                             .fetch_reply_comments_gen(comment_id as i32, None);
                         reply_stream
                             .filter_map(|r| r.ok())
@@ -596,9 +491,7 @@ impl DataQuery {
         reply_type: ReplyTypes,
         limit: i32,
     ) -> Box<dyn Iterator<Item = Result<JsonObject, DataQueryError>> + 'static> {
-        let coord = coordinator();
-        let total = match coord
-            .community_fetcher
+        let total = match CommunityDataFetcher::new()
             .fetch_message_count(MessageMethod::Web)
             .map_err(|e| DataQueryError::External(e.into()))
         {
@@ -609,7 +502,6 @@ impl DataQuery {
         let remaining = if limit == 0 { total } else { limit.min(total) };
 
         Box::new(CommunityReplyStream {
-            coord,
             reply_type,
             remaining,
             offset: 0,
@@ -623,11 +515,9 @@ impl DataQuery {
         source: CommentSource,
         target_id: i32,
     ) -> Result<i32, DataQueryError> {
-        let coord = coordinator();
         match source {
             CommentSource::Work => {
-                let comments_response = coord
-                    .client
+                let comments_response = ClientFactory::global_client()
                     .build_request(
                         HttpMethod::GET,
                         &format!("/creation-tools/v1/works/{}/comments", target_id),
@@ -638,8 +528,7 @@ impl DataQuery {
                     .send()
                     .map_err(to_external_err)?;
 
-                let json = coord
-                    .client
+                let json = ClientFactory::global_client()
                     .response_to_json(comments_response)
                     .map_err(to_external_err)?;
 
@@ -647,8 +536,7 @@ impl DataQuery {
                     return Ok(total as i32);
                 }
 
-                let work_response = coord
-                    .client
+                let work_response = ClientFactory::global_client()
                     .build_request(
                         HttpMethod::GET,
                         &format!("/creation-tools/v1/works/{}", target_id),
@@ -657,8 +545,7 @@ impl DataQuery {
                     .send()
                     .map_err(to_external_err)?;
 
-                let work_json = coord
-                    .client
+                let work_json = ClientFactory::global_client()
                     .response_to_json(work_response)
                     .map_err(to_external_err)?;
 
@@ -668,8 +555,7 @@ impl DataQuery {
                     .unwrap_or(0) as i32)
             }
             CommentSource::Shop => {
-                let response = coord
-                    .client
+                let response = ClientFactory::global_client()
                     .build_request(
                         HttpMethod::GET,
                         &format!("/web/discussions/{}/comments", target_id),
@@ -682,8 +568,7 @@ impl DataQuery {
                     .send()
                     .map_err(to_external_err)?;
 
-                let json = coord
-                    .client
+                let json = ClientFactory::global_client()
                     .response_to_json(response)
                     .map_err(to_external_err)?;
 
@@ -693,8 +578,7 @@ impl DataQuery {
                 Ok(total + total_reply)
             }
             CommentSource::Forum => {
-                let response = coord
-                    .client
+                let response = ClientFactory::global_client()
                     .build_request(
                         HttpMethod::GET,
                         &format!("/web/forums/posts/{}/details", target_id),
@@ -703,8 +587,7 @@ impl DataQuery {
                     .send()
                     .map_err(to_external_err)?;
 
-                let json = coord
-                    .client
+                let json = ClientFactory::global_client()
                     .response_to_json(response)
                     .map_err(to_external_err)?;
 
@@ -721,7 +604,6 @@ impl DataQuery {
         &self,
         limit: i32,
     ) -> Box<dyn Iterator<Item = Result<JsonObject, DataQueryError>> + 'static> {
-        let coord = coordinator();
         let per_source_limit = Some(limit / 2);
 
         let nemo_field_mapping: HashMap<&str, &str> = [
@@ -746,13 +628,12 @@ impl DataQuery {
         .into_iter()
         .collect();
 
-        let nemo_result =
-            coord
-                .work_fetcher
-                .fetch_new_works_nemo(NemoWorkType::Original, per_source_limit, None);
-        let web_result = coord
-            .work_fetcher
-            .fetch_new_works_web(per_source_limit, None, true);
+        let nemo_result = WorkDataFetcher::new().fetch_new_works_nemo(
+            NemoWorkType::Original,
+            per_source_limit,
+            None,
+        );
+        let web_result = WorkDataFetcher::new().fetch_new_works_web(per_source_limit, None, true);
 
         let process_result = |res: Result<Value, _>, mapping: HashMap<&str, &str>| match res {
             Ok(val) => {
@@ -865,7 +746,6 @@ impl DataQuery {
 
     /// 获取管理员举报处理统计
     pub fn compute_admin_report_stats(&self) -> Result<AdminReportStatistics, DataQueryError> {
-        let coord = coordinator();
         let admins = [
             (220, "石榴 Grant"),
             (222, "shidang88"),
@@ -882,8 +762,7 @@ impl DataQuery {
         let mut total_work_reports = 0;
 
         for &(admin_id, admin_name) in &admins {
-            let comment_count = coord
-                .report_fetcher
+            let comment_count = WhaleReportFetcher::new()
                 .fetch_comment_reports_total(
                     CommentSourceType::All,
                     ReportStatus::All,
@@ -895,8 +774,7 @@ impl DataQuery {
                 .and_then(|t| t.as_i64())
                 .unwrap_or(0) as i32;
 
-            let work_count = coord
-                .report_fetcher
+            let work_count = WhaleReportFetcher::new()
                 .fetch_work_reports_total(
                     WorkSourceType::All,
                     ReportStatus::All,
@@ -951,8 +829,7 @@ impl DataQuery {
         user_id: i32,
         like_threshold: i32,
     ) -> Result<FanByLikesStatistics, DataQueryError> {
-        let coord = coordinator();
-        let fans_stream = coord.user_fetcher.fetch_followers_gen(user_id, None);
+        let fans_stream = UserDataFetcher::new().fetch_followers_gen(user_id, None);
 
         let mut qualified_fans = Vec::new();
         let mut total_fans = 0;
@@ -967,8 +844,7 @@ impl DataQuery {
                 let mut fan_obj = JsonObject::new();
                 if let Some(id) = fan.get("id").and_then(|i| i.as_i64()) {
                     fan_obj.insert("user_id".into(), Value::Number(id.into()));
-                    let honors = coord
-                        .user_fetcher
+                    let honors = UserDataFetcher::new()
                         .fetch_user_honors(id as i32)
                         .map_err(|e| DataQueryError::External(e.into()));
                     if let Ok(ref honors_data) = honors {
@@ -1025,17 +901,15 @@ impl DataQuery {
         limit: Option<usize>,
     ) -> Box<dyn Iterator<Item = Result<(String, String), DataQueryError>> + 'static> {
         const MAX_EDU_STUDENTS: usize = 2000;
-        let coord = coordinator();
 
-        if let Err(e) = coord.client.switch_identity(Identity::Edu) {
+        if let Err(e) = ClientFactory::global_client().switch_identity(Identity::Edu) {
             return Box::new(std::iter::once(Err(to_external_err(e))));
         }
 
         let effective_limit = limit.unwrap_or(MAX_EDU_STUDENTS).min(MAX_EDU_STUDENTS);
 
         // 直接使用接口返回的迭代器，保留原始顺序
-        let stream = coord
-            .edu_fetcher
+        let stream = EduDataFetcher::new()
             .fetch_class_students_gen(1, Some(effective_limit))
             .filter_map(move |student_result| {
                 let student = match student_result {
@@ -1049,8 +923,7 @@ impl DataQuery {
                     .and_then(|u| u.as_str())?
                     .to_string();
 
-                let password_result = coord
-                    .edu_action
+                let password_result = EduUserAction::new()
                     .reset_student_password(student_id)
                     .map_err(|e| DataQueryError::External(e.into()));
 
@@ -1115,7 +988,6 @@ pub struct FanByLikesStatistics {
 
 /// 社区新回复分页流（健壮版，不再依赖总数）
 struct CommunityReplyStream {
-    coord: &'static Coordinator,
     reply_type: ReplyTypes,
     remaining: i32, // 剩余待取数量（i32::MAX 表示无上限）
     offset: i32,
@@ -1134,11 +1006,7 @@ impl Iterator for CommunityReplyStream {
         }
 
         let batch_size = self.remaining.min(200).max(5);
-        match self
-            .coord
-            .community_fetcher
-            .fetch_replies(self.reply_type, batch_size, self.offset)
-        {
+        match CommunityDataFetcher::new().fetch_replies(self.reply_type, batch_size, self.offset) {
             Ok(response) => {
                 let items: Vec<JsonObject> = response
                     .get("items")

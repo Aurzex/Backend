@@ -56,8 +56,9 @@ impl CommentSourceType {
 }
 
 // 举报状态枚举
+#[derive(PartialEq, Eq)]
 pub enum ReportStatus {
-    Tobedone,
+    ToBeDone,
     Done,
     All,
 }
@@ -65,7 +66,7 @@ pub enum ReportStatus {
 impl ReportStatus {
     fn as_str(&self) -> &'static str {
         match self {
-            ReportStatus::Tobedone => "TOBEDONE",
+            ReportStatus::ToBeDone => "TOBEDONE",
             ReportStatus::Done => "DONE",
             ReportStatus::All => "ALL",
         }
@@ -143,11 +144,11 @@ impl Resolution {
 }
 
 // ==================== 举报数据获取器 ====================
-pub struct ReportFetcher {
+pub struct WhaleReportFetcher {
     client: &'static CodeMaoClient,
 }
 
-impl ReportFetcher {
+impl WhaleReportFetcher {
     pub fn new() -> Self {
         Self {
             client: CodeMaoClient::global(),
@@ -469,7 +470,7 @@ impl ReportFetcher {
     }
 }
 
-impl Default for ReportFetcher {
+impl Default for WhaleReportFetcher {
     fn default() -> Self {
         Self::new()
     }

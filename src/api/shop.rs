@@ -33,7 +33,7 @@ impl AuditStatus {
 
 // 举报原因ID枚举
 #[repr(i32)]
-pub enum ReportReasonId {
+pub enum WorkShopReportReasonId {
     Custom = 0,
     Reason1 = 1,
     Reason2 = 2,
@@ -447,7 +447,7 @@ impl WorkshopActionHandler {
         &self,
         comment_id: i32,
         reason_content: &str,
-        reason_id: ReportReasonId,
+        reason_id: WorkShopReportReasonId,
         reporter_id: i32,
         comment_source: Option<Source>,
         comment_parent_id: Option<i32>,

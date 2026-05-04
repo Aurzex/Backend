@@ -230,9 +230,9 @@ impl BaseWorkOperations {
     // 举报作品
     pub fn execute_report_work(
         &self,
+        work_id: i32,
         describe: &str,
         reason: &str,
-        work_id: i32,
     ) -> Result<bool, Box<dyn std::error::Error>> {
         let data = json!({
             "work_id": work_id,
