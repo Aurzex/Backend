@@ -1,7 +1,6 @@
-use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Mutex, OnceLock};
 
-use rand::RngExt;
 use serde_json::{Map, Value};
 use thiserror::Error;
 
@@ -70,6 +69,9 @@ pub struct Coordinator {
     pub cache_manager: &'static CacheManager,
     pub history_manager: &'static HistoryManager,
     pub file_manager: CodeMaoFile,
+
+    // 可选全局缓存：用于减少 N+1 重复请求（由调用方决定是否启用）
+    pub reply_cache: Mutex<HashMap<i64, Vec<JsonObject>>>,
 }
 
 static COORDINATOR: OnceLock<Coordinator> = OnceLock::new();
@@ -101,6 +103,7 @@ pub fn init_coordinator() {
         cache_manager: CacheManager::global(),
         history_manager: HistoryManager::global(),
         file_manager: CodeMaoFile,
+        reply_cache: Mutex::new(HashMap::new()),
     };
 
     COORDINATOR.set(coordinator);
@@ -128,7 +131,12 @@ pub enum DataQueryError {
     #[error("内部错误: {0}")]
     Internal(String),
     #[error("外部错误: {0}")]
-    External(#[from] Box<dyn std::error::Error>),
+    External(Box<dyn std::error::Error>),
+}
+
+/// 安全地将具体错误类型转换为 DataQueryError
+fn to_external_err<E: std::error::Error + 'static>(e: E) -> DataQueryError {
+    DataQueryError::External(Box::new(e))
 }
 
 // ==================== 枚举定义 ====================
@@ -284,42 +292,47 @@ impl CommentQueryBuilder {
                 let iter = coord
                     .work_fetcher
                     .fetch_work_comments_gen(target_id, limit)
-                    .map(|item| item.map_err(|e| DataQueryError::External(e.into())));
+                    .map(|item| item.map_err(to_external_err));
                 Ok(Box::new(iter))
             }
             CommentSource::Forum => {
                 let iter = coord
                     .forum_fetcher
                     .fetch_post_replies_gen(target_id, None, limit)
-                    .map(|item| item.map_err(|e| DataQueryError::External(e.into())));
+                    .map(|item| item.map_err(to_external_err));
                 Ok(Box::new(iter))
             }
             CommentSource::Shop => {
                 let iter = coord
                     .shop_fetcher
                     .fetch_workshop_discussions_gen(target_id, None, None, limit)
-                    .map(|item| item.map_err(|e| DataQueryError::External(e.into())));
+                    .map(|item| item.map_err(to_external_err));
                 Ok(Box::new(iter))
             }
         }
     }
 
     /// 执行评论查询
-    pub fn execute(self) -> Result<CommentsResult, DataQueryError> {
+    pub fn execute(mut self) -> Result<CommentsResult, DataQueryError> {
         let source = self
             .source
             .ok_or_else(|| DataQueryError::InvalidSource("未设置来源".into()))?;
         let mode = self.mode;
 
+        // 安全上限：防止一次加载过多评论
+        const MAX_COMMENTS: usize = 1000;
+        let safe_limit = self.limit.unwrap_or(500).min(MAX_COMMENTS);
+        self.limit = Some(safe_limit);
+
         let comment_stream = self.build_comment_stream()?;
-        let comments: Vec<JsonValue> = comment_stream.collect::<Result<Vec<_>, _>>()?;
+        let comments: Vec<JsonValue> = comment_stream
+            .take(safe_limit)
+            .collect::<Result<Vec<_>, _>>()?;
 
         let user_field = match source {
             CommentSource::Work | CommentSource::Shop => "reply_user",
             CommentSource::Forum => "user",
         };
-
-        let mut reply_cache: HashMap<i64, Vec<JsonObject>> = HashMap::new();
 
         let extract_reply_user_id = |reply: &JsonObject| -> Option<i64> {
             reply
@@ -327,42 +340,6 @@ impl CommentQueryBuilder {
                 .and_then(|u| u.as_object())
                 .and_then(|u| u.get("id"))
                 .and_then(|id| id.as_i64())
-        };
-
-        let mut fetch_replies = |comment: &Value| -> Result<Vec<JsonObject>, DataQueryError> {
-            let comment_obj = comment
-                .as_object()
-                .ok_or_else(|| DataQueryError::ParseError("评论数据格式错误".into()))?;
-
-            if source == CommentSource::Forum {
-                let comment_id = comment_obj
-                    .get("id")
-                    .and_then(|id| id.as_i64())
-                    .ok_or(DataQueryError::ParseError("缺少评论ID".into()))?;
-
-                if !reply_cache.contains_key(&comment_id) {
-                    let replies_iter = coordinator()
-                        .forum_fetcher
-                        .fetch_reply_comments_gen(comment_id as i32, None);
-                    let replies: Vec<JsonObject> = replies_iter
-                        .filter_map(|item| match item {
-                            Ok(val) => val.as_object().cloned(),
-                            Err(_) => None,
-                        })
-                        .collect();
-                    reply_cache.insert(comment_id, replies);
-                }
-                Ok(reply_cache.get(&comment_id).cloned().unwrap_or_default())
-            } else {
-                let replies = comment
-                    .get("replies")
-                    .and_then(|r| r.as_object())
-                    .and_then(|r| r.get("items"))
-                    .and_then(|items| items.as_array())
-                    .map(|arr| arr.iter().filter_map(|v| v.as_object().cloned()).collect())
-                    .unwrap_or_default();
-                Ok(replies)
-            }
         };
 
         match mode {
@@ -377,9 +354,39 @@ impl CommentQueryBuilder {
                     {
                         user_ids.push(id.to_string());
                     }
-                    for reply in fetch_replies(comment)? {
-                        if let Some(uid) = extract_reply_user_id(&reply) {
-                            user_ids.push(uid.to_string());
+
+                    let comment_id = comment.get("id").and_then(|id| id.as_i64()).unwrap_or(0);
+
+                    // 提取回复中的用户ID，不构造完整对象
+                    if source == CommentSource::Forum {
+                        // Forum 需要拉取子回复流
+                        let reply_stream = coordinator()
+                            .forum_fetcher
+                            .fetch_reply_comments_gen(comment_id as i32, None);
+                        for reply_result in reply_stream {
+                            if let Ok(reply_val) = reply_result {
+                                if let Some(reply_obj) = reply_val.as_object() {
+                                    if let Some(uid) = extract_reply_user_id(reply_obj) {
+                                        user_ids.push(uid.to_string());
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // Work / Shop 内嵌 replies
+                        if let Some(replies) = comment
+                            .get("replies")
+                            .and_then(|r| r.as_object())
+                            .and_then(|r| r.get("items"))
+                            .and_then(|items| items.as_array())
+                        {
+                            for reply_val in replies {
+                                if let Some(reply_obj) = reply_val.as_object() {
+                                    if let Some(uid) = extract_reply_user_id(reply_obj) {
+                                        user_ids.push(uid.to_string());
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -391,12 +398,40 @@ impl CommentQueryBuilder {
                     if let Some(id) = comment.get("id").and_then(|id| id.as_i64()) {
                         comment_ids.push(id.to_string());
                     }
-                    let comment_id = comment.get("id").and_then(|id| id.as_i64());
-                    for reply in fetch_replies(comment)? {
-                        if let (Some(cid), Some(rid)) =
-                            (comment_id, reply.get("id").and_then(|id| id.as_i64()))
+                    let comment_id = comment.get("id").and_then(|id| id.as_i64()).unwrap_or(0);
+
+                    // 仅提取回复ID，不构建完整对象
+                    if source == CommentSource::Forum {
+                        let reply_stream = coordinator()
+                            .forum_fetcher
+                            .fetch_reply_comments_gen(comment_id as i32, None);
+                        for reply_result in reply_stream {
+                            if let Ok(reply_val) = reply_result {
+                                if let Some(reply_obj) = reply_val.as_object() {
+                                    if let Some(rid) =
+                                        reply_obj.get("id").and_then(|id| id.as_i64())
+                                    {
+                                        comment_ids.push(format!("{}.{}", comment_id, rid));
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        if let Some(replies) = comment
+                            .get("replies")
+                            .and_then(|r| r.as_object())
+                            .and_then(|r| r.get("items"))
+                            .and_then(|items| items.as_array())
                         {
-                            comment_ids.push(format!("{}.{}", cid, rid));
+                            for reply_val in replies {
+                                if let Some(reply_obj) = reply_val.as_object() {
+                                    if let Some(rid) =
+                                        reply_obj.get("id").and_then(|id| id.as_i64())
+                                    {
+                                        comment_ids.push(format!("{}.{}", comment_id, rid));
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -405,39 +440,42 @@ impl CommentQueryBuilder {
             CommentQueryMode::Comments => {
                 let mut detailed = Vec::new();
                 for comment in &comments {
-                    let replies: Vec<JsonObject> = fetch_replies(comment)?
-                        .into_iter()
-                        .filter_map(|reply| {
-                            let id = reply.get("id")?.as_i64()?;
-                            let content = reply
-                                .get("content")
-                                .and_then(|c| c.as_str())
-                                .unwrap_or("")
-                                .to_string();
-                            let created_at = reply
-                                .get("created_at")
-                                .and_then(|c| c.as_str())
-                                .unwrap_or("")
-                                .to_string();
-                            let user_id = extract_reply_user_id(&reply)?;
-                            let nickname = reply
-                                .get(user_field)
-                                .and_then(|u| u.as_object())
-                                .and_then(|u| u.get("nickname"))
-                                .and_then(|n| n.as_str())
-                                .unwrap_or("")
-                                .to_string();
+                    let comment_id = comment.get("id").and_then(|id| id.as_i64()).unwrap_or(0);
 
-                            let mut obj = JsonObject::new();
-                            obj.insert("id".into(), Value::Number(id.into()));
-                            obj.insert("content".into(), Value::String(content));
-                            obj.insert("created_at".into(), Value::String(created_at));
-                            obj.insert("user_id".into(), Value::Number(user_id.into()));
-                            obj.insert("nickname".into(), Value::String(nickname));
-                            Some(obj)
-                        })
-                        .collect();
+                    // 获取回复流，直接构建精简对象
+                    let replies: Vec<JsonObject> = if source == CommentSource::Forum {
+                        let reply_stream = coordinator()
+                            .forum_fetcher
+                            .fetch_reply_comments_gen(comment_id as i32, None);
+                        reply_stream
+                            .filter_map(|r| r.ok())
+                            .filter_map(|v| v.as_object().cloned())
+                            .filter_map(|reply| {
+                                build_compact_reply(&reply, user_field, &extract_reply_user_id)
+                            })
+                            .collect()
+                    } else {
+                        comment
+                            .get("replies")
+                            .and_then(|r| r.as_object())
+                            .and_then(|r| r.get("items"))
+                            .and_then(|items| items.as_array())
+                            .map(|arr| {
+                                arr.iter()
+                                    .filter_map(|v| v.as_object())
+                                    .filter_map(|reply| {
+                                        build_compact_reply(
+                                            reply,
+                                            user_field,
+                                            &extract_reply_user_id,
+                                        )
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default()
+                    };
 
+                    // 构建主评论精简对象
                     let mut comment_data = JsonObject::new();
                     if let Some(user) = comment.get("user").and_then(|u| u.as_object()) {
                         if let Some(id) = user.get("id") {
@@ -476,6 +514,41 @@ impl CommentQueryBuilder {
             }
         }
     }
+}
+
+/// 辅助函数：从原始回复对象构建精简的 JsonObject
+fn build_compact_reply(
+    reply: &JsonObject,
+    user_field: &str,
+    extract_id: &dyn Fn(&JsonObject) -> Option<i64>,
+) -> Option<JsonObject> {
+    let id = reply.get("id")?.as_i64()?;
+    let content = reply
+        .get("content")
+        .and_then(|c| c.as_str())
+        .unwrap_or("")
+        .to_string();
+    let created_at = reply
+        .get("created_at")
+        .and_then(|c| c.as_str())
+        .unwrap_or("")
+        .to_string();
+    let user_id = extract_id(reply)?;
+    let nickname = reply
+        .get(user_field)
+        .and_then(|u| u.as_object())
+        .and_then(|u| u.get("nickname"))
+        .and_then(|n| n.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let mut obj = JsonObject::new();
+    obj.insert("id".into(), Value::Number(id.into()));
+    obj.insert("content".into(), Value::String(content));
+    obj.insert("created_at".into(), Value::String(created_at));
+    obj.insert("user_id".into(), Value::Number(user_id.into()));
+    obj.insert("nickname".into(), Value::String(nickname));
+    Some(obj)
 }
 
 // ==================== 数据查询主结构体 ====================
@@ -532,7 +605,7 @@ impl DataQuery {
             reply_type,
             remaining,
             offset: 0,
-            buffer: std::collections::VecDeque::new(),
+            buffer: VecDeque::new(),
         })
     }
 
@@ -555,12 +628,12 @@ impl DataQuery {
                     .with_param("offset", "0")
                     .with_param("limit", "15")
                     .send()
-                    .map_err(|e| DataQueryError::External(e.into()))?;
+                    .map_err(to_external_err)?;
 
                 let json = coord
                     .client
                     .response_to_json(comments_response)
-                    .map_err(|e| DataQueryError::External(e.into()))?;
+                    .map_err(to_external_err)?;
 
                 if let Some(total) = json.get("total").and_then(|t| t.as_i64()) {
                     return Ok(total as i32);
@@ -574,12 +647,12 @@ impl DataQuery {
                         Some(BaseKey::Default),
                     )
                     .send()
-                    .map_err(|e| DataQueryError::External(e.into()))?;
+                    .map_err(to_external_err)?;
 
                 let work_json = coord
                     .client
                     .response_to_json(work_response)
-                    .map_err(|e| DataQueryError::External(e.into()))?;
+                    .map_err(to_external_err)?;
 
                 Ok(work_json
                     .get("comment_times")
@@ -599,12 +672,12 @@ impl DataQuery {
                     .with_param("limit", "15")
                     .with_param("offset", "0")
                     .send()
-                    .map_err(|e| DataQueryError::External(e.into()))?;
+                    .map_err(to_external_err)?;
 
                 let json = coord
                     .client
                     .response_to_json(response)
-                    .map_err(|e| DataQueryError::External(e.into()))?;
+                    .map_err(to_external_err)?;
 
                 let total = json.get("total").and_then(|t| t.as_i64()).unwrap_or(0) as i32;
                 let total_reply =
@@ -620,12 +693,12 @@ impl DataQuery {
                         Some(BaseKey::Default),
                     )
                     .send()
-                    .map_err(|e| DataQueryError::External(e.into()))?;
+                    .map_err(to_external_err)?;
 
                 let json = coord
                     .client
                     .response_to_json(response)
-                    .map_err(|e| DataQueryError::External(e.into()))?;
+                    .map_err(to_external_err)?;
 
                 let n_replies = json.get("n_replies").and_then(|r| r.as_i64()).unwrap_or(0) as i32;
                 let n_comments =
@@ -863,6 +936,8 @@ impl DataQuery {
     }
 
     /// 获取粉丝统计（基于点赞数阈值）
+    ///
+    /// 注意：为每个符合条件的粉丝单独查询荣誉数据（N+1 请求），需评估性能影响。
     pub fn compute_fans_by_like_threshold(
         &self,
         user_id: i32,
@@ -875,7 +950,7 @@ impl DataQuery {
         let mut total_fans = 0;
 
         for fan_result in fans_stream {
-            let fan = fan_result.map_err(|e| DataQueryError::External(e.into()))?;
+            let fan = fan_result.map_err(to_external_err)?;
             total_fans += 1;
 
             let total_likes = fan.get("total_likes").and_then(|l| l.as_i64()).unwrap_or(0) as i32;
@@ -934,52 +1009,56 @@ impl DataQuery {
     }
 
     /// 获取教育账号流（切换身份、重置密码）
+    ///
+    /// 为防止一次性加载过多学生造成 OOM，会限制最大学生数（默认 2000）。
+    /// 保持原始顺序，不再进行随机打乱。
     pub fn stream_edu_accounts_with_reset_passwords(
         &self,
         limit: Option<usize>,
     ) -> Box<dyn Iterator<Item = Result<(String, String), DataQueryError>> + 'static> {
+        const MAX_EDU_STUDENTS: usize = 2000;
         let coord = coordinator();
 
         if let Err(e) = coord.client.switch_identity(Identity::Edu) {
-            return Box::new(std::iter::once(Err(DataQueryError::External(e.into()))));
+            return Box::new(std::iter::once(Err(to_external_err(e))));
         }
 
-        let students = match coord
+        let effective_limit = limit.unwrap_or(MAX_EDU_STUDENTS).min(MAX_EDU_STUDENTS);
+
+        // 直接使用接口返回的迭代器，保留原始顺序
+        let stream = coord
             .edu_fetcher
-            .fetch_class_students_gen(1, limit)
-            .collect()
-            .map_err(|e| DataQueryError::External(e.into()))
-        {
-            Ok(students) => students,
-            Err(e) => return Box::new(std::iter::once(Err(e))),
-        };
+            .fetch_class_students_gen(1, Some(effective_limit))
+            .filter_map(move |student_result| {
+                let student = match student_result {
+                    Ok(s) => s,
+                    Err(e) => return Some(Err(DataQueryError::External(e.into()))),
+                };
 
-        let mut rng = rand::rng();
-        let mut shuffled_students = students;
-        shuffled_students.sort_by(|_, _| rng.random::<u8>().cmp(&128));
+                let student_id = student.get("id").and_then(|i| i.as_i64())? as i32;
+                let username = student
+                    .get("username")
+                    .and_then(|u| u.as_str())?
+                    .to_string();
 
-        let stream = shuffled_students.into_iter().filter_map(move |student| {
-            let student_id = student.get("id").and_then(|i| i.as_i64())? as i32;
-            let username = student
-                .get("username")
-                .and_then(|u| u.as_str())?
-                .to_string();
-            let password_result = coord
-                .edu_action
-                .reset_student_password(student_id)
-                .map_err(|e| DataQueryError::External(e.into()));
-            match password_result {
-                Ok(password_data) => {
-                    let password = password_data
-                        .get("password")
-                        .and_then(|p| p.as_str())
-                        .unwrap_or("")
-                        .to_string();
-                    Some(Ok((username, password)))
+                let password_result = coord
+                    .edu_action
+                    .reset_student_password(student_id)
+                    .map_err(|e| DataQueryError::External(e.into()));
+
+                match password_result {
+                    Ok(password_data) => {
+                        let password = password_data
+                            .get("password")
+                            .and_then(|p| p.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        Some(Ok((username, password)))
+                    }
+                    Err(e) => Some(Err(e)),
                 }
-                Err(e) => Some(Err(e)),
-            }
-        });
+            })
+            .take(effective_limit); // 额外安全限流
 
         Box::new(stream)
     }
@@ -1026,13 +1105,13 @@ pub struct FanByLikesStatistics {
 
 // ==================== 辅助迭代器实现 ====================
 
-/// 社区新回复分页流
+/// 社区新回复分页流（健壮版，不再依赖总数）
 struct CommunityReplyStream {
     coord: &'static Coordinator,
     reply_type: ReplyTypes,
-    remaining: i32,
+    remaining: i32, // 剩余待取数量（i32::MAX 表示无上限）
     offset: i32,
-    buffer: std::collections::VecDeque<JsonObject>,
+    buffer: VecDeque<JsonObject>,
 }
 
 impl Iterator for CommunityReplyStream {
@@ -1045,12 +1124,12 @@ impl Iterator for CommunityReplyStream {
         if self.remaining <= 0 {
             return None;
         }
+
         let batch_size = self.remaining.min(200).max(5);
         match self
             .coord
             .community_fetcher
             .fetch_replies(self.reply_type, batch_size, self.offset)
-            .map_err(|e| DataQueryError::External(e.into()))
         {
             Ok(response) => {
                 let items: Vec<JsonObject> = response
@@ -1059,13 +1138,19 @@ impl Iterator for CommunityReplyStream {
                     .into_iter()
                     .flat_map(|arr| arr.iter().filter_map(|v| v.as_object().cloned()))
                     .collect();
-                let take_count = items.len().min(self.remaining as usize);
+
+                let fetched_count = items.len() as i32;
+                if fetched_count == 0 {
+                    return None; // 无更多数据
+                }
+
+                let take_count = fetched_count.min(self.remaining) as usize;
                 self.remaining -= take_count as i32;
-                self.offset += batch_size;
+                self.offset += fetched_count; // 基于实际返回量推进偏移
                 self.buffer.extend(items.into_iter().take(take_count));
                 self.buffer.pop_front().map(Ok)
             }
-            Err(e) => Some(Err(e)),
+            Err(e) => Some(Err(DataQueryError::External(e.into()))),
         }
     }
 }
