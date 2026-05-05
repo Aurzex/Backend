@@ -56,7 +56,7 @@ impl CommentSourceType {
 }
 
 // 举报状态枚举
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Clone, Copy)]
 pub enum ReportStatus {
     ToBeDone,
     Done,

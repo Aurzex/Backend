@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::Debug;
 use std::fs;
 use std::io::{self, Write};
+use std::num::ParseIntError;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::thread;
@@ -12,7 +13,7 @@ use std::time::Duration;
 
 use crate::api::auth::AuthManager;
 use crate::api::forum::{
-    ForumActionHandler, ForumDataFetcher, ForumReportReasonId, PostReportReasonId,
+    ForumActionHandler, ForumDataFetcher, ForumReportReasonId, ItemType, PostReportReasonId,
 };
 use crate::api::shop::{WorkShopReportReasonId, WorkshopActionHandler, WorkshopDataFetcher};
 use crate::api::whale::{
@@ -21,7 +22,7 @@ use crate::api::whale::{
 };
 use crate::api::work::{BaseWorkOperations, CommentOperations, WorkDataFetcher};
 use crate::utils::acquire::{
-    BaseKey, ClientFactory, CodeMaoClient, FileUploader, HttpMethod, Identity,
+    self, BaseKey, ClientFactory, CodeMaoClient, FileUploader, HttpMethod, Identity,
 };
 use crate::utils::data::{DataManager, PathConfig, SettingManager};
 
@@ -31,6 +32,7 @@ pub enum ProcessorError {
     Processing(String),
     Io(io::Error),
     Json(serde_json::Error),
+    ParseInt(ParseIntError),
     External(Box<dyn std::error::Error>),
 }
 
@@ -40,6 +42,7 @@ impl std::fmt::Display for ProcessorError {
             ProcessorError::Processing(s) => write!(f, "Processing error: {}", s),
             ProcessorError::Io(e) => write!(f, "I/O error: {}", e),
             ProcessorError::Json(e) => write!(f, "JSON error: {}", e),
+            ProcessorError::ParseInt(e) => write!(f, "Parse int error: {}", e),
             ProcessorError::External(e) => write!(f, "External error: {}", e),
         }
     }
@@ -55,6 +58,16 @@ impl From<io::Error> for ProcessorError {
 impl From<serde_json::Error> for ProcessorError {
     fn from(e: serde_json::Error) -> Self {
         ProcessorError::Json(e)
+    }
+}
+impl From<ParseIntError> for ProcessorError {
+    fn from(e: ParseIntError) -> Self {
+        ProcessorError::ParseInt(e)
+    }
+}
+impl From<acquire::Error> for ProcessorError {
+    fn from(e: acquire::Error) -> Self {
+        ProcessorError::External(Box::new(e))
     }
 }
 impl From<Box<dyn std::error::Error>> for ProcessorError {
@@ -176,7 +189,7 @@ impl CommentProcessStrategy for AdsStrategy {
                     )
                 },
             );
-            if let Some(replies) = comment.get("replies").as_array() {
+            if let Some(replies) = comment.get("replies").and_then(|v| v.as_array()) {
                 for reply in replies {
                     process_single_comment(
                         reply,
@@ -280,7 +293,7 @@ impl CommentProcessStrategy for BlacklistStrategy {
                     )
                 },
             );
-            if let Some(replies) = comment.get("replies").as_array() {
+            if let Some(replies) = comment.get("replies").and_then(|v| v.as_array()) {
                 for reply in replies {
                     process_single_comment(
                         reply,
@@ -376,7 +389,7 @@ impl CommentProcessStrategy for DuplicatesStrategy {
 
         for comment in comments {
             track(comment, item_id, &mut content_map, source_type, false);
-            if let Some(replies) = comment.get("replies").as_array() {
+            if let Some(replies) = comment.get("replies").and_then(|v| v.as_array()) {
                 for reply in replies {
                     track(reply, item_id, &mut content_map, source_type, true);
                 }
@@ -401,7 +414,7 @@ impl CommentProcessStrategy for DuplicatesStrategy {
 }
 
 /// 辅助函数，用于处理单条评论/回复并构建标识符和日志
-fn process_single_comment<T: ?Sized + std::hash::Hash + Eq>(
+fn process_single_comment<T: std::hash::Hash + Eq>(
     data: &Value,
     item_id: i64,
     title: &str,
@@ -986,7 +999,6 @@ impl ReportFetcher {
         let mut carry_over = Vec::<Value>::new();
         std::iter::from_fn(move || {
             let mut chunk = Vec::new();
-            // Move any carry-over from previous iteration
             std::mem::swap(&mut chunk, &mut carry_over);
 
             while type_index < total_types {
@@ -998,12 +1010,11 @@ impl ReportFetcher {
                         continue;
                     }
                 };
-                let generator = (config.fetch_generator)(status);
+                let generator = (config.fetch_generator)(status.clone());
                 let mut type_items = Vec::new();
                 for result in generator {
                     match result {
                         Ok(item) => {
-                            // Filter unprocessed reports if needed
                             if status == ReportStatus::ToBeDone {
                                 if let Some(state) =
                                     item.get(&config.status_field).and_then(|v| v.as_str())
@@ -1015,8 +1026,7 @@ impl ReportFetcher {
                             }
                             type_items.push(item);
                             if type_items.len() >= 100 {
-                                // Save remaining for next iteration
-                                carry_over = type_items;
+                                carry_over = type_items.clone();
                                 break;
                             }
                         }
@@ -1027,11 +1037,9 @@ impl ReportFetcher {
                     }
                 }
                 chunk.extend(type_items);
-                // If chunk is not yet full, move to next type
                 if chunk.len() < 100 {
                     type_index += 1;
                 } else {
-                    // Enough data, return chunk
                     break;
                 }
             }
@@ -1087,7 +1095,6 @@ impl Processor for OfficialCheckProcessor {
         ]
         .into_iter()
         .collect();
-        // 尝试从item中获取 user_id 字段 (不同举报类型字段名可能不同，这里简化用 "user_id")
         if let Some(user_id) = context
             .item
             .get("user_id")
@@ -1101,8 +1108,6 @@ impl Processor for OfficialCheckProcessor {
                 context.messages.push("官方内容，自动通过".into());
                 context.action = Some("P".into());
                 context.processed = true;
-                // 实际执行可以通过协调器调用操作，此处发送通过请求
-
                 let status_map = HashMap::from([
                     ("D".to_string(), "DELETE".to_string()),
                     ("S".to_string(), "MUTE_SEVEN_DAYS".to_string()),
@@ -1110,8 +1115,6 @@ impl Processor for OfficialCheckProcessor {
                     ("P".to_string(), "PASS".to_string()),
                 ]);
                 if let Some(resolution) = status_map.get("P") {
-                    // 调用处理 (需要知道具体举报类型的handle_method，这里简化，直接尝试报告处理器)
-                    // 实际项目应通过注册表获取方法并调用，这里仅记录
                     println!("自动通过官方举报ID: {}", context.record_id);
                 }
             }
@@ -1125,14 +1128,12 @@ pub struct DetailDisplayProcessor;
 impl Processor for DetailDisplayProcessor {
     fn process(&self, context: &mut ProcessingContext) -> Result<(), ProcessorError> {
         println!("=== {} 举报详情 ===", context.report_type);
-        // 基本信息输出 (简化实现)
         if let Some(reason) = context.item.get("reason_content").and_then(|v| v.as_str()) {
             println!("举报原因: {}", reason);
         }
         if let Some(desc) = context.item.get("description").and_then(|v| v.as_str()) {
             println!("举报描述: {}", desc);
         }
-        // 更多详情根据report_type自行扩展...
         Ok(())
     }
 }
@@ -1150,23 +1151,31 @@ impl Processor for ActionSelectionProcessor {
             let choice = get_valid_input(&prompt, &valid_keys);
             match choice.as_str() {
                 "D" | "S" | "T" | "P" => {
-                    // 应用动作
                     context.action = Some(choice.clone());
                     if let Some(config) = self.registry.get_config(&context.report_type) {
                         let status_map = self.registry.get_status_mapping();
                         if let Some(resolution) = status_map.get(&choice) {
-                            // 实际执行API动作 (依赖协调器和动作处理器)
+                            let resolution_enum = match resolution.as_str() {
+                                "DELETE" => Resolution::Delete,
+                                "MUTE_SEVEN_DAYS" => Resolution::MuteSevenDays,
+                                "MUTE_THREE_MONTHS" => Resolution::MuteThreeMonths,
+                                "PASS" => Resolution::Pass,
+                                _ => {
+                                    return Err(ProcessorError::Processing(format!(
+                                        "未知状态: {}",
+                                        resolution
+                                    )));
+                                }
+                            };
 
-                            // 注意：handle_method 是配置中的方法名，需反射调用，这里简化，假设有统一的方法
                             let report_id: i32 = context.item["id"].as_i64().unwrap_or(0) as i32;
-                            // 调用 whale 报告处理器
                             match config.handle_method.as_str() {
                                 "execute_process_comment_report" => {
                                     ReportHandler::new()
                                         .execute_process_comment_report(
                                             report_id,
                                             context.admin_id,
-                                            resolution,
+                                            resolution_enum,
                                         )
                                         .map_err(|e| ProcessorError::External(e.into()))?;
                                 }
@@ -1175,7 +1184,7 @@ impl Processor for ActionSelectionProcessor {
                                         .execute_process_work_report(
                                             report_id,
                                             context.admin_id,
-                                            resolution,
+                                            resolution_enum,
                                         )
                                         .map_err(|e| ProcessorError::External(e.into()))?;
                                 }
@@ -1184,7 +1193,7 @@ impl Processor for ActionSelectionProcessor {
                                         .execute_process_post_report(
                                             report_id,
                                             context.admin_id,
-                                            resolution,
+                                            resolution_enum,
                                         )
                                         .map_err(|e| ProcessorError::External(e.into()))?;
                                 }
@@ -1193,7 +1202,7 @@ impl Processor for ActionSelectionProcessor {
                                         .execute_process_discussion_report(
                                             report_id,
                                             context.admin_id,
-                                            resolution,
+                                            resolution_enum,
                                         )
                                         .map_err(|e| ProcessorError::External(e.into()))?;
                                 }
@@ -1211,10 +1220,7 @@ impl Processor for ActionSelectionProcessor {
                     break;
                 }
                 "F" => {
-                    // 违规检查 (需要外部调用 ViolationChecker)
                     println!("执行违规检查...");
-                    // 实现略，可调用 ViolationChecker
-                    // 继续循环等待用户选择后续动作
                     continue;
                 }
                 "J" => {
@@ -1273,7 +1279,7 @@ impl ViolationChecker {
     pub fn check_violation(
         &self,
         source_id: i64,
-        source_type: &str, // "work", "forum", "shop"
+        source_type: &str,
         board_name: &str,
         user_id: Option<i64>,
     ) -> Result<(), ProcessorError> {
@@ -1282,16 +1288,13 @@ impl ViolationChecker {
             source_id, source_type, board_name, user_id
         );
 
-        // 1. 获取评论总数并询问获取多少条
         let total = self.get_comment_total(source_id, source_type)?;
         println!("该内容共有 {} 条评论", total);
         let limit_str = prompt_input("输入要获取的评论数: ");
         let limit: usize = limit_str.parse().unwrap_or(100);
 
-        // 2. 获取评论数据
         let comments = self.fetch_comments(source_id, source_type, limit)?;
 
-        // 3. 准备参数
         let data = DataManager::global()
             .data()
             .map_err(|e| ProcessorError::External(e.into()))?;
@@ -1322,8 +1325,6 @@ impl ViolationChecker {
 
         let mut target_lists: HashMap<String, Vec<String>> = HashMap::new();
 
-        // 4. 使用策略分析评论
-        // 创建一个简单的 CommentConfig 实现
         struct SimpleCommentConfig {
             comments: Vec<Value>,
         }
@@ -1348,7 +1349,6 @@ impl ViolationChecker {
             );
         }
 
-        // 5. 合并违规列表
         let mut violations: Vec<String> = Vec::new();
         if let Some(ads) = target_lists.get("ads") {
             violations.extend(ads.clone());
@@ -1359,7 +1359,6 @@ impl ViolationChecker {
         if let Some(dup) = target_lists.get("duplicates") {
             violations.extend(dup.clone());
         }
-        // 去重
         let violations: HashSet<String> = violations.into_iter().collect();
         if violations.is_empty() {
             println!("未检测到违规内容");
@@ -1426,8 +1425,6 @@ impl ViolationChecker {
         source_type: &str,
         limit: usize,
     ) -> Result<Vec<Value>, ProcessorError> {
-        // 利用资料中的 Obtain 逻辑类似方式请求
-
         match source_type {
             "work" => {
                 let iter =
@@ -1445,7 +1442,7 @@ impl ViolationChecker {
                 for item in iter {
                     match item {
                         Ok(v) => comments.push(v),
-                        Err(e) => break, // 忽略后续错误
+                        Err(e) => break,
                     }
                 }
                 Ok(comments)
@@ -1474,8 +1471,6 @@ impl ViolationChecker {
     }
 
     fn process_auto_report(&self, violations: HashSet<String>) -> Result<(), ProcessorError> {
-        // 加载多账号管理器
-
         let mut multi_account = MultiAccount::new(Identity::Edu);
         let password_path = PathConfig::password_file_path();
         if password_path.exists() {
@@ -1485,7 +1480,6 @@ impl ViolationChecker {
             return Ok(());
         }
 
-        // 确认
         let choice = get_valid_input(
             "是否自动举报违规评论? (Y/N)",
             &["Y".into(), "N".into()].into_iter().collect(),
@@ -1495,27 +1489,23 @@ impl ViolationChecker {
             return Ok(());
         }
 
-        let accounts = multi_account.accounts.clone();
+        let mut accounts = multi_account.accounts.clone();
         if accounts.is_empty() {
             println!("没有可用账号");
             return Ok(());
         }
 
-        // 获取举报原因 (原因ID=7 或其他)
-        let reason_content = "违规内容"; // 简化
+        let reason_content = "违规内容";
 
         let mut success = 0;
         let mut account_usage = HashMap::new();
         let mut account_index = 0;
-        let mut accounts = accounts;
 
         for (idx, violation) in violations.iter().enumerate() {
-            // 切换账号逻辑
             if account_usage.get(&account_index).copied().unwrap_or(0) >= 25 {
                 account_index = (account_index + 1) % accounts.len();
             }
             if account_usage.get(&account_index).copied().unwrap_or(0) == 0 {
-                // 登录这个账号
                 let (user, pass) = &accounts[account_index];
                 if let Err(e) = self.login_student(user, pass) {
                     println!("账号 {} 登录失败: {}", user, e);
@@ -1547,7 +1537,6 @@ impl ViolationChecker {
             }
         }
 
-        // 恢复默认管理员账号
         ClientFactory::global_client()
             .switch_identity(Identity::Judgement)
             .ok();
@@ -1612,7 +1601,11 @@ impl ViolationChecker {
                             .map_err(|e| ProcessorError::External(e.into()))?;
                     }
                     "forum" => {
-                        let item_type = if is_reply { "REPLY" } else { "COMMENT" };
+                        let item_type = if is_reply {
+                            ItemType::Reply
+                        } else {
+                            ItemType::Comment
+                        };
                         ForumActionHandler::new()
                             .report_item(
                                 content_id,
@@ -1775,8 +1768,7 @@ pub struct ReportProcessor {
 impl ReportProcessor {
     pub fn new() -> Self {
         let fetcher = ReportFetcher::new();
-        let registry = Arc::new(ReportTypeRegistry::new()); // 实际应该复用 fetcher 内的 registry
-        // 注意：这里简化，实际应该让 pipeline 使用 fetcher.registry 的 Arc
+        let registry = Arc::new(ReportTypeRegistry::new());
         ReportProcessor {
             fetcher,
             pipeline_factory: registry,
@@ -1791,7 +1783,6 @@ impl ReportProcessor {
             return Ok(0);
         }
 
-        // 询问是否一键通过
         let choice = get_valid_input(
             "是否一键全部通过? (Y/N)",
             &["Y".into(), "N".into()].into_iter().collect(),
@@ -1837,7 +1828,6 @@ impl ReportProcessor {
     }
 
     fn infer_report_type(&self, item: &Value) -> Option<String> {
-        // 根据字段判断类型，简化实现
         if item.get("comment_content").is_some() || item.get("comment_id").is_some() {
             Some("shop_comment".into())
         } else if item.get("work_name").is_some() {
@@ -1862,7 +1852,6 @@ impl ReportProcessor {
                     };
                     let report_id = report_item["id"].as_i64().unwrap_or(0) as i32;
 
-                    // 调用对应的通过方法
                     match config.handle_method.as_str() {
                         "execute_process_comment_report" => {
                             ReportHandler::new()
