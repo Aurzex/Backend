@@ -1108,8 +1108,15 @@ impl CloudAuthenticator {
     }
 
     /// 获取授权 token
-    pub fn authorization_token(&self) -> Option<&String> {
-        self.authorization_token.as_ref()
+    pub fn authorization_token(&self) -> Option<String> {
+        // 1. 优先使用显式设置的 token（保留手动覆盖能力）
+        if let Some(ref token) = self.authorization_token {
+            if !token.is_empty() {
+                return Some(token.clone());
+            }
+        }
+        // 2. 否则自动从全局 CodeMaoClient 获取当前身份的 token
+        self.client().current_token()
     }
 
     /// 设置授权 token

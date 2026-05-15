@@ -31,3 +31,4 @@ tungstenite = {
     features = ["native-tls", "handshake"]
 }
 http = "1.4.0"
+native-tls = "0.2"

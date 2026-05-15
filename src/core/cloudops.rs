@@ -6,12 +6,17 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use crate::api::auth::CloudAuthenticator;
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use native_tls::TlsConnector;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
+use std::io::{Read, Write};
 use tungstenite::WebSocket;
 use tungstenite::client::IntoClientRequest;
+use tungstenite::client_tls;
 use tungstenite::protocol::Message;
+use tungstenite::protocol::Role;
 use tungstenite::stream::MaybeTlsStream;
-
 // ==================== 错误类型 ====================
 #[derive(Debug, thiserror::Error)]
 pub enum CloudError {
@@ -1329,7 +1334,6 @@ impl CloudConnectionBuilder {
         self
     }
 
-    /// 建立连接，返回 CloudConnection
     pub fn connect(self) -> Result<CloudConnection, CloudError> {
         let mut authenticator = CloudAuthenticator::new(self.auth_token);
         let (auth_type, stag) = self.editor.as_param();
@@ -1337,31 +1341,105 @@ impl CloudConnectionBuilder {
             "wss://socketcv.codemao.cn:9096/cloudstorage/?session_id={}&authorization_type={}&stag={}&EIO=3&transport=websocket",
             self.work_id, auth_type, stag
         );
-        let mut req = url.into_client_request().unwrap();
+        let url = url::Url::parse(&url)
+            .map_err(|e| CloudError::Other(format!("URL parse error: {}", e)))?;
+
         let device_auth_result = authenticator.generate_x_device_auth();
         let device_auth_str = device_auth_result
             .map_err(|e| CloudError::Other(format!("Failed to generate device auth: {}", e)))?;
 
-        req.headers_mut().insert(
-            http::header::HeaderName::from_static("x-creation-tools-device-auth"),
-            http::header::HeaderValue::from_str(&device_auth_str)
-                .map_err(|e| CloudError::Other(format!("Invalid header value: {}", e)))?,
+        // ---- 手动建立 TLS 连接，完全控制 HTTP 握手 ----
+        let host = url
+            .host_str()
+            .ok_or_else(|| CloudError::Other("Missing host in URL".into()))?;
+        let port = url.port().unwrap_or(443);
+        let addr = format!("{}:{}", host, port);
+        let tcp = TcpStream::connect(&addr)
+            .map_err(|e| CloudError::Other(format!("TCP connect error: {}", e)))?;
+
+        let connector = TlsConnector::new()
+            .map_err(|e| CloudError::Other(format!("TLS connector create error: {}", e)))?;
+        let mut tls = connector
+            .connect(host, tcp)
+            .map_err(|e| CloudError::Other(format!("TLS connect error: {}", e)))?;
+
+        // 生成 Sec-WebSocket-Key
+        let nonce: [u8; 16] = rand::random();
+        let sec_key = BASE64.encode(nonce);
+
+        // 拼接完整的请求路径（包含查询参数）
+        let path_and_query = if let Some(query) = url.query() {
+            format!("{}?{}", url.path(), query)
+        } else {
+            url.path().to_string()
+        };
+
+        // 构造 Cookie 头
+        let cookie_line = if let Some(token) = authenticator.authorization_token() {
+            format!("Cookie: Authorization={}\r\n", token)
+        } else {
+            String::new()
+        };
+
+        // 构造 Origin 头（通常为协议+主机，与 Host 头一致）
+        let origin = format!("https://{}", host);
+
+        // 手动构造 HTTP 升级请求，所有头部保持原始大小写
+        let request_str = format!(
+            "GET {} HTTP/1.1\r\n\
+             Host: {}\r\n\
+             Upgrade: websocket\r\n\
+             Connection: Upgrade\r\n\
+             Sec-WebSocket-Key: {}\r\n\
+             Sec-WebSocket-Version: 13\r\n\
+             Origin: {}\r\n\
+             X-Creation-Tools-Device-Auth: {}\r\n\
+             {}\
+             \r\n",
+            path_and_query, host, sec_key, origin, device_auth_str, cookie_line,
         );
-        if let Some(token) = authenticator.authorization_token() {
-            req.headers_mut().insert(
-                http::header::COOKIE,
-                http::header::HeaderValue::from_str(&format!("Authorization={}", token)).unwrap(),
-            );
+
+        // 打印即将发送的请求头（方便调试）
+        println!("=== Sending WebSocket handshake request ===");
+        println!("{}", request_str);
+        println!("============================================");
+
+        tls.write_all(request_str.as_bytes())
+            .map_err(|e| CloudError::Other(format!("Send request error: {}", e)))?;
+
+        // 读取服务器响应
+        let mut buf = [0u8; 4096]; // 适当扩大缓冲区以容纳更多头部
+        let n = tls
+            .read(&mut buf)
+            .map_err(|e| CloudError::Other(format!("Read response error: {}", e)))?;
+        let response_str = std::str::from_utf8(&buf[..n])
+            .map_err(|e| CloudError::Other(format!("Response not valid UTF-8: {}", e)))?;
+
+        // 打印服务器返回的整个响应（状态行 + 头部）
+        println!("=== Received handshake response ===");
+        println!("{}", response_str);
+        println!("====================================");
+
+        // 验证 101 状态
+        if !response_str.starts_with("HTTP/1.1 101") {
+            return Err(CloudError::Other(format!(
+                "WebSocket handshake failed, response: {}",
+                response_str.lines().next().unwrap_or("")
+            )));
         }
 
-        let (mut ws, _resp) = tungstenite::connect(req)?;
-        let _handshake_msg = ws.read()?;
+        // 将 TLS 流包装成 MaybeTlsStream，然后交给 tungstenite
+        let stream = MaybeTlsStream::NativeTls(tls);
+        let mut ws = WebSocket::from_raw_socket(stream, Role::Client, None);
+
+        // 以下代码保持不变
+        let _handshake_msg = ws.read()?; // 读取服务器可能发来的首个 WebSocket 消息
         ws.send(Message::Text(WS_CONNECT_MESSAGE.into()))?;
         Ok(CloudConnection::new_connected(
             self.work_id,
             self.editor,
             authenticator,
-            ws,
+            ws, // 类型 WebSocket<MaybeTlsStream<TcpStream>> 完全匹配
         ))
     }
 }
