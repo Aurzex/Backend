@@ -1334,8 +1334,6 @@ impl CloudConnectionBuilder {
         self
     }
 
-    // ... 你的 CloudConnection 等定义 ...
-
     pub fn connect(self) -> Result<CloudConnection, CloudError> {
         let _ = rustls::crypto::ring::default_provider().install_default();
 
@@ -1382,7 +1380,7 @@ impl CloudConnectionBuilder {
         }
         println!("====================================================");
 
-        // ---- 4. 构建 rustls 配置（使用系统根证书） ----
+        // ---- 4. 构建 rustls 配置（使用系统根证书 + 自定义密码套件） ----
         let mut root_store = rustls::RootCertStore::empty();
         for cert in rustls_native_certs::load_native_certs().expect("could not load platform certs")
         {
@@ -1391,10 +1389,36 @@ impl CloudConnectionBuilder {
                 .map_err(|e| CloudError::Other(format!("Failed to add cert: {}", e)))?;
         }
 
-        let tls_config = ClientConfig::builder()
+        // 获取默认的 CryptoProvider，然后直接修改它的 cipher_suites 和 kx_groups 字段
+        let mut provider = rustls::crypto::ring::default_provider();
+
+        // 按照 Python 抓包的顺序设置密码套件
+        provider.cipher_suites = vec![
+            // TLS 1.3 套件（Python 顺序：13 02, 13 03, 13 01）
+            rustls::crypto::ring::cipher_suite::TLS13_AES_256_GCM_SHA384.into(),
+            rustls::crypto::ring::cipher_suite::TLS13_CHACHA20_POLY1305_SHA256.into(),
+            rustls::crypto::ring::cipher_suite::TLS13_AES_128_GCM_SHA256.into(),
+            // TLS 1.2 套件（仅包含 ring provider 实际提供的）
+            rustls::crypto::ring::cipher_suite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384.into(),
+            rustls::crypto::ring::cipher_suite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384.into(),
+            rustls::crypto::ring::cipher_suite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256.into(),
+            rustls::crypto::ring::cipher_suite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256.into(),
+            rustls::crypto::ring::cipher_suite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
+                .into(),
+            rustls::crypto::ring::cipher_suite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256.into(),
+        ];
+
+        // 设置与 Python 相同的椭圆曲线顺序
+        // 直接用 to_vec() 复制 ALL_KX_GROUPS 的引用（它们本身就是 &dyn SupportedKxGroup）
+        provider.kx_groups = rustls::crypto::ring::ALL_KX_GROUPS.to_vec();
+
+        let tls_config = rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(provider))
+            .with_safe_default_protocol_versions()
+            .map_err(|e| CloudError::Other(format!("TLS config error: {:?}", e)))?
             .with_root_certificates(root_store)
             .with_no_client_auth();
-        let config = Arc::new(tls_config);
+
+        let config = std::sync::Arc::new(tls_config);
         let connector = Connector::Rustls(config);
 
         // ---- 5. 解析 URL，建立 TCP 连接 ----
@@ -1419,7 +1443,6 @@ impl CloudConnectionBuilder {
                     for (name, value) in resp.headers() {
                         eprintln!("{}: {:?}", name, value);
                     }
-                    // 取出响应体
                     let body = resp.body_mut().take().unwrap_or_default();
                     let body_str = String::from_utf8_lossy(&body);
                     eprintln!("Body: {}", body_str);
