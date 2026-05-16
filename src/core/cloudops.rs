@@ -1,4 +1,5 @@
 use crate::api::auth::CloudAuthenticator;
+use schannel::schannel_cred::Direction;
 use schannel::{schannel_cred, tls_stream::TlsStream};
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -11,8 +12,6 @@ use tungstenite::Connector;
 use tungstenite::WebSocket;
 use tungstenite::client::IntoClientRequest;
 use tungstenite::protocol::Message;
-
-use schannel::schannel_cred::Direction;
 
 // ==================== 错误类型 ====================
 #[derive(Debug, thiserror::Error)]
@@ -1346,7 +1345,7 @@ impl CloudConnectionBuilder {
             .generate_x_device_auth()
             .map_err(|e| CloudError::Other(format!("Failed to generate device auth: {}", e)))?;
 
-        // ---- 1. 构建 HTTP 升级请求 ----
+        // ---- 构建 HTTP 升级请求 ----
         let mut request = url_str
             .clone()
             .into_client_request()
@@ -1375,7 +1374,7 @@ impl CloudConnectionBuilder {
         }
         println!("====================================================");
 
-        // ---- 2. 用 schannel 建立 TLS，同时启用 TLS 1.2 和 1.3 ----
+        // ---- 使用 schannel，并显式指定密码套件（包含 TLS 1.3） ----
         let url = url::Url::parse(&url_str)
             .map_err(|e| CloudError::Other(format!("Invalid URL: {}", e)))?;
         let host = url
@@ -1419,7 +1418,6 @@ impl CloudConnectionBuilder {
                 }
             };
 
-        // ---- 4. 打印握手响应 ----
         println!("=== Received handshake response ===");
         println!("Status: {}", response.status());
         for (name, value) in response.headers().iter() {
@@ -1427,7 +1425,7 @@ impl CloudConnectionBuilder {
         }
         println!("====================================");
 
-        // ---- 5. 进入 WebSocket 协议层 ----
+        // ---- 进入 WebSocket 协议层 ----
         let mut ws = ws;
         let _handshake_msg = ws
             .read()
