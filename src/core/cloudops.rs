@@ -1,22 +1,19 @@
+use crate::api::auth::CloudAuthenticator;
+use schannel::{schannel_cred, tls_stream::TlsStream};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::io::{self};
 use std::net::TcpStream;
 use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
-
-use crate::api::auth::CloudAuthenticator;
-use rustls::crypto::ring::default_provider;
-use rustls::version::TLS13;
-use rustls::{ClientConfig, ProtocolVersion, RootCertStore, SupportedCipherSuite};
-use serde_json::{Value, json};
 use tungstenite::Connector;
-
 use tungstenite::WebSocket;
 use tungstenite::client::IntoClientRequest;
 use tungstenite::protocol::Message;
-use tungstenite::stream::MaybeTlsStream;
-use webpki_roots::TLS_SERVER_ROOTS;
+
+use schannel::schannel_cred::Direction;
+
 // ==================== 错误类型 ====================
 #[derive(Debug, thiserror::Error)]
 pub enum CloudError {
@@ -47,7 +44,7 @@ pub enum CloudError {
 pub enum EditorType {
     NEMO,
     KITTEN,
-    NEKO, // Neko
+    NEKO,
     COCO,
 }
 
@@ -158,7 +155,7 @@ const BATCH_UPLOAD_INTERVAL_MS: u64 = 100;
 #[derive(Debug, Clone)]
 enum Command {
     VariableUpdate {
-        cmd_type: String, // "update_private_vars" 或 "update_vars"
+        cmd_type: String,
         data: Value,
     },
     ListUpdate {
@@ -468,7 +465,7 @@ pub struct CloudConnection {
     editor: EditorType,
     authenticator: CloudAuthenticator,
     // 连接相关
-    ws: Arc<Mutex<WebSocket<MaybeTlsStream<TcpStream>>>>,
+    ws: Arc<Mutex<WebSocket<TlsStream<TcpStream>>>>,
     connected: Arc<(Mutex<bool>, Condvar)>,
     data_ready: Arc<(Mutex<bool>, Condvar)>,
     online_users: Arc<RwLock<u32>>,
@@ -497,7 +494,7 @@ impl CloudConnection {
         work_id: u64,
         editor: EditorType,
         authenticator: CloudAuthenticator,
-        ws: WebSocket<MaybeTlsStream<TcpStream>>,
+        ws: WebSocket<TlsStream<TcpStream>>,
     ) -> Self {
         let ws = Arc::new(Mutex::new(ws));
         let connected = Arc::new((Mutex::new(true), Condvar::new()));
@@ -870,6 +867,31 @@ impl CloudConnection {
         }
     }
 
+    /// 获取所有私有变量名称
+    pub fn get_all_private_variable_names(&self) -> Vec<String> {
+        self.private_variables
+            .read()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    /// 获取所有公共变量名称
+    pub fn get_all_public_variable_names(&self) -> Vec<String> {
+        self.public_variables
+            .read()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    /// 获取所有列表名称
+    pub fn get_all_list_names(&self) -> Vec<String> {
+        self.lists.read().unwrap().keys().cloned().collect()
+    }
+
     /// 关闭连接
     pub fn close(mut self) {
         *self.shutdown.lock().unwrap() = true;
@@ -899,7 +921,7 @@ impl CloudConnection {
     }
 
     fn reader_loop(
-        ws: Arc<Mutex<WebSocket<MaybeTlsStream<TcpStream>>>>,
+        ws: Arc<Mutex<WebSocket<TlsStream<TcpStream>>>>,
         shutdown: Arc<Mutex<bool>>,
         connected: Arc<(Mutex<bool>, Condvar)>,
         conn_data: Arc<CloudConnectionData>,
@@ -909,8 +931,8 @@ impl CloudConnection {
                 break;
             }
             let msg = {
-                let mut ws_lock = ws.lock().unwrap();
-                match ws_lock.read() {
+                let mut ws_guard = ws.lock().unwrap();
+                match ws_guard.read() {
                     Ok(m) => m,
                     Err(e) => {
                         eprintln!("WebSocket read error: {}", e);
@@ -1223,7 +1245,7 @@ impl CloudConnection {
     }
 
     fn upload_loop(
-        ws: Arc<Mutex<WebSocket<MaybeTlsStream<TcpStream>>>>,
+        ws: Arc<Mutex<WebSocket<TlsStream<TcpStream>>>>,
         shutdown: Arc<Mutex<bool>>,
         stop: Arc<Mutex<bool>>,
         queue: Arc<Mutex<Vec<Command>>>,
@@ -1283,29 +1305,6 @@ impl CloudConnection {
             }
         }
     }
-    pub fn get_all_private_variable_names(&self) -> Vec<String> {
-        self.private_variables
-            .read()
-            .unwrap()
-            .keys()
-            .cloned()
-            .collect()
-    }
-
-    /// 获取所有公共变量名称
-    pub fn get_all_public_variable_names(&self) -> Vec<String> {
-        self.public_variables
-            .read()
-            .unwrap()
-            .keys()
-            .cloned()
-            .collect()
-    }
-
-    /// 获取所有列表名称
-    pub fn get_all_list_names(&self) -> Vec<String> {
-        self.lists.read().unwrap().keys().cloned().collect()
-    }
 }
 
 // ==================== Builder ====================
@@ -1335,8 +1334,6 @@ impl CloudConnectionBuilder {
     }
 
     pub fn connect(self) -> Result<CloudConnection, CloudError> {
-        let _ = rustls::crypto::ring::default_provider().install_default();
-
         let mut authenticator = CloudAuthenticator::new(self.auth_token);
         let (auth_type, stag) = self.editor.as_param();
 
@@ -1355,7 +1352,6 @@ impl CloudConnectionBuilder {
             .into_client_request()
             .map_err(|e| CloudError::Other(format!("Failed to create client request: {}", e)))?;
 
-        // ---- 2. 添加自定义头部 ----
         request.headers_mut().insert(
             "X-Creation-Tools-Device-Auth",
             http::HeaderValue::from_str(&device_auth_str)
@@ -1373,80 +1369,46 @@ impl CloudConnectionBuilder {
             http::HeaderValue::from_static("https://socketcv.codemao.cn:9096"),
         );
 
-        // ---- 3. 打印请求头 ----
         println!("=== Sending WebSocket handshake request headers ===");
         for (name, value) in request.headers().iter() {
             println!("{}: {:?}", name, value);
         }
         println!("====================================================");
 
-        // ---- 4. 构建 rustls 配置（使用系统根证书 + 自定义密码套件） ----
-        let mut root_store = rustls::RootCertStore::empty();
-        for cert in rustls_native_certs::load_native_certs().expect("could not load platform certs")
-        {
-            root_store
-                .add(cert)
-                .map_err(|e| CloudError::Other(format!("Failed to add cert: {}", e)))?;
-        }
-
-        // 获取默认的 CryptoProvider，然后直接修改它的 cipher_suites 和 kx_groups 字段
-        let mut provider = rustls::crypto::ring::default_provider();
-
-        // 按照 Python 抓包的顺序设置密码套件
-        provider.cipher_suites = vec![
-            // TLS 1.3 套件（Python 顺序：13 02, 13 03, 13 01）
-            rustls::crypto::ring::cipher_suite::TLS13_AES_256_GCM_SHA384.into(),
-            rustls::crypto::ring::cipher_suite::TLS13_CHACHA20_POLY1305_SHA256.into(),
-            rustls::crypto::ring::cipher_suite::TLS13_AES_128_GCM_SHA256.into(),
-            // TLS 1.2 套件（仅包含 ring provider 实际提供的）
-            rustls::crypto::ring::cipher_suite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384.into(),
-            rustls::crypto::ring::cipher_suite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384.into(),
-            rustls::crypto::ring::cipher_suite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256.into(),
-            rustls::crypto::ring::cipher_suite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256.into(),
-            rustls::crypto::ring::cipher_suite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
-                .into(),
-            rustls::crypto::ring::cipher_suite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256.into(),
-        ];
-
-        // 设置与 Python 相同的椭圆曲线顺序
-        // 直接用 to_vec() 复制 ALL_KX_GROUPS 的引用（它们本身就是 &dyn SupportedKxGroup）
-        provider.kx_groups = rustls::crypto::ring::ALL_KX_GROUPS.to_vec();
-
-        let tls_config = rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(provider))
-            .with_safe_default_protocol_versions()
-            .map_err(|e| CloudError::Other(format!("TLS config error: {:?}", e)))?
-            .with_root_certificates(root_store)
-            .with_no_client_auth();
-
-        let config = std::sync::Arc::new(tls_config);
-        let connector = Connector::Rustls(config);
-
-        // ---- 5. 解析 URL，建立 TCP 连接 ----
+        // ---- 2. 用 schannel 建立 TLS，同时启用 TLS 1.2 和 1.3 ----
         let url = url::Url::parse(&url_str)
             .map_err(|e| CloudError::Other(format!("Invalid URL: {}", e)))?;
         let host = url
             .host_str()
             .ok_or_else(|| CloudError::Other("No host in URL".into()))?;
         let port = url.port_or_known_default().unwrap_or(443);
-        let tcp_stream = TcpStream::connect((host, port))
+        let tcp = TcpStream::connect((host, port))
             .map_err(|e| CloudError::Other(format!("TCP connection failed: {}", e)))?;
 
-        // ---- 6. 进行 TLS 握手和 WebSocket 升级 ----
+        // 创建 SChannel 凭据，显式要求支持 TLS 1.3 和 TLS 1.2
+        let cred = schannel_cred::Builder::new()
+            .enabled_protocols(&[
+                schannel_cred::Protocol::Tls13,
+                schannel_cred::Protocol::Tls12,
+            ])
+            .acquire(Direction::Outbound)
+            .map_err(|e| CloudError::Other(format!("Acquire credentials error: {}", e)))?;
+
+        // 建立 TLS 流
+        let tls_stream = schannel::tls_stream::Builder::new()
+            .domain(host)
+            .connect(cred, tcp)
+            .map_err(|e| CloudError::Other(format!("TLS handshake failed: {}", e)))?;
+
+        // ---- 3. WebSocket 升级握手（直接使用 client_with_config） ----
         let (ws, response) =
-            match tungstenite::client_tls_with_config(request, tcp_stream, None, Some(connector)) {
+            match tungstenite::client::client_with_config(request, tls_stream, None) {
                 Ok(pair) => pair,
                 Err(tungstenite::handshake::HandshakeError::Failure(tungstenite::Error::Http(
-                    mut resp,
+                    resp,
                 ))) => {
                     eprintln!("=== 401 Response ===");
                     eprintln!("Status: {}", resp.status());
-                    for (name, value) in resp.headers() {
-                        eprintln!("{}: {:?}", name, value);
-                    }
-                    let body = resp.body_mut().take().unwrap_or_default();
-                    let body_str = String::from_utf8_lossy(&body);
-                    eprintln!("Body: {}", body_str);
-                    eprintln!("====================");
                     return Err(CloudError::Other("WebSocket handshake got 401".into()));
                 }
                 Err(e) => {
@@ -1457,7 +1419,7 @@ impl CloudConnectionBuilder {
                 }
             };
 
-        // ---- 7. 打印握手响应 ----
+        // ---- 4. 打印握手响应 ----
         println!("=== Received handshake response ===");
         println!("Status: {}", response.status());
         for (name, value) in response.headers().iter() {
@@ -1465,7 +1427,7 @@ impl CloudConnectionBuilder {
         }
         println!("====================================");
 
-        // ---- 8. 进入 WebSocket 协议层 ----
+        // ---- 5. 进入 WebSocket 协议层 ----
         let mut ws = ws;
         let _handshake_msg = ws
             .read()
