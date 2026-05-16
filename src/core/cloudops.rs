@@ -6,15 +6,15 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use crate::api::auth::CloudAuthenticator;
+use rustls::version::TLS13;
+use rustls::{ClientConfig, RootCertStore, SupportedCipherSuite};
 use serde_json::{Value, json};
+use tungstenite::Connector;
+
 use tungstenite::WebSocket;
 use tungstenite::client::IntoClientRequest;
 use tungstenite::protocol::Message;
 use tungstenite::stream::MaybeTlsStream;
-use std::sync::Arc;
-use tungstenite::Connector;
-use rustls::{ClientConfig, RootCertStore, cipher_suite};
-use rustls::version::TLS13;
 use webpki_roots::TLS_SERVER_ROOTS;
 // ==================== 错误类型 ====================
 #[derive(Debug, thiserror::Error)]
@@ -1352,7 +1352,7 @@ impl CloudConnectionBuilder {
             .into_client_request()
             .map_err(|e| CloudError::Other(format!("Failed to create client request: {}", e)))?;
 
-        // 2. 添加自定义头部（严格对齐 Python 成功请求头）
+        // 2. 添加自定义头部
         request.headers_mut().insert(
             "X-Creation-Tools-Device-Auth",
             http::HeaderValue::from_str(&device_auth_str)
@@ -1369,7 +1369,6 @@ impl CloudConnectionBuilder {
             "Origin",
             http::HeaderValue::from_static("https://socketcv.codemao.cn:9096"),
         );
-        // 移除 User-Agent（Python 未发送），不要添加 Referer、Accept-Language
 
         // 3. 打印即将发送的请求头（调试用）
         println!("=== Sending WebSocket handshake request headers ===");
@@ -1378,41 +1377,31 @@ impl CloudConnectionBuilder {
         }
         println!("====================================================");
 
-        // 4. 构建自定义 TLS 配置（模仿 Python 的密码套件顺序）
-        let mut root_store = RootCertStore::empty();
-        root_store.add_trust_anchors(TLS_SERVER_ROOTS.iter().map(|ta| {
-            rustls::OwnedTrustAnchor::from_subject_spki_name_constraints(
-                ta.subject,
-                ta.spki,
-                ta.name_constraints,
-            )
-        }));
+        // 4. 使用 from_iter 构建根证书存储
+        let root_store =
+            rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
 
-        // 密码套件列表，严格按照 Python 成功连接时的 Client Hello 顺序
-        let suites: Vec<rustls::SupportedCipherSuite> = vec![
-            // TLS 1.3 套件
-            cipher_suite::TLS13_AES_256_GCM_SHA384,
-            cipher_suite::TLS13_CHACHA20_POLY1305_SHA256,
-            cipher_suite::TLS13_AES_128_GCM_SHA256,
-            // TLS 1.2 套件（从 Python 十六进制转回）
-            cipher_suite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,   // 0xC02C
-            cipher_suite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,   // 0xC030
-            cipher_suite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, // 0xC02B
-            cipher_suite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, // 0xC02F
-            // 以下按 Python 实际顺序补充（部分套件若 rustls 未定义可省略）
-            // 例如：TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256 等
+        // 5. 定义密码套件（严格按照 Python 成功连接时的 Client Hello 顺序）
+        let suites = &[
+            rustls::CipherSuite::TLS13_AES_256_GCM_SHA384,
+            rustls::CipherSuite::TLS13_CHACHA20_POLY1305_SHA256,
+            rustls::CipherSuite::TLS13_AES_128_GCM_SHA256,
+            rustls::CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+            rustls::CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+            rustls::CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+            rustls::CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
         ];
 
-        let config = ClientConfig::builder()
-            .with_cipher_suites(&suites)
-            .with_safe_defaults()           // 包含安全扩展（SNI、ALPN 等）
+        // 6. 构建 TLS 配置
+        let tls_config = rustls::ClientConfig::builder()
+            .with_cipher_suites(suites)
             .with_root_certificates(root_store)
             .with_no_client_auth();
 
-        let connector = Connector::Rustls(Arc::new(config));
+        let config = std::sync::Arc::new(tls_config);
 
-        // 5. 使用 tungstenite 完成握手（通过自定义连接器）
-        let (ws, response) = match tungstenite::connect(request.with_connector(connector)) {
+        // 7. 使用 connect_with_rustls_config 完成 WebSocket 握手
+        let (ws, response) = match tungstenite::connect_with_rustls_config(request, config) {
             Ok(pair) => pair,
             Err(tungstenite::Error::Http(mut resp)) => {
                 eprintln!("=== 401 Response ===");
@@ -1420,8 +1409,8 @@ impl CloudConnectionBuilder {
                 for (name, value) in resp.headers() {
                     eprintln!("{}: {:?}", name, value);
                 }
-                // 读取响应体（如果有）
-                let body = String::from_utf8(resp.into_body().unwrap_or_default()).unwrap_or_default();
+                let body =
+                    String::from_utf8(resp.into_body().unwrap_or_default()).unwrap_or_default();
                 eprintln!("Body: {}", body);
                 eprintln!("====================");
                 return Err(CloudError::Other("WebSocket handshake got 401".into()));
@@ -1429,7 +1418,7 @@ impl CloudConnectionBuilder {
             Err(e) => return Err(CloudError::Other(format!("WebSocket error: {}", e))),
         };
 
-        // 6. 打印服务器握手响应
+        // 8. 打印服务器握手响应
         println!("=== Received handshake response ===");
         println!("Status: {}", response.status());
         for (name, value) in response.headers().iter() {
@@ -1437,7 +1426,7 @@ impl CloudConnectionBuilder {
         }
         println!("====================================");
 
-        // 7. 后续处理（与原来相同）
+        // 9. 后续处理
         let mut ws = ws;
         let _handshake_msg = ws.read()?;
         ws.send(Message::Text(WS_CONNECT_MESSAGE.into()))?;
