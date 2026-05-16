@@ -1,5 +1,4 @@
 use std::collections::{HashMap, VecDeque};
-use std::sync::{Mutex, OnceLock};
 
 use serde_json::{Map, Value};
 use thiserror::Error;
@@ -14,7 +13,7 @@ use crate::api::whale::{
     WorkReportFilterType, WorkSourceType,
 };
 use crate::api::work::{NemoWorkType, WorkDataFetcher};
-use crate::utils::acquire::{BaseKey, ClientFactory, CodeMaoClient, HttpMethod, Identity};
+use crate::utils::acquire::{BaseKey, ClientFactory, HttpMethod, Identity};
 
 // ==================== 错误类型 ====================
 

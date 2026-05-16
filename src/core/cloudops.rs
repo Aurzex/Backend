@@ -6,17 +6,16 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use crate::api::auth::CloudAuthenticator;
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-use native_tls::TlsConnector;
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
-use std::io::{Read, Write};
 use tungstenite::WebSocket;
 use tungstenite::client::IntoClientRequest;
-use tungstenite::client_tls;
 use tungstenite::protocol::Message;
-use tungstenite::protocol::Role;
 use tungstenite::stream::MaybeTlsStream;
+use std::sync::Arc;
+use tungstenite::Connector;
+use rustls::{ClientConfig, RootCertStore, cipher_suite};
+use rustls::version::TLS13;
+use webpki_roots::TLS_SERVER_ROOTS;
 // ==================== 错误类型 ====================
 #[derive(Debug, thiserror::Error)]
 pub enum CloudError {
@@ -1337,109 +1336,116 @@ impl CloudConnectionBuilder {
     pub fn connect(self) -> Result<CloudConnection, CloudError> {
         let mut authenticator = CloudAuthenticator::new(self.auth_token);
         let (auth_type, stag) = self.editor.as_param();
+
         let url = format!(
             "wss://socketcv.codemao.cn:9096/cloudstorage/?session_id={}&authorization_type={}&stag={}&EIO=3&transport=websocket",
             self.work_id, auth_type, stag
         );
-        let url = url::Url::parse(&url)
-            .map_err(|e| CloudError::Other(format!("URL parse error: {}", e)))?;
 
-        let device_auth_result = authenticator.generate_x_device_auth();
-        let device_auth_str = device_auth_result
+        let device_auth_str = authenticator
+            .generate_x_device_auth()
             .map_err(|e| CloudError::Other(format!("Failed to generate device auth: {}", e)))?;
 
-        // ---- 手动建立 TLS 连接，完全控制 HTTP 握手 ----
-        let host = url
-            .host_str()
-            .ok_or_else(|| CloudError::Other("Missing host in URL".into()))?;
-        let port = url.port().unwrap_or(443);
-        let addr = format!("{}:{}", host, port);
-        let tcp = TcpStream::connect(&addr)
-            .map_err(|e| CloudError::Other(format!("TCP connect error: {}", e)))?;
+        // 1. 创建 HTTP 升级请求
+        let mut request = url
+            .clone()
+            .into_client_request()
+            .map_err(|e| CloudError::Other(format!("Failed to create client request: {}", e)))?;
 
-        let connector = TlsConnector::new()
-            .map_err(|e| CloudError::Other(format!("TLS connector create error: {}", e)))?;
-        let mut tls = connector
-            .connect(host, tcp)
-            .map_err(|e| CloudError::Other(format!("TLS connect error: {}", e)))?;
-
-        // 生成 Sec-WebSocket-Key
-        let nonce: [u8; 16] = rand::random();
-        let sec_key = BASE64.encode(nonce);
-
-        // 拼接完整的请求路径（包含查询参数）
-        let path_and_query = if let Some(query) = url.query() {
-            format!("{}?{}", url.path(), query)
-        } else {
-            url.path().to_string()
-        };
-
-        // 构造 Cookie 头
-        let cookie_line = if let Some(token) = authenticator.authorization_token() {
-            format!("Cookie: Authorization={}\r\n", token)
-        } else {
-            String::new()
-        };
-
-        // 构造 Origin 头（通常为协议+主机，与 Host 头一致）
-        let origin = format!("https://{}", host);
-
-        // 手动构造 HTTP 升级请求，所有头部保持原始大小写
-        let request_str = format!(
-            "GET {} HTTP/1.1\r\n\
-             Host: {}\r\n\
-             Upgrade: websocket\r\n\
-             Connection: Upgrade\r\n\
-             Sec-WebSocket-Key: {}\r\n\
-             Sec-WebSocket-Version: 13\r\n\
-             Origin: {}\r\n\
-             X-Creation-Tools-Device-Auth: {}\r\n\
-             {}\
-             \r\n",
-            path_and_query, host, sec_key, origin, device_auth_str, cookie_line,
+        // 2. 添加自定义头部（严格对齐 Python 成功请求头）
+        request.headers_mut().insert(
+            "X-Creation-Tools-Device-Auth",
+            http::HeaderValue::from_str(&device_auth_str)
+                .map_err(|e| CloudError::Other(format!("Invalid device auth header: {}", e)))?,
         );
+        if let Some(token) = authenticator.authorization_token() {
+            request.headers_mut().insert(
+                "Cookie",
+                http::HeaderValue::from_str(&format!("Authorization={}", token))
+                    .map_err(|e| CloudError::Other(format!("Invalid cookie header: {}", e)))?,
+            );
+        }
+        request.headers_mut().insert(
+            "Origin",
+            http::HeaderValue::from_static("https://socketcv.codemao.cn:9096"),
+        );
+        // 移除 User-Agent（Python 未发送），不要添加 Referer、Accept-Language
 
-        // 打印即将发送的请求头（方便调试）
-        println!("=== Sending WebSocket handshake request ===");
-        println!("{}", request_str);
-        println!("============================================");
+        // 3. 打印即将发送的请求头（调试用）
+        println!("=== Sending WebSocket handshake request headers ===");
+        for (name, value) in request.headers().iter() {
+            println!("{}: {:?}", name, value);
+        }
+        println!("====================================================");
 
-        tls.write_all(request_str.as_bytes())
-            .map_err(|e| CloudError::Other(format!("Send request error: {}", e)))?;
+        // 4. 构建自定义 TLS 配置（模仿 Python 的密码套件顺序）
+        let mut root_store = RootCertStore::empty();
+        root_store.add_trust_anchors(TLS_SERVER_ROOTS.iter().map(|ta| {
+            rustls::OwnedTrustAnchor::from_subject_spki_name_constraints(
+                ta.subject,
+                ta.spki,
+                ta.name_constraints,
+            )
+        }));
 
-        // 读取服务器响应
-        let mut buf = [0u8; 4096]; // 适当扩大缓冲区以容纳更多头部
-        let n = tls
-            .read(&mut buf)
-            .map_err(|e| CloudError::Other(format!("Read response error: {}", e)))?;
-        let response_str = std::str::from_utf8(&buf[..n])
-            .map_err(|e| CloudError::Other(format!("Response not valid UTF-8: {}", e)))?;
+        // 密码套件列表，严格按照 Python 成功连接时的 Client Hello 顺序
+        let suites: Vec<rustls::SupportedCipherSuite> = vec![
+            // TLS 1.3 套件
+            cipher_suite::TLS13_AES_256_GCM_SHA384,
+            cipher_suite::TLS13_CHACHA20_POLY1305_SHA256,
+            cipher_suite::TLS13_AES_128_GCM_SHA256,
+            // TLS 1.2 套件（从 Python 十六进制转回）
+            cipher_suite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,   // 0xC02C
+            cipher_suite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,   // 0xC030
+            cipher_suite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, // 0xC02B
+            cipher_suite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, // 0xC02F
+            // 以下按 Python 实际顺序补充（部分套件若 rustls 未定义可省略）
+            // 例如：TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256 等
+        ];
 
-        // 打印服务器返回的整个响应（状态行 + 头部）
+        let config = ClientConfig::builder()
+            .with_cipher_suites(&suites)
+            .with_safe_defaults()           // 包含安全扩展（SNI、ALPN 等）
+            .with_root_certificates(root_store)
+            .with_no_client_auth();
+
+        let connector = Connector::Rustls(Arc::new(config));
+
+        // 5. 使用 tungstenite 完成握手（通过自定义连接器）
+        let (ws, response) = match tungstenite::connect(request.with_connector(connector)) {
+            Ok(pair) => pair,
+            Err(tungstenite::Error::Http(mut resp)) => {
+                eprintln!("=== 401 Response ===");
+                eprintln!("Status: {}", resp.status());
+                for (name, value) in resp.headers() {
+                    eprintln!("{}: {:?}", name, value);
+                }
+                // 读取响应体（如果有）
+                let body = String::from_utf8(resp.into_body().unwrap_or_default()).unwrap_or_default();
+                eprintln!("Body: {}", body);
+                eprintln!("====================");
+                return Err(CloudError::Other("WebSocket handshake got 401".into()));
+            }
+            Err(e) => return Err(CloudError::Other(format!("WebSocket error: {}", e))),
+        };
+
+        // 6. 打印服务器握手响应
         println!("=== Received handshake response ===");
-        println!("{}", response_str);
+        println!("Status: {}", response.status());
+        for (name, value) in response.headers().iter() {
+            println!("{}: {:?}", name, value);
+        }
         println!("====================================");
 
-        // 验证 101 状态
-        if !response_str.starts_with("HTTP/1.1 101") {
-            return Err(CloudError::Other(format!(
-                "WebSocket handshake failed, response: {}",
-                response_str.lines().next().unwrap_or("")
-            )));
-        }
-
-        // 将 TLS 流包装成 MaybeTlsStream，然后交给 tungstenite
-        let stream = MaybeTlsStream::NativeTls(tls);
-        let mut ws = WebSocket::from_raw_socket(stream, Role::Client, None);
-
-        // 以下代码保持不变
-        let _handshake_msg = ws.read()?; // 读取服务器可能发来的首个 WebSocket 消息
+        // 7. 后续处理（与原来相同）
+        let mut ws = ws;
+        let _handshake_msg = ws.read()?;
         ws.send(Message::Text(WS_CONNECT_MESSAGE.into()))?;
         Ok(CloudConnection::new_connected(
             self.work_id,
             self.editor,
             authenticator,
-            ws, // 类型 WebSocket<MaybeTlsStream<TcpStream>> 完全匹配
+            ws,
         ))
     }
 }

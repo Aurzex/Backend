@@ -2,14 +2,12 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::io::{self, Write};
 use std::num::ParseIntError;
-use std::path::{Path, PathBuf};
+
 use std::time::{Duration, UNIX_EPOCH};
 
-use crate::api::whale::{
-    CommentSourceType, ReportStatus, Resolution, WhaleReportFetcher, WorkSourceType,
-};
-use crate::utils::acquire::{self, BaseKey, ClientFactory, FileUploader, HttpMethod};
-use crate::utils::data::{DataManager, SettingManager};
+use crate::api::whale::{CommentSourceType, ReportStatus, WhaleReportFetcher, WorkSourceType};
+use crate::utils::acquire::{self};
+
 use serde_json::Value;
 // ==================== 自定义错误类型 ====================
 #[derive(Debug)]

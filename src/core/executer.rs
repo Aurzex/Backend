@@ -6,10 +6,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use rand::{Rng, RngExt};
+use rand::RngExt;
 use serde_json::{Map, Value};
 
-use crate::api::auth::AuthManager;
 use crate::api::forum::{
     ForumActionHandler, ForumDataFetcher, ForumReportReasonId, ItemType, PostReportReasonId,
 };
@@ -21,7 +20,7 @@ use crate::utils::acquire::{BaseKey, ClientFactory, FileUploader, HttpMethod, Id
 use crate::utils::data::{DataManager, PathConfig, SettingManager};
 
 use super::types::{
-    ActionConfig, ProcessorError, ReportFetcher, ReportTypeRegistry, SourceConfig, bytes_to_human,
+    ProcessorError, ReportFetcher, ReportTypeRegistry, SourceConfig, bytes_to_human,
     get_valid_input, html_to_text, prompt_input, timestamp_to_string, value_to_i64,
     value_to_string,
 };
