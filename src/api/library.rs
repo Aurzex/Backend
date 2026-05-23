@@ -1,19 +1,15 @@
-use crate::utils::acquire::{CodeMaoClient, HttpMethod};
+use crate::utils::acquire::{CodeMaoClient, HttpMethod, MewError, MewResult};
 use serde_json::{Value, json};
-
-// ==================== 漫画相关枚举 ====================
-// 暂无特定枚举，直接使用结构体
 
 // ==================== 小说相关枚举 ====================
 
-// 小说列表类型枚举
 pub enum NovelListType {
     All,
     Recommend,
 }
 
 impl NovelListType {
-    fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             NovelListType::All => "all",
             NovelListType::Recommend => "recommend",
@@ -21,7 +17,6 @@ impl NovelListType {
     }
 }
 
-// 小说排序方式枚举
 #[repr(i32)]
 pub enum NovelSortId {
     Default = 0,
@@ -30,7 +25,6 @@ pub enum NovelSortId {
     RecentlyUpdated = 3,
 }
 
-// 小说分类ID枚举
 #[repr(i32)]
 pub enum NovelCategoryId {
     All = 0,
@@ -47,7 +41,6 @@ pub enum NovelCategoryId {
     Horror = 11,
 }
 
-// 小说状态枚举
 #[repr(i32)]
 pub enum NovelStatus {
     All = 0,
@@ -57,7 +50,6 @@ pub enum NovelStatus {
 
 // ==================== 图鉴相关枚举 ====================
 
-// 图鉴星级枚举
 #[repr(i32)]
 pub enum BookStar {
     OneStar = 1,
@@ -68,7 +60,6 @@ pub enum BookStar {
     SixStar = 6,
 }
 
-// 图鉴属性ID枚举
 #[repr(i32)]
 pub enum BookAttributeId {
     Normal = 2,
@@ -84,7 +75,8 @@ pub enum BookAttributeId {
     Holy = 12,
 }
 
-// ==================== 漫画数据获取器 ====================
+// ==================== CartoonDataFetcher ====================
+
 pub struct CartoonDataFetcher {
     client: &'static CodeMaoClient,
 }
@@ -96,36 +88,41 @@ impl CartoonDataFetcher {
         }
     }
 
-    // 获取全部漫画
-    pub fn fetch_all_cartoons(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self
-            .client
+    /// 获取全部漫画
+    pub async fn fetch_all_cartoons(&self) -> MewResult<Value> {
+        self.client
             .build_request(HttpMethod::GET, "/api/comic/list/all", None)
-            .send()?;
-        Ok(self.client.response_to_json(response)?)
+            .send()
+            .await?
+            .json()
+            .await
+            .map_err(MewError::from)
     }
 
-    // 获取漫画信息
-    pub fn fetch_cartoon_info(&self, comic_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
+    /// 获取漫画信息
+    pub async fn fetch_cartoon_info(&self, comic_id: i32) -> MewResult<Value> {
         let endpoint = format!("/api/comic/{}", comic_id);
-        let response = self
-            .client
+
+        self.client
             .build_request(HttpMethod::GET, &endpoint, None)
-            .send()?;
-        Ok(self.client.response_to_json(response)?)
+            .send()
+            .await?
+            .json()
+            .await
+            .map_err(MewError::from)
     }
 
-    // 获取漫画某个章节信息
-    pub fn fetch_cartoon_chapter(
-        &self,
-        chapter_id: i32,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    /// 获取漫画某个章节信息
+    pub async fn fetch_cartoon_chapter(&self, chapter_id: i32) -> MewResult<Value> {
         let endpoint = format!("/api/comic/page/list/{}", chapter_id);
-        let response = self
-            .client
+
+        self.client
             .build_request(HttpMethod::GET, &endpoint, None)
-            .send()?;
-        Ok(self.client.response_to_json(response)?)
+            .send()
+            .await?
+            .json()
+            .await
+            .map_err(MewError::from)
     }
 }
 
@@ -135,7 +132,8 @@ impl Default for CartoonDataFetcher {
     }
 }
 
-// ==================== 小说数据获取器 ====================
+// ==================== NovelDataFetcher ====================
+
 pub struct NovelDataFetcher {
     client: &'static CodeMaoClient,
 }
@@ -147,26 +145,30 @@ impl NovelDataFetcher {
         }
     }
 
-    // 获取小说分类列表
-    pub fn fetch_novel_categories(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self
-            .client
+    /// 获取小说分类列表
+    pub async fn fetch_novel_categories(&self) -> MewResult<Value> {
+        self.client
             .build_request(HttpMethod::GET, "/api/fanfic/type", None)
-            .send()?;
-        Ok(self.client.response_to_json(response)?)
+            .send()
+            .await?
+            .json()
+            .await
+            .map_err(MewError::from)
     }
 
-    // 获取推荐小说
-    pub fn fetch_recommend_novel(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self
-            .client
+    /// 获取推荐小说
+    pub async fn fetch_recommend_novel(&self) -> MewResult<Value> {
+        self.client
             .build_request(HttpMethod::GET, "/api/fanfic/list/recommend", None)
-            .send()?;
-        Ok(self.client.response_to_json(response)?)
+            .send()
+            .await?
+            .json()
+            .await
+            .map_err(MewError::from)
     }
 
-    // 获取小说列表
-    pub fn fetch_novel_list(
+    /// 获取小说列表
+    pub async fn fetch_novel_list(
         &self,
         list_type: NovelListType,
         sort_id: NovelSortId,
@@ -174,141 +176,153 @@ impl NovelDataFetcher {
         status: NovelStatus,
         page: Option<i32>,
         limit: Option<i32>,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let endpoint = format!("/api/fanfic/list/{}", list_type.as_str());
 
-        let response = self
-            .client
+        self.client
             .build_request(HttpMethod::GET, &endpoint, None)
             .with_param("sort_id", (sort_id as i32).to_string())
             .with_param("type_id", (category_id as i32).to_string())
             .with_param("status", (status as i32).to_string())
             .with_param("page", page.unwrap_or(1).to_string())
             .with_param("limit", limit.unwrap_or(20).to_string())
-            .send()?;
-
-        Ok(self.client.response_to_json(response)?)
+            .send()
+            .await?
+            .json()
+            .await
+            .map_err(MewError::from)
     }
 
-    // 获取收藏的小说列表
-    pub fn fetch_favorite_novels(
+    /// 获取收藏的小说列表
+    pub async fn fetch_favorite_novels(
         &self,
         page: Option<i32>,
         limit: Option<i32>,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self
-            .client
+    ) -> MewResult<Value> {
+        self.client
             .build_request(HttpMethod::GET, "/web/fanfic/collection", None)
             .with_param("page", page.unwrap_or(1).to_string())
             .with_param("limit", limit.unwrap_or(10).to_string())
-            .send()?;
-        Ok(self.client.response_to_json(response)?)
+            .send()
+            .await?
+            .json()
+            .await
+            .map_err(MewError::from)
     }
 
-    // 获取小说详情
-    pub fn fetch_novel_details(&self, novel_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
+    /// 获取小说详情
+    pub async fn fetch_novel_details(&self, novel_id: i32) -> MewResult<Value> {
         let endpoint = format!("/api/fanfic/{}", novel_id);
-        let response = self
-            .client
+
+        self.client
             .build_request(HttpMethod::GET, &endpoint, None)
-            .send()?;
-        Ok(self.client.response_to_json(response)?)
+            .send()
+            .await?
+            .json()
+            .await
+            .map_err(MewError::from)
     }
 
-    // 获取小说章节信息
-    pub fn fetch_chapter_details(
-        &self,
-        chapter_id: i32,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    /// 获取小说章节信息
+    pub async fn fetch_chapter_details(&self, chapter_id: i32) -> MewResult<Value> {
         let endpoint = format!("/api/fanfic/section/{}", chapter_id);
-        let response = self
-            .client
+
+        self.client
             .build_request(HttpMethod::GET, &endpoint, None)
-            .send()?;
-        Ok(self.client.response_to_json(response)?)
+            .send()
+            .await?
+            .json()
+            .await
+            .map_err(MewError::from)
     }
 
-    // 获取小说评论
-    pub fn fetch_novel_comments(
+    /// 获取小说评论
+    pub async fn fetch_novel_comments(
         &self,
         novel_id: i32,
         page: Option<i32>,
         limit: Option<i32>,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let endpoint = format!("/api/fanfic/comments/list/{}", novel_id);
 
-        let response = self
-            .client
+        self.client
             .build_request(HttpMethod::GET, &endpoint, None)
             .with_param("page", page.unwrap_or(0).to_string())
             .with_param("limit", limit.unwrap_or(10).to_string())
-            .send()?;
-        Ok(self.client.response_to_json(response)?)
+            .send()
+            .await?
+            .json()
+            .await
+            .map_err(MewError::from)
     }
 
-    // 获取搜索小说结果
-    pub fn search_novels(
+    /// 搜索小说
+    pub async fn search_novels(
         &self,
         keyword: &str,
         page: Option<i32>,
         limit: Option<i32>,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self
-            .client
+    ) -> MewResult<Value> {
+        self.client
             .build_request(HttpMethod::GET, "/api/fanfic/list/search", None)
             .with_param("searchContent", keyword)
             .with_param("page", page.unwrap_or(0).to_string())
             .with_param("limit", limit.unwrap_or(10).to_string())
-            .send()?;
-        Ok(self.client.response_to_json(response)?)
+            .send()
+            .await?
+            .json()
+            .await
+            .map_err(MewError::from)
     }
 
-    // 获取小说的所有章节
-    pub fn fetch_all_chapters(
+    /// 获取小说的所有章节
+    pub async fn fetch_all_chapters(
         &self,
         novel_id: i32,
         limit: Option<i32>,
         page: Option<i32>,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let endpoint = format!("/web/fanfic/{}/sections", novel_id);
 
-        let response = self
-            .client
+        self.client
             .build_request(HttpMethod::GET, &endpoint, None)
             .with_param("amount_items", limit.unwrap_or(200).to_string())
             .with_param("page_number", page.unwrap_or(1).to_string())
-            .send()?;
-        Ok(self.client.response_to_json(response)?)
+            .send()
+            .await?
+            .json()
+            .await
+            .map_err(MewError::from)
     }
 
-    // 获取我的小说
-    pub fn fetch_my_novels(
-        &self,
-        limit: Option<i32>,
-        page: Option<i32>,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self
-            .client
+    /// 获取我的小说
+    pub async fn fetch_my_novels(&self, limit: Option<i32>, page: Option<i32>) -> MewResult<Value> {
+        self.client
             .build_request(HttpMethod::GET, "/web/fanfic/my", None)
             .with_param("amount_items", limit.unwrap_or(200).to_string())
             .with_param("page_number", page.unwrap_or(1).to_string())
-            .send()?;
-        Ok(self.client.response_to_json(response)?)
+            .send()
+            .await?
+            .json()
+            .await
+            .map_err(MewError::from)
     }
 
-    // 获取已删除的章节
-    pub fn fetch_deleted_chapters(
+    /// 获取已删除的章节
+    pub async fn fetch_deleted_chapters(
         &self,
         limit: Option<i32>,
         page: Option<i32>,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self
-            .client
+    ) -> MewResult<Value> {
+        self.client
             .build_request(HttpMethod::GET, "/web/fanfic/section/deleted", None)
             .with_param("amount_items", limit.unwrap_or(200).to_string())
             .with_param("page_number", page.unwrap_or(1).to_string())
-            .send()?;
-        Ok(self.client.response_to_json(response)?)
+            .send()
+            .await?
+            .json()
+            .await
+            .map_err(MewError::from)
     }
 }
 
@@ -318,7 +332,8 @@ impl Default for NovelDataFetcher {
     }
 }
 
-// ==================== 小说操作处理器 ====================
+// ==================== NovelActionHandler ====================
+
 pub struct NovelActionHandler {
     client: &'static CodeMaoClient,
 }
@@ -330,12 +345,12 @@ impl NovelActionHandler {
         }
     }
 
-    // 收藏 / 取消收藏小说
-    pub fn execute_toggle_novel_favorite(
+    /// 收藏 / 取消收藏小说
+    pub async fn execute_toggle_novel_favorite(
         &self,
         novel_id: i32,
         favorite: bool,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let method = if favorite {
             HttpMethod::POST
         } else {
@@ -343,42 +358,45 @@ impl NovelActionHandler {
         };
         let endpoint = format!("/web/fanfic/collect/{}", novel_id);
 
-        let response = self.client.build_request(method, &endpoint, None).send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client
+            .build_request(method, &endpoint, None)
+            .send()
+            .await?
+            .json()
+            .await
+            .map_err(MewError::from)
     }
 
-    // 发布小说评论
-    pub fn create_novel_comment(
+    /// 发布小说评论
+    pub async fn create_novel_comment(
         &self,
         content: &str,
         novel_id: i32,
         return_data: bool,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let endpoint = format!("/api/fanfic/comments/{}", novel_id);
-        let payload = json!({
-            "content": content
-        });
 
         let response = self
             .client
             .build_request(HttpMethod::POST, &endpoint, None)
-            .with_payload(payload)
-            .send()?;
+            .with_payload(json!({ "content": content }))
+            .send()
+            .await?;
 
         if return_data {
-            Ok(self.client.response_to_json(response)?)
+            response.json().await.map_err(MewError::from)
         } else {
-            Ok(json!({ "success": response.status() == 200 }))
+            Ok(json!({ "success": response.status().is_success() }))
         }
     }
 
-    // 点赞 / 取消点赞小说评论
-    pub fn execute_toggle_comment_like(
+    /// 点赞 / 取消点赞小说评论
+    pub async fn execute_toggle_comment_like(
         &self,
         comment_id: i32,
         like: bool,
         return_data: bool,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let method = if like {
             HttpMethod::POST
         } else {
@@ -386,74 +404,80 @@ impl NovelActionHandler {
         };
         let endpoint = format!("/api/fanfic/comments/praise/{}", comment_id);
 
-        let response = self.client.build_request(method, &endpoint, None).send()?;
+        let response = self
+            .client
+            .build_request(method, &endpoint, None)
+            .send()
+            .await?;
 
         if return_data {
-            Ok(self.client.response_to_json(response)?)
+            response.json().await.map_err(MewError::from)
         } else {
-            Ok(json!({ "success": response.status() == 200 }))
+            Ok(json!({ "success": response.status().is_success() }))
         }
     }
 
-    // 删除小说评论
-    pub fn delete_novel_comment(
+    /// 删除小说评论
+    pub async fn delete_novel_comment(
         &self,
         comment_id: i32,
         return_data: bool,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let endpoint = format!("/api/fanfic/comments/{}", comment_id);
 
         let response = self
             .client
             .build_request(HttpMethod::DELETE, &endpoint, None)
-            .send()?;
+            .send()
+            .await?;
 
         if return_data {
-            Ok(self.client.response_to_json(response)?)
+            response.json().await.map_err(MewError::from)
         } else {
-            Ok(json!({ "success": response.status() == 200 }))
+            Ok(json!({ "success": response.status().is_success() }))
         }
     }
 
-    // 更新章节
-    pub fn update_chapter(
+    /// 更新章节
+    pub async fn update_chapter(
         &self,
         chapter_id: i32,
         title: &str,
         content: &str,
         words_num: i32,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    ) -> MewResult<bool> {
         let endpoint = format!("/web/fanfic/section/{}", chapter_id);
-        let payload = json!({
-            "title": title,
-            "content": content,
-            "draft_words_num": words_num,
-        });
 
         let response = self
             .client
             .build_request(HttpMethod::PUT, &endpoint, None)
-            .with_payload(payload)
-            .send()?;
+            .with_payload(json!({
+                "title": title,
+                "content": content,
+                "draft_words_num": words_num,
+            }))
+            .send()
+            .await?;
 
-        Ok(response.status() == 204)
+        Ok(response.status().as_u16() == 204)
     }
 
-    // 发布章节
-    pub fn publish_chapter(&self, chapter_id: i32) -> Result<bool, Box<dyn std::error::Error>> {
+    /// 发布章节
+    pub async fn publish_chapter(&self, chapter_id: i32) -> MewResult<bool> {
         let endpoint = format!("/web/fanfic/section/{}/publish", chapter_id);
 
         let response = self
             .client
             .build_request(HttpMethod::PUT, &endpoint, None)
             .with_payload(json!({}))
-            .send()?;
+            .send()
+            .await?;
 
-        Ok(response.status() == 204)
+        Ok(response.status().as_u16() == 204)
     }
 
-    // 更新小说
-    pub fn update_novel(
+    /// 更新小说
+    pub async fn update_novel(
         &self,
         novel_id: i32,
         title: &str,
@@ -461,30 +485,30 @@ impl NovelActionHandler {
         category_id: i32,
         status: i32,
         return_data: bool,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let endpoint = format!("/web/fanfic/{}", novel_id);
-        let payload = json!({
-            "title": title,
-            "introduction": introduction,
-            "fanfic_type_id": category_id,
-            "status": status,
-        });
 
         let response = self
             .client
             .build_request(HttpMethod::PUT, &endpoint, None)
-            .with_payload(payload)
-            .send()?;
+            .with_payload(json!({
+                "title": title,
+                "introduction": introduction,
+                "fanfic_type_id": category_id,
+                "status": status,
+            }))
+            .send()
+            .await?;
 
         if return_data {
-            Ok(self.client.response_to_json(response)?)
+            response.json().await.map_err(MewError::from)
         } else {
-            Ok(json!({ "success": response.status() == 200 }))
+            Ok(json!({ "success": response.status().is_success() }))
         }
     }
 
-    // 创建小说
-    pub fn create_novel(
+    /// 创建小说
+    pub async fn create_novel(
         &self,
         title: &str,
         section_title: &str,
@@ -492,38 +516,38 @@ impl NovelActionHandler {
         cover_pic: &str,
         words_num: i32,
         return_data: bool,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
-        let payload = json!({
-            "title": title,
-            "section_title": section_title,
-            "draft": draft,
-            "cover_pic": cover_pic,
-            "draft_words_num": words_num,
-        });
-
+    ) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::POST, "/web/fanfic", None)
-            .with_payload(payload)
-            .send()?;
+            .with_payload(json!({
+                "title": title,
+                "section_title": section_title,
+                "draft": draft,
+                "cover_pic": cover_pic,
+                "draft_words_num": words_num,
+            }))
+            .send()
+            .await?;
 
         if return_data {
-            Ok(self.client.response_to_json(response)?)
+            response.json().await.map_err(MewError::from)
         } else {
-            Ok(json!({ "success": response.status() == 200 }))
+            Ok(json!({ "success": response.status().is_success() }))
         }
     }
 
-    // 删除小说
-    pub fn delete_novel(&self, novel_id: i32) -> Result<bool, Box<dyn std::error::Error>> {
+    /// 删除小说
+    pub async fn delete_novel(&self, novel_id: i32) -> MewResult<bool> {
         let endpoint = format!("/web/fanfic/{}", novel_id);
 
         let response = self
             .client
             .build_request(HttpMethod::DELETE, &endpoint, None)
-            .send()?;
+            .send()
+            .await?;
 
-        Ok(response.status() == 204)
+        Ok(response.status().as_u16() == 204)
     }
 }
 
@@ -533,7 +557,8 @@ impl Default for NovelActionHandler {
     }
 }
 
-// ==================== 图鉴数据获取器 ====================
+// ==================== BookDataFetcher ====================
+
 pub struct BookDataFetcher {
     client: &'static CodeMaoClient,
 }
@@ -545,62 +570,66 @@ impl BookDataFetcher {
         }
     }
 
-    // 获取全部图鉴
-    pub fn fetch_all_books(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self
-            .client
+    /// 获取全部图鉴
+    pub async fn fetch_all_books(&self) -> MewResult<Value> {
+        self.client
             .build_request(HttpMethod::GET, "/api/sprite/list/all", None)
-            .send()?;
-        Ok(self.client.response_to_json(response)?)
+            .send()
+            .await?
+            .json()
+            .await
+            .map_err(MewError::from)
     }
 
-    // 获取所有属性
-    pub fn fetch_all_attributes(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = self
-            .client
+    /// 获取所有属性
+    pub async fn fetch_all_attributes(&self) -> MewResult<Value> {
+        self.client
             .build_request(HttpMethod::GET, "/api/sprite/factio", None)
-            .send()?;
-        Ok(self.client.response_to_json(response)?)
+            .send()
+            .await?
+            .json()
+            .await
+            .map_err(MewError::from)
     }
 
-    // 按星级获取图鉴
-    pub fn fetch_books_by_star(&self, star: BookStar) -> Result<Value, Box<dyn std::error::Error>> {
-        self._get_books_by_params(
-            self.client
-                .build_request(HttpMethod::GET, "/api/sprite/list/all", None)
-                .with_param("star", (star as i32).to_string()),
-        )
+    /// 按星级获取图鉴
+    pub async fn fetch_books_by_star(&self, star: BookStar) -> MewResult<Value> {
+        self.client
+            .build_request(HttpMethod::GET, "/api/sprite/list/all", None)
+            .with_param("star", (star as i32).to_string())
+            .send()
+            .await?
+            .json()
+            .await
+            .map_err(MewError::from)
     }
 
-    // 按属性获取图鉴
-    pub fn fetch_books_by_attribute(
+    /// 按属性获取图鉴
+    pub async fn fetch_books_by_attribute(
         &self,
         attribute_id: BookAttributeId,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
-        self._get_books_by_params(
-            self.client
-                .build_request(HttpMethod::GET, "/api/sprite/list/all", None)
-                .with_param("faction_id", (attribute_id as i32).to_string()),
-        )
+    ) -> MewResult<Value> {
+        self.client
+            .build_request(HttpMethod::GET, "/api/sprite/list/all", None)
+            .with_param("faction_id", (attribute_id as i32).to_string())
+            .send()
+            .await?
+            .json()
+            .await
+            .map_err(MewError::from)
     }
 
-    // 通用获取图鉴方法
-    fn _get_books_by_params(
-        &self,
-        builder: crate::utils::acquire::InnerBuilder,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
-        let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
-    }
-
-    // 获取指定图鉴详情
-    pub fn fetch_book_details(&self, book_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
+    /// 获取指定图鉴详情
+    pub async fn fetch_book_details(&self, book_id: i32) -> MewResult<Value> {
         let endpoint = format!("/api/sprite/{}", book_id);
-        let response = self
-            .client
+
+        self.client
             .build_request(HttpMethod::GET, &endpoint, None)
-            .send()?;
-        Ok(self.client.response_to_json(response)?)
+            .send()
+            .await?
+            .json()
+            .await
+            .map_err(MewError::from)
     }
 }
 
@@ -610,7 +639,8 @@ impl Default for BookDataFetcher {
     }
 }
 
-// ==================== 图鉴操作处理器 ====================
+// ==================== BookActionHandler ====================
+
 pub struct BookActionHandler {
     client: &'static CodeMaoClient,
 }
@@ -622,13 +652,13 @@ impl BookActionHandler {
         }
     }
 
-    // 点赞 / 取消点赞图鉴
-    pub fn execute_toggle_book_like(
+    /// 点赞 / 取消点赞图鉴
+    pub async fn execute_toggle_book_like(
         &self,
         book_id: i32,
         like: bool,
         return_data: bool,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let method = if like {
             HttpMethod::POST
         } else {
@@ -636,12 +666,16 @@ impl BookActionHandler {
         };
         let endpoint = format!("/api/sprite/praise/{}", book_id);
 
-        let response = self.client.build_request(method, &endpoint, None).send()?;
+        let response = self
+            .client
+            .build_request(method, &endpoint, None)
+            .send()
+            .await?;
 
         if return_data {
-            Ok(self.client.response_to_json(response)?)
+            response.json().await.map_err(MewError::from)
         } else {
-            Ok(json!({ "success": response.status() == 200 }))
+            Ok(json!({ "success": response.status().is_success() }))
         }
     }
 }
