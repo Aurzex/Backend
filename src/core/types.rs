@@ -735,7 +735,7 @@ impl ReportFetcher {
 
                 for result in generator {
                     match result {
-                        Ok(item) => {
+                        Ok(mut item) => {
                             if status == ReportStatus::ToBeDone {
                                 if let Some(state) =
                                     item.get(&config.status_field).and_then(|v| v.as_str())
@@ -744,6 +744,13 @@ impl ReportFetcher {
                                         continue;
                                     }
                                 }
+                            }
+                            // ★ 注入类型标记
+                            if let Value::Object(ref mut map) = item {
+                                map.insert(
+                                    "_report_type".into(),
+                                    Value::String(report_type.clone()),
+                                );
                             }
                             type_items.push(item);
                             if type_items.len() >= config.chunk_size {

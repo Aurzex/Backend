@@ -119,6 +119,7 @@ impl Default for BaseKey {
 // ==================== 常量定义 ====================
 /// 默认请求头静态切片
 const DEFAULT_HEADERS: &[(&str, &str)] = &[
+    ("Accept", "application/json, text/plain, */*"),
     (
         "User-Agent",
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -292,7 +293,7 @@ impl Default for ClientConfig {
         Self {
             default_base_key: BaseKey::Default,
             timeout: Duration::from_secs(30),
-            log_requests: true,
+            log_requests: false,
             use_global_auth: true,
         }
     }
@@ -551,15 +552,16 @@ impl InnerClient {
         if !self.config.log_requests {
             return Ok(());
         }
-        println!("{}", url);
-        println!("\n---------- 响应信息 ----------");
+
+        println!("\n========== 响应信息 ==========");
+        println!("请求 URL: {}", url);
         println!(
             "状态: {} {}",
             response.status(),
             response.status().canonical_reason().unwrap_or("")
         );
 
-        println!("响应头:");
+        println!("\n响应头:");
         for (key, value) in response.headers() {
             if let Ok(value_str) = value.to_str() {
                 println!("  {}: {}", key, value_str);
@@ -683,6 +685,7 @@ impl InnerClient {
             }
         };
 
+        // 记录响应信息和响应体内容
         self.log_response(&url, &response)?;
         Ok(response)
     }
@@ -691,31 +694,79 @@ impl InnerClient {
         let mut body = response.into_body();
         let bytes = body.read_to_vec()?;
         if bytes.is_empty() {
+            if self.config.log_requests {
+                println!("响应体: (空)");
+            }
             return Ok(Value::Null);
         }
-        // 只解析一次
+
         let json: Value = serde_json::from_slice(&bytes)?;
+
         if self.config.log_requests {
-            println!("响应体 (JSON):");
+            println!("\n---------- 响应体 (JSON) ----------");
             if let Ok(pretty) = serde_json::to_string_pretty(&json) {
                 for line in pretty.lines() {
                     println!("  {}", line);
                 }
             }
+            println!("------------------------------------\n");
         }
+
         Ok(json)
     }
 
     fn response_to_string(&self, response: Response<Body>) -> Result<String> {
         let mut body = response.into_body();
         let text = body.read_to_string()?;
+
+        if self.config.log_requests {
+            println!("\n---------- 响应体 (文本) ----------");
+            // 限制输出长度，避免日志过长
+            if text.len() > 1000 {
+                let preview: String = text.chars().take(1000).collect();
+                println!("  {}", preview);
+                println!("  ... (剩余 {} 字符被截断)", text.len() - 1000);
+            } else {
+                println!("  {}", text);
+            }
+            println!("-------------------------------------\n");
+        }
+
         Ok(text)
     }
 
     fn response_to_binary(&self, response: Response<Body>) -> Result<Vec<u8>> {
         let mut body = response.into_body();
-        let text = body.read_to_vec()?;
-        Ok(text)
+        let data = body.read_to_vec()?;
+
+        if self.config.log_requests {
+            println!("\n---------- 响应体 (二进制) ----------");
+            println!("  大小: {} 字节", data.len());
+
+            // 尝试以文本方式预览
+            if let Ok(text) = std::str::from_utf8(&data) {
+                println!("  内容预览:");
+                let preview: String = text.chars().take(200).collect();
+                println!("  {}", preview);
+                if text.len() > 200 {
+                    println!("  ... (截断)");
+                }
+            } else {
+                // 显示十六进制预览
+                let preview_len = std::cmp::min(data.len(), 64);
+                print!("  十六进制预览: ");
+                for byte in &data[..preview_len] {
+                    print!("{:02x} ", byte);
+                }
+                println!();
+                if data.len() > 64 {
+                    println!("  ... (截断)");
+                }
+            }
+            println!("--------------------------------------\n");
+        }
+
+        Ok(data)
     }
 }
 

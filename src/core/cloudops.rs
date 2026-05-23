@@ -1390,9 +1390,7 @@ impl CloudConnectionBuilder {
         }
 
         let mut provider = rustls::crypto::ring::default_provider();
-
         // 不再手动设置 cipher_suites，使用默认的密码套件顺序
-
         // 保持原有的椭圆曲线设置
         provider.kx_groups = rustls::crypto::ring::ALL_KX_GROUPS.to_vec();
 

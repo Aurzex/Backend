@@ -25,6 +25,100 @@ use super::types::{
     value_to_string,
 };
 
+// ==================== 公共工具函数 ====================
+
+/// 生成标题预览字符串，最多显示前10个字符。
+fn title_preview_str(title: &str) -> String {
+    if title.is_empty() {
+        String::new()
+    } else {
+        format!("[{}]", &title[..title.len().min(10)])
+    }
+}
+
+/// 按字符截断字符串，确保不截断多字节字符。
+fn truncate_chars(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        s.to_string()
+    } else {
+        s.chars().take(max_chars).collect::<String>() + "..."
+    }
+}
+
+/// 生成统一的违规标识符: source_type:item_id:type:parent_id:content_id
+fn build_identifier(source_type: &str, item_id: i64, data: &Value, is_reply: bool) -> String {
+    let content_id = data.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
+    let parent_id = if is_reply {
+        data.get("parent_id").and_then(|v| v.as_i64()).unwrap_or(0)
+    } else {
+        0
+    };
+    format!(
+        "{}:{}:{}:{}:{}",
+        source_type,
+        item_id,
+        if is_reply { "reply" } else { "comment" },
+        parent_id,
+        content_id
+    )
+}
+
+/// 对每条非置顶评论及其所有回复应用闭包处理。
+fn for_each_comment_reply(
+    comments: &[Value],
+    mut handler: impl FnMut(&Value, bool), // is_reply: bool
+) {
+    for comment in comments {
+        if comment
+            .get("is_top")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        handler(comment, false);
+        if let Some(replies) = comment.get("replies").and_then(|v| v.as_array()) {
+            for reply in replies {
+                handler(reply, true);
+            }
+        }
+    }
+}
+
+/// 将字符串解析为 Resolution 枚举，错误映射为 ProcessorError。
+fn parse_resolution(resolution: &str) -> Result<Resolution, ProcessorError> {
+    match resolution {
+        "DELETE" => Ok(Resolution::Delete),
+        "MUTE_SEVEN_DAYS" => Ok(Resolution::MuteSevenDays),
+        "MUTE_THREE_MONTHS" => Ok(Resolution::MuteThreeMonths),
+        "PASS" => Ok(Resolution::Pass),
+        "UNLOAD" => Ok(Resolution::Unload),
+        _ => Err(ProcessorError::Processing(format!(
+            "未知状态: {}",
+            resolution
+        ))),
+    }
+}
+
+/// 官方账号 ID 列表，编译期常量。
+const OFFICIAL_IDS: [i64; 9] = [
+    128963, 629055, 203577, 859722, 148883, 2191000, 7492052, 387963, 3649031,
+];
+
+/// 提取 SourceConfig 的 report_id 辅助 trait。
+trait ReportIdExt {
+    fn get_report_id(&self, item: &Value) -> i32;
+}
+
+impl ReportIdExt for SourceConfig {
+    fn get_report_id(&self, item: &Value) -> i32 {
+        item.get(&self.report_id_field)
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0)
+    }
+}
+
 // ==================== 策略模式：评论违规检测 ====================
 pub trait CommentProcessStrategy: Send + Sync {
     fn process(
@@ -49,7 +143,7 @@ impl CommentProcessStrategy for AdsStrategy {
         target_lists: &mut HashMap<String, Vec<String>>,
         source_type: &str,
     ) {
-        let ad_keywords: Vec<String> = params
+        let ad_keywords: HashSet<String> = params
             .get("ads")
             .and_then(|v| v.as_array())
             .map(|arr| {
@@ -63,54 +157,22 @@ impl CommentProcessStrategy for AdsStrategy {
             return;
         }
 
-        let ad_set: HashSet<String> = ad_keywords.into_iter().collect();
-
-        fn process_branch(
-            data: &Value,
-            item_id: i64,
-            title: &str,
-            ad_keywords: &HashSet<String>,
-            target_lists: &mut HashMap<String, Vec<String>>,
-            source_type: &str,
-            is_reply: bool,
-        ) {
+        for_each_comment_reply(comments, |data, is_reply| {
             let content = data
                 .get("content")
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_lowercase();
-            let mut found = false;
-            for kw in ad_keywords {
-                if content.contains(kw) {
-                    found = true;
-                    break;
-                }
-            }
-
-            if found {
-                let id = data.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
-                let parent_id = if is_reply {
-                    data.get("parent_id").and_then(|v| v.as_i64()).unwrap_or(0)
-                } else {
-                    0
-                };
-                let identifier = if is_reply {
-                    format!("{}:{}:reply:{}:{}", source_type, item_id, parent_id, id)
-                } else {
-                    format!("{}:{}:comment:0:{}", source_type, item_id, id)
-                };
+            if ad_keywords.iter().any(|kw| content.contains(kw)) {
+                let identifier = build_identifier(source_type, item_id, data, is_reply);
                 let log_type = if is_reply { "回复" } else { "评论" };
-                let content_preview: String = content.chars().take(50).collect();
-                let title_preview = if title.is_empty() {
-                    String::new()
-                } else {
-                    format!("[{}]", &title[..title.len().min(10)])
-                };
+                let content_preview = truncate_chars(&content, 50);
+                let title_part = title_preview_str(title);
                 println!(
                     "广告 {} [{}]{} : {}",
                     log_type,
                     source_type.to_uppercase(),
-                    title_preview,
+                    title_part,
                     content_preview
                 );
                 target_lists
@@ -118,39 +180,7 @@ impl CommentProcessStrategy for AdsStrategy {
                     .or_default()
                     .push(identifier);
             }
-        }
-
-        for comment in comments {
-            if comment
-                .get("is_top")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false)
-            {
-                continue;
-            }
-            process_branch(
-                comment,
-                item_id,
-                title,
-                &ad_set,
-                target_lists,
-                source_type,
-                false,
-            );
-            if let Some(replies) = comment.get("replies").and_then(|v| v.as_array()) {
-                for reply in replies {
-                    process_branch(
-                        reply,
-                        item_id,
-                        title,
-                        &ad_set,
-                        target_lists,
-                        source_type,
-                        true,
-                    );
-                }
-            }
-        }
+        });
     }
 }
 
@@ -175,46 +205,24 @@ impl CommentProcessStrategy for BlacklistStrategy {
             return;
         }
 
-        fn process_branch(
-            data: &Value,
-            item_id: i64,
-            title: &str,
-            blacklist: &HashSet<String>,
-            target_lists: &mut HashMap<String, Vec<String>>,
-            source_type: &str,
-            is_reply: bool,
-        ) {
-            let uid = data
+        for_each_comment_reply(comments, |data, is_reply| {
+            let user_id = data
                 .get("user_id")
                 .map(|v| value_to_string(v))
                 .unwrap_or_default();
-            if blacklist.contains(&uid) {
-                let id = data.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
-                let parent_id = if is_reply {
-                    data.get("parent_id").and_then(|v| v.as_i64()).unwrap_or(0)
-                } else {
-                    0
-                };
-                let identifier = if is_reply {
-                    format!("{}:{}:reply:{}:{}", source_type, item_id, parent_id, id)
-                } else {
-                    format!("{}:{}:comment:0:{}", source_type, item_id, id)
-                };
+            if blacklist.contains(&user_id) {
+                let identifier = build_identifier(source_type, item_id, data, is_reply);
                 let log_type = if is_reply { "回复" } else { "评论" };
                 let nickname = data
                     .get("nickname")
                     .and_then(|v| v.as_str())
                     .unwrap_or("未知用户");
-                let title_preview = if title.is_empty() {
-                    String::new()
-                } else {
-                    format!("[{}]", &title[..title.len().min(10)])
-                };
+                let title_part = title_preview_str(title);
                 println!(
                     "黑名单 {} [{}]{} : {}",
                     log_type,
                     source_type.to_uppercase(),
-                    title_preview,
+                    title_part,
                     nickname
                 );
                 target_lists
@@ -222,39 +230,7 @@ impl CommentProcessStrategy for BlacklistStrategy {
                     .or_default()
                     .push(identifier);
             }
-        }
-
-        for comment in comments {
-            if comment
-                .get("is_top")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false)
-            {
-                continue;
-            }
-            process_branch(
-                comment,
-                item_id,
-                title,
-                &blacklist,
-                target_lists,
-                source_type,
-                false,
-            );
-            if let Some(replies) = comment.get("replies").and_then(|v| v.as_array()) {
-                for reply in replies {
-                    process_branch(
-                        reply,
-                        item_id,
-                        title,
-                        &blacklist,
-                        target_lists,
-                        source_type,
-                        true,
-                    );
-                }
-            }
-        }
+        });
     }
 }
 
@@ -276,13 +252,7 @@ impl CommentProcessStrategy for DuplicatesStrategy {
 
         let mut content_map: HashMap<(String, String), Vec<String>> = HashMap::new();
 
-        fn track(
-            data: &Value,
-            item_id: i64,
-            map: &mut HashMap<(String, String), Vec<String>>,
-            source_type: &str,
-            is_reply: bool,
-        ) {
+        for_each_comment_reply(comments, |data, is_reply| {
             let user_id = data
                 .get("user_id")
                 .map(|v| value_to_string(v))
@@ -295,35 +265,19 @@ impl CommentProcessStrategy for DuplicatesStrategy {
             if user_id.is_empty() || content.is_empty() {
                 return;
             }
-            let id = data.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
-            let parent_id = if is_reply {
-                data.get("parent_id").and_then(|v| v.as_i64()).unwrap_or(0)
-            } else {
-                0
-            };
-            let identifier = if is_reply {
-                format!("{}:{}:reply:{}:{}", source_type, item_id, parent_id, id)
-            } else {
-                format!("{}:{}:comment:0:{}", source_type, item_id, id)
-            };
-            map.entry((user_id, content)).or_default().push(identifier);
-        }
-
-        for comment in comments {
-            track(comment, item_id, &mut content_map, source_type, false);
-            if let Some(replies) = comment.get("replies").and_then(|v| v.as_array()) {
-                for reply in replies {
-                    track(reply, item_id, &mut content_map, source_type, true);
-                }
-            }
-        }
+            let identifier = build_identifier(source_type, item_id, data, is_reply);
+            content_map
+                .entry((user_id, content))
+                .or_default()
+                .push(identifier);
+        });
 
         for ((user_id, content), identifiers) in content_map {
             if identifiers.len() >= threshold {
                 println!(
                     "用户 {} 刷屏评论: {}... - 出现 {} 次",
                     user_id,
-                    &content[..content.len().min(50)],
+                    truncate_chars(&content, 50),
                     identifiers.len()
                 );
                 target_lists
@@ -510,12 +464,6 @@ pub struct OfficialCheckProcessor;
 
 impl Processor for OfficialCheckProcessor {
     fn process(&self, context: &mut ProcessingContext) -> Result<(), ProcessorError> {
-        let official_ids: HashSet<i64> = vec![
-            128963, 629055, 203577, 859722, 148883, 2191000, 7492052, 387963, 3649031,
-        ]
-        .into_iter()
-        .collect();
-
         let config = match &context.config {
             Some(c) => c,
             None => return Ok(()),
@@ -528,7 +476,7 @@ impl Processor for OfficialCheckProcessor {
 
         if let Some(uid) = user_id {
             context.user_id = Some(uid);
-            if official_ids.contains(&uid) {
+            if OFFICIAL_IDS.contains(&uid) {
                 context.messages.push("官方内容，自动通过".into());
                 context.action = Some("P".into());
                 context.processed = true;
@@ -541,13 +489,7 @@ impl Processor for OfficialCheckProcessor {
                 ]);
 
                 if let Some(resolution) = status_map.get("P") {
-                    let report_id = context
-                        .item
-                        .get(&config.report_id_field)
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("0")
-                        .parse::<i32>()
-                        .unwrap_or(0);
+                    let report_id = config.get_report_id(&context.item);
                     let _ = apply_action_by_method(
                         &config.handle_method,
                         report_id,
@@ -681,19 +623,11 @@ impl DetailDisplayProcessor {
             .unwrap_or_default();
         println!("帖子链接: {}/community/{}", base_url, post_id_value);
 
-        if let Some(post_id) = post_id_value.parse::<i64>().ok() {
-            if let Ok(details) = ForumDataFetcher::new().fetch_single_post_details(post_id as i32) {
+        if let Ok(post_id) = post_id_value.parse::<i32>() {
+            if let Ok(details) = ForumDataFetcher::new().fetch_single_post_details(post_id) {
                 if let Some(content) = details.get("content").and_then(|v| v.as_str()) {
                     let content_text = html_to_text(content);
-                    let truncated = if content_text.len() > 200 {
-                        // 按字符截取，而不是按字节
-                        let char_count: Vec<char> = content_text.chars().collect();
-                        let truncated_chars: String = char_count.iter().take(200).collect();
-                        format!("{}...", truncated_chars)
-                    } else {
-                        content_text
-                    };
-                    println!("内容: {}", truncated);
+                    println!("内容: {}", truncate_chars(&content_text, 200));
                 }
             }
         }
@@ -898,17 +832,7 @@ impl Processor for ActionSelectionProcessor {
                     if let Some(config) = &context.config {
                         let status_map = self.registry.get_status_mapping();
                         if let Some(resolution) = status_map.get(&choice) {
-                            let report_id = if let Some(config) = &context.config {
-                                context
-                                    .item
-                                    .get(&config.report_id_field)
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("0")
-                                    .parse::<i32>()
-                                    .unwrap_or(0)
-                            } else {
-                                0
-                            };
+                            let report_id = config.get_report_id(&context.item);
                             apply_action_by_method(
                                 &config.handle_method,
                                 report_id,
@@ -990,19 +914,7 @@ fn apply_action_by_method(
     admin_id: i32,
     resolution: &str,
 ) -> Result<bool, ProcessorError> {
-    let resolution_enum = match resolution {
-        "DELETE" => Resolution::Delete,
-        "MUTE_SEVEN_DAYS" => Resolution::MuteSevenDays,
-        "MUTE_THREE_MONTHS" => Resolution::MuteThreeMonths,
-        "PASS" => Resolution::Pass,
-        "UNLOAD" => Resolution::Unload,
-        _ => {
-            return Err(ProcessorError::Processing(format!(
-                "未知状态: {}",
-                resolution
-            )));
-        }
-    };
+    let resolution_enum = parse_resolution(resolution)?;
 
     match method {
         "execute_process_comment_report" => ReportHandler::new()
@@ -1059,28 +971,34 @@ impl ViolationChecker {
         let data = DataManager::global()
             .data()
             .map_err(|e| ProcessorError::External(e.into()))?;
-        let ads: Vec<Value> = data
-            .user_data
-            .ads
-            .iter()
-            .map(|s| Value::String(s.clone()))
-            .collect();
-        let blacklist: Vec<Value> = data
-            .user_data
-            .black_room
-            .iter()
-            .map(|s| Value::String(s.clone()))
-            .collect();
         let setting = SettingManager::global()
             .data()
             .map_err(|e| ProcessorError::External(e.into()))?;
         let spam_max = setting.parameter.spam_del_max;
 
-        let mut params = HashMap::new();
-        params.insert("ads".to_string(), Value::Array(ads));
-        params.insert("blacklist".to_string(), Value::Array(blacklist));
+        let mut params: HashMap<String, Value> = HashMap::new();
         params.insert(
-            "duplicates".to_string(),
+            "ads".into(),
+            Value::Array(
+                data.user_data
+                    .ads
+                    .iter()
+                    .map(|s| Value::String(s.clone()))
+                    .collect(),
+            ),
+        );
+        params.insert(
+            "blacklist".into(),
+            Value::Array(
+                data.user_data
+                    .black_room
+                    .iter()
+                    .map(|s| Value::String(s.clone()))
+                    .collect(),
+            ),
+        );
+        params.insert(
+            "duplicates".into(),
             Value::Number(serde_json::Number::from(spam_max)),
         );
 
@@ -1784,7 +1702,7 @@ fn visit_dir(
             if path.is_dir() {
                 visit_dir(&path, cb)?;
             } else {
-                cb(entry).map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+                cb(entry).map_err(|e| io::Error::other(e.to_string()))?;
             }
         }
     }
@@ -1843,16 +1761,21 @@ impl ReportProcessor {
 
             if total >= 15 {
                 let batch_groups = self.identify_batch_groups(&chunk);
-                self.handle_batch_groups(&batch_groups, &chunk, admin_id)?;
+                if let Err(e) = self.handle_batch_groups(&batch_groups, &chunk, admin_id) {
+                    eprintln!("批量组处理出错: {}，继续处理剩余记录", e);
+                }
             }
 
-            let chunk_processed = self.process_chunk_with_pipeline(&chunk, admin_id)?;
-            total_processed += chunk_processed;
+            // 错误不再中断整个循环
+            match self.process_chunk_with_pipeline(&chunk, admin_id) {
+                Ok(processed) => total_processed += processed,
+                Err(e) => eprintln!("块处理出错: {}，跳过该块", e),
+            }
 
             println!(
                 "第 {} 块处理完成, 处理了 {} 条举报",
                 chunk_count + 1,
-                chunk_processed
+                total_processed
             );
         }
 
@@ -1867,7 +1790,6 @@ impl ReportProcessor {
         for item in chunk {
             if let Some(report_type) = self.infer_report_type(item) {
                 if let Some(config) = self.fetcher.registry.get_config(&report_type) {
-                    // 改为用 value_to_string 兼容数字和字符串字段
                     let record_id = item
                         .get(&config.report_id_field)
                         .map(|v| value_to_string(v))
@@ -1901,7 +1823,6 @@ impl ReportProcessor {
             }
         }
 
-        // 后面的分组逻辑不变...
         let mut batch_groups = Vec::new();
         let mut processed_ids = HashSet::new();
 
@@ -1980,7 +1901,6 @@ impl ReportProcessor {
                                 first_item.clone(),
                                 admin_id,
                             );
-                            // ★ 必须为 false，让用户正常选择操作
                             context.is_batch_mode = false;
                             context.config = config;
 
@@ -2020,7 +1940,6 @@ impl ReportProcessor {
         Ok(())
     }
 
-    // 辅助函数：统一用 value_to_string 匹配 record_id
     fn record_id_matches(&self, item: &Value, target_id: &str) -> bool {
         if let Some(rt) = self.infer_report_type(item) {
             if let Some(cfg) = self.fetcher.registry.get_config(&rt) {
@@ -2042,17 +1961,19 @@ impl ReportProcessor {
         let mut processed = 0i64;
 
         for item in chunk {
-            let record_id = if let Some(report_type) = self.infer_report_type(item) {
-                if let Some(cfg) = self.fetcher.registry.get_config(&report_type) {
-                    item.get(&cfg.report_id_field)
+            // 提前计算 report_type 和 config，避免重复 infer
+            let report_type = self.infer_report_type(item);
+            let config = report_type
+                .as_ref()
+                .and_then(|rt| self.fetcher.registry.get_config(rt));
+
+            let record_id = config
+                .map(|c| {
+                    item.get(&c.report_id_field)
                         .map(|v| value_to_string(v))
                         .unwrap_or_else(|| "0".to_string())
-                } else {
-                    "0".to_string()
-                }
-            } else {
-                "0".to_string()
-            };
+                })
+                .unwrap_or_else(|| "0".to_string());
 
             if self
                 .batch_manager
@@ -2063,21 +1984,20 @@ impl ReportProcessor {
                 continue;
             }
 
-            if let Some(report_type) = self.infer_report_type(item) {
-                let config = self.fetcher.registry.get_config(&report_type).cloned();
-                let mut context = ProcessingContext::new(
-                    record_id.clone(),
-                    report_type.clone(),
-                    item.clone(),
-                    admin_id,
-                );
-                context.config = config;
+            if let (Some(rt), Some(cfg)) = (report_type, config) {
+                let mut context =
+                    ProcessingContext::new(record_id.clone(), rt.clone(), item.clone(), admin_id);
+                context.config = Some(cfg.clone());
 
                 let pipeline = ProcessingPipeline::create_default(
                     self.pipeline_factory.clone(),
                     self.batch_manager.clone(),
                 );
-                pipeline.execute(&mut context)?;
+                // 捕获单条错误，防止块中断
+                if let Err(e) = pipeline.execute(&mut context) {
+                    eprintln!("处理记录 {} 失败: {}，跳过", record_id, e);
+                    continue;
+                }
 
                 if context.processed {
                     processed += 1;
@@ -2102,12 +2022,7 @@ impl ReportProcessor {
         if let Some(config) = self.fetcher.registry.get_config(report_type) {
             let status_map = self.fetcher.registry.get_status_mapping();
             if let Some(resolution) = status_map.get(action) {
-                let report_id = item
-                    .get(&config.report_id_field)
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("0")
-                    .parse::<i32>()
-                    .unwrap_or(0);
+                let report_id = config.get_report_id(item);
                 apply_action_by_method(&config.handle_method, report_id, admin_id, resolution)?;
             }
         }
@@ -2122,13 +2037,7 @@ impl ReportProcessor {
             for item in chunk {
                 if let Some(report_type) = self.infer_report_type(&item) {
                     let config = self.fetcher.registry.get_config(&report_type);
-                    let report_id = config
-                        .and_then(|cfg| {
-                            item.get(&cfg.report_id_field)
-                                .and_then(|v| v.as_str())
-                                .and_then(|s| s.parse::<i32>().ok())
-                        })
-                        .unwrap_or(0);
+                    let report_id = config.map(|cfg| cfg.get_report_id(&item)).unwrap_or(0);
                     if let Some(cfg) = config {
                         match cfg.handle_method.as_str() {
                             "execute_process_comment_report" => {
@@ -2180,14 +2089,19 @@ impl ReportProcessor {
     }
 
     fn infer_report_type(&self, item: &Value) -> Option<String> {
+        // 优先使用数据中注入的 _report_type
+        if let Some(t) = item.get("_report_type").and_then(|v| v.as_str()) {
+            return Some(t.to_string());
+        }
+        // 向后兼容：如果没有标记，走原来的字段推断
         if item.get("comment_content").is_some() || item.get("comment_id").is_some() {
             Some("shop_comment".into())
         } else if item.get("work_name").is_some() {
             Some("work_work".into())
+        } else if item.get("discussion_content").is_some() || item.get("discussion_id").is_some() {
+            Some("forum_discussion".into())
         } else if item.get("post_title").is_some() && item.get("board_name").is_some() {
             Some("forum_post".into())
-        } else if item.get("discussion_content").is_some() {
-            Some("forum_discussion".into())
         } else {
             None
         }
