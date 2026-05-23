@@ -1,5 +1,5 @@
 use crate::utils::acquire::{
-    CodeMaoClient, HTTPStatus, HttpMethod, PaginatedIter, PaginationMethod,
+    BaseKey, CodeMaoClient, HTTPStatus, HttpMethod, PaginatedIter, PaginationMethod,
 };
 use serde_json::{Value, json};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -167,7 +167,7 @@ impl WhaleReportFetcher {
         paginated.with_param("TIME", timestamp.to_string())
     }
 
-    // 获取作品举报列表生成器
+    // 作品举报（分页）
     pub fn fetch_work_reports_gen(
         &self,
         source_type: WorkSourceType,
@@ -178,7 +178,8 @@ impl WhaleReportFetcher {
     ) -> PaginatedIter {
         let mut paginated = self
             .client
-            .paginated("https://whale.codemao.cn/reports/works/search")
+            .paginated("/reports/works")
+            .with_base_key(BaseKey::Whale)
             .with_param("type", source_type.as_str())
             .with_param("status", status.as_str())
             .with_param("offset", "0")
@@ -192,17 +193,15 @@ impl WhaleReportFetcher {
         if let (Some(filter), Some(id)) = (filter_type, target_id) {
             paginated = paginated.with_param(filter.as_str(), id.to_string());
         }
-
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
         } else {
             paginated = paginated.with_limit(15);
         }
-
         paginated
     }
 
-    // 获取作品举报总数
+    // 作品举报总数
     pub fn fetch_work_reports_total(
         &self,
         source_type: WorkSourceType,
@@ -212,11 +211,7 @@ impl WhaleReportFetcher {
     ) -> Result<Value, Box<dyn std::error::Error>> {
         let mut builder = self
             .client
-            .build_request(
-                HttpMethod::GET,
-                "https://whale.codemao.cn/reports/works/search",
-                None,
-            )
+            .build_request(HttpMethod::GET, "/reports/works", Some(BaseKey::Whale))
             .with_param("type", source_type.as_str())
             .with_param("status", status.as_str())
             .with_param("offset", "0")
@@ -232,7 +227,7 @@ impl WhaleReportFetcher {
         Ok(self.client.response_to_json(response)?)
     }
 
-    // 获取作品举报额外总数
+    // 作品举报总数（额外端点）
     pub fn fetch_work_reports_total_extra(
         &self,
         source_type: WorkSourceType,
@@ -242,11 +237,7 @@ impl WhaleReportFetcher {
     ) -> Result<Value, Box<dyn std::error::Error>> {
         let mut builder = self
             .client
-            .build_request(
-                HttpMethod::GET,
-                "https://whale.codemao.cn/reports/works",
-                None,
-            )
+            .build_request(HttpMethod::GET, "/reports/works", Some(BaseKey::Whale))
             .with_param("type", source_type.as_str())
             .with_param("status", status.as_str())
             .with_param("offset", "0")
@@ -262,7 +253,7 @@ impl WhaleReportFetcher {
         Ok(self.client.response_to_json(response)?)
     }
 
-    // 获取评论举报列表生成器
+    // 评论举报（分页）
     pub fn fetch_comment_reports_gen(
         &self,
         source_type: CommentSourceType,
@@ -273,7 +264,8 @@ impl WhaleReportFetcher {
     ) -> PaginatedIter {
         let mut paginated = self
             .client
-            .paginated("https://whale.codemao.cn/reports/comments/search")
+            .paginated("/reports/comments/search")
+            .with_base_key(BaseKey::Whale)
             .with_param("source", source_type.as_str())
             .with_param("status", status.as_str())
             .with_param("offset", "0")
@@ -287,17 +279,15 @@ impl WhaleReportFetcher {
         if let (Some(filter), Some(id)) = (filter_type, target_id) {
             paginated = paginated.with_param(filter.as_str(), id.to_string());
         }
-
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
         } else {
             paginated = paginated.with_limit(15);
         }
-
         paginated
     }
 
-    // 获取评论举报总数
+    // 评论举报总数
     pub fn fetch_comment_reports_total(
         &self,
         source_type: CommentSourceType,
@@ -307,11 +297,7 @@ impl WhaleReportFetcher {
     ) -> Result<Value, Box<dyn std::error::Error>> {
         let mut builder = self
             .client
-            .build_request(
-                HttpMethod::GET,
-                "https://whale.codemao.cn/reports/comments/search",
-                None,
-            )
+            .build_request(HttpMethod::GET, "/reports/comments", Some(BaseKey::Whale))
             .with_param("source", source_type.as_str())
             .with_param("status", status.as_str())
             .with_param("offset", "0")
@@ -327,7 +313,7 @@ impl WhaleReportFetcher {
         Ok(self.client.response_to_json(response)?)
     }
 
-    // 获取帖子举报列表生成器
+    // 帖子举报（分页）
     pub fn fetch_post_reports_gen(
         &self,
         status: ReportStatus,
@@ -338,7 +324,8 @@ impl WhaleReportFetcher {
     ) -> PaginatedIter {
         let mut paginated = self
             .client
-            .paginated("https://whale.codemao.cn/reports/posts")
+            .paginated("/reports/posts")
+            .with_base_key(BaseKey::Whale)
             .with_param("status", status.as_str())
             .with_param("offset", "0")
             .with_param("limit", "15")
@@ -351,21 +338,18 @@ impl WhaleReportFetcher {
         if let Some(board) = board_id {
             paginated = paginated.with_param("board_id", board.to_string());
         }
-
         if let (Some(filter), Some(id)) = (filter_type, target_id) {
             paginated = paginated.with_param(filter.as_str(), id.to_string());
         }
-
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
         } else {
             paginated = paginated.with_limit(15);
         }
-
         paginated
     }
 
-    // 获取帖子举报总数
+    // 帖子举报总数
     pub fn fetch_post_reports_total(
         &self,
         status: ReportStatus,
@@ -375,11 +359,7 @@ impl WhaleReportFetcher {
     ) -> Result<Value, Box<dyn std::error::Error>> {
         let mut builder = self
             .client
-            .build_request(
-                HttpMethod::GET,
-                "https://whale.codemao.cn/reports/posts",
-                None,
-            )
+            .build_request(HttpMethod::GET, "/reports/posts", Some(BaseKey::Whale))
             .with_param("status", status.as_str())
             .with_param("offset", "0")
             .with_param("limit", "15");
@@ -389,7 +369,6 @@ impl WhaleReportFetcher {
         if let Some(board) = board_id {
             builder = builder.with_param("board_id", board.to_string());
         }
-
         if let (Some(filter), Some(id)) = (filter_type, target_id) {
             builder = builder.with_param(filter.as_str(), id.to_string());
         }
@@ -398,7 +377,7 @@ impl WhaleReportFetcher {
         Ok(self.client.response_to_json(response)?)
     }
 
-    // 获取讨论区举报列表生成器
+    // 讨论区举报（分页）
     pub fn fetch_discussion_reports_gen(
         &self,
         status: ReportStatus,
@@ -409,7 +388,8 @@ impl WhaleReportFetcher {
     ) -> PaginatedIter {
         let mut paginated = self
             .client
-            .paginated("https://whale.codemao.cn/reports/posts/discussions")
+            .paginated("/reports/posts/discussions")
+            .with_base_key(BaseKey::Whale)
             .with_param("status", status.as_str())
             .with_param("offset", "0")
             .with_param("limit", "15")
@@ -422,21 +402,18 @@ impl WhaleReportFetcher {
         if let Some(board) = board_id {
             paginated = paginated.with_param("board_id", board.to_string());
         }
-
         if let (Some(filter), Some(id)) = (filter_type, target_id) {
             paginated = paginated.with_param(filter.as_str(), id.to_string());
         }
-
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
         } else {
             paginated = paginated.with_limit(15);
         }
-
         paginated
     }
 
-    // 获取讨论区举报总数
+    // 讨论区举报总数
     pub fn fetch_discussion_reports_total(
         &self,
         status: ReportStatus,
@@ -448,8 +425,8 @@ impl WhaleReportFetcher {
             .client
             .build_request(
                 HttpMethod::GET,
-                "https://whale.codemao.cn/reports/posts/discussions",
-                None,
+                "/reports/posts/discussions",
+                Some(BaseKey::Whale),
             )
             .with_param("status", status.as_str())
             .with_param("offset", "0")
@@ -460,7 +437,6 @@ impl WhaleReportFetcher {
         if let Some(board) = board_id {
             builder = builder.with_param("board_id", board.to_string());
         }
-
         if let (Some(filter), Some(id)) = (filter_type, target_id) {
             builder = builder.with_param(filter.as_str(), id.to_string());
         }
@@ -488,15 +464,13 @@ impl ReportHandler {
         }
     }
 
-    // 处理帖子举报
     pub fn execute_process_post_report(
         &self,
         report_id: i32,
         admin_id: i32,
         resolution: Resolution,
     ) -> Result<bool, Box<dyn std::error::Error>> {
-        let endpoint = format!("https://whale.codemao.cn/reports/posts/{}", report_id);
-
+        let endpoint = format!("/reports/posts/{}", report_id);
         let payload = json!({
             "admin_id": admin_id,
             "status": resolution.as_str(),
@@ -504,25 +478,20 @@ impl ReportHandler {
 
         let response = self
             .client
-            .build_request(HttpMethod::PATCH, &endpoint, None)
+            .build_request(HttpMethod::PATCH, &endpoint, Some(BaseKey::Whale))
             .with_payload(payload)
             .send()?;
 
         Ok(response.status() == HTTPStatus::NoContent as u16)
     }
 
-    // 处理讨论区举报
     pub fn execute_process_discussion_report(
         &self,
         report_id: i32,
         admin_id: i32,
         resolution: Resolution,
     ) -> Result<bool, Box<dyn std::error::Error>> {
-        let endpoint = format!(
-            "https://whale.codemao.cn/reports/posts/discussions/{}",
-            report_id
-        );
-
+        let endpoint = format!("/reports/posts/discussions/{}", report_id);
         let payload = json!({
             "admin_id": admin_id,
             "status": resolution.as_str(),
@@ -530,22 +499,20 @@ impl ReportHandler {
 
         let response = self
             .client
-            .build_request(HttpMethod::PATCH, &endpoint, None)
+            .build_request(HttpMethod::PATCH, &endpoint, Some(BaseKey::Whale))
             .with_payload(payload)
             .send()?;
 
         Ok(response.status() == HTTPStatus::NoContent as u16)
     }
 
-    // 处理评论举报
     pub fn execute_process_comment_report(
         &self,
         report_id: i32,
         admin_id: i32,
         resolution: Resolution,
     ) -> Result<bool, Box<dyn std::error::Error>> {
-        let endpoint = format!("https://whale.codemao.cn/reports/comments/{}", report_id);
-
+        let endpoint = format!("/reports/comments/{}", report_id);
         let payload = json!({
             "admin_id": admin_id,
             "status": resolution.as_str(),
@@ -553,21 +520,19 @@ impl ReportHandler {
 
         let response = self
             .client
-            .build_request(HttpMethod::PATCH, &endpoint, None)
+            .build_request(HttpMethod::PATCH, &endpoint, Some(BaseKey::Whale))
             .with_payload(payload)
             .send()?;
 
         Ok(response.status() == HTTPStatus::NoContent as u16)
     }
 
-    // 处理作品举报
     pub fn execute_process_work_report(
         &self,
         report_id: i32,
         admin_id: i32,
         resolution: Resolution,
     ) -> Result<bool, Box<dyn std::error::Error>> {
-        // 作品举报只有特定的决议类型
         let resolution_str = match resolution {
             Resolution::Pass | Resolution::Delete | Resolution::Unload | Resolution::Tobedone => {
                 resolution.as_str()
@@ -575,8 +540,7 @@ impl ReportHandler {
             _ => return Err("作品举报不支持此决议类型".into()),
         };
 
-        let endpoint = format!("https://whale.codemao.cn/reports/works/{}", report_id);
-
+        let endpoint = format!("/reports/works/{}", report_id);
         let payload = json!({
             "admin_id": admin_id,
             "status": resolution_str,
@@ -584,7 +548,7 @@ impl ReportHandler {
 
         let response = self
             .client
-            .build_request(HttpMethod::PATCH, &endpoint, None)
+            .build_request(HttpMethod::PATCH, &endpoint, Some(BaseKey::Whale))
             .with_payload(payload)
             .send()?;
 

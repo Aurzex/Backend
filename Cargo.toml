@@ -23,7 +23,7 @@ sha2 = "0.10.9"
 thiserror = "2"
 ureq = {
 	version = "3",
-    features = ["json", "cookies", "multipart"]
+    features = ["json", "cookies", "multipart","gzip"]
 }
 url = "2"
 tungstenite = {

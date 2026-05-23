@@ -541,7 +541,13 @@ impl Processor for OfficialCheckProcessor {
                 ]);
 
                 if let Some(resolution) = status_map.get("P") {
-                    let report_id = context.item["id"].as_i64().unwrap_or(0) as i32;
+                    let report_id = context
+                        .item
+                        .get(&config.report_id_field)
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("0")
+                        .parse::<i32>()
+                        .unwrap_or(0);
                     let _ = apply_action_by_method(
                         &config.handle_method,
                         report_id,
@@ -680,7 +686,10 @@ impl DetailDisplayProcessor {
                 if let Some(content) = details.get("content").and_then(|v| v.as_str()) {
                     let content_text = html_to_text(content);
                     let truncated = if content_text.len() > 200 {
-                        format!("{}...", &content_text[..200])
+                        // 按字符截取，而不是按字节
+                        let char_count: Vec<char> = content_text.chars().collect();
+                        let truncated_chars: String = char_count.iter().take(200).collect();
+                        format!("{}...", truncated_chars)
                     } else {
                         content_text
                     };
@@ -889,7 +898,17 @@ impl Processor for ActionSelectionProcessor {
                     if let Some(config) = &context.config {
                         let status_map = self.registry.get_status_mapping();
                         if let Some(resolution) = status_map.get(&choice) {
-                            let report_id = context.item["id"].as_i64().unwrap_or(0) as i32;
+                            let report_id = if let Some(config) = &context.config {
+                                context
+                                    .item
+                                    .get(&config.report_id_field)
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("0")
+                                    .parse::<i32>()
+                                    .unwrap_or(0)
+                            } else {
+                                0
+                            };
                             apply_action_by_method(
                                 &config.handle_method,
                                 report_id,
@@ -1848,7 +1867,12 @@ impl ReportProcessor {
         for item in chunk {
             if let Some(report_type) = self.infer_report_type(item) {
                 if let Some(config) = self.fetcher.registry.get_config(&report_type) {
-                    let record_id = item["id"].as_i64().unwrap_or(0).to_string();
+                    // 改为用 value_to_string 兼容数字和字符串字段
+                    let record_id = item
+                        .get(&config.report_id_field)
+                        .map(|v| value_to_string(v))
+                        .unwrap_or_else(|| "0".to_string());
+
                     let item_id = item
                         .get(&config.item_id_field)
                         .map(|v| value_to_string(v))
@@ -1877,6 +1901,7 @@ impl ReportProcessor {
             }
         }
 
+        // 后面的分组逻辑不变...
         let mut batch_groups = Vec::new();
         let mut processed_ids = HashSet::new();
 
@@ -1923,9 +1948,7 @@ impl ReportProcessor {
             if let Some(action) = saved_action {
                 println!("应用保存的批量动作: {}", action);
                 for record_id in &group.record_ids {
-                    if let Some(item) = chunk
-                        .iter()
-                        .find(|v| v["id"].as_i64().unwrap_or(0).to_string() == *record_id)
+                    if let Some(item) = chunk.iter().find(|v| self.record_id_matches(v, record_id))
                     {
                         if let Some(report_type) = self.infer_report_type(item) {
                             if self
@@ -1947,7 +1970,7 @@ impl ReportProcessor {
                 if let Some(first_record_id) = group.record_ids.first() {
                     if let Some(first_item) = chunk
                         .iter()
-                        .find(|v| v["id"].as_i64().unwrap_or(0).to_string() == *first_record_id)
+                        .find(|v| self.record_id_matches(v, first_record_id))
                     {
                         if let Some(report_type) = self.infer_report_type(first_item) {
                             let config = self.fetcher.registry.get_config(&report_type).cloned();
@@ -1957,7 +1980,8 @@ impl ReportProcessor {
                                 first_item.clone(),
                                 admin_id,
                             );
-                            context.is_batch_mode = true;
+                            // ★ 必须为 false，让用户正常选择操作
+                            context.is_batch_mode = false;
                             context.config = config;
 
                             let pipeline = ProcessingPipeline::create_default(
@@ -1974,9 +1998,9 @@ impl ReportProcessor {
                                 );
 
                                 for record_id in &group.record_ids[1..] {
-                                    if let Some(item) = chunk.iter().find(|v| {
-                                        v["id"].as_i64().unwrap_or(0).to_string() == *record_id
-                                    }) {
+                                    if let Some(item) =
+                                        chunk.iter().find(|v| self.record_id_matches(v, record_id))
+                                    {
                                         if let Some(rt) = self.infer_report_type(item) {
                                             self.apply_simple_action(item, &rt, &action, admin_id)?;
                                             self.batch_manager
@@ -1996,6 +2020,20 @@ impl ReportProcessor {
         Ok(())
     }
 
+    // 辅助函数：统一用 value_to_string 匹配 record_id
+    fn record_id_matches(&self, item: &Value, target_id: &str) -> bool {
+        if let Some(rt) = self.infer_report_type(item) {
+            if let Some(cfg) = self.fetcher.registry.get_config(&rt) {
+                return item
+                    .get(&cfg.report_id_field)
+                    .map(|v| value_to_string(&v))
+                    .map(|s| s == target_id)
+                    .unwrap_or(false);
+            }
+        }
+        false
+    }
+
     fn process_chunk_with_pipeline(
         &self,
         chunk: &[Value],
@@ -2004,7 +2042,17 @@ impl ReportProcessor {
         let mut processed = 0i64;
 
         for item in chunk {
-            let record_id = item["id"].as_i64().unwrap_or(0).to_string();
+            let record_id = if let Some(report_type) = self.infer_report_type(item) {
+                if let Some(cfg) = self.fetcher.registry.get_config(&report_type) {
+                    item.get(&cfg.report_id_field)
+                        .map(|v| value_to_string(v))
+                        .unwrap_or_else(|| "0".to_string())
+                } else {
+                    "0".to_string()
+                }
+            } else {
+                "0".to_string()
+            };
 
             if self
                 .batch_manager
@@ -2054,7 +2102,12 @@ impl ReportProcessor {
         if let Some(config) = self.fetcher.registry.get_config(report_type) {
             let status_map = self.fetcher.registry.get_status_mapping();
             if let Some(resolution) = status_map.get(action) {
-                let report_id = item["id"].as_i64().unwrap_or(0) as i32;
+                let report_id = item
+                    .get(&config.report_id_field)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("0")
+                    .parse::<i32>()
+                    .unwrap_or(0);
                 apply_action_by_method(&config.handle_method, report_id, admin_id, resolution)?;
             }
         }
@@ -2068,8 +2121,14 @@ impl ReportProcessor {
         for chunk in self.fetcher.fetch_reports_chunked(ReportStatus::ToBeDone) {
             for item in chunk {
                 if let Some(report_type) = self.infer_report_type(&item) {
-                    let report_id = item["id"].as_i64().unwrap_or(0) as i32;
                     let config = self.fetcher.registry.get_config(&report_type);
+                    let report_id = config
+                        .and_then(|cfg| {
+                            item.get(&cfg.report_id_field)
+                                .and_then(|v| v.as_str())
+                                .and_then(|s| s.parse::<i32>().ok())
+                        })
+                        .unwrap_or(0);
                     if let Some(cfg) = config {
                         match cfg.handle_method.as_str() {
                             "execute_process_comment_report" => {
