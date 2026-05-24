@@ -266,10 +266,11 @@ impl CommentQueryBuilder {
                         .and_then(|items| items.as_array())
                     {
                         for reply_val in replies {
-                            if let Some(reply_obj) = reply_val.as_object() {
-                                if let Some(uid) = extract_reply_user_id(reply_obj) {
-                                    user_ids.push(uid.to_string());
-                                }
+                            let Some(reply_obj) = reply_val.as_object() else {
+                                continue;
+                            };
+                            if let Some(uid) = extract_reply_user_id(reply_obj) {
+                                user_ids.push(uid.to_string());
                             }
                         }
                     }
@@ -298,10 +299,15 @@ impl CommentQueryBuilder {
                             .fetch_reply_comments_gen(comment_id as i32, None);
                         while let Some(reply_result) = reply_iter.next_item().await {
                             let reply_val = reply_result?;
-                            if let Some(reply_obj) = reply_val.as_object() {
-                                if let Some(rid) = reply_obj.get("id").and_then(|id| id.as_i64()) {
-                                    comment_ids.push(format!("{}.{}", comment_id, rid));
+                            match reply_val.as_object() {
+                                Some(reply_obj) => {
+                                    if let Some(rid) =
+                                        reply_obj.get("id").and_then(|id| id.as_i64())
+                                    {
+                                        comment_ids.push(format!("{}.{}", comment_id, rid));
+                                    }
                                 }
+                                _ => (),
                             }
                         }
                     } else if let Some(replies) = comment
@@ -311,10 +317,15 @@ impl CommentQueryBuilder {
                         .and_then(|items| items.as_array())
                     {
                         for reply_val in replies {
-                            if let Some(reply_obj) = reply_val.as_object() {
-                                if let Some(rid) = reply_obj.get("id").and_then(|id| id.as_i64()) {
-                                    comment_ids.push(format!("{}.{}", comment_id, rid));
+                            match reply_val.as_object() {
+                                Some(reply_obj) => {
+                                    if let Some(rid) =
+                                        reply_obj.get("id").and_then(|id| id.as_i64())
+                                    {
+                                        comment_ids.push(format!("{}.{}", comment_id, rid));
+                                    }
                                 }
+                                _ => (),
                             }
                         }
                     }
@@ -606,8 +617,7 @@ impl DataQuery {
                         CommentQueryMode::Comments,
                         Some(20),
                     )
-                    .await
-                {
+                    .await {
                     all_comments.extend(comments);
                 }
             }
@@ -733,7 +743,7 @@ impl DataQuery {
             };
         }
 
-        stats.sort_by(|a, b| b.total_reports.cmp(&a.total_reports));
+        stats.sort_by_key(|b| std::cmp::Reverse(b.total_reports));
 
         Ok(AdminReportStatistics {
             total_admins: stats.len() as i32,
@@ -1059,7 +1069,7 @@ impl CommunityReplyStream {
             return None;
         }
 
-        let batch_size = self.remaining.min(200).max(5);
+        let batch_size = self.remaining.clamp(5, 200);
         match CommunityDataFetcher::new()
             .fetch_replies(self.reply_type, batch_size, self.offset)
             .await

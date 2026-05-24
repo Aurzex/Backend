@@ -713,13 +713,16 @@ impl LoginHandler {
                         .unwrap_or("未知错误");
                     println!("登录失败: {}", error_msg);
 
-                    if let Some(error_code) = response.get("error_code").and_then(|e| e.as_str()) {
-                        if error_code == "Admin-Password-Error@Community-Admin"
-                            || error_code == "Param-Invalid@Common"
-                        {
-                            username = Self::read_input("请输入用户名:")?;
-                            password = Self::read_input("请输入密码:")?;
+                    match response.get("error_code").and_then(|e| e.as_str()) {
+                        Some(error_code) => {
+                            if error_code == "Admin-Password-Error@Community-Admin"
+                                || error_code == "Param-Invalid@Common"
+                            {
+                                username = Self::read_input("请输入用户名:")?;
+                                password = Self::read_input("请输入密码:")?;
+                            }
                         }
+                        _ => (),
                     }
                 }
                 Err(e) => println!("认证请求失败: {}", e),

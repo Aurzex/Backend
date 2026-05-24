@@ -44,4 +44,4 @@ reqwest = { version = "0.13", default-features = false, features = [
     "gzip",
     "http2"
 ] }
-tokio = "1.52.3"
+tokio = { version = "1", features = ["rt", "macros","rt-multi-thread"] }
