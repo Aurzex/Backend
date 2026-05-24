@@ -1,14 +1,16 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
+use std::future::Future;
 use std::io::{self, Write};
 use std::num::ParseIntError;
-
+use std::pin::Pin;
 use std::time::{Duration, UNIX_EPOCH};
 
 use crate::api::whale::{CommentSourceType, ReportStatus, WhaleReportFetcher, WorkSourceType};
 use crate::utils::acquire::{self};
 
 use serde_json::Value;
+
 // ==================== 自定义错误类型 ====================
 #[derive(Debug)]
 pub enum ProcessorError {
@@ -48,8 +50,8 @@ impl From<ParseIntError> for ProcessorError {
         ProcessorError::ParseInt(e)
     }
 }
-impl From<acquire::Error> for ProcessorError {
-    fn from(e: acquire::Error) -> Self {
+impl From<acquire::MewError> for ProcessorError {
+    fn from(e: acquire::MewError) -> Self {
         ProcessorError::External(Box::new(e))
     }
 }
@@ -62,6 +64,7 @@ impl From<Box<dyn std::error::Error>> for ProcessorError {
 pub trait CommentConfig {
     fn get_comments(&self, item_id: i64) -> Option<Vec<Value>>;
 }
+
 // ==================== 交互工具 ====================
 pub fn prompt_input(prompt: &str) -> String {
     print!("{}", prompt);
@@ -101,14 +104,11 @@ pub fn value_to_i64(v: &serde_json::Value) -> Option<i64> {
 pub fn timestamp_to_string(ts: &serde_json::Value) -> String {
     if let Some(secs) = ts.as_i64() {
         if secs > 0 {
-            // Convert UNIX timestamp to local time string without using chrono or external crates
             let secs_u64 = secs as u64;
             let t = UNIX_EPOCH + Duration::from_secs(secs_u64);
             match t.elapsed() {
                 Ok(_) => {
-                    // Get seconds since UNIX_EPOCH and format as YYYY-MM-DD HH:MM:SS
-                    let time = t;
-                    let timestamp = time.duration_since(UNIX_EPOCH).unwrap().as_secs();
+                    let timestamp = t.duration_since(UNIX_EPOCH).unwrap().as_secs();
                     return format!("{}", timestamp);
                 }
                 Err(_) => {}
@@ -151,9 +151,11 @@ pub struct ActionConfig {
 #[derive(Clone, Debug)]
 pub struct SourceConfig {
     pub name: String,
-    pub fetch_total: fn(ReportStatus) -> Result<serde_json::Value, ProcessorError>,
-    pub fetch_generator:
-        fn(ReportStatus) -> Box<dyn Iterator<Item = Result<serde_json::Value, ProcessorError>>>,
+    // 异步获取总数
+    pub fetch_total:
+        fn(ReportStatus) -> Pin<Box<dyn Future<Output = Result<Value, ProcessorError>> + Send>>,
+    // 同步收集所有报告（内部使用 tokio 阻塞等待）
+    pub fetch_generator: fn(ReportStatus) -> Result<Vec<Value>, ProcessorError>,
     pub handle_method: String,
     pub item_id_field: String,
     pub report_id_field: String,
@@ -182,7 +184,7 @@ pub struct SourceConfig {
     pub board_id_field: Option<String>,
     pub created_at_field: String,
     pub chunk_size: usize,
-    pub special_check: Option<fn(&serde_json::Value) -> bool>,
+    pub special_check: Option<fn(&Value) -> bool>,
     pub available_actions: Vec<ActionConfig>,
 }
 
@@ -330,27 +332,44 @@ pub struct ReportFetcher {
 }
 
 impl ReportFetcher {
-    pub fn new() -> Self {
+    pub async fn new() -> Self {
         let mut registry = ReportTypeRegistry::new();
 
+        // 注册工作室评论举报
         registry.register(
             "shop_comment",
             SourceConfig {
                 name: "工作室评论举报".into(),
                 fetch_total: |status| {
-                    WhaleReportFetcher::new()
-                        .fetch_comment_reports_total(CommentSourceType::All, status, None, None)
-                        .map_err(|e| ProcessorError::External(e.into()))
+                    Box::pin(async move {
+                        WhaleReportFetcher::new()
+                            .fetch_comment_reports_total(CommentSourceType::All, status, None, None)
+                            .await
+                            .map_err(|e| ProcessorError::External(e.into()))
+                    })
                 },
                 fetch_generator: |status| {
-                    let iter = WhaleReportFetcher::new().fetch_comment_reports_gen(
+                    // 使用 Handle::block_on 在当前 Tokio 运行时中阻塞执行异步操作
+                    let handle = tokio::runtime::Handle::current();
+                    let mut iter = WhaleReportFetcher::new().fetch_comment_reports_gen(
                         CommentSourceType::All,
                         status,
                         None,
                         None,
                         Some(100),
                     );
-                    Box::new(iter.map(|r| r.map_err(|e| ProcessorError::External(e.into()))))
+                    let mut all = Vec::new();
+                    let result: Result<(), ProcessorError> = handle.block_on(async {
+                        while let Some(item) = iter.next_item().await {
+                            match item {
+                                Ok(v) => all.push(v),
+                                Err(e) => return Err(ProcessorError::External(e.into())),
+                            }
+                        }
+                        Ok(())
+                    });
+                    // 显式标注闭包返回类型
+                    result.map(|_| -> Vec<Value> { all })
                 },
                 handle_method: "execute_process_comment_report".into(),
                 item_id_field: "id".into(),
@@ -380,7 +399,7 @@ impl ReportFetcher {
                 board_id_field: None,
                 created_at_field: "created_at".into(),
                 chunk_size: 100,
-                special_check: Some(|item: &serde_json::Value| -> bool {
+                special_check: Some(|item: &Value| -> bool {
                     item.get("comment_source")
                         .and_then(|v| v.as_str())
                         .map(|s| s == "WORK_SHOP")
@@ -433,24 +452,39 @@ impl ReportFetcher {
             },
         );
 
+        // 注册作品举报
         registry.register(
             "work_work",
             SourceConfig {
                 name: "作品举报".into(),
                 fetch_total: |status| {
-                    WhaleReportFetcher::new()
-                        .fetch_work_reports_total(WorkSourceType::All, status, None, None)
-                        .map_err(|e| ProcessorError::External(e.into()))
+                    Box::pin(async move {
+                        WhaleReportFetcher::new()
+                            .fetch_work_reports_total(WorkSourceType::All, status, None, None)
+                            .await
+                            .map_err(|e| ProcessorError::External(e.into()))
+                    })
                 },
                 fetch_generator: |status| {
-                    let iter = WhaleReportFetcher::new().fetch_work_reports_gen(
+                    let handle = tokio::runtime::Handle::current();
+                    let mut iter = WhaleReportFetcher::new().fetch_work_reports_gen(
                         WorkSourceType::All,
                         status,
                         None,
                         None,
                         Some(100),
                     );
-                    Box::new(iter.map(|r| r.map_err(|e| ProcessorError::External(e.into()))))
+                    let mut all = Vec::new();
+                    let result: Result<(), ProcessorError> = handle.block_on(async {
+                        while let Some(item) = iter.next_item().await {
+                            match item {
+                                Ok(v) => all.push(v),
+                                Err(e) => return Err(ProcessorError::External(e.into())),
+                            }
+                        }
+                        Ok(())
+                    });
+                    result.map(|_| -> Vec<Value> { all })
                 },
                 handle_method: "execute_process_work_report".into(),
                 item_id_field: "id".into(),
@@ -514,24 +548,39 @@ impl ReportFetcher {
             },
         );
 
+        // 注册帖子举报
         registry.register(
             "forum_post",
             SourceConfig {
                 name: "帖子举报".into(),
                 fetch_total: |status| {
-                    WhaleReportFetcher::new()
-                        .fetch_post_reports_total(status, None, None, None)
-                        .map_err(|e| ProcessorError::External(e.into()))
+                    Box::pin(async move {
+                        WhaleReportFetcher::new()
+                            .fetch_post_reports_total(status, None, None, None)
+                            .await
+                            .map_err(|e| ProcessorError::External(e.into()))
+                    })
                 },
                 fetch_generator: |status| {
-                    let iter = WhaleReportFetcher::new().fetch_post_reports_gen(
+                    let handle = tokio::runtime::Handle::current();
+                    let mut iter = WhaleReportFetcher::new().fetch_post_reports_gen(
                         status,
                         None,
                         None,
                         None,
                         Some(100),
                     );
-                    Box::new(iter.map(|r| r.map_err(|e| ProcessorError::External(e.into()))))
+                    let mut all = Vec::new();
+                    let result: Result<(), ProcessorError> = handle.block_on(async {
+                        while let Some(item) = iter.next_item().await {
+                            match item {
+                                Ok(v) => all.push(v),
+                                Err(e) => return Err(ProcessorError::External(e.into())),
+                            }
+                        }
+                        Ok(())
+                    });
+                    result.map(|_| -> Vec<Value> { all })
                 },
                 handle_method: "execute_process_post_report".into(),
                 item_id_field: "id".into(),
@@ -609,24 +658,39 @@ impl ReportFetcher {
             },
         );
 
+        // 注册讨论举报
         registry.register(
             "forum_discussion",
             SourceConfig {
                 name: "讨论举报".into(),
                 fetch_total: |status| {
-                    WhaleReportFetcher::new()
-                        .fetch_discussion_reports_total(status, None, None, None)
-                        .map_err(|e| ProcessorError::External(e.into()))
+                    Box::pin(async move {
+                        WhaleReportFetcher::new()
+                            .fetch_discussion_reports_total(status, None, None, None)
+                            .await
+                            .map_err(|e| ProcessorError::External(e.into()))
+                    })
                 },
                 fetch_generator: |status| {
-                    let iter = WhaleReportFetcher::new().fetch_discussion_reports_gen(
+                    let handle = tokio::runtime::Handle::current();
+                    let mut iter = WhaleReportFetcher::new().fetch_discussion_reports_gen(
                         status,
                         None,
                         None,
                         None,
                         Some(100),
                     );
-                    Box::new(iter.map(|r| r.map_err(|e| ProcessorError::External(e.into()))))
+                    let mut all = Vec::new();
+                    let result: Result<(), ProcessorError> = handle.block_on(async {
+                        while let Some(item) = iter.next_item().await {
+                            match item {
+                                Ok(v) => all.push(v),
+                                Err(e) => return Err(ProcessorError::External(e.into())),
+                            }
+                        }
+                        Ok(())
+                    });
+                    result.map(|_| -> Vec<Value> { all })
                 },
                 handle_method: "execute_process_discussion_report".into(),
                 item_id_field: "id".into(),
@@ -707,19 +771,27 @@ impl ReportFetcher {
         ReportFetcher { registry }
     }
 
-    pub fn fetch_chunked(
-        &self,
-        status: ReportStatus,
-    ) -> impl Iterator<Item = Vec<serde_json::Value>> {
+    pub fn fetch_chunked(&self, status: ReportStatus) -> impl Iterator<Item = Vec<Value>> {
         let report_types = self.registry.get_all_types();
         let total_types = report_types.len();
         let mut type_index = 0;
-        let mut carry_over = Vec::<serde_json::Value>::new();
+        let mut carry_over: Vec<Value> = Vec::new();
 
         std::iter::from_fn(move || {
-            let mut chunk = Vec::new();
-            std::mem::swap(&mut chunk, &mut carry_over);
+            // 如果上一轮有剩余数据，优先返回
+            if !carry_over.is_empty() {
+                let mut chunk = Vec::new();
+                std::mem::swap(&mut chunk, &mut carry_over);
+                if chunk.len() <= 100 {
+                    return Some(chunk);
+                } else {
+                    let remaining = chunk.split_off(100);
+                    carry_over = remaining;
+                    return Some(chunk);
+                }
+            }
 
+            // 没有剩余数据，继续从下一类型拉取
             while type_index < total_types {
                 let report_type = &report_types[type_index];
                 let config = match self.registry.get_config(report_type) {
@@ -730,72 +802,64 @@ impl ReportFetcher {
                     }
                 };
 
-                let generator = (config.fetch_generator)(status.clone());
-                let mut type_items = Vec::new();
+                // 同步获取该类型所有报告
+                let mut all_items = match (config.fetch_generator)(status.clone()) {
+                    Ok(items) => items,
+                    Err(e) => {
+                        eprintln!("Error fetching report data: {}", e);
+                        type_index += 1;
+                        continue;
+                    }
+                };
 
-                for result in generator {
-                    match result {
-                        Ok(mut item) => {
-                            if status == ReportStatus::ToBeDone {
-                                if let Some(state) =
-                                    item.get(&config.status_field).and_then(|v| v.as_str())
-                                {
-                                    if state != "TOBEDONE" {
-                                        continue;
-                                    }
-                                }
-                            }
-                            // ★ 注入类型标记
-                            if let Value::Object(ref mut map) = item {
-                                map.insert(
-                                    "_report_type".into(),
-                                    Value::String(report_type.clone()),
-                                );
-                            }
-                            type_items.push(item);
-                            if type_items.len() >= config.chunk_size {
-                                carry_over = type_items.clone();
-                                break;
-                            }
-                        }
-                        Err(error) => {
-                            eprintln!("Error fetching report data: {}", error);
-                            break;
-                        }
+                // 按状态过滤（仅对 ToBeDone）
+                if status == ReportStatus::ToBeDone {
+                    all_items.retain(|item| {
+                        item.get(&config.status_field)
+                            .and_then(|v| v.as_str())
+                            .map(|s| s == "TOBEDONE")
+                            .unwrap_or(false)
+                    });
+                }
+
+                // 注入类型标记（使用 as_object_mut 避免借用冲突）
+                for item in &mut all_items {
+                    if let Some(map) = item.as_object_mut() {
+                        map.insert("_report_type".into(), Value::String(report_type.clone()));
                     }
                 }
 
-                chunk.extend(type_items);
-
-                if chunk.len() < 100 {
+                if all_items.is_empty() {
                     type_index += 1;
+                    continue;
+                }
+
+                // 分块处理
+                if all_items.len() <= 100 {
+                    type_index += 1;
+                    return Some(all_items);
                 } else {
-                    break;
+                    let mut chunk = all_items;
+                    let remaining = chunk.split_off(100);
+                    carry_over = remaining;
+                    return Some(chunk);
                 }
             }
 
-            if chunk.is_empty() && type_index >= total_types {
-                None
-            } else if !chunk.is_empty() {
-                Some(chunk)
-            } else {
-                None
-            }
+            // 所有类型都遍历完了
+            None
         })
     }
 
-    pub fn fetch_reports_chunked(
-        &self,
-        status: ReportStatus,
-    ) -> impl Iterator<Item = Vec<serde_json::Value>> {
+    pub fn fetch_reports_chunked(&self, status: ReportStatus) -> impl Iterator<Item = Vec<Value>> {
         self.fetch_chunked(status)
     }
 
-    pub fn get_total_reports(&self, status: ReportStatus) -> i64 {
+    pub async fn get_total_reports(&self, status: ReportStatus) -> i64 {
         let mut total = 0i64;
         for rtype in self.registry.get_all_types() {
             if let Some(config) = self.registry.get_config(&rtype) {
-                if let Ok(result) = (config.fetch_total)(status) {
+                if let Ok(result) = (config.fetch_total)(status).await {
                     if let Some(t) = result.get("total").and_then(|v| v.as_i64()) {
                         total += t;
                     }

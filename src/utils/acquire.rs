@@ -9,6 +9,8 @@ use std::sync::{
 };
 use std::time::Duration;
 use thiserror::Error as ThisError;
+use tokio::sync::{Semaphore, mpsc};
+use tokio::task::JoinSet;
 
 // ==================== 错误定义（使用 thiserror） ====================
 #[derive(ThisError, Debug)]
@@ -757,7 +759,39 @@ impl CodeMaoClient {
     ) -> KittyRequestBuilder {
         KittyRequestBuilder::new(self.clone(), method, endpoint, base_key)
     }
+    pub async fn concurrent_requests<I>(
+        &self,
+        builders: I,
+        max_concurrency: usize,
+    ) -> Vec<MewResult<Response>>
+    where
+        I: IntoIterator<Item = KittyRequestBuilder>,
+    {
+        let sem = Arc::new(Semaphore::new(max_concurrency));
+        let mut set = JoinSet::new();
 
+        for builder in builders {
+            let permit = sem
+                .clone()
+                .acquire_owned()
+                .await
+                .expect("semaphore closed unexpectedly");
+            set.spawn(async move {
+                let result = builder.send().await;
+                drop(permit);
+                result
+            });
+        }
+
+        let mut results = Vec::new();
+        while let Some(res) = set.join_next().await {
+            match res {
+                Ok(r) => results.push(r),
+                Err(e) => results.push(Err(MewError::Other(format!("join task panicked: {}", e)))),
+            }
+        }
+        results
+    }
     /// 创建分页迭代器
     pub fn paginated(&self, endpoint: impl Into<String>) -> PaginatedIter {
         PaginatedIter::new(self.clone(), endpoint)
@@ -1055,6 +1089,149 @@ impl PaginatedIter {
             items.push(item?);
         }
         Ok(items)
+    }
+    /// 并发拉取所有分页数据，通过 `mpsc::Receiver` 流式逐条产出。
+    ///
+    /// * `prefetch_pages` – 预取页数（同时发起的页面请求数），控制并发度。
+    ///
+    /// 返回的 `Receiver` 每项为 `MewResult<Value>`。
+    /// 消费方用 `while let Some(item) = receiver.recv().await` 逐条处理，
+    /// 可实现背压（接收方慢时，后台任务会自动等待）。
+    pub async fn concurrent_receiver(
+        mut self,
+        prefetch_pages: usize,
+    ) -> tokio::sync::mpsc::Receiver<MewResult<Value>> {
+        // 1. 确保初始化，获取 total_items / items_per_page
+        if let Err(e) = self.initialize().await {
+            // 初始化失败：创建只包含错误的通道
+            let (tx, rx) = mpsc::channel(1);
+            let _ = tx.send(Err(e)).await;
+            return rx;
+        }
+
+        // 2. 提取所有需要的字段（move 到任务中）
+        let total_items = self.total_items;
+        let items_per_page = self.items_per_page;
+        let client = self.client.clone();
+        let endpoint = self.endpoint.clone();
+        let base_params = Arc::clone(&self.base_params);
+        let config = self.config.clone();
+        let pagination_method = self.pagination_method;
+        let base_key = self.base_key;
+        let data_key = self.data_key.clone();
+        let limit = self.limit;
+
+        let (tx, rx) = mpsc::channel(prefetch_pages * items_per_page);
+
+        // 3. 后台任务：并发拉取所有页面
+        tokio::spawn(async move {
+            let total_pages = (total_items + items_per_page - 1) / items_per_page;
+            let mut join_set = JoinSet::new();
+            let mut next_page = 0;
+            let mut active_requests = 0;
+            let mut yielded = 0;
+
+            // 辅助函数：构建单页请求
+            let fetch_page = |page: usize| {
+                let client = client.clone();
+                let endpoint = endpoint.clone();
+                let base_params = Arc::clone(&base_params);
+                let config = config.clone();
+                let pagination_method = pagination_method;
+                let base_key = base_key;
+                let data_key = data_key.clone();
+                let items_per_page = items_per_page;
+                async move {
+                    let mut builder = client.build_request(HttpMethod::GET, &endpoint, base_key);
+                    for (k, v) in base_params.iter() {
+                        builder = builder.with_param(k.clone(), v.clone());
+                    }
+                    if let Some(amount_key) = &config.amount_key {
+                        builder =
+                            builder.with_param(amount_key.clone(), items_per_page.to_string());
+                    }
+                    if let Some(offset_key) = &config.offset_key {
+                        let offset = match pagination_method {
+                            PaginationMethod::Offset => (page * items_per_page).to_string(),
+                            PaginationMethod::Page => (page + 1).to_string(),
+                        };
+                        builder = builder.with_param(offset_key.clone(), offset);
+                    }
+                    let response = builder.send().await?;
+                    let json = response.json::<Value>().await?;
+                    let items = json
+                        .pointer(&format!("/{}", data_key.replace('.', "/")))
+                        .and_then(|v| v.as_array())
+                        .cloned()
+                        .unwrap_or_default();
+                    Ok(items)
+                }
+            };
+
+            // 初始填充 prefetch_pages 个请求
+            while next_page < total_pages && active_requests < prefetch_pages {
+                join_set.spawn(fetch_page(next_page));
+                next_page += 1;
+                active_requests += 1;
+            }
+
+            // 处理完成的任务并补充新任务
+            while let Some(result) = join_set.join_next().await {
+                active_requests -= 1;
+
+                // 提前退出：达到 limit
+                if let Some(lim) = limit {
+                    if yielded >= lim {
+                        join_set.abort_all();
+                        return;
+                    }
+                }
+
+                match result {
+                    Ok(Ok(items)) => {
+                        for item in items {
+                            // 控制 limit
+                            if let Some(lim) = limit {
+                                if yielded >= lim {
+                                    break;
+                                }
+                            }
+                            if tx.send(Ok(item)).await.is_err() {
+                                // 接收端已关闭
+                                join_set.abort_all();
+                                return;
+                            }
+                            yielded += 1;
+                        }
+                    }
+                    Ok(Err(e)) => {
+                        let _ = tx.send(Err(e)).await;
+                        join_set.abort_all();
+                        return;
+                    }
+                    Err(join_err) => {
+                        let _ = tx
+                            .send(Err(MewError::Other(format!(
+                                "page task panicked: {}",
+                                join_err
+                            ))))
+                            .await;
+                        join_set.abort_all();
+                        return;
+                    }
+                }
+
+                // 补充新请求
+                if next_page < total_pages {
+                    join_set.spawn(fetch_page(next_page));
+                    next_page += 1;
+                    active_requests += 1;
+                }
+            }
+            // 所有页已拉完，通道自然关闭（tx drop）
+        });
+
+        rx
     }
 }
 

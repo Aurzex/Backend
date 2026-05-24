@@ -2148,33 +2148,6 @@ impl WorkDataFetcher {
         response.json().await.map_err(MewError::from)
     }
 
-    // 获取 Web 端最新作品
-    pub async fn fetch_new_works_web(
-        &self,
-        limit: Option<i32>,
-        offset: Option<i32>,
-        origin: bool,
-    ) -> MewResult<Value> {
-        let timestamp = current_timestamp_13();
-        let mut builder = self
-            .client
-            .build_request(
-                HttpMethod::GET,
-                "/creation-tools/v1/pc/discover/newest-work",
-                None,
-            )
-            .with_param("TIME", timestamp.to_string())
-            .with_param("limit", limit.unwrap_or(15).to_string())
-            .with_param("offset", offset.unwrap_or(0).to_string());
-
-        if origin {
-            builder = builder.with_param("work_origin_type", "ORIGINAL_WORK");
-        }
-
-        let response = builder.send().await?;
-        response.json().await.map_err(MewError::from)
-    }
-
     // 获取 Web 端主题作品
     pub async fn fetch_themed_works_web(
         &self,
@@ -2214,25 +2187,59 @@ impl WorkDataFetcher {
     }
 
     // 获取 Nemo 端最新作品
-    pub async fn fetch_new_works_nemo(
+    pub fn fetch_new_works_nemo(
         &self,
         types: NemoWorkType,
         limit: Option<i32>,
         offset: Option<i32>,
-    ) -> MewResult<Value> {
+    ) -> PaginatedIter {
         let timestamp = current_timestamp_13();
-        let endpoint = format!("/nemo/v3/newest/work/{}/list", types.as_str());
-
-        let response = self
+        let mut paginated = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
-            .with_param("TIME", timestamp.to_string())
+            .paginated(format!("/nemo/v3/newest/work/{}/list", types.as_str()))
+            .with_param("TIME", timestamp.to_string());
+
+        if let Some(lim) = limit {
+            paginated = paginated.with_limit(lim as usize);
+        }
+
+        paginated
             .with_param("limit", limit.unwrap_or(15).to_string())
             .with_param("offset", offset.unwrap_or(0).to_string())
-            .send()
-            .await?;
+            .with_offset_key("offset")
+            .with_amount_key("limit")
+            .with_data_key("items")
+            .with_total_key("total")
+    }
 
-        response.json().await.map_err(MewError::from)
+    // 获取 Web 端最新作品
+    pub fn fetch_new_works_web(
+        &self,
+        limit: Option<i32>,
+        offset: Option<i32>,
+        origin: bool,
+    ) -> PaginatedIter {
+        let timestamp = current_timestamp_13();
+        let mut paginated = self
+            .client
+            .paginated("/creation-tools/v1/pc/discover/newest-work")
+            .with_param("TIME", timestamp.to_string())
+            .with_param("limit", limit.unwrap_or(15).to_string())
+            .with_param("offset", offset.unwrap_or(0).to_string());
+
+        if origin {
+            paginated = paginated.with_param("work_origin_type", "ORIGINAL_WORK");
+        }
+
+        if let Some(lim) = limit {
+            paginated = paginated.with_limit(lim as usize);
+        }
+
+        paginated
+            .with_offset_key("offset")
+            .with_amount_key("limit")
+            .with_data_key("items")
+            .with_total_key("total")
     }
 
     // 获取动态作品

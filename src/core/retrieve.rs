@@ -13,7 +13,9 @@ use crate::api::whale::{
     WorkReportFilterType, WorkSourceType,
 };
 use crate::api::work::{NemoWorkType, WorkDataFetcher};
-use crate::utils::acquire::{BaseKey, ClientFactory, HttpMethod, Identity};
+use crate::utils::acquire::{
+    BaseKey, Catsona, HttpMethod, KittyFactory, MewError, MewResult, PaginatedIter,
+};
 
 // ==================== 错误类型 ====================
 
@@ -35,19 +37,29 @@ pub enum DataQueryError {
     External(Box<dyn std::error::Error>),
 }
 
-/// 安全地将具体错误类型转换为 DataQueryError
+impl From<MewError> for DataQueryError {
+    fn from(e: MewError) -> Self {
+        DataQueryError::External(Box::new(e))
+    }
+}
+
+impl From<reqwest::Error> for DataQueryError {
+    fn from(e: reqwest::Error) -> Self {
+        DataQueryError::External(Box::new(e))
+    }
+}
+
 fn to_external_err<E: std::error::Error + 'static>(e: E) -> DataQueryError {
     DataQueryError::External(Box::new(e))
 }
 
 // ==================== 枚举定义 ====================
 
-/// 评论来源类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CommentSource {
-    Work,  // 作品评论
-    Forum, // 论坛帖子评论
-    Shop,  // 工坊讨论评论
+    Work,
+    Forum,
+    Shop,
 }
 
 impl CommentSource {
@@ -72,12 +84,11 @@ impl std::str::FromStr for CommentSource {
     }
 }
 
-/// 评论查询模式
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CommentQueryMode {
-    UserId,    // 提取用户ID列表
-    CommentId, // 提取评论ID列表
-    Comments,  // 获取详细评论数据
+    UserId,
+    CommentId,
+    Comments,
 }
 
 impl CommentQueryMode {
@@ -102,12 +113,11 @@ impl std::str::FromStr for CommentQueryMode {
     }
 }
 
-/// 通知类型分类
 #[derive(Debug, Clone, Copy)]
 pub enum NotificationCategory {
-    LikeFork,     // 点赞/收藏
-    CommentReply, // 评论/回复
-    System,       // 系统通知
+    LikeFork,
+    CommentReply,
+    System,
 }
 
 impl NotificationCategory {
@@ -127,17 +137,15 @@ pub type JsonObject = Map<String, Value>;
 
 // ==================== 结果类型 ====================
 
-/// 评论查询结果枚举
 #[derive(Debug, Clone)]
 pub enum CommentsResult {
-    UserIdList(Vec<String>),           // 用户ID列表
-    CommentIdList(Vec<String>),        // 评论ID列表
-    DetailedComments(Vec<JsonObject>), // 详细评论数据
+    UserIdList(Vec<String>),
+    CommentIdList(Vec<String>),
+    DetailedComments(Vec<JsonObject>),
 }
 
 // ==================== 查询构建器 ====================
 
-/// 评论查询构建器
 pub struct CommentQueryBuilder {
     source: Option<CommentSource>,
     target_id: Option<i32>,
@@ -175,10 +183,7 @@ impl CommentQueryBuilder {
         self
     }
 
-    /// 根据来源获取评论数据的惰性迭代器
-    fn build_comment_stream(
-        &self,
-    ) -> Result<Box<dyn Iterator<Item = Result<JsonValue, DataQueryError>>>, DataQueryError> {
+    fn build_comment_iter(&self) -> Result<PaginatedIter, DataQueryError> {
         let source = self
             .source
             .ok_or_else(|| DataQueryError::InvalidSource("未设置来源".into()))?;
@@ -187,44 +192,23 @@ impl CommentQueryBuilder {
             .ok_or_else(|| DataQueryError::InvalidSource("未设置源ID".into()))?;
         let limit = self.limit;
 
-        match source {
-            CommentSource::Work => {
-                let iter = WorkDataFetcher::new()
-                    .fetch_work_comments_gen(target_id, limit)
-                    .map(|item| item.map_err(to_external_err));
-                Ok(Box::new(iter))
-            }
+        Ok(match source {
+            CommentSource::Work => WorkDataFetcher::new().fetch_work_comments_gen(target_id, limit),
             CommentSource::Forum => {
-                let iter = ForumDataFetcher::new()
-                    .fetch_post_replies_gen(target_id, None, limit)
-                    .map(|item| item.map_err(to_external_err));
-                Ok(Box::new(iter))
+                ForumDataFetcher::new().fetch_post_replies_gen(target_id, None, limit)
             }
-            CommentSource::Shop => {
-                let iter = WorkshopDataFetcher::new()
-                    .fetch_workshop_discussions_gen(target_id, None, None, limit)
-                    .map(|item| item.map_err(to_external_err));
-                Ok(Box::new(iter))
-            }
-        }
+            CommentSource::Shop => WorkshopDataFetcher::new()
+                .fetch_workshop_discussions_gen(target_id, None, None, limit),
+        })
     }
 
-    /// 执行评论查询
-    pub fn execute(mut self) -> Result<CommentsResult, DataQueryError> {
+    pub async fn execute(self) -> Result<CommentsResult, DataQueryError> {
         let source = self
             .source
             .ok_or_else(|| DataQueryError::InvalidSource("未设置来源".into()))?;
         let mode = self.mode;
 
-        // 安全上限：防止一次加载过多评论
-        const MAX_COMMENTS: usize = 1000;
-        let safe_limit = self.limit.unwrap_or(500).min(MAX_COMMENTS);
-        self.limit = Some(safe_limit);
-
-        let comment_stream = self.build_comment_stream()?;
-        let comments: Vec<JsonValue> = comment_stream
-            .take(safe_limit)
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut comment_iter = self.build_comment_iter()?;
 
         let user_field = match source {
             CommentSource::Work | CommentSource::Shop => "reply_user",
@@ -239,10 +223,20 @@ impl CommentQueryBuilder {
                 .and_then(|id| id.as_i64())
         };
 
+        let max_limit = self.limit.unwrap_or(500).min(1000);
+
         match mode {
             CommentQueryMode::UserId => {
                 let mut user_ids = Vec::new();
-                for comment in &comments {
+                let mut count = 0;
+
+                while let Some(item) = comment_iter.next_item().await {
+                    let comment = item?;
+                    count += 1;
+                    if count > max_limit {
+                        break;
+                    }
+
                     if let Some(id) = comment
                         .get("user")
                         .and_then(|u| u.as_object())
@@ -254,33 +248,27 @@ impl CommentQueryBuilder {
 
                     let comment_id = comment.get("id").and_then(|id| id.as_i64()).unwrap_or(0);
 
-                    // 提取回复中的用户ID，不构造完整对象
                     if source == CommentSource::Forum {
-                        // Forum 需要拉取子回复流
-                        let reply_stream = ForumDataFetcher::new()
+                        let mut reply_iter = ForumDataFetcher::new()
                             .fetch_reply_comments_gen(comment_id as i32, None);
-                        for reply_result in reply_stream {
-                            if let Ok(reply_val) = reply_result {
-                                if let Some(reply_obj) = reply_val.as_object() {
-                                    if let Some(uid) = extract_reply_user_id(reply_obj) {
-                                        user_ids.push(uid.to_string());
-                                    }
+                        while let Some(reply_result) = reply_iter.next_item().await {
+                            let reply_val = reply_result?;
+                            if let Some(reply_obj) = reply_val.as_object() {
+                                if let Some(uid) = extract_reply_user_id(reply_obj) {
+                                    user_ids.push(uid.to_string());
                                 }
                             }
                         }
-                    } else {
-                        // Work / Shop 内嵌 replies
-                        if let Some(replies) = comment
-                            .get("replies")
-                            .and_then(|r| r.as_object())
-                            .and_then(|r| r.get("items"))
-                            .and_then(|items| items.as_array())
-                        {
-                            for reply_val in replies {
-                                if let Some(reply_obj) = reply_val.as_object() {
-                                    if let Some(uid) = extract_reply_user_id(reply_obj) {
-                                        user_ids.push(uid.to_string());
-                                    }
+                    } else if let Some(replies) = comment
+                        .get("replies")
+                        .and_then(|r| r.as_object())
+                        .and_then(|r| r.get("items"))
+                        .and_then(|items| items.as_array())
+                    {
+                        for reply_val in replies {
+                            if let Some(reply_obj) = reply_val.as_object() {
+                                if let Some(uid) = extract_reply_user_id(reply_obj) {
+                                    user_ids.push(uid.to_string());
                                 }
                             }
                         }
@@ -290,41 +278,42 @@ impl CommentQueryBuilder {
             }
             CommentQueryMode::CommentId => {
                 let mut comment_ids = Vec::new();
-                for comment in &comments {
+                let mut count = 0;
+
+                while let Some(item) = comment_iter.next_item().await {
+                    let comment = item?;
+                    count += 1;
+                    if count > max_limit {
+                        break;
+                    }
+
                     if let Some(id) = comment.get("id").and_then(|id| id.as_i64()) {
                         comment_ids.push(id.to_string());
                     }
+
                     let comment_id = comment.get("id").and_then(|id| id.as_i64()).unwrap_or(0);
 
-                    // 仅提取回复ID，不构建完整对象
                     if source == CommentSource::Forum {
-                        let reply_stream = ForumDataFetcher::new()
+                        let mut reply_iter = ForumDataFetcher::new()
                             .fetch_reply_comments_gen(comment_id as i32, None);
-                        for reply_result in reply_stream {
-                            if let Ok(reply_val) = reply_result {
-                                if let Some(reply_obj) = reply_val.as_object() {
-                                    if let Some(rid) =
-                                        reply_obj.get("id").and_then(|id| id.as_i64())
-                                    {
-                                        comment_ids.push(format!("{}.{}", comment_id, rid));
-                                    }
+                        while let Some(reply_result) = reply_iter.next_item().await {
+                            let reply_val = reply_result?;
+                            if let Some(reply_obj) = reply_val.as_object() {
+                                if let Some(rid) = reply_obj.get("id").and_then(|id| id.as_i64()) {
+                                    comment_ids.push(format!("{}.{}", comment_id, rid));
                                 }
                             }
                         }
-                    } else {
-                        if let Some(replies) = comment
-                            .get("replies")
-                            .and_then(|r| r.as_object())
-                            .and_then(|r| r.get("items"))
-                            .and_then(|items| items.as_array())
-                        {
-                            for reply_val in replies {
-                                if let Some(reply_obj) = reply_val.as_object() {
-                                    if let Some(rid) =
-                                        reply_obj.get("id").and_then(|id| id.as_i64())
-                                    {
-                                        comment_ids.push(format!("{}.{}", comment_id, rid));
-                                    }
+                    } else if let Some(replies) = comment
+                        .get("replies")
+                        .and_then(|r| r.as_object())
+                        .and_then(|r| r.get("items"))
+                        .and_then(|items| items.as_array())
+                    {
+                        for reply_val in replies {
+                            if let Some(reply_obj) = reply_val.as_object() {
+                                if let Some(rid) = reply_obj.get("id").and_then(|id| id.as_i64()) {
+                                    comment_ids.push(format!("{}.{}", comment_id, rid));
                                 }
                             }
                         }
@@ -334,20 +323,34 @@ impl CommentQueryBuilder {
             }
             CommentQueryMode::Comments => {
                 let mut detailed = Vec::new();
-                for comment in &comments {
+                let mut count = 0;
+
+                while let Some(item) = comment_iter.next_item().await {
+                    let comment = item?;
+                    count += 1;
+                    if count > max_limit {
+                        break;
+                    }
+
                     let comment_id = comment.get("id").and_then(|id| id.as_i64()).unwrap_or(0);
 
-                    // 获取回复流，直接构建精简对象
                     let replies: Vec<JsonObject> = if source == CommentSource::Forum {
-                        let reply_stream = ForumDataFetcher::new()
+                        let mut reply_iter = ForumDataFetcher::new()
                             .fetch_reply_comments_gen(comment_id as i32, None);
-                        reply_stream
-                            .filter_map(|r| r.ok())
-                            .filter_map(|v| v.as_object().cloned())
-                            .filter_map(|reply| {
-                                build_compact_reply(&reply, user_field, &extract_reply_user_id)
-                            })
-                            .collect()
+                        let mut replies_list = Vec::new();
+                        while let Some(reply_result) = reply_iter.next_item().await {
+                            let reply_val = reply_result?;
+                            if let Some(reply_obj) = reply_val.as_object() {
+                                if let Some(compact) = build_compact_reply(
+                                    reply_obj,
+                                    user_field,
+                                    &extract_reply_user_id,
+                                ) {
+                                    replies_list.push(compact);
+                                }
+                            }
+                        }
+                        replies_list
                     } else {
                         comment
                             .get("replies")
@@ -369,7 +372,6 @@ impl CommentQueryBuilder {
                             .unwrap_or_default()
                     };
 
-                    // 构建主评论精简对象
                     let mut comment_data = JsonObject::new();
                     if let Some(user) = comment.get("user").and_then(|u| u.as_object()) {
                         if let Some(id) = user.get("id") {
@@ -413,7 +415,6 @@ impl CommentQueryBuilder {
     }
 }
 
-/// 辅助函数：从原始回复对象构建精简的 JsonObject
 fn build_compact_reply(
     reply: &JsonObject,
     user_field: &str,
@@ -455,7 +456,6 @@ fn build_compact_reply(
 
 // ==================== 数据查询主结构体 ====================
 
-/// 数据查询与统计入口
 pub struct DataQuery;
 
 impl DataQuery {
@@ -463,13 +463,11 @@ impl DataQuery {
         DataQuery
     }
 
-    /// 创建评论查询构建器
     pub fn query_comments(&self) -> CommentQueryBuilder {
         CommentQueryBuilder::new()
     }
 
-    /// 获取评论数据（快捷方法）
-    pub fn fetch_comments(
+    pub async fn fetch_comments(
         &self,
         source: CommentSource,
         target_id: i32,
@@ -482,41 +480,32 @@ impl DataQuery {
             .mode(mode)
             .limit(limit)
             .execute()
+            .await
     }
 
-    /// 获取社区新回复流（惰性迭代器）
-    pub fn stream_new_replies(
+    pub async fn stream_new_replies(
         &self,
         reply_type: ReplyTypes,
         limit: i32,
-    ) -> Box<dyn Iterator<Item = Result<JsonObject, DataQueryError>> + 'static> {
-        let total = match CommunityDataFetcher::new()
+    ) -> CommunityReplyStream {
+        // 直接返回类型，不需要 Box
+        let data = CommunityDataFetcher::new()
             .fetch_message_count(MessageMethod::Web)
-            .map_err(|e| DataQueryError::External(e.into()))
-        {
-            Ok(data) => data.get("count").and_then(|c| c.as_i64()).unwrap_or(0) as i32,
-            Err(e) => return Box::new(std::iter::once(Err(e))),
-        };
+            .await
+            .unwrap();
+        let total = data.get("count").and_then(|c| c.as_i64()).unwrap_or(0) as i32;
 
-        let remaining = if limit == 0 { total } else { limit.min(total) };
-
-        Box::new(CommunityReplyStream {
-            reply_type,
-            remaining,
-            offset: 0,
-            buffer: VecDeque::new(),
-        })
+        CommunityReplyStream::new(reply_type, total, limit)
     }
 
-    /// 获取评论总数
-    pub fn count_comments(
+    pub async fn count_comments(
         &self,
         source: CommentSource,
         target_id: i32,
     ) -> Result<i32, DataQueryError> {
         match source {
             CommentSource::Work => {
-                let comments_response = ClientFactory::global_client()
+                let resp = KittyFactory::global_client()
                     .build_request(
                         HttpMethod::GET,
                         &format!("/creation-tools/v1/works/{}/comments", target_id),
@@ -525,36 +514,29 @@ impl DataQuery {
                     .with_param("offset", "0")
                     .with_param("limit", "15")
                     .send()
-                    .map_err(to_external_err)?;
-
-                let json = ClientFactory::global_client()
-                    .response_to_json(comments_response)
-                    .map_err(to_external_err)?;
+                    .await?;
+                let json: Value = resp.json().await?;
 
                 if let Some(total) = json.get("total").and_then(|t| t.as_i64()) {
                     return Ok(total as i32);
                 }
 
-                let work_response = ClientFactory::global_client()
+                let work_resp = KittyFactory::global_client()
                     .build_request(
                         HttpMethod::GET,
                         &format!("/creation-tools/v1/works/{}", target_id),
                         Some(BaseKey::Default),
                     )
                     .send()
-                    .map_err(to_external_err)?;
-
-                let work_json = ClientFactory::global_client()
-                    .response_to_json(work_response)
-                    .map_err(to_external_err)?;
-
+                    .await?;
+                let work_json: Value = work_resp.json().await?;
                 Ok(work_json
                     .get("comment_times")
                     .and_then(|t| t.as_i64())
                     .unwrap_or(0) as i32)
             }
             CommentSource::Shop => {
-                let response = ClientFactory::global_client()
+                let resp = KittyFactory::global_client()
                     .build_request(
                         HttpMethod::GET,
                         &format!("/web/discussions/{}/comments", target_id),
@@ -565,31 +547,23 @@ impl DataQuery {
                     .with_param("limit", "15")
                     .with_param("offset", "0")
                     .send()
-                    .map_err(to_external_err)?;
-
-                let json = ClientFactory::global_client()
-                    .response_to_json(response)
-                    .map_err(to_external_err)?;
-
+                    .await?;
+                let json: Value = resp.json().await?;
                 let total = json.get("total").and_then(|t| t.as_i64()).unwrap_or(0) as i32;
                 let total_reply =
                     json.get("totalReply").and_then(|t| t.as_i64()).unwrap_or(0) as i32;
                 Ok(total + total_reply)
             }
             CommentSource::Forum => {
-                let response = ClientFactory::global_client()
+                let resp = KittyFactory::global_client()
                     .build_request(
                         HttpMethod::GET,
                         &format!("/web/forums/posts/{}/details", target_id),
                         Some(BaseKey::Default),
                     )
                     .send()
-                    .map_err(to_external_err)?;
-
-                let json = ClientFactory::global_client()
-                    .response_to_json(response)
-                    .map_err(to_external_err)?;
-
+                    .await?;
+                let json: Value = resp.json().await?;
                 let n_replies = json.get("n_replies").and_then(|r| r.as_i64()).unwrap_or(0) as i32;
                 let n_comments =
                     json.get("n_comments").and_then(|c| c.as_i64()).unwrap_or(0) as i32;
@@ -598,94 +572,42 @@ impl DataQuery {
         }
     }
 
-    /// 合并 Nemo 和 Web 来源的作品数据流
-    pub fn stream_works_from_both_sources(
-        &self,
-        limit: i32,
-    ) -> Box<dyn Iterator<Item = Result<JsonObject, DataQueryError>> + 'static> {
-        let per_source_limit = Some(limit / 2);
+    pub async fn stream_works_from_both_sources(&self, limit: i32) -> MergedWorksStream {
+        let per_source_limit: Option<i32> = Some(limit / 2);
 
-        let nemo_field_mapping: HashMap<&str, &str> = [
-            ("work_id", "work_id"),
-            ("work_name", "work_name"),
-            ("user_name", "user_name"),
-            ("user_id", "user_id"),
-            ("like_count", "like_count"),
-            ("updated_at", "updated_at"),
-        ]
-        .into_iter()
-        .collect();
-
-        let web_field_mapping: HashMap<&str, &str> = [
-            ("work_id", "work_id"),
-            ("work_name", "work_name"),
-            ("user_name", "nickname"),
-            ("user_id", "user_id"),
-            ("like_count", "likes_count"),
-            ("updated_at", "updated_at"),
-        ]
-        .into_iter()
-        .collect();
-
-        let nemo_result = WorkDataFetcher::new().fetch_new_works_nemo(
+        let nemo_iter = WorkDataFetcher::new().fetch_new_works_nemo(
             NemoWorkType::Original,
             per_source_limit,
             None,
         );
-        let web_result = WorkDataFetcher::new().fetch_new_works_web(per_source_limit, None, true);
+        let web_iter = WorkDataFetcher::new().fetch_new_works_web(per_source_limit, None, true);
 
-        let process_result = |res: Result<Value, _>, mapping: HashMap<&str, &str>| match res {
-            Ok(val) => {
-                let items = val
-                    .get("items")
-                    .and_then(|i| i.as_array())
-                    .cloned()
-                    .unwrap_or_default();
-                let mapped: Vec<Result<JsonObject, DataQueryError>> = items
-                    .into_iter()
-                    .filter_map(|v| v.as_object().cloned())
-                    .map(move |obj| {
-                        let mut mapped_obj = JsonObject::new();
-                        for (target, source) in &mapping {
-                            if let Some(val) = obj.get(*source) {
-                                mapped_obj.insert(target.to_string(), val.clone());
-                            }
-                        }
-                        Ok(mapped_obj)
-                    })
-                    .collect();
-                Box::new(mapped.into_iter())
-                    as Box<dyn Iterator<Item = Result<JsonObject, DataQueryError>>>
-            }
-            Err(e) => Box::new(std::iter::once::<Result<JsonObject, DataQueryError>>(Err(
-                DataQueryError::External(e),
-            ))),
-        };
-
-        let nemo_stream = process_result(nemo_result, nemo_field_mapping);
-        let web_stream = process_result(web_result, web_field_mapping);
-
-        Box::new(nemo_stream.chain(web_stream))
+        MergedWorksStream::new(nemo_iter, web_iter, per_source_limit.map(|x| x as usize))
     }
 
-    /// 从作品中收集用户评论并聚合统计
-    pub fn aggregate_user_comments_from_works(
+    pub async fn aggregate_user_comments_from_works(
         &self,
         work_limit: i32,
     ) -> Result<Vec<JsonObject>, DataQueryError> {
-        let works: Vec<JsonObject> = self
-            .stream_works_from_both_sources(work_limit)
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut work_stream = self.stream_works_from_both_sources(work_limit).await;
+        let mut works = Vec::new();
+
+        while let Some(work_result) = work_stream.next().await {
+            works.push(work_result?);
+        }
 
         let mut all_comments = Vec::new();
         for work in &works {
             if let Some(work_id) = work.get("work_id").and_then(|id| id.as_i64()) {
-                if let Ok(CommentsResult::DetailedComments(comments)) = self.fetch_comments(
-                    CommentSource::Work,
-                    work_id as i32,
-                    CommentQueryMode::Comments,
-                    Some(20),
-                ) {
+                if let Ok(CommentsResult::DetailedComments(comments)) = self
+                    .fetch_comments(
+                        CommentSource::Work,
+                        work_id as i32,
+                        CommentQueryMode::Comments,
+                        Some(20),
+                    )
+                    .await
+                {
                     all_comments.extend(comments);
                 }
             }
@@ -743,8 +665,9 @@ impl DataQuery {
         Ok(result)
     }
 
-    /// 获取管理员举报处理统计
-    pub fn compute_admin_report_stats(&self) -> Result<AdminReportStatistics, DataQueryError> {
+    pub async fn compute_admin_report_stats(
+        &self,
+    ) -> Result<AdminReportStatistics, DataQueryError> {
         let admins = [
             (220, "石榴 Grant"),
             (222, "shidang88"),
@@ -768,6 +691,7 @@ impl DataQuery {
                     Some(CommentReportFilterType::AdminId),
                     Some(admin_id),
                 )
+                .await
                 .map_err(|e| DataQueryError::External(e.into()))?
                 .get("total")
                 .and_then(|t| t.as_i64())
@@ -780,13 +704,13 @@ impl DataQuery {
                     Some(WorkReportFilterType::AdminId),
                     Some(admin_id),
                 )
+                .await
                 .map_err(|e| DataQueryError::External(e.into()))?
                 .get("total")
                 .and_then(|t| t.as_i64())
                 .unwrap_or(0) as i32;
 
             let total = comment_count + work_count;
-
             total_comment_reports += comment_count;
             total_work_reports += work_count;
 
@@ -820,20 +744,17 @@ impl DataQuery {
         })
     }
 
-    /// 获取粉丝统计（基于点赞数阈值）
-    ///
-    /// 注意：为每个符合条件的粉丝单独查询荣誉数据（N+1 请求），需评估性能影响。
-    pub fn compute_fans_by_like_threshold(
+    pub async fn compute_fans_by_like_threshold(
         &self,
         user_id: i32,
         like_threshold: i32,
     ) -> Result<FanByLikesStatistics, DataQueryError> {
-        let fans_stream = UserDataFetcher::new().fetch_followers_gen(user_id, None);
+        let mut fans_stream = UserDataFetcher::new().fetch_followers_gen(user_id, None);
 
         let mut qualified_fans = Vec::new();
         let mut total_fans = 0;
 
-        for fan_result in fans_stream {
+        while let Some(fan_result) = fans_stream.next_item().await {
             let fan = fan_result.map_err(to_external_err)?;
             total_fans += 1;
 
@@ -845,6 +766,7 @@ impl DataQuery {
                     fan_obj.insert("user_id".into(), Value::Number(id.into()));
                     let honors = UserDataFetcher::new()
                         .fetch_user_honors(id as i32)
+                        .await
                         .map_err(|e| DataQueryError::External(e.into()));
                     if let Ok(ref honors_data) = honors {
                         if let Some(fans_total) = honors_data.get("fans_total") {
@@ -891,56 +813,12 @@ impl DataQuery {
         })
     }
 
-    /// 获取教育账号流（切换身份、重置密码）
-    ///
-    /// 为防止一次性加载过多学生造成 OOM，会限制最大学生数（默认 2000）。
-    /// 保持原始顺序，不再进行随机打乱。
     pub fn stream_edu_accounts_with_reset_passwords(
         &self,
         limit: Option<usize>,
-    ) -> Box<dyn Iterator<Item = Result<(String, String), DataQueryError>> + 'static> {
-        const MAX_EDU_STUDENTS: usize = 2000;
-
-        if let Err(e) = ClientFactory::global_client().switch_identity(Identity::Edu) {
-            return Box::new(std::iter::once(Err(to_external_err(e))));
-        }
-
-        let effective_limit = limit.unwrap_or(MAX_EDU_STUDENTS).min(MAX_EDU_STUDENTS);
-
-        // 直接使用接口返回的迭代器，保留原始顺序
-        let stream = EduDataFetcher::new()
-            .fetch_class_students_gen(1, Some(effective_limit))
-            .filter_map(move |student_result| {
-                let student = match student_result {
-                    Ok(s) => s,
-                    Err(e) => return Some(Err(DataQueryError::External(e.into()))),
-                };
-
-                let student_id = student.get("id").and_then(|i| i.as_i64())? as i32;
-                let username = student
-                    .get("username")
-                    .and_then(|u| u.as_str())?
-                    .to_string();
-
-                let password_result = EduUserAction::new()
-                    .reset_student_password(student_id)
-                    .map_err(|e| DataQueryError::External(e.into()));
-
-                match password_result {
-                    Ok(password_data) => {
-                        let password = password_data
-                            .get("password")
-                            .and_then(|p| p.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        Some(Ok((username, password)))
-                    }
-                    Err(e) => Some(Err(e)),
-                }
-            })
-            .take(effective_limit); // 额外安全限流
-
-        Box::new(stream)
+    ) -> Result<EduStudentAccountIter, MewError> {
+        KittyFactory::global_client().switch_identity(Catsona::Scholar)?;
+        Ok(EduStudentAccountIter::new(1, limit))
     }
 }
 
@@ -949,10 +827,182 @@ impl Default for DataQuery {
         Self::new()
     }
 }
+// 定义学生账号迭代器
+pub struct EduStudentAccountIter {
+    student_iter: PaginatedIter,
+    limit: usize,
+    yielded: usize,
+}
+
+impl EduStudentAccountIter {
+    fn new(class_id: i32, limit: Option<usize>) -> Self {
+        let limit = limit.unwrap_or(2000).min(2000);
+        let student_iter = EduDataFetcher::new().fetch_class_students_gen(class_id, Some(limit));
+
+        Self {
+            student_iter,
+            limit,
+            yielded: 0,
+        }
+    }
+
+    pub async fn next(&mut self) -> Option<Result<(String, String), MewError>> {
+        if self.yielded >= self.limit {
+            return None;
+        }
+
+        while let Some(student_result) = self.student_iter.next_item().await {
+            let student = match student_result {
+                Ok(s) => s,
+                Err(e) => return Some(Err(e)),
+            };
+
+            let student_id = match student.get("id").and_then(|i| i.as_i64()) {
+                Some(id) => id as i32,
+                None => return Some(Err(MewError::Other("Missing student id".into()))),
+            };
+
+            let username = match student.get("username").and_then(|u| u.as_str()) {
+                Some(u) => u.to_string(),
+                None => return Some(Err(MewError::Other("Missing username".into()))),
+            };
+
+            // 重置密码
+            match EduUserAction::new()
+                .reset_student_password(student_id)
+                .await
+            {
+                Ok(password_data) => {
+                    let password = password_data
+                        .get("password")
+                        .and_then(|p| p.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    self.yielded += 1;
+                    return Some(Ok((username, password)));
+                }
+                Err(e) => return Some(Err(MewError::Other(e.to_string()))),
+            }
+        }
+        None
+    }
+
+    pub async fn collect(mut self) -> Vec<Result<(String, String), MewError>> {
+        let mut results = Vec::new();
+        while let Some(result) = self.next().await {
+            results.push(result);
+        }
+        results
+    }
+}
+
+// ==================== 合并作品流 ====================
+
+pub struct MergedWorksStream {
+    current: MergedSource,
+    next: MergedSource,
+    current_remaining: usize,
+    next_remaining: usize,
+    current_done: bool,
+    next_done: bool,
+}
+
+enum MergedSource {
+    Nemo(PaginatedIter),
+    Web(PaginatedIter),
+}
+
+impl MergedWorksStream {
+    fn new(
+        nemo_iter: PaginatedIter,
+        web_iter: PaginatedIter,
+        per_source_limit: Option<usize>,
+    ) -> Self {
+        let limit = per_source_limit.unwrap_or(usize::MAX);
+        MergedWorksStream {
+            current: MergedSource::Nemo(nemo_iter),
+            next: MergedSource::Web(web_iter),
+            current_remaining: limit,
+            next_remaining: limit,
+            current_done: false,
+            next_done: false,
+        }
+    }
+
+    pub async fn next(&mut self) -> Option<Result<JsonObject, DataQueryError>> {
+        loop {
+            if self.current_done || self.current_remaining == 0 {
+                if self.next_done || self.next_remaining == 0 {
+                    return None;
+                }
+                std::mem::swap(&mut self.current, &mut self.next);
+                std::mem::swap(&mut self.current_remaining, &mut self.next_remaining);
+                std::mem::swap(&mut self.current_done, &mut self.next_done);
+                continue;
+            }
+
+            let iter = match &mut self.current {
+                MergedSource::Nemo(iter) => iter,
+                MergedSource::Web(iter) => iter,
+            };
+
+            match iter.next_item().await {
+                Some(Ok(value)) => {
+                    self.current_remaining -= 1;
+                    if let Some(obj) = value.as_object() {
+                        let mapped = match &self.current {
+                            MergedSource::Nemo(_) => map_nemo_work(obj),
+                            MergedSource::Web(_) => map_web_work(obj),
+                        };
+                        return Some(Ok(mapped));
+                    }
+                }
+                Some(Err(e)) => return Some(Err(DataQueryError::External(Box::new(e)))),
+                None => {
+                    self.current_done = true;
+                    continue;
+                }
+            }
+        }
+    }
+}
+
+fn map_nemo_work(obj: &JsonObject) -> JsonObject {
+    let mut mapped = JsonObject::new();
+    for (target, source) in &[
+        ("work_id", "work_id"),
+        ("work_name", "work_name"),
+        ("user_name", "user_name"),
+        ("user_id", "user_id"),
+        ("like_count", "like_count"),
+        ("updated_at", "updated_at"),
+    ] {
+        if let Some(val) = obj.get(*source) {
+            mapped.insert(target.to_string(), val.clone());
+        }
+    }
+    mapped
+}
+
+fn map_web_work(obj: &JsonObject) -> JsonObject {
+    let mut mapped = JsonObject::new();
+    for (target, source) in &[
+        ("work_id", "work_id"),
+        ("work_name", "work_name"),
+        ("user_name", "nickname"),
+        ("user_id", "user_id"),
+        ("like_count", "likes_count"),
+        ("updated_at", "updated_at"),
+    ] {
+        if let Some(val) = obj.get(*source) {
+            mapped.insert(target.to_string(), val.clone());
+        }
+    }
+    mapped
+}
 
 // ==================== 辅助数据结构 ====================
 
-/// 管理员举报统计条目
 #[derive(Debug, Clone)]
 pub struct AdminReportStatsEntry {
     pub admin_id: i32,
@@ -963,7 +1013,6 @@ pub struct AdminReportStatsEntry {
     pub percentage: f64,
 }
 
-/// 管理员举报统计汇总
 #[derive(Debug, Clone)]
 pub struct AdminReportStatistics {
     pub total_admins: i32,
@@ -973,7 +1022,6 @@ pub struct AdminReportStatistics {
     pub statistics: Vec<AdminReportStatsEntry>,
 }
 
-/// 粉丝点赞统计
 #[derive(Debug, Clone)]
 pub struct FanByLikesStatistics {
     pub target_user_id: i32,
@@ -985,18 +1033,25 @@ pub struct FanByLikesStatistics {
 
 // ==================== 辅助迭代器实现 ====================
 
-/// 社区新回复分页流（健壮版，不再依赖总数）
-struct CommunityReplyStream {
+pub struct CommunityReplyStream {
     reply_type: ReplyTypes,
-    remaining: i32, // 剩余待取数量（i32::MAX 表示无上限）
+    remaining: i32,
     offset: i32,
     buffer: VecDeque<JsonObject>,
 }
 
-impl Iterator for CommunityReplyStream {
-    type Item = Result<JsonObject, DataQueryError>;
+impl CommunityReplyStream {
+    pub fn new(reply_type: ReplyTypes, total: i32, limit: i32) -> Self {
+        let remaining = if limit == 0 { total } else { limit.min(total) };
+        Self {
+            reply_type,
+            remaining,
+            offset: 0,
+            buffer: VecDeque::new(),
+        }
+    }
 
-    fn next(&mut self) -> Option<Self::Item> {
+    pub async fn next(&mut self) -> Option<Result<JsonObject, DataQueryError>> {
         if let Some(obj) = self.buffer.pop_front() {
             return Some(Ok(obj));
         }
@@ -1005,7 +1060,10 @@ impl Iterator for CommunityReplyStream {
         }
 
         let batch_size = self.remaining.min(200).max(5);
-        match CommunityDataFetcher::new().fetch_replies(self.reply_type, batch_size, self.offset) {
+        match CommunityDataFetcher::new()
+            .fetch_replies(self.reply_type, batch_size, self.offset)
+            .await
+        {
             Ok(response) => {
                 let items: Vec<JsonObject> = response
                     .get("items")
@@ -1016,23 +1074,30 @@ impl Iterator for CommunityReplyStream {
 
                 let fetched_count = items.len() as i32;
                 if fetched_count == 0 {
-                    return None; // 无更多数据
+                    return None;
                 }
 
                 let take_count = fetched_count.min(self.remaining) as usize;
                 self.remaining -= take_count as i32;
-                self.offset += fetched_count; // 基于实际返回量推进偏移
+                self.offset += fetched_count;
                 self.buffer.extend(items.into_iter().take(take_count));
                 self.buffer.pop_front().map(Ok)
             }
             Err(e) => Some(Err(DataQueryError::External(e.into()))),
         }
     }
+
+    pub async fn collect(mut self) -> Vec<Result<JsonObject, DataQueryError>> {
+        let mut results = Vec::new();
+        while let Some(result) = self.next().await {
+            results.push(result);
+        }
+        results
+    }
 }
 
 // ==================== 工具函数 ====================
 
-/// 字符串数组去重
 fn deduplicate(items: &[String]) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
     let mut result = Vec::new();
