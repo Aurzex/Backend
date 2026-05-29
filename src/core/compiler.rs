@@ -731,11 +731,11 @@ impl BlockDecompilerCore {
         self.process_conditions(context, &mut block_value)?;
         self.process_params(context, &mut block_value)?;
 
-        if let Some(obj) = block_value.as_object_mut() {
-            if let Some(shadows_obj) = obj.get_mut("shadows").and_then(|v| v.as_object_mut()) {
-                for (name, xml) in &context.shadows {
-                    shadows_obj.insert(name.clone(), Value::String(xml.clone()));
-                }
+        if let Some(obj) = block_value.as_object_mut()
+            && let Some(shadows_obj) = obj.get_mut("shadows").and_then(|v| v.as_object_mut())
+        {
+            for (name, xml) in &context.shadows {
+                shadows_obj.insert(name.clone(), Value::String(xml.clone()));
             }
         }
 
@@ -744,25 +744,25 @@ impl BlockDecompilerCore {
     }
 
     fn process_next(&self, context: &mut BlockContext, block_value: &mut Value) -> Result<()> {
-        if let Some(next_compiled) = self.compiled.get("next_block") {
-            if !next_compiled.is_null() {
-                let mut decompiler = BlockDecompilerCore::new(
-                    next_compiled.clone(),
-                    self.config.clone(),
-                    self.id_generator.clone(),
-                    Box::new(DefaultBlockBehavior),
+        if let Some(next_compiled) = self.compiled.get("next_block")
+            && !next_compiled.is_null()
+        {
+            let mut decompiler = BlockDecompilerCore::new(
+                next_compiled.clone(),
+                self.config.clone(),
+                self.id_generator.clone(),
+                Box::new(DefaultBlockBehavior),
+            );
+            let mut next_block = decompiler.decompile(context)?;
+            if let Some(obj) = next_block.as_object_mut() {
+                obj.insert(
+                    "parent_id".to_string(),
+                    block_value.get("id").unwrap().clone(),
                 );
-                let mut next_block = decompiler.decompile(context)?;
-                if let Some(obj) = next_block.as_object_mut() {
-                    obj.insert(
-                        "parent_id".to_string(),
-                        block_value.get("id").unwrap().clone(),
-                    );
-                }
-                let next_id = next_block.get("id").unwrap().as_str().unwrap().to_string();
-                context.blocks.insert(next_id.clone(), next_block);
-                context.connections.insert(next_id, json!({"type": "next"}));
             }
+            let next_id = next_block.get("id").unwrap().as_str().unwrap().to_string();
+            context.blocks.insert(next_id.clone(), next_block);
+            context.connections.insert(next_id, json!({"type": "next"}));
         }
         Ok(())
     }
@@ -976,7 +976,7 @@ impl NekoDecompiler {
         let encrypted_url = detail
             .get("source_urls")
             .and_then(|v| v.as_array())
-            .and_then(|arr| arr.get(0))
+            .and_then(|arr| arr.first())
             .and_then(|v| v.as_str())
             .ok_or_else(|| DecompilerError::InvalidResponse("无法获取source_urls".to_string()))?;
         let encrypted_content = self.context.http_client.get_text(encrypted_url).await?;
@@ -1082,19 +1082,19 @@ impl NemoResourceManager {
             .unwrap()
             .join(format!("{}.meta", work_id));
         FileService::write_json(&meta_path, &meta_data)?;
-        if let Some(preview) = source_info.get("preview").and_then(|v| v.as_str()) {
-            if !preview.is_empty() {
-                match self.context.http_client.get_binary(preview).await {
-                    Ok(cover_data) => {
-                        let cover_path = self
-                            .dirs
-                            .get("works")
-                            .unwrap()
-                            .join(format!("{}.cover", work_id));
-                        FileService::write_binary(&cover_path, &cover_data)?;
-                    }
-                    Err(e) => println!("封面下载失败: {}", e),
+        if let Some(preview) = source_info.get("preview").and_then(|v| v.as_str())
+            && !preview.is_empty()
+        {
+            match self.context.http_client.get_binary(preview).await {
+                Ok(cover_data) => {
+                    let cover_path = self
+                        .dirs
+                        .get("works")
+                        .unwrap()
+                        .join(format!("{}.cover", work_id));
+                    FileService::write_binary(&cover_path, &cover_data)?;
                 }
+                Err(e) => println!("封面下载失败: {}", e),
             }
         }
         Ok(())
@@ -1136,7 +1136,7 @@ impl NemoResourceManager {
         let work_urls = source_info
             .get("work_urls")
             .and_then(|v| v.as_array())
-            .and_then(|arr| arr.get(0))
+            .and_then(|arr| arr.first())
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
@@ -1218,7 +1218,7 @@ impl NemoDecompiler {
         let bcm_url = source_info
             .get("work_urls")
             .and_then(|v| v.as_array())
-            .and_then(|arr| arr.get(0))
+            .and_then(|arr| arr.first())
             .and_then(|v| v.as_str())
             .ok_or_else(|| DecompilerError::InvalidResponse("无法获取work_urls".to_string()))?;
         let bcm_data = self.context.http_client.get_json(bcm_url, None).await?;
@@ -1580,7 +1580,7 @@ impl BlockDecompiler for FunctionCallDecompiler {
         let mut mutation = String::from("<mutation");
         mutation.push_str(&format!(r#" name="{}""#, procedure_name));
         mutation.push_str(&format!(r#" def_id="{}""#, func_id));
-        mutation.push_str(">");
+        mutation.push('>');
         for (param_name, _) in params.iter() {
             mutation.push_str(&format!(
                 r#"<procedures_2_parameter_shadow name="{}" value="0"/>"#,
@@ -1590,8 +1590,7 @@ impl BlockDecompiler for FunctionCallDecompiler {
         mutation.push_str("</mutation>");
         block.insert("mutation".to_string(), Value::String(mutation));
         context.shadows.insert("NAME".to_string(), String::new());
-        let mut param_index = 0;
-        for (_param_name, param_value) in params.iter() {
+        for (param_index, (_param_name, param_value)) in params.iter().enumerate() {
             let input_name = format!("ARG {}", param_index);
             if let Some(_param_block_data) = param_value.as_object() {
                 let mut param_decompiler = BlockDecompilerCore::new(
@@ -1619,7 +1618,6 @@ impl BlockDecompiler for FunctionCallDecompiler {
                 let shadow_xml = context.shadow_builder.create("default_value", None, None);
                 context.shadows.insert(input_name, shadow_xml);
             }
-            param_index += 1;
         }
         let fields = block
             .get_mut("fields")
@@ -1649,7 +1647,7 @@ impl KittenDecompiler {
         let compiled_url = data
             .get("source_urls")
             .and_then(|v| v.as_array())
-            .and_then(|arr| arr.get(0))
+            .and_then(|arr| arr.first())
             .and_then(|v| v.as_str())
             .ok_or_else(|| DecompilerError::InvalidResponse("无法获取source_urls".to_string()))?;
         self.context.http_client.get_json(compiled_url, None).await
@@ -1657,15 +1655,15 @@ impl KittenDecompiler {
 
     fn get_actor_info(&self, work: &Value, actor_id: &str) -> Value {
         if let Some(theatre) = work.get("theatre").and_then(|v| v.as_object()) {
-            if let Some(actors) = theatre.get("actors").and_then(|v| v.as_object()) {
-                if let Some(actor) = actors.get(actor_id) {
-                    return actor.clone();
-                }
+            if let Some(actors) = theatre.get("actors").and_then(|v| v.as_object())
+                && let Some(actor) = actors.get(actor_id)
+            {
+                return actor.clone();
             }
-            if let Some(scenes) = theatre.get("scenes").and_then(|v| v.as_object()) {
-                if let Some(scene) = scenes.get(actor_id) {
-                    return scene.clone();
-                }
+            if let Some(scenes) = theatre.get("scenes").and_then(|v| v.as_object())
+                && let Some(scene) = scenes.get(actor_id)
+            {
+                return scene.clone();
             }
         }
         json!({
@@ -1871,7 +1869,7 @@ impl CocoDataReorganizer {
             .get("widgetMap")
             .and_then(|v| v.as_object())
             .cloned()
-            .unwrap_or_else(|| serde_json::Map::new());
+            .unwrap_or(serde_json::Map::new());
         for mut screen in screen_list {
             let screen_obj = screen.as_object_mut().unwrap();
             let screen_id = screen_obj
@@ -1897,10 +1895,10 @@ impl CocoDataReorganizer {
                 .unwrap_or_default();
             let mut screen_widgets = serde_json::Map::new();
             for widget_id_value in widget_ids.iter().chain(invisible_widget_ids.iter()) {
-                if let Some(widget_id) = widget_id_value.as_str() {
-                    if let Some(widget) = widget_map.remove(widget_id) {
-                        screen_widgets.insert(widget_id.to_string(), widget);
-                    }
+                if let Some(widget_id) = widget_id_value.as_str()
+                    && let Some(widget) = widget_map.remove(widget_id)
+                {
+                    screen_widgets.insert(widget_id.to_string(), widget);
                 }
             }
             screen_obj.insert("widgets".to_string(), Value::Object(screen_widgets));
@@ -2151,20 +2149,14 @@ impl WoodResourceManager {
     fn save_code_files(&self, work_data: &Value) -> Result<()> {
         if let Some(content) = work_data.get("content").and_then(|v| v.as_array()) {
             for file_info in content {
-                if let Some(file_type) = file_info.get("file_type").and_then(|v| v.as_i64()) {
-                    if file_type == 2 {
-                        if let Some(file_name) = file_info.get("file_name").and_then(|v| v.as_str())
-                        {
-                            if file_name.ends_with(".py") {
-                                if let Some(source) =
-                                    file_info.get("source").and_then(|v| v.as_str())
-                                {
-                                    let file_path = self.dirs.get("root").unwrap().join(file_name);
-                                    std::fs::write(file_path, source)?;
-                                }
-                            }
-                        }
-                    }
+                if let Some(file_type) = file_info.get("file_type").and_then(|v| v.as_i64())
+                    && file_type == 2
+                    && let Some(file_name) = file_info.get("file_name").and_then(|v| v.as_str())
+                    && file_name.ends_with(".py")
+                    && let Some(source) = file_info.get("source").and_then(|v| v.as_str())
+                {
+                    let file_path = self.dirs.get("root").unwrap().join(file_name);
+                    std::fs::write(file_path, source)?;
                 }
             }
         }
@@ -2188,33 +2180,31 @@ impl WoodResourceManager {
     async fn download_images(&self, work_data: &Value) -> Result<()> {
         if let Some(content) = work_data.get("content").and_then(|v| v.as_array()) {
             for file_info in content {
-                if let Some(file_type) = file_info.get("file_type").and_then(|v| v.as_i64()) {
-                    if file_type == 3 {
-                        if let Some(image_url) = file_info.get("url").and_then(|v| v.as_str()) {
-                            match self.context.http_client.get_binary(image_url).await {
-                                Ok(image_data) => {
-                                    let file_name = file_info
-                                        .get("file_name")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("")
-                                        .to_string();
-                                    let file_name = if file_name.is_empty() {
-                                        self.extract_filename_from_url(image_url)
-                                    } else {
-                                        file_name
-                                    };
-                                    let file_name = if file_name.is_empty() {
-                                        "image.png".to_string()
-                                    } else {
-                                        file_name
-                                    };
-                                    let file_path =
-                                        self.dirs.get("images").unwrap().join(file_name);
-                                    FileService::write_binary(&file_path, &image_data)?;
-                                }
-                                Err(e) => println!("图片下载失败 {}: {}", image_url, e),
-                            }
+                if let Some(file_type) = file_info.get("file_type").and_then(|v| v.as_i64())
+                    && file_type == 3
+                    && let Some(image_url) = file_info.get("url").and_then(|v| v.as_str())
+                {
+                    match self.context.http_client.get_binary(image_url).await {
+                        Ok(image_data) => {
+                            let file_name = file_info
+                                .get("file_name")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            let file_name = if file_name.is_empty() {
+                                self.extract_filename_from_url(image_url)
+                            } else {
+                                file_name
+                            };
+                            let file_name = if file_name.is_empty() {
+                                "image.png".to_string()
+                            } else {
+                                file_name
+                            };
+                            let file_path = self.dirs.get("images").unwrap().join(file_name);
+                            FileService::write_binary(&file_path, &image_data)?;
                         }
+                        Err(e) => println!("图片下载失败 {}: {}", image_url, e),
                     }
                 }
             }

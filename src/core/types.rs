@@ -102,17 +102,14 @@ pub fn value_to_i64(v: &serde_json::Value) -> Option<i64> {
 }
 
 pub fn timestamp_to_string(ts: &serde_json::Value) -> String {
-    if let Some(secs) = ts.as_i64() {
-        if secs > 0 {
-            let secs_u64 = secs as u64;
-            let t = UNIX_EPOCH + Duration::from_secs(secs_u64);
-            match t.elapsed() {
-                Ok(_) => {
-                    let timestamp = t.duration_since(UNIX_EPOCH).unwrap().as_secs();
-                    return format!("{}", timestamp);
-                }
-                Err(_) => {}
-            }
+    if let Some(secs) = ts.as_i64()
+        && secs > 0
+    {
+        let secs_u64 = secs as u64;
+        let t = UNIX_EPOCH + Duration::from_secs(secs_u64);
+        if t.elapsed().is_ok() {
+            let timestamp = t.duration_since(UNIX_EPOCH).unwrap().as_secs();
+            return format!("{}", timestamp);
         }
     }
     ts.to_string()
@@ -803,7 +800,7 @@ impl ReportFetcher {
                 };
 
                 // 同步获取该类型所有报告
-                let mut all_items = match (config.fetch_generator)(status.clone()) {
+                let mut all_items = match (config.fetch_generator)(status) {
                     Ok(items) => items,
                     Err(e) => {
                         eprintln!("Error fetching report data: {}", e);
@@ -858,12 +855,11 @@ impl ReportFetcher {
     pub async fn get_total_reports(&self, status: ReportStatus) -> i64 {
         let mut total = 0i64;
         for rtype in self.registry.get_all_types() {
-            if let Some(config) = self.registry.get_config(&rtype) {
-                if let Ok(result) = (config.fetch_total)(status).await {
-                    if let Some(t) = result.get("total").and_then(|v| v.as_i64()) {
-                        total += t;
-                    }
-                }
+            if let Some(config) = self.registry.get_config(&rtype)
+                && let Ok(result) = (config.fetch_total)(status).await
+                && let Some(t) = result.get("total").and_then(|v| v.as_i64())
+            {
+                total += t;
             }
         }
         total

@@ -1,6 +1,6 @@
 use crate::utils::acquire::{BaseKey, Catsona, CodeMaoClient, HttpMethod, MewError, MewResult};
 use crate::utils::data::{CodeMaoFile, FileContent, PathConfig};
-use rand::{Rng, RngExt};
+use rand::RngExt;
 use reqwest::header::HeaderValue;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -305,7 +305,7 @@ impl AuthProcessor {
         let response = self
             .client()
             .build_request(HttpMethod::GET, "/web/users/details", None)
-            .with_header("Cookie", &format!("authorization={}", token))
+            .with_header("Cookie", format!("authorization={}", token))
             .send()
             .await?;
 
@@ -650,7 +650,7 @@ impl LoginHandler {
                 let mut input = String::new();
                 std::io::stdin()
                     .read_line(&mut input)
-                    .map_err(|e| MewError::Io(e))?;
+                    .map_err(MewError::Io)?;
                 input.trim().to_string()
             }
         };
@@ -713,17 +713,13 @@ impl LoginHandler {
                         .unwrap_or("未知错误");
                     println!("登录失败: {}", error_msg);
 
-                    match response.get("error_code").and_then(|e| e.as_str()) {
-                        Some(error_code) => {
-                            if error_code == "Admin-Password-Error@Community-Admin"
-                                || error_code == "Param-Invalid@Common"
-                            {
-                                username = Self::read_input("请输入用户名:")?;
-                                password = Self::read_input("请输入密码:")?;
-                            }
+                    if let Some(error_code) = response.get("error_code").and_then(|e| e.as_str())
+                        && (error_code == "Admin-Password-Error@Community-Admin"
+                            || error_code == "Param-Invalid@Common")
+                        {
+                            username = Self::read_input("请输入用户名:")?;
+                            password = Self::read_input("请输入密码:")?;
                         }
-                        _ => (),
-                    }
                 }
                 Err(e) => println!("认证请求失败: {}", e),
             }
@@ -735,7 +731,7 @@ impl LoginHandler {
         let mut input = String::new();
         std::io::stdin()
             .read_line(&mut input)
-            .map_err(|e| MewError::Io(e))?;
+            .map_err(MewError::Io)?;
         Ok(input.trim().to_string())
     }
 }
@@ -1107,11 +1103,10 @@ impl CloudAuthenticator {
     }
 
     pub fn authorization_token(&self) -> Option<String> {
-        if let Some(ref token) = self.authorization_token {
-            if !token.is_empty() {
+        if let Some(ref token) = self.authorization_token
+            && !token.is_empty() {
                 return Some(token.clone());
             }
-        }
         self.client().current_token()
     }
 

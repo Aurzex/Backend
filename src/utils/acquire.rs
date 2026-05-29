@@ -32,8 +32,9 @@ pub enum MewError {
 pub type MewResult<T> = std::result::Result<T, MewError>;
 
 // ==================== 基础 URL 键枚举 ====================
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum BaseKey {
+    #[default]
     Default,
     Creation,
     Whale,
@@ -80,12 +81,6 @@ impl FromStr for BaseKey {
             "education" => Ok(BaseKey::Education),
             _ => Err(MewError::Other(format!("invalid base key: {}", s))),
         }
-    }
-}
-
-impl Default for BaseKey {
-    fn default() -> Self {
-        BaseKey::Default
     }
 }
 
@@ -221,7 +216,7 @@ impl KittyIdentityManager {
 static GLOBAL_IDENTITY_MANAGER: OnceLock<KittyIdentityManager> = OnceLock::new();
 
 fn get_global_identity_manager() -> &'static KittyIdentityManager {
-    GLOBAL_IDENTITY_MANAGER.get_or_init(|| KittyIdentityManager::new())
+    GLOBAL_IDENTITY_MANAGER.get_or_init(KittyIdentityManager::new)
 }
 
 // ==================== 客户端配置 ====================
@@ -1002,10 +997,10 @@ impl PaginatedIter {
 
         self.total_items = Self::extract_total(&json, &self.total_key)?;
 
-        if let Some(response_amount_key) = &self.config.response_amount_key {
-            if let Some(amount) = Self::extract_nested_u64(&json, response_amount_key) {
-                self.items_per_page = amount as usize;
-            }
+        if let Some(response_amount_key) = &self.config.response_amount_key
+            && let Some(amount) = Self::extract_nested_u64(&json, response_amount_key)
+        {
+            self.items_per_page = amount as usize;
         }
 
         if let Some(items) = json
@@ -1052,10 +1047,10 @@ impl PaginatedIter {
     }
 
     pub async fn next_item(&mut self) -> Option<MewResult<Value>> {
-        if !self.initialized {
-            if let Err(e) = self.initialize().await {
-                return Some(Err(e));
-            }
+        if !self.initialized
+            && let Err(e) = self.initialize().await
+        {
+            return Some(Err(e));
         }
         if self.finished || self.reached_limit() {
             return None;
@@ -1125,7 +1120,7 @@ impl PaginatedIter {
 
         // 3. 后台任务：并发拉取所有页面
         tokio::spawn(async move {
-            let total_pages = (total_items + items_per_page - 1) / items_per_page;
+            let total_pages = total_items.div_ceil(items_per_page);
             let mut join_set = JoinSet::new();
             let mut next_page = 0;
             let mut active_requests = 0;
@@ -1137,10 +1132,7 @@ impl PaginatedIter {
                 let endpoint = endpoint.clone();
                 let base_params = Arc::clone(&base_params);
                 let config = config.clone();
-                let pagination_method = pagination_method;
-                let base_key = base_key;
                 let data_key = data_key.clone();
-                let items_per_page = items_per_page;
                 async move {
                     let mut builder = client.build_request(HttpMethod::GET, &endpoint, base_key);
                     for (k, v) in base_params.iter() {
@@ -1180,21 +1172,21 @@ impl PaginatedIter {
                 active_requests -= 1;
 
                 // 提前退出：达到 limit
-                if let Some(lim) = limit {
-                    if yielded >= lim {
-                        join_set.abort_all();
-                        return;
-                    }
+                if let Some(lim) = limit
+                    && yielded >= lim
+                {
+                    join_set.abort_all();
+                    return;
                 }
 
                 match result {
                     Ok(Ok(items)) => {
                         for item in items {
                             // 控制 limit
-                            if let Some(lim) = limit {
-                                if yielded >= lim {
-                                    break;
-                                }
+                            if let Some(lim) = limit
+                                && yielded >= lim
+                            {
+                                break;
                             }
                             if tx.send(Ok(item)).await.is_err() {
                                 // 接收端已关闭
@@ -1356,7 +1348,7 @@ impl FileUploader {
             .as_array()
             .ok_or_else(|| MewError::Other("No tokens array".into()))?;
         let token_info = tokens
-            .get(0)
+            .first()
             .ok_or_else(|| MewError::Other("No token".into()))?;
 
         Ok(CodeMaoTokenInfo {
@@ -1395,7 +1387,7 @@ impl FileUploader {
             .as_array()
             .ok_or_else(|| MewError::Other("No data array".into()))?;
         let token_data = data
-            .get(0)
+            .first()
             .ok_or_else(|| MewError::Other("No token data".into()))?;
 
         Ok(CodeGameTokenInfo {

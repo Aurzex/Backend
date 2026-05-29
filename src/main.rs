@@ -7,8 +7,8 @@ use tokio::main;
 #[tokio::main]
 async fn main() {
     auth::LoginBuilder::new()
-        .identity("fengji03")
-        .password("CODExhr1106.mao")
+        .identity("")
+        .password("")
         .role(auth::UserRole::Admin)
         .method(auth::LoginMethod::AdminPassword)
         .execute()

@@ -253,10 +253,10 @@ impl CommentQueryBuilder {
                             .fetch_reply_comments_gen(comment_id as i32, None);
                         while let Some(reply_result) = reply_iter.next_item().await {
                             let reply_val = reply_result?;
-                            if let Some(reply_obj) = reply_val.as_object() {
-                                if let Some(uid) = extract_reply_user_id(reply_obj) {
-                                    user_ids.push(uid.to_string());
-                                }
+                            if let Some(reply_obj) = reply_val.as_object()
+                                && let Some(uid) = extract_reply_user_id(reply_obj)
+                            {
+                                user_ids.push(uid.to_string());
                             }
                         }
                     } else if let Some(replies) = comment
@@ -299,15 +299,10 @@ impl CommentQueryBuilder {
                             .fetch_reply_comments_gen(comment_id as i32, None);
                         while let Some(reply_result) = reply_iter.next_item().await {
                             let reply_val = reply_result?;
-                            match reply_val.as_object() {
-                                Some(reply_obj) => {
-                                    if let Some(rid) =
-                                        reply_obj.get("id").and_then(|id| id.as_i64())
-                                    {
-                                        comment_ids.push(format!("{}.{}", comment_id, rid));
-                                    }
-                                }
-                                _ => (),
+                            if let Some(reply_obj) = reply_val.as_object()
+                                && let Some(rid) = reply_obj.get("id").and_then(|id| id.as_i64())
+                            {
+                                comment_ids.push(format!("{}.{}", comment_id, rid));
                             }
                         }
                     } else if let Some(replies) = comment
@@ -317,15 +312,10 @@ impl CommentQueryBuilder {
                         .and_then(|items| items.as_array())
                     {
                         for reply_val in replies {
-                            match reply_val.as_object() {
-                                Some(reply_obj) => {
-                                    if let Some(rid) =
-                                        reply_obj.get("id").and_then(|id| id.as_i64())
-                                    {
-                                        comment_ids.push(format!("{}.{}", comment_id, rid));
-                                    }
-                                }
-                                _ => (),
+                            if let Some(reply_obj) = reply_val.as_object()
+                                && let Some(rid) = reply_obj.get("id").and_then(|id| id.as_i64())
+                            {
+                                comment_ids.push(format!("{}.{}", comment_id, rid));
                             }
                         }
                     }
@@ -351,14 +341,14 @@ impl CommentQueryBuilder {
                         let mut replies_list = Vec::new();
                         while let Some(reply_result) = reply_iter.next_item().await {
                             let reply_val = reply_result?;
-                            if let Some(reply_obj) = reply_val.as_object() {
-                                if let Some(compact) = build_compact_reply(
+                            if let Some(reply_obj) = reply_val.as_object()
+                                && let Some(compact) = build_compact_reply(
                                     reply_obj,
                                     user_field,
                                     &extract_reply_user_id,
-                                ) {
-                                    replies_list.push(compact);
-                                }
+                                )
+                            {
+                                replies_list.push(compact);
                             }
                         }
                         replies_list
@@ -609,17 +599,17 @@ impl DataQuery {
 
         let mut all_comments = Vec::new();
         for work in &works {
-            if let Some(work_id) = work.get("work_id").and_then(|id| id.as_i64()) {
-                if let Ok(CommentsResult::DetailedComments(comments)) = self
+            if let Some(work_id) = work.get("work_id").and_then(|id| id.as_i64())
+                && let Ok(CommentsResult::DetailedComments(comments)) = self
                     .fetch_comments(
                         CommentSource::Work,
                         work_id as i32,
                         CommentQueryMode::Comments,
                         Some(20),
                     )
-                    .await {
-                    all_comments.extend(comments);
-                }
+                    .await
+            {
+                all_comments.extend(comments);
             }
         }
 

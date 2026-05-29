@@ -530,7 +530,7 @@ impl KittenWorkManager {
             "if_default_cover": if_default_cover,
             "version": version,
             "cover_type": cover_type.unwrap_or(1),
-            "user_labels": user_labels.unwrap_or_else(|| vec![]),
+            "user_labels": user_labels.unwrap_or_else(std::vec::Vec::new),
         });
 
         let response = self

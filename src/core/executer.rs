@@ -189,7 +189,7 @@ impl CommentProcessStrategy for BlacklistStrategy {
         let blacklist: HashSet<String> = params
             .get("blacklist")
             .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().map(|v| value_to_string(v)).collect())
+            .map(|arr| arr.iter().map(value_to_string).collect())
             .unwrap_or_default();
 
         if blacklist.is_empty() {
@@ -197,10 +197,7 @@ impl CommentProcessStrategy for BlacklistStrategy {
         }
 
         for_each_comment_reply(comments, |data, is_reply| {
-            let user_id = data
-                .get("user_id")
-                .map(|v| value_to_string(v))
-                .unwrap_or_default();
+            let user_id = data.get("user_id").map(value_to_string).unwrap_or_default();
             if blacklist.contains(&user_id) {
                 let identifier = build_identifier(source_type, item_id, data, is_reply);
                 let log_type = if is_reply { "回复" } else { "评论" };
@@ -244,10 +241,7 @@ impl CommentProcessStrategy for DuplicatesStrategy {
         let mut content_map: HashMap<(String, String), Vec<String>> = HashMap::new();
 
         for_each_comment_reply(comments, |data, is_reply| {
-            let user_id = data
-                .get("user_id")
-                .map(|v| value_to_string(v))
-                .unwrap_or_default();
+            let user_id = data.get("user_id").map(value_to_string).unwrap_or_default();
             let content = data
                 .get("content")
                 .and_then(|v| v.as_str())
@@ -331,10 +325,10 @@ impl CommentProcessor {
         target_lists: &mut HashMap<String, Vec<String>>,
         source_type: &str,
     ) {
-        if let Some(strategy) = self.factory.get(action_type) {
-            if let Some(comments) = config.get_comments(item_id) {
-                strategy.process(&comments, item_id, title, params, target_lists, source_type);
-            }
+        if let Some(strategy) = self.factory.get(action_type)
+            && let Some(comments) = config.get_comments(item_id)
+        {
+            strategy.process(&comments, item_id, title, params, target_lists, source_type);
         }
     }
 
@@ -471,7 +465,7 @@ impl Processor for OfficialCheckProcessor {
             let user_id = context
                 .item
                 .get(&config.user_id_field)
-                .and_then(|v| value_to_i64(v));
+                .and_then(value_to_i64);
 
             if let Some(uid) = user_id {
                 context.user_id = Some(uid);
@@ -521,21 +515,21 @@ impl DetailDisplayProcessor {
             .unwrap_or("未知");
         let author_id = item
             .get(&config.user_id_field)
-            .map(|v| value_to_string(v))
+            .map(value_to_string)
             .unwrap_or_default();
         println!("作者昵称: {}", author_nickname);
         println!("作者链接: {}/user/{}", base_url, author_id);
 
         let work_id = item
             .get(&config.source_id_field)
-            .map(|v| value_to_string(v))
+            .map(value_to_string)
             .unwrap_or_default();
         println!("作品链接: {}/work/{}", base_url, work_id);
 
-        if let Some(type_field) = &config.work_type_field {
-            if let Some(work_type) = item.get(type_field).and_then(|v| v.as_str()) {
-                println!("作品类型: {}", work_type);
-            }
+        if let Some(type_field) = &config.work_type_field
+            && let Some(work_type) = item.get(type_field).and_then(|v| v.as_str())
+        {
+            println!("作品类型: {}", work_type);
         }
 
         let reason = item
@@ -552,7 +546,7 @@ impl DetailDisplayProcessor {
 
         let created_at = item
             .get(&config.created_at_field)
-            .map(|v| timestamp_to_string(v))
+            .map(timestamp_to_string)
             .unwrap_or_default();
         println!("举报时间: {}", created_at);
     }
@@ -574,7 +568,7 @@ impl DetailDisplayProcessor {
             .unwrap_or("未知");
         let user_id = item
             .get(&config.user_id_field)
-            .map(|v| value_to_string(v))
+            .map(value_to_string)
             .unwrap_or_default();
         println!("被举报人昵称: {}", user_nickname);
         println!("被举报人链接: {}/user/{}", base_url, user_id);
@@ -585,7 +579,7 @@ impl DetailDisplayProcessor {
             .unwrap_or("未知");
         let studio_id = item
             .get(&config.source_id_field)
-            .map(|v| value_to_string(v))
+            .map(value_to_string)
             .unwrap_or_default();
         println!("工作室名称: {}", studio_name);
         println!("工作室链接: {}/work_shop/{}", base_url, studio_id);
@@ -598,7 +592,7 @@ impl DetailDisplayProcessor {
 
         let created_at = item
             .get(&config.created_at_field)
-            .map(|v| timestamp_to_string(v))
+            .map(timestamp_to_string)
             .unwrap_or_default();
         println!("举报时间: {}", created_at);
     }
@@ -613,33 +607,31 @@ impl DetailDisplayProcessor {
             .unwrap_or("未知");
         let author_id = item
             .get(&config.user_id_field)
-            .map(|v| value_to_string(v))
+            .map(value_to_string)
             .unwrap_or_default();
         println!("帖子作者: {}", author_nickname);
         println!("作者链接: {}/user/{}", base_url, author_id);
 
         let post_id_value = item
             .get(&config.source_id_field)
-            .map(|v| value_to_string(v))
+            .map(value_to_string)
             .unwrap_or_default();
         println!("帖子链接: {}/community/{}", base_url, post_id_value);
 
-        if let Ok(post_id) = post_id_value.parse::<i32>() {
-            if let Ok(details) = ForumDataFetcher::new()
+        if let Ok(post_id) = post_id_value.parse::<i32>()
+            && let Ok(details) = ForumDataFetcher::new()
                 .fetch_single_post_details(post_id)
                 .await
-            {
-                if let Some(content) = details.get("content").and_then(|v| v.as_str()) {
-                    let content_text = html_to_text(content);
-                    println!("内容: {}", truncate_chars(&content_text, 200));
-                }
-            }
+            && let Some(content) = details.get("content").and_then(|v| v.as_str())
+        {
+            let content_text = html_to_text(content);
+            println!("内容: {}", truncate_chars(&content_text, 200));
         }
 
-        if let Some(title_field) = &config.title_field {
-            if let Some(title) = item.get(title_field).and_then(|v| v.as_str()) {
-                println!("标题: {}", title);
-            }
+        if let Some(title_field) = &config.title_field
+            && let Some(title) = item.get(title_field).and_then(|v| v.as_str())
+        {
+            println!("标题: {}", title);
         }
 
         let reason = item
@@ -656,7 +648,7 @@ impl DetailDisplayProcessor {
 
         let created_at = item
             .get(&config.created_at_field)
-            .map(|v| timestamp_to_string(v))
+            .map(timestamp_to_string)
             .unwrap_or_default();
         println!("举报时间: {}", created_at);
     }
@@ -678,29 +670,27 @@ impl DetailDisplayProcessor {
             .unwrap_or("未知");
         let user_id = item
             .get(&config.user_id_field)
-            .map(|v| value_to_string(v))
+            .map(value_to_string)
             .unwrap_or_default();
         println!("被举报人昵称: {}", user_nickname);
         println!("被举报人链接: {}/user/{}", base_url, user_id);
 
         let post_id = item
             .get(&config.source_id_field)
-            .map(|v| value_to_string(v))
+            .map(value_to_string)
             .unwrap_or_default();
         println!("帖子链接: {}/community/{}", base_url, post_id);
 
-        if let Some(title_field) = &config.title_field {
-            if let Some(title) = item.get(title_field).and_then(|v| v.as_str()) {
-                println!("帖子标题: {}", title);
-            }
+        if let Some(title_field) = &config.title_field
+            && let Some(title) = item.get(title_field).and_then(|v| v.as_str())
+        {
+            println!("帖子标题: {}", title);
         }
-
-        if let Some(board_field) = &config.board_name_field {
-            if let Some(board) = item.get(board_field).and_then(|v| v.as_str()) {
-                println!("分区: {}", board);
-            }
+        if let Some(board_field) = &config.board_name_field
+            && let Some(board) = item.get(board_field).and_then(|v| v.as_str())
+        {
+            println!("分区: {}", board);
         }
-
         let reason = item
             .get(&config.reason_field)
             .and_then(|v| v.as_str())
@@ -709,7 +699,7 @@ impl DetailDisplayProcessor {
 
         let created_at = item
             .get(&config.created_at_field)
-            .map(|v| timestamp_to_string(v))
+            .map(timestamp_to_string)
             .unwrap_or_default();
         println!("举报时间: {}", created_at);
     }
@@ -738,7 +728,7 @@ impl DetailDisplayProcessor {
 
         let created_at = item
             .get(&config.created_at_field)
-            .map(|v| timestamp_to_string(v))
+            .map(timestamp_to_string)
             .unwrap_or_default();
         println!("举报时间: {}", created_at);
     }
@@ -812,7 +802,7 @@ impl ActionSelectionProcessor {
         let user_id = context
             .item
             .get(&config.user_id_field)
-            .and_then(|v| value_to_i64(v));
+            .and_then(value_to_i64);
 
         let checker = ViolationChecker::new();
         checker
@@ -862,14 +852,13 @@ impl Processor for ActionSelectionProcessor {
                         break;
                     }
                     "F" => {
-                        if let Some(config) = &context.config {
-                            if let Some(special_check) = config.special_check {
-                                if special_check(&context.item) {
-                                    self.check_violation(context).await?;
-                                    println!("违规检查完成, 请选择处理动作");
-                                    continue;
-                                }
-                            }
+                        if let Some(config) = &context.config
+                            && let Some(special_check) = config.special_check
+                            && special_check(&context.item)
+                        {
+                            self.check_violation(context).await?;
+                            println!("违规检查完成, 请选择处理动作");
+                            continue;
                         }
                         println!("该类型不支持检查违规操作");
                         continue;
@@ -1060,11 +1049,11 @@ impl ViolationChecker {
             violations.extend(dup.clone());
         }
 
-        if source_type == "forum" {
-            if let Some(uid) = user_id {
-                let spam_violations = self.check_spam_posts(uid, board_name).await?;
-                violations.extend(spam_violations);
-            }
+        if source_type == "forum"
+            && let Some(uid) = user_id
+        {
+            let spam_violations = self.check_spam_posts(uid, board_name).await?;
+            violations.extend(spam_violations);
         }
 
         let violations: HashSet<String> = violations.into_iter().collect();
@@ -1414,11 +1403,7 @@ impl ViolationChecker {
                 match source.as_str() {
                     "work" => {
                         CommentOperations::new()
-                            .execute_report_comment(
-                                source_id as i32,
-                                content_id as i32,
-                                reason_content,
-                            )
+                            .execute_report_comment(source_id as i32, content_id, reason_content)
                             .await
                             .map_err(|e| ProcessorError::External(Box::new(e)))?;
                     }
@@ -1738,14 +1723,12 @@ impl FileProcessor {
     ) -> Result<HashMap<PathBuf, String>, ProcessorError> {
         let mut results = HashMap::new();
         visit_dir(dir_path, &mut |entry| {
-            if entry.file_type().map_or(false, |ft| ft.is_file()) {
+            if entry.file_type().is_ok_and(|ft| ft.is_file()) {
                 let path = entry.path();
                 // 注意：这里不能直接 await，需要改为 async 闭包或使用 spawn
                 // 为保持简洁，保持同步错误处理，实际上传应改为 async
-                match std::fs::read_to_string(&path) {
-                    // 占位，真实实现应调用 handle_file_upload.await
-                    _ => {}
-                }
+                std::fs::read_to_string(&path);
+                {}
             }
             Ok(())
         })?;
@@ -1852,38 +1835,38 @@ impl ReportProcessor {
         let mut content_groups: HashMap<String, Vec<String>> = HashMap::new();
 
         for item in chunk {
-            if let Some(report_type) = self.infer_report_type(item) {
-                if let Some(config) = self.fetcher.registry.get_config(&report_type) {
-                    let record_id = item
-                        .get(&config.report_id_field)
-                        .map(|v| value_to_string(v))
-                        .unwrap_or_else(|| "0".to_string());
+            if let Some(report_type) = self.infer_report_type(item)
+                && let Some(config) = self.fetcher.registry.get_config(&report_type)
+            {
+                let record_id = item
+                    .get(&config.report_id_field)
+                    .map(value_to_string)
+                    .unwrap_or_else(|| "0".to_string());
 
-                    let item_id = item
-                        .get(&config.item_id_field)
-                        .map(|v| value_to_string(v))
-                        .unwrap_or_default();
+                let item_id = item
+                    .get(&config.item_id_field)
+                    .map(value_to_string)
+                    .unwrap_or_default();
 
-                    item_id_groups
-                        .entry(item_id.clone())
-                        .or_default()
-                        .push(record_id.clone());
+                item_id_groups
+                    .entry(item_id.clone())
+                    .or_default()
+                    .push(record_id.clone());
 
-                    let content_key = format!(
-                        "{}:{}:{}",
-                        item.get(&config.content_field)
-                            .map(|v| value_to_string(v))
-                            .unwrap_or_default(),
-                        report_type,
-                        item.get(&config.source_id_field)
-                            .map(|v| value_to_string(v))
-                            .unwrap_or_default()
-                    );
-                    content_groups
-                        .entry(content_key)
-                        .or_default()
-                        .push(record_id);
-                }
+                let content_key = format!(
+                    "{}:{}:{}",
+                    item.get(&config.content_field)
+                        .map(value_to_string)
+                        .unwrap_or_default(),
+                    report_type,
+                    item.get(&config.source_id_field)
+                        .map(value_to_string)
+                        .unwrap_or_default()
+                );
+                content_groups
+                    .entry(content_key)
+                    .or_default()
+                    .push(record_id);
             }
         }
 
@@ -1934,67 +1917,61 @@ impl ReportProcessor {
                 println!("应用保存的批量动作: {}", action);
                 for record_id in &group.record_ids {
                     if let Some(item) = chunk.iter().find(|v| self.record_id_matches(v, record_id))
+                        && let Some(report_type) = self.infer_report_type(item)
+                        && self
+                            .fetcher
+                            .registry
+                            .is_action_available(&report_type, &action)
                     {
-                        if let Some(report_type) = self.infer_report_type(item) {
-                            if self
-                                .fetcher
-                                .registry
-                                .is_action_available(&report_type, &action)
+                        self.apply_simple_action(item, &report_type, &action, admin_id)
+                            .await?;
+                        self.batch_manager
+                            .lock()
+                            .await
+                            .mark_record_processed(record_id);
+                    }
+                }
+            } else {
+                if let Some(first_record_id) = group.record_ids.first()
+                    && let Some(first_item) = chunk
+                        .iter()
+                        .find(|v| self.record_id_matches(v, first_record_id))
+                    && let Some(report_type) = self.infer_report_type(first_item)
+                {
+                    let config = self.fetcher.registry.get_config(&report_type).cloned();
+                    let mut context = ProcessingContext::new(
+                        first_record_id.clone(),
+                        report_type.clone(),
+                        first_item.clone(),
+                        admin_id,
+                    );
+                    context.is_batch_mode = false;
+                    context.config = config;
+
+                    let pipeline = ProcessingPipeline::create_default(
+                        self.pipeline_factory.clone(),
+                        self.batch_manager.clone(),
+                    );
+                    pipeline.execute(&mut context).await?;
+
+                    if let Some(action) = context.action {
+                        self.batch_manager.lock().await.save_batch_action(
+                            &group.group_type,
+                            &group.group_key,
+                            &action,
+                        );
+
+                        for record_id in &group.record_ids[1..] {
+                            if let Some(item) =
+                                chunk.iter().find(|v| self.record_id_matches(v, record_id))
+                                && let Some(rt) = self.infer_report_type(item)
                             {
-                                self.apply_simple_action(item, &report_type, &action, admin_id)
+                                self.apply_simple_action(item, &rt, &action, admin_id)
                                     .await?;
                                 self.batch_manager
                                     .lock()
                                     .await
                                     .mark_record_processed(record_id);
-                            }
-                        }
-                    }
-                }
-            } else {
-                if let Some(first_record_id) = group.record_ids.first() {
-                    if let Some(first_item) = chunk
-                        .iter()
-                        .find(|v| self.record_id_matches(v, first_record_id))
-                    {
-                        if let Some(report_type) = self.infer_report_type(first_item) {
-                            let config = self.fetcher.registry.get_config(&report_type).cloned();
-                            let mut context = ProcessingContext::new(
-                                first_record_id.clone(),
-                                report_type.clone(),
-                                first_item.clone(),
-                                admin_id,
-                            );
-                            context.is_batch_mode = false;
-                            context.config = config;
-
-                            let pipeline = ProcessingPipeline::create_default(
-                                self.pipeline_factory.clone(),
-                                self.batch_manager.clone(),
-                            );
-                            pipeline.execute(&mut context).await?;
-
-                            if let Some(action) = context.action {
-                                self.batch_manager.lock().await.save_batch_action(
-                                    &group.group_type,
-                                    &group.group_key,
-                                    &action,
-                                );
-
-                                for record_id in &group.record_ids[1..] {
-                                    if let Some(item) =
-                                        chunk.iter().find(|v| self.record_id_matches(v, record_id))
-                                    {
-                                        if let Some(rt) = self.infer_report_type(item) {
-                                            self.apply_simple_action(item, &rt, &action, admin_id)
-                                                .await?;
-                                            self.batch_manager
-                                                .lock()
-                                                .await
-                                                .mark_record_processed(record_id);
-                                        }
-                                    }
-                                }
                             }
                         }
                     }
@@ -2006,14 +1983,14 @@ impl ReportProcessor {
     }
 
     fn record_id_matches(&self, item: &Value, target_id: &str) -> bool {
-        if let Some(rt) = self.infer_report_type(item) {
-            if let Some(cfg) = self.fetcher.registry.get_config(&rt) {
-                return item
-                    .get(&cfg.report_id_field)
-                    .map(|v| value_to_string(&v))
-                    .map(|s| s == target_id)
-                    .unwrap_or(false);
-            }
+        if let Some(rt) = self.infer_report_type(item)
+            && let Some(cfg) = self.fetcher.registry.get_config(&rt)
+        {
+            return item
+                .get(&cfg.report_id_field)
+                .map(value_to_string)
+                .map(|s| s == target_id)
+                .unwrap_or(false);
         }
         false
     }
@@ -2034,7 +2011,7 @@ impl ReportProcessor {
             let record_id = config
                 .map(|c| {
                     item.get(&c.report_id_field)
-                        .map(|v| value_to_string(v))
+                        .map(value_to_string)
                         .unwrap_or_else(|| "0".to_string())
                 })
                 .unwrap_or_else(|| "0".to_string());
