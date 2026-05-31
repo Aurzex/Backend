@@ -851,7 +851,7 @@ impl EduStudentAccountIter {
             return None;
         }
 
-        while let Some(student_result) = self.student_iter.next_item().await {
+        if let Some(student_result) = self.student_iter.next_item().await {
             let student = match student_result {
                 Ok(s) => s,
                 Err(e) => return Some(Err(e)),
