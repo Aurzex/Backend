@@ -157,18 +157,13 @@ impl WsHandle {
         self.sender.send(msg).await?;
         Ok(())
     }
-
-    fn shutdown(self) {
-        // 向通道发送关闭信号，然后等待任务结束
-        // 注意：这里需要异步上下文，实际在 close() 时通过 runtime block_on 处理
-    }
 }
 
 // ==================== 主客户端 ====================
 pub struct CodeMaoChatClient {
     config: ChatConfig,
     token: String,
-    ws_handle: Option<WsHandle>,
+    ws_handle: std::sync::Mutex<Option<WsHandle>>, // ★ 改为 Mutex
     state: Arc<(std::sync::Mutex<ClientState>, Notify)>,
     global_callbacks: Arc<std::sync::Mutex<Vec<StreamCallback>>>,
     runtime: Runtime,
@@ -179,12 +174,12 @@ impl CodeMaoChatClient {
         ChatClientBuilder::new()
     }
 
-    /// 同步连接接口，保持原有用法不变
-    pub fn connect(&mut self) -> Result<(), ChatError> {
+    /// 同步连接接口，现在接受 &self
+    pub fn connect(&self) -> Result<(), ChatError> {
         self.runtime.block_on(self.async_connect())
     }
 
-    async fn async_connect(&mut self) -> Result<(), ChatError> {
+    async fn async_connect(&self) -> Result<(), ChatError> {
         let url = self.config.build_ws_url(&self.token)?;
         let state = Arc::clone(&self.state);
         let global_callbacks = Arc::clone(&self.global_callbacks);
@@ -202,14 +197,14 @@ impl CodeMaoChatClient {
             }
         });
 
-        self.ws_handle = Some(WsHandle { sender: tx, handle });
+        // 使用锁设置 ws_handle
+        *self.ws_handle.lock().unwrap() = Some(WsHandle { sender: tx, handle });
 
         // 等待连接建立和加入房间完成
         let timeout = Duration::from_secs(self.config.connect_timeout);
         let notify = &self.state.1;
         let start = tokio::time::Instant::now();
 
-        // 使用 Notify 异步等待
         loop {
             {
                 let guard = self.state.0.lock().unwrap();
@@ -226,7 +221,6 @@ impl CodeMaoChatClient {
                     return Err(ChatError::Timeout("加入房间超时".to_string()));
                 }
             }
-            // 等待通知，带超时
             tokio::select! {
                 _ = notify.notified() => {},
                 _ = tokio::time::sleep(Duration::from_millis(100)) => {},
@@ -244,7 +238,8 @@ impl CodeMaoChatClient {
     }
 
     async fn ws_send_async(&self, msg: String) -> Result<(), ChatError> {
-        if let Some(ref ws) = self.ws_handle {
+        let guard = self.ws_handle.lock().unwrap();
+        if let Some(ref ws) = *guard {
             ws.send(msg).await?;
             Ok(())
         } else {
@@ -252,7 +247,6 @@ impl CodeMaoChatClient {
         }
     }
 
-    // 内部同步包装（供同步上下文使用）
     fn ws_send(&self, msg: String) -> Result<(), ChatError> {
         self.runtime.block_on(self.ws_send_async(msg))
     }
@@ -274,22 +268,21 @@ impl CodeMaoChatClient {
         }
     }
 
-    pub fn close(&mut self) {
-        if let Some(ws) = self.ws_handle.take() {
-            // 通知写循环退出
+    pub fn close(&self) {
+        let mut guard = self.ws_handle.lock().unwrap();
+        if let Some(ws) = guard.take() {
+            drop(guard); // 释放锁，避免 block_on 中持有
             let _ = self
                 .runtime
                 .block_on(async { ws.sender.send("__CLOSE__".to_string()).await });
-            // 等待任务结束
             let _ = self.runtime.block_on(ws.handle);
         }
     }
 
     /// 便捷同步接口
     pub fn quick_chat(token: &str, message: &str) -> Result<String, ChatError> {
-        let mut client = CodeMaoChatClient::builder().token(token).build()?;
+        let client = CodeMaoChatClient::builder().token(token).build()?;
         client.connect()?;
-        // 短暂停确保初始化完成
         std::thread::sleep(Duration::from_secs(1));
         let response = client.send_message(message).send_and_wait()?;
         client.close();
@@ -299,7 +292,7 @@ impl CodeMaoChatClient {
 
 impl Drop for CodeMaoChatClient {
     fn drop(&mut self) {
-        self.close();
+        self.close(); // 现在 close 接受 &self
     }
 }
 
@@ -374,7 +367,6 @@ impl<'a> MessageRequestBuilder<'a> {
     async fn send_and_wait_async(self) -> Result<String, ChatError> {
         self.send_internal_async().await?;
 
-        // 注册临时回调
         let callbacks = self.callbacks;
         let original_len = if !callbacks.is_empty() {
             let mut guard = self.client.global_callbacks.lock().unwrap();
@@ -386,12 +378,11 @@ impl<'a> MessageRequestBuilder<'a> {
         };
 
         let timeout = Duration::from_secs(self.timeout);
-        let state_tuple = &*self.client.state; // 类型是 &(Mutex<ClientState>, Notify)
+        let state_tuple = &*self.client.state;
         let lock = &state_tuple.0;
         let notify = &state_tuple.1;
         let start = tokio::time::Instant::now();
 
-        // 异步等待回复开始
         loop {
             let mut state = lock.lock().unwrap();
             if state.is_receiving_response || state.response_complete {
@@ -407,12 +398,10 @@ impl<'a> MessageRequestBuilder<'a> {
             }
         }
 
-        // 等待回复完成
         loop {
             let mut state = lock.lock().unwrap();
             if state.response_complete {
                 let result = state.current_response.clone();
-                // 清理回调
                 if let Some(len) = original_len {
                     drop(state);
                     let mut guard = self.client.global_callbacks.lock().unwrap();
@@ -564,7 +553,7 @@ impl ChatClientBuilder {
         Ok(CodeMaoChatClient {
             config: self.config,
             token,
-            ws_handle: None,
+            ws_handle: std::sync::Mutex::new(None), // ★ 初始为空
             state,
             global_callbacks: Arc::new(std::sync::Mutex::new(self.callbacks)),
             runtime,
@@ -581,10 +570,7 @@ async fn run_ws_loop(
     callbacks: Arc<std::sync::Mutex<Vec<StreamCallback>>>,
     verbose: bool,
 ) -> Result<(), ChatError> {
-    // ★ 核心：使用 wreq 创建 Client，并启用浏览器指纹模拟
-    let client = Client::builder()
-        .emulation(Emulation::Chrome137) // 模拟 Chrome 140 的 TLS/JA3/HTTP2 指纹
-        .build()?;
+    let client = Client::builder().emulation(Emulation::Chrome137).build()?;
 
     let ws_response = client
         .websocket(url.as_str())
@@ -602,27 +588,23 @@ async fn run_ws_loop(
 
     let (mut ws_sink, mut ws_stream) = ws_response.into_websocket().await?.split();
 
-    // 标记连接已建立
     {
         let mut st = state.0.lock().unwrap();
         st.connected = true;
         state.1.notify_one();
     }
 
-    // 发送 engine.io open 包 "40"
     ws_sink
         .send(wreq::Message::text("40"))
         .await
         .map_err(|e| ChatError::WebSocket(e.to_string()))?;
 
-    // 延迟 1 秒发送 join
     let sender_for_join = reader_tx.clone();
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_secs(1)).await;
         let _ = sender_for_join.send(r#"42 ["join"]"#.to_string()).await;
     });
 
-    // 写任务：从 rx 接收消息并发送到 WebSocket
     let write_handle = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
             if msg == "__CLOSE__" {
@@ -641,7 +623,6 @@ async fn run_ws_loop(
         let _ = ws_sink.close().await;
     });
 
-    // 读循环
     while let Some(msg) = ws_stream.next().await {
         match msg {
             Ok(wreq::Message::Text(text)) => {
@@ -674,6 +655,7 @@ async fn run_ws_loop(
     Ok(())
 }
 
+// ★ 重构后的消息处理：所有 .await 均在释放状态锁之后执行
 async fn handle_message(
     text: &str,
     state: &(std::sync::Mutex<ClientState>, Notify),
@@ -682,30 +664,38 @@ async fn handle_message(
     sender: &mpsc::Sender<String>,
 ) -> bool {
     let (lock, notify) = state;
-    let mut state_guard = lock.lock().unwrap();
 
-    if verbose && !text.starts_with('3') {
-        println!("[RECV] {}", text);
-    }
-
-    if text.starts_with('0') {
-        if verbose {
-            println!("收到服务器 open 包");
-        }
-    } else if text == "40" {
-        if verbose {
-            println!("Socket.IO 握手确认");
-        }
-    } else if text == "2" {
+    // Ping 响应不需要状态锁
+    if text == "2" {
         if verbose {
             println!("收到 PING，回复 PONG");
         }
         let _ = sender.send("3".to_string()).await;
-    } else if text == "3" {
+        return true;
+    }
+    if text == "3" {
         if verbose {
             println!("收到 PONG");
         }
-    } else if text.starts_with("42") {
+        return true;
+    }
+
+    // 处理 Engine.IO / Socket.IO 控制帧
+    if text.starts_with('0') {
+        if verbose {
+            println!("收到服务器 open 包");
+        }
+        return true;
+    }
+    if text == "40" {
+        if verbose {
+            println!("Socket.IO 握手确认");
+        }
+        return true;
+    }
+
+    // 处理 42 消息体
+    if text.starts_with("42") {
         let payload = &text[2..];
         if let Ok(arr) = serde_json::from_str::<Vec<Value>>(payload) {
             if arr.len() >= 2 {
@@ -714,6 +704,7 @@ async fn handle_message(
 
                 match event_name {
                     "on_connect_ack" => {
+                        let mut guard = lock.lock().unwrap();
                         if let Some(code) = event_data.get("code").and_then(|v| v.as_i64()) {
                             if code == 1 {
                                 if verbose {
@@ -722,44 +713,60 @@ async fn handle_message(
                                 if let Some(data) = event_data.get("data") {
                                     if let Some(obj) = data.as_object() {
                                         for (k, v) in obj {
-                                            state_guard.user_info.insert(k.clone(), v.clone());
+                                            guard.user_info.insert(k.clone(), v.clone());
                                         }
                                     }
                                 }
                             }
                         }
                     }
-                    "join_ack" => {
-                        if let Some(code) = event_data.get("code").and_then(|v| v.as_i64()) {
-                            if code == 1 {
-                                if verbose {
-                                    println!("加入房间成功");
-                                }
-                                if let Some(data) = event_data.get("data") {
-                                    state_guard.user_id =
-                                        data.get("user_id").and_then(|v| v.as_u64());
-                                    state_guard.search_session = data
-                                        .get("search_session")
-                                        .and_then(|v| v.as_str())
-                                        .map(String::from);
-                                }
-                                state_guard.joined = true;
-                                notify.notify_one();
 
-                                let sender_clone = sender.clone();
-                                let _ = sender_clone
-                                    .send(
+                    "join_ack" => {
+                        // 先获取需要发送的消息，然后释放锁再 await
+                        let (should_send, msg1, msg2) = {
+                            let mut guard = lock.lock().unwrap();
+                            let mut joined = false;
+                            let mut send1 = None;
+                            let mut send2 = None;
+                            if let Some(code) = event_data.get("code").and_then(|v| v.as_i64()) {
+                                if code == 1 {
+                                    if verbose {
+                                        println!("加入房间成功");
+                                    }
+                                    if let Some(data) = event_data.get("data") {
+                                        guard.user_id =
+                                            data.get("user_id").and_then(|v| v.as_u64());
+                                        guard.search_session = data
+                                            .get("search_session")
+                                            .and_then(|v| v.as_str())
+                                            .map(String::from);
+                                    }
+                                    guard.joined = true;
+                                    notify.notify_one();
+                                    joined = true;
+                                    send1 = Some(
                                         r#"42 ["preset_chat_message",{"turn_count":5,"system_content_enum":"default"}]"#
                                             .to_string(),
-                                    )
-                                    .await;
-                                let _ = sender_clone
-                                    .send(r#"42 ["get_text2Img_remaining_times"]"#.to_string())
-                                    .await;
+                                    );
+                                    send2 =
+                                        Some(r#"42 ["get_text2Img_remaining_times"]"#.to_string());
+                                }
+                            }
+                            (joined, send1, send2)
+                        }; // 锁在此释放
+
+                        if should_send {
+                            if let Some(m1) = msg1 {
+                                let _ = sender.send(m1).await;
+                            }
+                            if let Some(m2) = msg2 {
+                                let _ = sender.send(m2).await;
                             }
                         }
                     }
+
                     "chat_ack" => {
+                        // 处理聊天回复
                         if let Some(code) = event_data.get("code").and_then(|v| v.as_i64()) {
                             if code == 1 {
                                 if let Some(data) = event_data.get("data") {
@@ -775,12 +782,14 @@ async fn handle_message(
                                             if verbose {
                                                 println!("[回复开始]");
                                             }
-                                            state_guard.is_receiving_response = true;
-                                            state_guard.current_response.clear();
-                                            state_guard.response_complete = false;
-                                            drop(state_guard);
+                                            {
+                                                let mut guard = lock.lock().unwrap();
+                                                guard.is_receiving_response = true;
+                                                guard.current_response.clear();
+                                                guard.response_complete = false;
+                                            } // 锁释放
                                             notify_callbacks(callbacks, "", StreamEventType::Start);
-                                            state_guard = lock.lock().unwrap();
+                                            return true;
                                         }
                                         "stream_output_content" => {
                                             if verbose {
@@ -788,45 +797,47 @@ async fn handle_message(
                                                 let _ =
                                                     std::io::Write::flush(&mut std::io::stdout());
                                             }
-                                            state_guard.current_response.push_str(content);
-                                            drop(state_guard);
+                                            {
+                                                let mut guard = lock.lock().unwrap();
+                                                guard.current_response.push_str(content);
+                                            }
                                             notify_callbacks(
                                                 callbacks,
                                                 content,
                                                 StreamEventType::Text,
                                             );
-                                            state_guard = lock.lock().unwrap();
+                                            return true;
                                         }
                                         "stream_output_end" => {
                                             if verbose {
                                                 println!("\n[回复结束]");
                                             }
-                                            state_guard.is_receiving_response = false;
-                                            state_guard.response_complete = true;
-
-                                            let final_response =
-                                                state_guard.current_response.clone();
-                                            if !final_response.is_empty() {
-                                                let mut entry = HashMap::new();
-                                                entry.insert(
-                                                    "role".to_string(),
-                                                    "assistant".to_string(),
-                                                );
-                                                entry.insert(
-                                                    "content".to_string(),
-                                                    final_response.clone(),
-                                                );
-                                                state_guard.conversation_history.push(entry);
+                                            let final_response;
+                                            {
+                                                let mut guard = lock.lock().unwrap();
+                                                guard.is_receiving_response = false;
+                                                guard.response_complete = true;
+                                                final_response = guard.current_response.clone();
+                                                if !final_response.is_empty() {
+                                                    let mut entry = HashMap::new();
+                                                    entry.insert(
+                                                        "role".to_string(),
+                                                        "assistant".to_string(),
+                                                    );
+                                                    entry.insert(
+                                                        "content".to_string(),
+                                                        final_response.clone(),
+                                                    );
+                                                    guard.conversation_history.push(entry);
+                                                }
+                                                notify.notify_one();
                                             }
-
-                                            notify.notify_one();
-                                            drop(state_guard);
                                             notify_callbacks(
                                                 callbacks,
                                                 &final_response,
                                                 StreamEventType::End,
                                             );
-                                            state_guard = lock.lock().unwrap();
+                                            return true;
                                         }
                                         _ => {}
                                     }
@@ -838,14 +849,16 @@ async fn handle_message(
                                     if verbose {
                                         eprintln!("聊天错误: {} (code: {})", code_msg, code);
                                     }
-                                    state_guard.is_receiving_response = false;
-                                    state_guard.response_complete = true;
-                                    state_guard.current_response = format!("错误: {}", code_msg);
+                                    let mut guard = lock.lock().unwrap();
+                                    guard.is_receiving_response = false;
+                                    guard.response_complete = true;
+                                    guard.current_response = format!("错误: {}", code_msg);
                                     notify.notify_one();
                                 }
                             }
                         }
                     }
+
                     _ => {
                         if verbose {
                             println!("[未处理事件] {}: {}", event_name, event_data);

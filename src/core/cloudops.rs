@@ -1,9 +1,8 @@
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
 use std::collections::HashMap;
-use std::sync::{Arc, Condvar, Mutex, RwLock};
-use std::time::{Duration, Instant};
-use tokio::runtime::Runtime;
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::Duration;
 use tokio::sync::Notify as AsyncNotify;
 use wreq::Client;
 use wreq_util::Emulation;
@@ -447,7 +446,8 @@ enum Command {
 
 // ==================== 内部共享状态 ====================
 struct CloudSharedState {
-    data_ready: (Mutex<bool>, Condvar),
+    // ★ 用 AsyncNotify 替换 Condvar
+    data_ready: (Mutex<bool>, AsyncNotify),
     online_users: RwLock<u32>,
     private_variables: RwLock<HashMap<String, PrivateCloudVariable>>,
     public_variables: RwLock<HashMap<String, PublicCloudVariable>>,
@@ -464,7 +464,7 @@ pub struct CloudConnection {
     editor: EditorType,
     authenticator: CloudAuthenticator,
     state: Arc<CloudSharedState>,
-    runtime: Runtime,
+    // ★ 移除 runtime 字段
     writer_tx: tokio::sync::mpsc::Sender<String>,
     _tasks: Vec<tokio::task::JoinHandle<()>>,
     connected: Arc<(Mutex<bool>, AsyncNotify)>,
@@ -494,9 +494,9 @@ impl CloudConnection {
         let ws_response = req.send().await?;
         let (mut ws_sink, mut ws_stream) = ws_response.into_websocket().await?.split();
 
-        // 创建状态
+        // 创建状态，注意 data_ready 现在用 AsyncNotify
         let state = Arc::new(CloudSharedState {
-            data_ready: (Mutex::new(false), Condvar::new()),
+            data_ready: (Mutex::new(false), AsyncNotify::new()),
             online_users: RwLock::new(0),
             private_variables: RwLock::new(HashMap::new()),
             public_variables: RwLock::new(HashMap::new()),
@@ -509,7 +509,7 @@ impl CloudConnection {
 
         let connected = Arc::new((Mutex::new(true), AsyncNotify::new()));
 
-        // 创建消息通道：writer_tx -> writer 任务 -> ws_sink
+        // 创建消息通道
         let (writer_tx, mut writer_rx) = tokio::sync::mpsc::channel::<String>(256);
 
         // writer 任务
@@ -546,7 +546,7 @@ impl CloudConnection {
             reader_connected.1.notify_one();
         });
 
-        // upload 循环任务
+        // upload 循环任务（★ 已修复 MutexGuard 跨越 .await）
         let upload_state = state.clone();
         let upload_tx = writer_tx.clone();
         let upload_handle = tokio::spawn(async move {
@@ -557,13 +557,14 @@ impl CloudConnection {
                     break;
                 }
 
+                // ★ 将锁的获取放入独立作用域，确保在 .await 前释放
                 let commands: Vec<Command> = {
                     let mut q = upload_state.command_queue.lock().unwrap();
                     if q.is_empty() {
-                        continue; // continue 会离开外层 loop，锁在此作用域结束时自动释放
+                        continue;
                     }
                     q.drain(..).collect()
-                }; // 锁在此处自动释放
+                }; // 锁在此释放
 
                 let mut private_updates = Vec::new();
                 let mut public_updates = Vec::new();
@@ -608,64 +609,57 @@ impl CloudConnection {
             .await
             .map_err(|_| CloudError::WebSocket("Failed to send init message".into()))?;
 
-        let runtime = Runtime::new().map_err(|e| CloudError::Other(e.to_string()))?;
-
-        let conn = CloudConnection {
+        Ok(CloudConnection {
             work_id,
             editor,
             authenticator,
             state,
-            runtime,
             writer_tx,
             _tasks: vec![writer_handle, reader_handle, upload_handle],
             connected,
-        };
-
-        Ok(conn)
+        })
     }
 
-    // ---------- 内部消息发送 ----------
+    // ---------- 内部消息发送（现在全部异步） ----------
 
-    fn send_message_async(&self, msg_type: SendMessageType, data: Value) -> Result<(), CloudError> {
+    async fn send_message_async(
+        &self,
+        msg_type: SendMessageType,
+        data: Value,
+    ) -> Result<(), CloudError> {
         let payload = json!([msg_type.as_str(), data]);
         let msg = format!("42{}", serde_json::to_string(&payload)?);
-        let tx = self.writer_tx.clone();
-        self.runtime.block_on(async {
-            tx.send(msg)
-                .await
-                .map_err(|_| CloudError::WebSocket("Send channel closed".into()))
-        })
+        self.writer_tx
+            .send(msg)
+            .await
+            .map_err(|_| CloudError::WebSocket("Send channel closed".into()))
     }
 
-    fn send_raw(&self, msg: String) -> Result<(), CloudError> {
-        let tx = self.writer_tx.clone();
-        self.runtime.block_on(async {
-            tx.send(msg)
-                .await
-                .map_err(|_| CloudError::WebSocket("Send channel closed".into()))
-        })
+    async fn send_raw(&self, msg: String) -> Result<(), CloudError> {
+        self.writer_tx
+            .send(msg)
+            .await
+            .map_err(|_| CloudError::WebSocket("Send channel closed".into()))
     }
 
     // ---------- 公共 API ----------
 
-    /// 等待数据就绪（阻塞式）
-    pub fn wait_for_data(&self, timeout: Duration) -> Result<(), CloudError> {
-        let (lock, cvar) = &self.state.data_ready;
-        let mut ready = lock.lock().unwrap();
-        let deadline = Instant::now() + timeout;
-        while !*ready {
-            let now = Instant::now();
-            if now >= deadline {
+    /// 等待数据就绪（异步）
+    pub async fn wait_for_data(&self, timeout: Duration) -> Result<(), CloudError> {
+        let (lock, notify) = &self.state.data_ready;
+        let start = tokio::time::Instant::now();
+        loop {
+            if *lock.lock().unwrap() {
+                return Ok(());
+            }
+            if start.elapsed() >= timeout {
                 return Err(CloudError::Timeout);
             }
-            let remaining = deadline - now;
-            let (result, timeout_res) = cvar.wait_timeout(ready, remaining).unwrap();
-            ready = result;
-            if timeout_res.timed_out() {
-                return Err(CloudError::Timeout);
+            tokio::select! {
+                _ = notify.notified() => {},
+                _ = tokio::time::sleep(Duration::from_millis(100)) => {},
             }
         }
-        Ok(())
     }
 
     /// 是否连接
@@ -777,7 +771,15 @@ impl CloudConnection {
                 .push(cvid.clone());
             drop(vars);
             let data = json!({"cvid": cvid, "limit": limit, "order_type": order});
-            self.send_message_async(SendMessageType::GetPrivateVariableRankingList, data)?;
+            // 注意：这里需要异步发送，但当前方法是同步的，为了保持 API 兼容，我们使用 tokio::task::spawn 发送？
+            // 更好的办法是改为 async，这里暂时用 spawn 来避免阻塞，但需要确保运行时仍在。
+            // 由于整个 CloudConnection 已去除自己的 Runtime，我们需要调用者确保在 Tokio 上下文中。
+            let writer = self.writer_tx.clone();
+            tokio::spawn(async move {
+                let payload = json!(["list_ranking", data]);
+                let msg = format!("42{}", serde_json::to_string(&payload).unwrap());
+                let _ = writer.send(msg).await;
+            });
             Ok(self)
         } else {
             Err(CloudError::InvalidVariableType)
@@ -1082,14 +1084,13 @@ impl CloudConnection {
 
     // ---------- 清理 ----------
 
-    /// 关闭连接
-    pub fn close(mut self) {
+    /// 关闭连接（异步）
+    pub async fn close(mut self) {
         *self.state.shutdown.lock().unwrap() = true;
-        self.runtime.block_on(async {
-            for task in self._tasks.drain(..) {
-                task.abort();
-            }
-        });
+        // 中止所有后台任务
+        for task in self._tasks.drain(..) {
+            task.abort();
+        }
     }
 }
 
@@ -1186,9 +1187,10 @@ impl CloudConnection {
                                     }
                                 }
                             }
-                            let (lock, cvar) = &state.data_ready;
+                            // ★ 设置数据就绪，使用 AsyncNotify
+                            let (lock, notify) = &state.data_ready;
                             *lock.lock().unwrap() = true;
-                            cvar.notify_all();
+                            notify.notify_one();
                         }
                         ReceiveMessageType::UpdatePrivateVariable => {
                             if let Some(obj) = parsed.as_object() {
@@ -1417,6 +1419,7 @@ impl CloudConnectionBuilder {
         self
     }
 
+    /// ★ 现在完全是异步的，不再创建内部 Runtime
     pub async fn connect(self) -> Result<CloudConnection, CloudError> {
         let mut authenticator = CloudAuthenticator::new(self.auth_token);
         let (auth_type, stag) = self.editor.as_param();
@@ -1433,22 +1436,24 @@ impl CloudConnectionBuilder {
 
         let auth_cookie = authenticator.authorization_token();
 
-        let rt = Runtime::new().map_err(|e| CloudError::Other(e.to_string()))?;
-        let mut conn = rt.block_on(CloudConnection::new_async(
+        let conn = CloudConnection::new_async(
             self.work_id,
             self.editor,
             authenticator,
             &url_str,
             &device_auth_str,
             auth_cookie,
-        ))?;
+        )
+        .await?;
 
-        // 发送 join 消息获取数据
-        conn.send_message_async(SendMessageType::Join, json!({"session_id": conn.work_id}))?;
-        conn.send_message_async(SendMessageType::GetAllData, Value::Null)?;
+        // 发送 join 和 get 数据
+        conn.send_message_async(SendMessageType::Join, json!({"session_id": conn.work_id}))
+            .await?;
+        conn.send_message_async(SendMessageType::GetAllData, Value::Null)
+            .await?;
 
-        // 等待数据就绪
-        conn.wait_for_data(Duration::from_secs(30))?;
+        // 等待数据就绪（现在也是异步的）
+        conn.wait_for_data(Duration::from_secs(30)).await?;
 
         Ok(conn)
     }

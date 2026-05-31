@@ -1341,7 +1341,7 @@ impl ViolationChecker {
     }
 
     async fn login_student(&self, username: &str, password: &str) -> Result<(), ProcessorError> {
-        crate::auth::LoginBuilder::new()
+        crate::api::auth::LoginBuilder::new()
             .identity(username)
             .password(password)
             .status(crate::api::auth::AccountStatus::Edu)
