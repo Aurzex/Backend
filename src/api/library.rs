@@ -1,5 +1,5 @@
 use crate::utils::acquire::{
-    CodeMaoClient, HTTPStatus, HttpMethod, KittyRequestBuilder, MewError, MewResult,
+    CodeMaoClient, HTTPStatus, HttpMethod, KittyRequestBuilder, MewResult,
 };
 use serde_json::{Value, json};
 

@@ -1970,7 +1970,7 @@ impl ReportProcessor {
             let record_id = config
                 .map(|c| {
                     item.get(&c.report_id_field)
-                        .map(|v| value_to_string(v))
+                        .map(value_to_string)
                         .unwrap_or_else(|| "0".to_string())
                 })
                 .unwrap_or_else(|| "0".to_string());

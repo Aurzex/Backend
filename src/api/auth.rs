@@ -1,8 +1,6 @@
-use crate::utils::acquire::{
-    BaseKey, Catsona, CodeMaoClient, HttpMethod, KittyRequestBuilder, MewError, MewResult,
-};
+use crate::utils::acquire::{BaseKey, Catsona, CodeMaoClient, HttpMethod, MewError, MewResult};
 use crate::utils::data::{CodeMaoFile, FileContent, PathConfig};
-use rand::{Rng, RngExt};
+use rand::RngExt;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 

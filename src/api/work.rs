@@ -1,5 +1,5 @@
 use crate::utils::acquire::{
-    BaseKey, CodeMaoClient, HTTPStatus, HttpMethod, KittyRequestBuilder, MewError, MewResult,
+    BaseKey, CodeMaoClient, HTTPStatus, HttpMethod, MewResult,
     PaginatedIter, PaginationMethod,
 };
 use serde_json::{Value, json};
@@ -527,7 +527,7 @@ impl KittenWorkManager {
             "if_default_cover": if_default_cover,
             "version": version,
             "cover_type": cover_type.unwrap_or(1),
-            "user_labels": user_labels.unwrap_or_else(std::vec::Vec::new),
+            "user_labels": user_labels.unwrap_or_default(),
         });
 
         let response = self
@@ -858,7 +858,7 @@ impl WoodWorkManager {
                 "isTurnOnDebug": is_turn_on_debug.unwrap_or(true),
                 "editorMode": editor_mode.unwrap_or("code"),
             },
-            "files": files.unwrap_or_else(|| vec![]),
+            "files": files.unwrap_or_default(),
             "preview_url": preview_url.unwrap_or(""),
             "preview_code": preview_code.unwrap_or(""),
         });
@@ -926,7 +926,7 @@ impl WoodWorkManager {
         let mut files = project["files"]
             .as_array()
             .cloned()
-            .unwrap_or_else(|| vec![]);
+            .unwrap_or_else(std::vec::Vec::new);
 
         let file_data = json!({
             "work_id": work_id,
