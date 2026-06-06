@@ -31,8 +31,8 @@ impl SelectMethod {
 
     fn to_http_method(&self) -> HttpMethod {
         match self {
-            SelectMethod::Post => HttpMethod::POST,
-            SelectMethod::Delete => HttpMethod::DELETE,
+            SelectMethod::Post => HttpMethod::Post,
+            SelectMethod::Delete => HttpMethod::Delete,
         }
     }
 }
@@ -195,7 +195,7 @@ impl BaseWorkOperations {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, &endpoint, None)
+            .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(json!({}))
             .send()?;
 
@@ -208,7 +208,7 @@ impl BaseWorkOperations {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, &endpoint, None)
+            .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(json!({}))
             .send()?;
 
@@ -230,7 +230,7 @@ impl BaseWorkOperations {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, "/nemo/v2/report/work", None)
+            .build_request(HttpMethod::Post, "/nemo/v2/report/work", None)
             .with_payload(data)
             .send()?;
 
@@ -250,7 +250,7 @@ impl BaseWorkOperations {
 
         let mut builder = self
             .client
-            .build_request(HttpMethod::PATCH, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Patch, &endpoint, Some(BaseKey::Creation))
             .with_param("TIME", timestamp.to_string())
             .with_param("is_check_name", is_check_name.to_string())
             .with_param("name", name);
@@ -304,7 +304,7 @@ impl CommentOperations {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, &endpoint, None)
+            .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(payload)
             .send()?;
 
@@ -336,7 +336,7 @@ impl CommentOperations {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, &endpoint, None)
+            .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(data)
             .send()?;
 
@@ -356,7 +356,7 @@ impl CommentOperations {
 
         let response = self
             .client
-            .build_request(HttpMethod::DELETE, &endpoint, None)
+            .build_request(HttpMethod::Delete, &endpoint, None)
             .send()?;
 
         Ok(response.status() == HTTPStatus::NoContent as u16)
@@ -420,7 +420,7 @@ impl CommentOperations {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, &endpoint, None)
+            .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(data)
             .send()?;
 
@@ -488,7 +488,7 @@ impl KittenWorkManager {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, "/kitten/r2/work", Some(BaseKey::Creation))
+            .build_request(HttpMethod::Post, "/kitten/r2/work", Some(BaseKey::Creation))
             .with_payload(payload)
             .send()?;
 
@@ -531,7 +531,7 @@ impl KittenWorkManager {
 
         let response = self
             .client
-            .build_request(HttpMethod::PUT, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Put, &endpoint, Some(BaseKey::Creation))
             .with_payload(payload)
             .send()?;
 
@@ -544,7 +544,7 @@ impl KittenWorkManager {
 
         let response = self
             .client
-            .build_request(HttpMethod::DELETE, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Delete, &endpoint, Some(BaseKey::Creation))
             .send()?;
 
         Ok(response.status() == HTTPStatus::Ok as u16)
@@ -556,7 +556,7 @@ impl KittenWorkManager {
 
         let response = self
             .client
-            .build_request(HttpMethod::PATCH, &endpoint, None)
+            .build_request(HttpMethod::Patch, &endpoint, None)
             .with_payload(json!({}))
             .send()?;
 
@@ -569,7 +569,7 @@ impl KittenWorkManager {
 
         let response = self
             .client
-            .build_request(HttpMethod::PUT, &endpoint, None)
+            .build_request(HttpMethod::Put, &endpoint, None)
             .with_payload(json!({}))
             .send()?;
 
@@ -581,7 +581,7 @@ impl KittenWorkManager {
         let response = self
             .client
             .build_request(
-                HttpMethod::DELETE,
+                HttpMethod::Delete,
                 "/work/user/works/permanently",
                 Some(BaseKey::Creation),
             )
@@ -595,7 +595,7 @@ impl KittenWorkManager {
         let response = self
             .client
             .build_request(
-                HttpMethod::POST,
+                HttpMethod::Post,
                 "/kitten/work/translate",
                 Some(BaseKey::Creation),
             )
@@ -657,7 +657,7 @@ impl NekoWorkManager {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, "/neko/works", Some(BaseKey::Creation))
+            .build_request(HttpMethod::Post, "/neko/works", Some(BaseKey::Creation))
             .with_payload(payload)
             .send()?;
 
@@ -696,7 +696,7 @@ impl NekoWorkManager {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Post, &endpoint, Some(BaseKey::Creation))
             .with_payload(payload)
             .send()?;
 
@@ -710,7 +710,7 @@ impl NekoWorkManager {
 
         let response = self
             .client
-            .build_request(HttpMethod::DELETE, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Delete, &endpoint, Some(BaseKey::Creation))
             .with_param("TIME", timestamp.to_string())
             .with_param("force", force.to_string())
             .send()?;
@@ -724,7 +724,7 @@ impl NekoWorkManager {
 
         let response = self
             .client
-            .build_request(HttpMethod::PUT, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Put, &endpoint, Some(BaseKey::Creation))
             .send()?;
 
         Ok(response.status() == HTTPStatus::Ok as u16)
@@ -735,7 +735,7 @@ impl NekoWorkManager {
         let response = self
             .client
             .build_request(
-                HttpMethod::DELETE,
+                HttpMethod::Delete,
                 "/neko/works/permanently",
                 Some(BaseKey::Creation),
             )
@@ -750,7 +750,7 @@ impl NekoWorkManager {
 
         let response = self
             .client
-            .build_request(HttpMethod::PATCH, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Patch, &endpoint, Some(BaseKey::Creation))
             .send()?;
 
         Ok(response.status() == HTTPStatus::Ok as u16)
@@ -761,7 +761,7 @@ impl NekoWorkManager {
         let response = self
             .client
             .build_request(
-                HttpMethod::POST,
+                HttpMethod::Post,
                 "/neko/works/teacher",
                 Some(BaseKey::Creation),
             )
@@ -778,7 +778,7 @@ impl NekoWorkManager {
         let response = self
             .client
             .build_request(
-                HttpMethod::POST,
+                HttpMethod::Post,
                 "/neko/works/copy",
                 Some(BaseKey::Creation),
             )
@@ -794,7 +794,7 @@ impl NekoWorkManager {
 
         let response = self
             .client
-            .build_request(HttpMethod::PUT, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Put, &endpoint, Some(BaseKey::Creation))
             .send()?;
 
         self.client.response_to_json(response)
@@ -825,7 +825,7 @@ impl WoodWorkManager {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/wood/project", Some(BaseKey::Creation))
+            .build_request(HttpMethod::Get, "/wood/project", Some(BaseKey::Creation))
             .with_param("TIME", timestamp.to_string())
             .with_param("work_id", work_id.to_string())
             .send()?;
@@ -864,7 +864,7 @@ impl WoodWorkManager {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, "/wood/project", Some(BaseKey::Creation))
+            .build_request(HttpMethod::Post, "/wood/project", Some(BaseKey::Creation))
             .with_payload(payload)
             .send()?;
 
@@ -877,7 +877,7 @@ impl WoodWorkManager {
 
         let response = self
             .client
-            .build_request(HttpMethod::DELETE, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Delete, &endpoint, Some(BaseKey::Creation))
             .send()?;
 
         Ok(response.status() == HTTPStatus::Ok as u16)
@@ -896,7 +896,7 @@ impl WoodWorkManager {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/wood/user/project/search",
                 Some(BaseKey::Creation),
             )
@@ -981,7 +981,7 @@ impl CocoWorkManager {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/coconut/primary-course/list",
                 Some(BaseKey::Creation),
             )
@@ -1021,7 +1021,7 @@ impl CocoWorkManager {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/coconut/sample/list",
                 Some(BaseKey::Creation),
             )
@@ -1035,7 +1035,7 @@ impl CocoWorkManager {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "https://static.bcmcdn.com/coco/whitelist.json",
                 None,
             )
@@ -1051,7 +1051,7 @@ impl CocoWorkManager {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/coconut/web/user/widget/list",
                 Some(BaseKey::Creation),
             )
@@ -1085,7 +1085,7 @@ impl CocoWorkManager {
         let response = self
             .client
             .build_request(
-                HttpMethod::PUT,
+                HttpMethod::Put,
                 "/coconut/web/work",
                 Some(BaseKey::Creation),
             )
@@ -1118,7 +1118,7 @@ impl CocoWorkManager {
 
         let response = self
             .client
-            .build_request(HttpMethod::PUT, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Put, &endpoint, Some(BaseKey::Creation))
             .with_payload(data)
             .send()?;
 
@@ -1174,7 +1174,7 @@ impl CollaborationManager {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .with_param("TIME", timestamp.to_string())
             .with_param("edit_permission", permission.as_code().to_string())
             .send()?;
@@ -1223,7 +1223,7 @@ impl CollaborationManager {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation))
             .send()?;
 
         self.client.response_to_json(response)
@@ -1235,7 +1235,7 @@ impl CollaborationManager {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation))
             .send()?;
 
         self.client.response_to_json(response)
@@ -1255,7 +1255,7 @@ impl CollaborationManager {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, &endpoint, None)
+            .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(json!({}))
             .send()?;
 
@@ -1311,7 +1311,7 @@ impl AIServices {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/neko/text2img/prompt",
                 Some(BaseKey::Creation),
             )
@@ -1327,7 +1327,7 @@ impl AIServices {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/neko/ai-painting/templates",
                 Some(BaseKey::Creation),
             )
@@ -1343,7 +1343,7 @@ impl AIServices {
         let response = self
             .client
             .build_request(
-                HttpMethod::POST,
+                HttpMethod::Post,
                 "/neko/ai-painting/match",
                 Some(BaseKey::Creation),
             )
@@ -1373,7 +1373,7 @@ impl AIServices {
         let response = self
             .client
             .build_request(
-                HttpMethod::POST,
+                HttpMethod::Post,
                 "/neko/inspiration-pool",
                 Some(BaseKey::Creation),
             )
@@ -1407,7 +1407,7 @@ impl TeachingPlanManager {
         let response = self
             .client
             .build_request(
-                HttpMethod::POST,
+                HttpMethod::Post,
                 "/neko/teaching-plan/save/team/work",
                 Some(BaseKey::Creation),
             )
@@ -1429,7 +1429,7 @@ impl TeachingPlanManager {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/neko/teaching-plan/list/opr/log",
                 Some(BaseKey::Creation),
             )
@@ -1447,7 +1447,7 @@ impl TeachingPlanManager {
         let response = self
             .client
             .build_request(
-                HttpMethod::POST,
+                HttpMethod::Post,
                 "/neko/teaching-plan/add/opr/log",
                 Some(BaseKey::Creation),
             )
@@ -1463,7 +1463,7 @@ impl TeachingPlanManager {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation))
             .send()?;
 
         self.client.response_to_json(response)
@@ -1474,7 +1474,7 @@ impl TeachingPlanManager {
         let response = self
             .client
             .build_request(
-                HttpMethod::POST,
+                HttpMethod::Post,
                 "/neko/teaching-plan/set/work/editing-status",
                 Some(BaseKey::Creation),
             )
@@ -1489,7 +1489,7 @@ impl TeachingPlanManager {
         let response = self
             .client
             .build_request(
-                HttpMethod::POST,
+                HttpMethod::Post,
                 "/neko/course/user/progress",
                 Some(BaseKey::Creation),
             )
@@ -1504,7 +1504,7 @@ impl TeachingPlanManager {
         let response = self
             .client
             .build_request(
-                HttpMethod::POST,
+                HttpMethod::Post,
                 "/neko/course/user/course-work",
                 Some(BaseKey::Creation),
             )
@@ -1519,7 +1519,7 @@ impl TeachingPlanManager {
         let response = self
             .client
             .build_request(
-                HttpMethod::POST,
+                HttpMethod::Post,
                 "/neko/works/save-teacher-course-invite-url",
                 Some(BaseKey::Creation),
             )
@@ -1559,7 +1559,7 @@ impl ImageClassifyManager {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/neko/image-classify/list",
                 Some(BaseKey::Creation),
             )
@@ -1576,7 +1576,7 @@ impl ImageClassifyManager {
         let response = self
             .client
             .build_request(
-                HttpMethod::POST,
+                HttpMethod::Post,
                 "/neko/image-classify",
                 Some(BaseKey::Creation),
             )
@@ -1592,7 +1592,7 @@ impl ImageClassifyManager {
 
         let response = self
             .client
-            .build_request(HttpMethod::PUT, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Put, &endpoint, Some(BaseKey::Creation))
             .with_payload(data)
             .send()?;
 
@@ -1605,7 +1605,7 @@ impl ImageClassifyManager {
 
         let response = self
             .client
-            .build_request(HttpMethod::DELETE, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Delete, &endpoint, Some(BaseKey::Creation))
             .send()?;
 
         self.client.response_to_json(response)
@@ -1642,7 +1642,7 @@ impl PackageManager {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/neko/package/list",
                 Some(BaseKey::Creation),
             )
@@ -1659,7 +1659,7 @@ impl PackageManager {
     pub fn create_package(&self, data: Value) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::POST, "/neko/package", Some(BaseKey::Creation))
+            .build_request(HttpMethod::Post, "/neko/package", Some(BaseKey::Creation))
             .with_payload(data)
             .send()?;
 
@@ -1682,7 +1682,7 @@ impl PackageManager {
 
         let response = self
             .client
-            .build_request(HttpMethod::PUT, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Put, &endpoint, Some(BaseKey::Creation))
             .with_payload(data)
             .send()?;
 
@@ -1695,7 +1695,7 @@ impl PackageManager {
 
         let response = self
             .client
-            .build_request(HttpMethod::DELETE, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Delete, &endpoint, Some(BaseKey::Creation))
             .send()?;
 
         self.client.response_to_json(response)
@@ -1726,7 +1726,7 @@ impl SampleManager {
         let mut builder = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/neko/sample/detail",
                 Some(BaseKey::Creation),
             )
@@ -1747,7 +1747,7 @@ impl SampleManager {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/neko/sample/list",
                 Some(BaseKey::Creation),
             )
@@ -1785,7 +1785,7 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .send()?;
 
         self.client.response_to_json(response)
@@ -1797,7 +1797,7 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation))
             .send()?;
 
         self.client.response_to_json(response)
@@ -1809,7 +1809,7 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation))
             .send()?;
 
         self.client.response_to_json(response)
@@ -1821,7 +1821,7 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation))
             .send()?;
 
         self.client.response_to_json(response)
@@ -1833,7 +1833,7 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation))
             .send()?;
 
         self.client.response_to_json(response)
@@ -1845,7 +1845,7 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation))
             .send()?;
 
         self.client.response_to_json(response)
@@ -1857,7 +1857,7 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation))
             .send()?;
 
         self.client.response_to_json(response)
@@ -1869,7 +1869,7 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation))
             .send()?;
 
         self.client.response_to_json(response)
@@ -1882,7 +1882,7 @@ impl WorkDataFetcher {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/neko/works/get-player-by-course-code",
                 Some(BaseKey::Creation),
             )
@@ -1899,7 +1899,7 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation))
             .send()?;
 
         self.client.response_to_json(response)
@@ -1911,7 +1911,7 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .send()?;
 
         self.client.response_to_json(response)
@@ -1923,7 +1923,7 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation))
             .send()?;
 
         self.client.response_to_json(response)
@@ -1961,7 +1961,7 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .send()?;
 
         self.client.response_to_json(response)
@@ -1973,7 +1973,7 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation))
             .send()?;
 
         self.client.response_to_json(response)
@@ -1985,7 +1985,7 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation))
             .send()?;
 
         self.client.response_to_json(response)
@@ -1997,7 +1997,7 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation))
             .send()?;
 
         self.client.response_to_json(response)
@@ -2009,7 +2009,7 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation))
             .send()?;
 
         self.client.response_to_json(response)
@@ -2022,7 +2022,7 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation))
             .with_param("TIME", timestamp.to_string())
             .with_param("channel_type", "0")
             .send()?;
@@ -2036,7 +2036,7 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation))
             .send()?;
 
         self.client.response_to_json(response)
@@ -2050,7 +2050,7 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .send()?;
 
         self.client.response_to_json(response)
@@ -2063,7 +2063,7 @@ impl WorkDataFetcher {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/nemo/v3/work-details/recommended/list",
                 None,
             )
@@ -2085,7 +2085,7 @@ impl WorkDataFetcher {
         let mut builder = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/creation-tools/v1/pc/discover/newest-work",
                 None,
             )
@@ -2112,7 +2112,7 @@ impl WorkDataFetcher {
         let mut builder = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/creation-tools/v1/pc/discover/subject-work",
                 None,
             )
@@ -2132,7 +2132,7 @@ impl WorkDataFetcher {
     pub fn fetch_nemo_discover(&self) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/creation-tools/v1/home/discover", None)
+            .build_request(HttpMethod::Get, "/creation-tools/v1/home/discover", None)
             .send()?;
 
         self.client.response_to_json(response)
@@ -2150,7 +2150,7 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .with_param("TIME", timestamp.to_string())
             .with_param("limit", limit.unwrap_or(15).to_string())
             .with_param("offset", offset.unwrap_or(0).to_string())
@@ -2165,7 +2165,7 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/nemo/v3/work/dynamic", None)
+            .build_request(HttpMethod::Get, "/nemo/v3/work/dynamic", None)
             .with_param("TIME", timestamp.to_string())
             .with_param("limit", limit.unwrap_or(15).to_string())
             .with_param("offset", offset.unwrap_or(0).to_string())
@@ -2179,7 +2179,7 @@ impl WorkDataFetcher {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/nemo/v3/dynamic/focus/user/recommend",
                 None,
             )
@@ -2194,7 +2194,7 @@ impl WorkDataFetcher {
     pub fn fetch_random_subjects(&self) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/nemo/v3/work-subject/random", None)
+            .build_request(HttpMethod::Get, "/nemo/v3/work-subject/random", None)
             .send()?;
 
         self.client.response_to_json(response)
@@ -2206,7 +2206,7 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .send()?;
 
         self.client.response_to_json(response)
@@ -2224,7 +2224,7 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .with_param("TIME", timestamp.to_string())
             .with_param("limit", limit.unwrap_or(15).to_string())
             .with_param("offset", offset.unwrap_or(0).to_string())
@@ -2243,7 +2243,7 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/nemo/v3/work-subject/home", None)
+            .build_request(HttpMethod::Get, "/nemo/v3/work-subject/home", None)
             .with_param("TIME", timestamp.to_string())
             .with_param("limit", limit.unwrap_or(15).to_string())
             .with_param("offset", offset.unwrap_or(0).to_string())
@@ -2260,7 +2260,7 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .send()?;
 
         self.client.response_to_json(response)
@@ -2272,7 +2272,7 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .send()?;
 
         self.client.response_to_json(response)
@@ -2498,7 +2498,7 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/nemo/community/work/name/search", None)
+            .build_request(HttpMethod::Get, "/nemo/community/work/name/search", None)
             .with_param("TIME", timestamp.to_string())
             .with_param("query", name)
             .with_param("offset", offset.unwrap_or(0).to_string())
@@ -2519,7 +2519,7 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/nemo/v2/work/name/search", None)
+            .build_request(HttpMethod::Get, "/nemo/v2/work/name/search", None)
             .with_param("TIME", timestamp.to_string())
             .with_param("key", name)
             .with_param("offset", offset.unwrap_or(0).to_string())
@@ -2537,7 +2537,7 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .send()?;
 
         self.client.response_to_json(response)
@@ -2550,7 +2550,7 @@ impl WorkDataFetcher {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/creation-tools/v1/work-details/work-labels",
                 None,
             )
@@ -2566,7 +2566,7 @@ impl WorkDataFetcher {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/kitten/work/labels",
                 Some(BaseKey::Creation),
             )
@@ -2580,7 +2580,7 @@ impl WorkDataFetcher {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/kitten/work/cover/defaultCovers",
                 Some(BaseKey::Creation),
             )
@@ -2595,7 +2595,7 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation))
             .send()?;
 
         self.client.response_to_json(response)
@@ -2607,7 +2607,7 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/tiger/work/checkname", None)
+            .build_request(HttpMethod::Get, "/tiger/work/checkname", None)
             .with_param("TIME", timestamp.to_string())
             .with_param("name", name)
             .with_param("work_id", work_id.to_string())
@@ -2624,7 +2624,7 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .send()?;
 
         self.client.response_to_json(response)
@@ -2638,7 +2638,7 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/tiger/nemo/miao-codes", None)
+            .build_request(HttpMethod::Get, "/tiger/nemo/miao-codes", None)
             .with_param("TIME", timestamp.to_string())
             .with_param("token", token)
             .send()?;
@@ -2655,7 +2655,7 @@ impl WorkDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .send()?;
 
         self.client.response_to_json(response)
@@ -2673,7 +2673,7 @@ impl WorkDataFetcher {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/neko/package/list",
                 Some(BaseKey::Creation),
             )
@@ -2693,7 +2693,7 @@ impl WorkDataFetcher {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/neko/material/categories",
                 Some(BaseKey::Creation),
             )
@@ -2716,7 +2716,7 @@ impl WorkDataFetcher {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/neko/material/list",
                 Some(BaseKey::Creation),
             )

@@ -59,12 +59,12 @@ pub enum NovelStatus {
 // 图鉴星级枚举
 #[repr(i32)]
 pub enum BookStar {
-    OneStar = 1,
-    TwoStar = 2,
-    ThreeStar = 3,
-    FourStar = 4,
-    FiveStar = 5,
-    SixStar = 6,
+    One = 1,
+    Two = 2,
+    Three = 3,
+    Four = 4,
+    Five = 5,
+    Six = 6,
 }
 
 // 图鉴属性ID枚举
@@ -99,7 +99,7 @@ impl CartoonDataFetcher {
     pub fn fetch_all_cartoons(&self) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/api/comic/list/all", None)
+            .build_request(HttpMethod::Get, "/api/comic/list/all", None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -109,7 +109,7 @@ impl CartoonDataFetcher {
         let endpoint = format!("/api/comic/{}", comic_id);
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -119,7 +119,7 @@ impl CartoonDataFetcher {
         let endpoint = format!("/api/comic/page/list/{}", chapter_id);
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -147,7 +147,7 @@ impl NovelDataFetcher {
     pub fn fetch_novel_categories(&self) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/api/fanfic/type", None)
+            .build_request(HttpMethod::Get, "/api/fanfic/type", None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -156,7 +156,7 @@ impl NovelDataFetcher {
     pub fn fetch_recommend_novel(&self) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/api/fanfic/list/recommend", None)
+            .build_request(HttpMethod::Get, "/api/fanfic/list/recommend", None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -175,7 +175,7 @@ impl NovelDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .with_param("sort_id", (sort_id as i32).to_string())
             .with_param("type_id", (category_id as i32).to_string())
             .with_param("status", (status as i32).to_string())
@@ -190,7 +190,7 @@ impl NovelDataFetcher {
     pub fn fetch_favorite_novels(&self, page: Option<i32>, limit: Option<i32>) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/web/fanfic/collection", None)
+            .build_request(HttpMethod::Get, "/web/fanfic/collection", None)
             .with_param("page", page.unwrap_or(1).to_string())
             .with_param("limit", limit.unwrap_or(10).to_string())
             .send()?;
@@ -202,7 +202,7 @@ impl NovelDataFetcher {
         let endpoint = format!("/api/fanfic/{}", novel_id);
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -212,7 +212,7 @@ impl NovelDataFetcher {
         let endpoint = format!("/api/fanfic/section/{}", chapter_id);
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -228,7 +228,7 @@ impl NovelDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .with_param("page", page.unwrap_or(0).to_string())
             .with_param("limit", limit.unwrap_or(10).to_string())
             .send()?;
@@ -244,7 +244,7 @@ impl NovelDataFetcher {
     ) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/api/fanfic/list/search", None)
+            .build_request(HttpMethod::Get, "/api/fanfic/list/search", None)
             .with_param("searchContent", keyword)
             .with_param("page", page.unwrap_or(0).to_string())
             .with_param("limit", limit.unwrap_or(10).to_string())
@@ -263,7 +263,7 @@ impl NovelDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .with_param("amount_items", limit.unwrap_or(200).to_string())
             .with_param("page_number", page.unwrap_or(1).to_string())
             .send()?;
@@ -274,7 +274,7 @@ impl NovelDataFetcher {
     pub fn fetch_my_novels(&self, limit: Option<i32>, page: Option<i32>) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/web/fanfic/my", None)
+            .build_request(HttpMethod::Get, "/web/fanfic/my", None)
             .with_param("amount_items", limit.unwrap_or(200).to_string())
             .with_param("page_number", page.unwrap_or(1).to_string())
             .send()?;
@@ -289,7 +289,7 @@ impl NovelDataFetcher {
     ) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/web/fanfic/section/deleted", None)
+            .build_request(HttpMethod::Get, "/web/fanfic/section/deleted", None)
             .with_param("amount_items", limit.unwrap_or(200).to_string())
             .with_param("page_number", page.unwrap_or(1).to_string())
             .send()?;
@@ -318,9 +318,9 @@ impl NovelActionHandler {
     // 收藏 / 取消收藏小说
     pub fn execute_toggle_novel_favorite(&self, novel_id: i32, favorite: bool) -> MewResult<Value> {
         let method = if favorite {
-            HttpMethod::POST
+            HttpMethod::Post
         } else {
-            HttpMethod::DELETE
+            HttpMethod::Delete
         };
         let endpoint = format!("/web/fanfic/collect/{}", novel_id);
 
@@ -342,7 +342,7 @@ impl NovelActionHandler {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, &endpoint, None)
+            .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(payload)
             .send()?;
 
@@ -361,9 +361,9 @@ impl NovelActionHandler {
         return_data: bool,
     ) -> MewResult<Value> {
         let method = if like {
-            HttpMethod::POST
+            HttpMethod::Post
         } else {
-            HttpMethod::DELETE
+            HttpMethod::Delete
         };
         let endpoint = format!("/api/fanfic/comments/praise/{}", comment_id);
 
@@ -382,7 +382,7 @@ impl NovelActionHandler {
 
         let response = self
             .client
-            .build_request(HttpMethod::DELETE, &endpoint, None)
+            .build_request(HttpMethod::Delete, &endpoint, None)
             .send()?;
 
         if return_data {
@@ -409,7 +409,7 @@ impl NovelActionHandler {
 
         let response = self
             .client
-            .build_request(HttpMethod::PUT, &endpoint, None)
+            .build_request(HttpMethod::Put, &endpoint, None)
             .with_payload(payload)
             .send()?;
 
@@ -422,7 +422,7 @@ impl NovelActionHandler {
 
         let response = self
             .client
-            .build_request(HttpMethod::PUT, &endpoint, None)
+            .build_request(HttpMethod::Put, &endpoint, None)
             .with_payload(json!({}))
             .send()?;
 
@@ -449,7 +449,7 @@ impl NovelActionHandler {
 
         let response = self
             .client
-            .build_request(HttpMethod::PUT, &endpoint, None)
+            .build_request(HttpMethod::Put, &endpoint, None)
             .with_payload(payload)
             .send()?;
 
@@ -480,7 +480,7 @@ impl NovelActionHandler {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, "/web/fanfic", None)
+            .build_request(HttpMethod::Post, "/web/fanfic", None)
             .with_payload(payload)
             .send()?;
 
@@ -497,7 +497,7 @@ impl NovelActionHandler {
 
         let response = self
             .client
-            .build_request(HttpMethod::DELETE, &endpoint, None)
+            .build_request(HttpMethod::Delete, &endpoint, None)
             .send()?;
 
         Ok(response.status() == HTTPStatus::NoContent as u16)
@@ -526,7 +526,7 @@ impl BookDataFetcher {
     pub fn fetch_all_books(&self) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/api/sprite/list/all", None)
+            .build_request(HttpMethod::Get, "/api/sprite/list/all", None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -535,7 +535,7 @@ impl BookDataFetcher {
     pub fn fetch_all_attributes(&self) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/api/sprite/factio", None)
+            .build_request(HttpMethod::Get, "/api/sprite/factio", None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -544,7 +544,7 @@ impl BookDataFetcher {
     pub fn fetch_books_by_star(&self, star: BookStar) -> MewResult<Value> {
         self._get_books_by_params(
             self.client
-                .build_request(HttpMethod::GET, "/api/sprite/list/all", None)
+                .build_request(HttpMethod::Get, "/api/sprite/list/all", None)
                 .with_param("star", (star as i32).to_string()),
         )
     }
@@ -553,7 +553,7 @@ impl BookDataFetcher {
     pub fn fetch_books_by_attribute(&self, attribute_id: BookAttributeId) -> MewResult<Value> {
         self._get_books_by_params(
             self.client
-                .build_request(HttpMethod::GET, "/api/sprite/list/all", None)
+                .build_request(HttpMethod::Get, "/api/sprite/list/all", None)
                 .with_param("faction_id", (attribute_id as i32).to_string()),
         )
     }
@@ -569,7 +569,7 @@ impl BookDataFetcher {
         let endpoint = format!("/api/sprite/{}", book_id);
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -601,9 +601,9 @@ impl BookActionHandler {
         return_data: bool,
     ) -> MewResult<Value> {
         let method = if like {
-            HttpMethod::POST
+            HttpMethod::Post
         } else {
-            HttpMethod::DELETE
+            HttpMethod::Delete
         };
         let endpoint = format!("/api/sprite/praise/{}", book_id);
 

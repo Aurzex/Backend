@@ -18,7 +18,7 @@ impl OverseaDataClient {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "https://oversea-api.code.game/tiger/accounts",
                 None,
             )
@@ -31,7 +31,7 @@ impl OverseaDataClient {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "https://oversea-api.code.game/config",
                 None,
             )
@@ -102,7 +102,7 @@ impl UserActionHandler {
         let response = self
             .client
             .build_request(
-                HttpMethod::POST,
+                HttpMethod::Post,
                 "https://oversea-api.code.game/tiger/accounts/register/email",
                 None,
             )
@@ -136,7 +136,7 @@ impl UserActionHandler {
         let response = self
             .client
             .build_request(
-                HttpMethod::POST,
+                HttpMethod::Post,
                 "https://oversea-api.code.game/tiger/accounts/login",
                 None,
             )

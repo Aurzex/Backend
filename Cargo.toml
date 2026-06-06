@@ -13,7 +13,7 @@ unused = "allow"
 [dependencies]
 aes-gcm = "0"
 base64 = "0"
-rand = "0"
+fastrand ="2"
 serde = {
 	version = "1",
     features = ["derive"]

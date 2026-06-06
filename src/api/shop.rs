@@ -61,7 +61,7 @@ impl WorkshopDataFetcher {
     pub fn fetch_workshop_info(&self) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/web/work_shops/simple", None)
+            .build_request(HttpMethod::Get, "/web/work_shops/simple", None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -71,7 +71,7 @@ impl WorkshopDataFetcher {
         let endpoint = format!("/web/shops/{}", workshop_id);
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -87,7 +87,7 @@ impl WorkshopDataFetcher {
     ) -> MewResult<Value> {
         let mut builder = self
             .client
-            .build_request(HttpMethod::GET, "/web/work-shops/search", None)
+            .build_request(HttpMethod::Get, "/web/work-shops/search", None)
             .with_param("level", level.unwrap_or(4).to_string())
             .with_param("works_limit", works_limit.unwrap_or(4).to_string())
             .with_param("limit", limit.unwrap_or(14).to_string())
@@ -137,7 +137,7 @@ impl WorkshopDataFetcher {
     ) -> MewResult<Value> {
         let mut builder = self
             .client
-            .build_request(HttpMethod::GET, "/web/shops", None);
+            .build_request(HttpMethod::Get, "/web/shops", None);
 
         if let Some(levels_vec) = levels {
             let levels_str: Vec<String> = levels_vec.iter().map(|l| l.to_string()).collect();
@@ -222,7 +222,7 @@ impl WorkshopDataFetcher {
     pub fn fetch_workshop_relation(&self, relation_id: i32) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/web/work_shops/users/relation", None)
+            .build_request(HttpMethod::Get, "/web/work_shops/users/relation", None)
             .with_param("id", relation_id.to_string())
             .send()?;
         self.client.response_to_json(response)
@@ -257,7 +257,7 @@ impl WorkshopDataFetcher {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "https://api.codemao.cn/web/work_shops/users/unaudited/list",
                 None,
             )
@@ -304,7 +304,7 @@ impl WorkshopActionHandler {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, "/web/work_shops/update", None)
+            .build_request(HttpMethod::Post, "/web/work_shops/update", None)
             .with_payload(payload)
             .send()?;
 
@@ -326,7 +326,7 @@ impl WorkshopActionHandler {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, "/web/work_shops/create", None)
+            .build_request(HttpMethod::Post, "/web/work_shops/create", None)
             .with_payload(payload)
             .send()?;
 
@@ -341,7 +341,7 @@ impl WorkshopActionHandler {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, "/web/work_shops/dissolve", None)
+            .build_request(HttpMethod::Post, "/web/work_shops/dissolve", None)
             .with_payload(payload)
             .send()?;
 
@@ -357,7 +357,7 @@ impl WorkshopActionHandler {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, "/web/work_shops/works/contribute", None)
+            .build_request(HttpMethod::Post, "/web/work_shops/works/contribute", None)
             .with_payload(payload)
             .send()?;
 
@@ -373,7 +373,7 @@ impl WorkshopActionHandler {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, "/web/work_shops/works/remove", None)
+            .build_request(HttpMethod::Post, "/web/work_shops/works/remove", None)
             .with_payload(payload)
             .send()?;
 
@@ -395,7 +395,7 @@ impl WorkshopActionHandler {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, "/web/work_shops/users/apply/join", None)
+            .build_request(HttpMethod::Post, "/web/work_shops/users/apply/join", None)
             .with_payload(payload)
             .send()?;
 
@@ -417,7 +417,7 @@ impl WorkshopActionHandler {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, "/web/work_shops/users/audit", None)
+            .build_request(HttpMethod::Post, "/web/work_shops/users/audit", None)
             .with_payload(payload)
             .send()?;
 
@@ -447,7 +447,7 @@ impl WorkshopActionHandler {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, "/web/reports/comments", None)
+            .build_request(HttpMethod::Post, "/web/reports/comments", None)
             .with_payload(payload)
             .send()?;
 
@@ -477,7 +477,7 @@ impl WorkshopActionHandler {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, &endpoint, None)
+            .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(payload)
             .send()?;
 
@@ -494,7 +494,7 @@ impl WorkshopActionHandler {
 
         let response = self
             .client
-            .build_request(HttpMethod::DELETE, &endpoint, None)
+            .build_request(HttpMethod::Delete, &endpoint, None)
             .with_param("source", source.unwrap_or(Source::WorkShop).as_str())
             .send()?;
 
@@ -520,7 +520,7 @@ impl WorkshopActionHandler {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, &endpoint, None)
+            .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(payload)
             .send()?;
 
@@ -537,7 +537,7 @@ impl WorkshopActionHandler {
 
         let response = self
             .client
-            .build_request(HttpMethod::DELETE, &endpoint, None)
+            .build_request(HttpMethod::Delete, &endpoint, None)
             .with_param("source", source.unwrap_or(Source::WorkShop).as_str())
             .send()?;
 

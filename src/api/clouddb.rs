@@ -24,7 +24,7 @@ impl Ranking {
         let response = self
             .client
             .build_request(
-                HttpMethod::PUT,
+                HttpMethod::Put,
                 "/neko/ranking-list/fullUpdate",
                 Some(BaseKey::Creation),
             )
@@ -44,7 +44,7 @@ impl Ranking {
         let response = self
             .client
             .build_request(
-                HttpMethod::PUT,
+                HttpMethod::Put,
                 "/neko/ranking-list/clear",
                 Some(BaseKey::Creation),
             )
@@ -65,7 +65,7 @@ impl Ranking {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/neko/ranking-list/record/list",
                 Some(BaseKey::Creation),
             )
@@ -99,7 +99,7 @@ impl Ranking {
         let response = self
             .client
             .build_request(
-                HttpMethod::POST,
+                HttpMethod::Post,
                 "/neko/ranking-list/record",
                 Some(BaseKey::Creation),
             )
@@ -119,7 +119,7 @@ impl Ranking {
         let response = self
             .client
             .build_request(
-                HttpMethod::POST,
+                HttpMethod::Post,
                 "/neko/ranking-list",
                 Some(BaseKey::Creation),
             )
@@ -141,7 +141,7 @@ impl Ranking {
 
         let response = self
             .client
-            .build_request(HttpMethod::DELETE, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Delete, &endpoint, Some(BaseKey::Creation))
             .with_param("id", ranking_id)
             .with_param("work_id", work_id.to_string())
             .send()?;
@@ -196,7 +196,7 @@ impl CoconutCloud {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Post, &endpoint, Some(BaseKey::Creation))
             .with_payload(data)
             .send()?;
         self.client.response_to_json(response)
@@ -215,7 +215,7 @@ impl CoconutCloud {
 
         let response = self
             .client
-            .build_request(HttpMethod::DELETE, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Delete, &endpoint, Some(BaseKey::Creation))
             .with_param("key", key)
             .send()?;
         self.client.response_to_json(response)
@@ -233,7 +233,7 @@ impl CoconutCloud {
 
         let response = self
             .client
-            .build_request(HttpMethod::DELETE, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Delete, &endpoint, Some(BaseKey::Creation))
             .send()?;
         self.client.response_to_json(response)
     }
@@ -250,7 +250,7 @@ impl CoconutCloud {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation))
             .send()?;
         self.client.response_to_json(response)
     }
@@ -268,7 +268,7 @@ impl CoconutCloud {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation))
             .with_param("key", key)
             .send()?;
         self.client.response_to_json(response)
@@ -293,7 +293,7 @@ impl CoconutCloud {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Post, &endpoint, Some(BaseKey::Creation))
             .with_payload(data)
             .send()?;
         self.client.response_to_json(response)
@@ -325,7 +325,7 @@ impl CoconutCloud {
 
         let response = self
             .client
-            .build_request(HttpMethod::PUT, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Put, &endpoint, Some(BaseKey::Creation))
             .with_payload(data)
             .send()?;
         self.client.response_to_json(response)
@@ -348,7 +348,7 @@ impl CoconutCloud {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Post, &endpoint, Some(BaseKey::Creation))
             .with_payload(data)
             .send()?;
         self.client.response_to_json(response)
@@ -373,7 +373,7 @@ impl CoconutCloud {
 
         let response = self
             .client
-            .build_request(HttpMethod::PUT, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Put, &endpoint, Some(BaseKey::Creation))
             .with_payload(data)
             .send()?;
         self.client.response_to_json(response)
@@ -391,7 +391,7 @@ impl CoconutCloud {
 
         let response = self
             .client
-            .build_request(HttpMethod::PUT, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Put, &endpoint, Some(BaseKey::Creation))
             .send()?;
         self.client.response_to_json(response)
     }
@@ -408,7 +408,7 @@ impl CoconutCloud {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation))
             .with_param("type", "RECORD")
             .send()?;
         self.client.response_to_json(response)
@@ -427,7 +427,7 @@ impl CoconutCloud {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/coconut/clouddb/v2/runtime/list",
                 Some(BaseKey::Creation),
             )
@@ -449,7 +449,7 @@ impl CoconutCloud {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation))
             .with_param("channel", channel)
             .send()?;
         self.client.response_to_json(response)
@@ -489,7 +489,7 @@ impl CoconutCloudAdmin {
     /// 数据库列表
     pub fn list_user_databases(&self, db_type: Option<CloudDatabaseType>) -> MewResult<Value> {
         let mut builder = self.client.build_request(
-            HttpMethod::GET,
+            HttpMethod::Get,
             "/coconut/clouddb/user/list",
             Some(BaseKey::Creation),
         );
@@ -514,7 +514,7 @@ impl CoconutCloudAdmin {
         db_type: Option<CloudDatabaseType>,
     ) -> MewResult<Value> {
         let mut builder = self.client.build_request(
-            HttpMethod::GET,
+            HttpMethod::Get,
             "/coconut/clouddb/user/list/detail",
             Some(BaseKey::Creation),
         );
@@ -538,7 +538,7 @@ impl CoconutCloudAdmin {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/coconut/webdb/admin/dict",
                 Some(BaseKey::Creation),
             )
@@ -558,7 +558,7 @@ impl CoconutCloudAdmin {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/coconut/webdb/admin/dict",
                 Some(BaseKey::Creation),
             )
@@ -588,7 +588,7 @@ impl CoconutCloudAdmin {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
+            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation))
             .with_param("work_id", work_id.to_string())
             .with_param("offset", offset.unwrap_or(1).to_string())
             .with_param("limit", limit.unwrap_or(500).to_string())
@@ -615,7 +615,7 @@ impl CoconutCloudAdmin {
         let response = self
             .client
             .build_request(
-                HttpMethod::PUT,
+                HttpMethod::Put,
                 "/coconut/webdb/admin/dict/migrate",
                 Some(BaseKey::Creation),
             )

@@ -31,7 +31,7 @@ impl EduUserAction {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "https://eduzone.codemao.cn/edu/zone/account/updateName",
                 None,
             )
@@ -49,7 +49,7 @@ impl EduUserAction {
         let response = self
             .client
             .build_request(
-                HttpMethod::POST,
+                HttpMethod::Post,
                 "https://eduzone.codemao.cn/edu/zone/class",
                 None,
             )
@@ -65,7 +65,7 @@ impl EduUserAction {
 
         let response = self
             .client
-            .build_request(HttpMethod::DELETE, &endpoint, None)
+            .build_request(HttpMethod::Delete, &endpoint, None)
             .with_param("TIME", timestamp.to_string())
             .send()?;
 
@@ -81,7 +81,7 @@ impl EduUserAction {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, &endpoint, None)
+            .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(data)
             .send()?;
 
@@ -96,7 +96,7 @@ impl EduUserAction {
 
         let response = self
             .client
-            .build_request(HttpMethod::PATCH, &endpoint, None)
+            .build_request(HttpMethod::Patch, &endpoint, None)
             .with_payload(json!({}))
             .send()?;
 
@@ -109,7 +109,7 @@ impl EduUserAction {
         let response = self
             .client
             .build_request(
-                HttpMethod::PATCH,
+                HttpMethod::Patch,
                 "https://eduzone.codemao.cn/edu/zone/students/password",
                 None,
             )
@@ -127,7 +127,7 @@ impl EduUserAction {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, &endpoint, None)
+            .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(json!({}))
             .send()?;
 
@@ -173,7 +173,7 @@ impl EduUserAction {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, &endpoint, None)
+            .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(json!({}))
             .send()?;
 
@@ -188,7 +188,7 @@ impl EduUserAction {
 
         let response = self
             .client
-            .build_request(HttpMethod::DELETE, &endpoint, None)
+            .build_request(HttpMethod::Delete, &endpoint, None)
             .with_param("student_ids[]", stu_id.to_string())
             .send()?;
 
@@ -201,7 +201,7 @@ impl EduUserAction {
         let response = self
             .client
             .build_request(
-                HttpMethod::POST,
+                HttpMethod::Post,
                 "https://eduzone.codemao.cn/edu/zone/activity/open/package",
                 None,
             )
@@ -215,7 +215,7 @@ impl EduUserAction {
         let response = self
             .client
             .build_request(
-                HttpMethod::POST,
+                HttpMethod::Post,
                 "https://eduzone.codemao.cn/edu/zone/activity/list/activity/package",
                 None,
             )
@@ -229,7 +229,7 @@ impl EduUserAction {
         let response = self
             .client
             .build_request(
-                HttpMethod::POST,
+                HttpMethod::Post,
                 "https://eduzone.codemao.cn/edu/zone/invite/message/all/read",
                 None,
             )
@@ -262,7 +262,7 @@ impl EduUserAction {
         let response = self
             .client
             .build_request(
-                HttpMethod::PATCH,
+                HttpMethod::Patch,
                 "https://eduzone.codemao.cn/edu/zone/work/manager/works/scores",
                 None,
             )
@@ -291,7 +291,7 @@ impl EduUserAction {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, &endpoint, None)
+            .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(data)
             .send()?;
 
@@ -306,7 +306,7 @@ impl EduUserAction {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, &endpoint, None)
+            .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(json!({}))
             .send()?;
 
@@ -344,7 +344,7 @@ impl EduUserAction {
         let response = self
             .client
             .build_request(
-                HttpMethod::POST,
+                HttpMethod::Post,
                 "https://eduzone.codemao.cn/edu/zone/sign/login/teacher/info/improve",
                 None,
             )
@@ -380,7 +380,7 @@ impl EduDataFetcher {
     pub fn fetch_user_profile(&self) -> MewResult<Value> {
         let builder =
             self.client
-                .build_request(HttpMethod::GET, "https://eduzone.codemao.cn/edu/zone", None);
+                .build_request(HttpMethod::Get, "https://eduzone.codemao.cn/edu/zone", None);
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
         self.client.response_to_json(response)
@@ -388,7 +388,7 @@ impl EduDataFetcher {
 
     pub fn fetch_account_role(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
-            HttpMethod::GET,
+            HttpMethod::Get,
             "https://eduzone.codemao.cn/api/home/account",
             None,
         );
@@ -399,7 +399,7 @@ impl EduDataFetcher {
 
     pub fn fetch_unread_message_count(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
-            HttpMethod::GET,
+            HttpMethod::Get,
             "https://eduzone.codemao.cn/edu/zone/system/message/unread/num",
             None,
         );
@@ -455,7 +455,7 @@ impl EduDataFetcher {
 
     pub fn fetch_school_categories(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
-            HttpMethod::GET,
+            HttpMethod::Get,
             "https://eduzone.codemao.cn/edu/zone/school/open/grade/list",
             None,
         );
@@ -469,7 +469,7 @@ impl EduDataFetcher {
             let response = self
                 .client
                 .build_request(
-                    HttpMethod::GET,
+                    HttpMethod::Get,
                     "https://eduzone.codemao.cn/edu/zone/classes/simple",
                     None,
                 )
@@ -520,7 +520,7 @@ impl EduDataFetcher {
             .with_param("page", "1")
             .with_param("limit", "100")
             .with_payload(data)
-            .with_method(HttpMethod::POST)
+            .with_method(HttpMethod::Post)
             .with_pagination_method(PaginationMethod::Page)
             .with_offset_key("page")
             .with_amount_key("limit");
@@ -535,7 +535,7 @@ impl EduDataFetcher {
 
     pub fn fetch_navigation_menus(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
-            HttpMethod::GET,
+            HttpMethod::Get,
             "https://eduzone.codemao.cn/api/home/eduzone/menus",
             None,
         );
@@ -548,7 +548,7 @@ impl EduDataFetcher {
         let builder = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "https://eduzone.codemao.cn/api/home/banners",
                 None,
             )
@@ -560,7 +560,7 @@ impl EduDataFetcher {
 
     pub fn fetch_server_time(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
-            HttpMethod::GET,
+            HttpMethod::Get,
             "https://eduzone.codemao.cn/edu/base/server/time",
             None,
         );
@@ -571,7 +571,7 @@ impl EduDataFetcher {
 
     pub fn fetch_lesson_package_status(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
-            HttpMethod::GET,
+            HttpMethod::Get,
             "https://eduzone.codemao.cn/edu/zone/lessons/person/package/remind/status",
             None,
         );
@@ -584,7 +584,7 @@ impl EduDataFetcher {
         let builder = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "https://eduzone.codemao.cn/edu/base/general/conf",
                 None,
             )
@@ -596,7 +596,7 @@ impl EduDataFetcher {
 
     pub fn fetch_extended_profile(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
-            HttpMethod::GET,
+            HttpMethod::Get,
             "https://eduzone.codemao.cn/edu/zone/user-extend/info",
             None,
         );
@@ -607,7 +607,7 @@ impl EduDataFetcher {
 
     pub fn fetch_operation_logs(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
-            HttpMethod::GET,
+            HttpMethod::Get,
             "https://eduzone.codemao.cn/edu/zone/operation/records",
             None,
         );
@@ -618,7 +618,7 @@ impl EduDataFetcher {
 
     pub fn fetch_teaching_status(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
-            HttpMethod::GET,
+            HttpMethod::Get,
             "https://eduzone.codemao.cn/edu/zone/teaching/class/remind",
             None,
         );
@@ -629,7 +629,7 @@ impl EduDataFetcher {
 
     pub fn fetch_dashboard_stats(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
-            HttpMethod::GET,
+            HttpMethod::Get,
             "https://eduzone.codemao.cn/edu/zone/homepage/statistic",
             None,
         );
@@ -640,7 +640,7 @@ impl EduDataFetcher {
 
     pub fn fetch_tool_menu(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
-            HttpMethod::GET,
+            HttpMethod::Get,
             "https://eduzone.codemao.cn/edu/zone/homepage/menus",
             None,
         );
@@ -715,7 +715,7 @@ impl EduDataFetcher {
         let mut builder = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "https://eduzone.codemao.cn/edu/zone/work/manager/works/statistics",
                 None,
             )
@@ -753,7 +753,7 @@ impl EduDataFetcher {
 
     pub fn fetch_teaching_classes(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
-            HttpMethod::GET,
+            HttpMethod::Get,
             "https://eduzone.codemao.cn/edu/zone/teaching/class/teacher/list",
             None,
         );
@@ -766,7 +766,7 @@ impl EduDataFetcher {
         let builder = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "https://eduzone.codemao.cn/edu/zone/school/info",
                 None,
             )
@@ -804,7 +804,7 @@ impl EduDataFetcher {
         let builder = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "https://eduzone.codemao.cn/edu/zone/lessons/official/packages/topics",
                 None,
             )
@@ -819,7 +819,7 @@ impl EduDataFetcher {
         let builder = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "https://eduzone.codemao.cn/edu/zone/lessons/official/packages/topics/all/tags",
                 None,
             )
@@ -864,7 +864,7 @@ impl EduDataFetcher {
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
 
-        if method == HttpMethod::GET {
+        if method == HttpMethod::Get {
             self.client.response_to_json(response)
         } else {
             Ok(json!({ "success": response.status() == HTTPStatus::Ok as u16 }))
@@ -875,7 +875,7 @@ impl EduDataFetcher {
         let builder = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "https://eduzone.codemao.cn/edu/zone/lesson/customized/package/lessons",
                 None,
             )
@@ -888,7 +888,7 @@ impl EduDataFetcher {
 
     pub fn fetch_class_invites(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
-            HttpMethod::GET,
+            HttpMethod::Get,
             "https://eduzone.codemao.cn/edu/zone/invite/student/message/next",
             None,
         );
@@ -899,7 +899,7 @@ impl EduDataFetcher {
 
     pub fn fetch_expiring_lessons(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
-            HttpMethod::GET,
+            HttpMethod::Get,
             "https://eduzone.codemao.cn/edu/zone/lesson/offical/packages/expired",
             None,
         );
@@ -914,7 +914,7 @@ impl EduDataFetcher {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "https://static.codemao.cn/teacher-edu/organization_ids.json",
                 None,
             )
@@ -926,7 +926,7 @@ impl EduDataFetcher {
 
     pub fn fetch_report_metadata(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
-            HttpMethod::GET,
+            HttpMethod::Get,
             "https://eduzone.codemao.cn/edu/zone/analysis/report/info",
             None,
         );
@@ -937,7 +937,7 @@ impl EduDataFetcher {
 
     pub fn fetch_course_analytics(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
-            HttpMethod::GET,
+            HttpMethod::Get,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/course",
             None,
         );
@@ -948,7 +948,7 @@ impl EduDataFetcher {
 
     pub fn fetch_lesson_package_analytics(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
-            HttpMethod::GET,
+            HttpMethod::Get,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/packages",
             None,
         );
@@ -959,7 +959,7 @@ impl EduDataFetcher {
 
     pub fn fetch_classroom_analytics(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
-            HttpMethod::GET,
+            HttpMethod::Get,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/class/info",
             None,
         );
@@ -970,7 +970,7 @@ impl EduDataFetcher {
 
     pub fn fetch_work_performance(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
-            HttpMethod::GET,
+            HttpMethod::Get,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/works/situations",
             None,
         );
@@ -981,7 +981,7 @@ impl EduDataFetcher {
 
     pub fn fetch_work_ratings(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
-            HttpMethod::GET,
+            HttpMethod::Get,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/works/star/info",
             None,
         );
@@ -992,7 +992,7 @@ impl EduDataFetcher {
 
     pub fn fetch_skill_assessment(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
-            HttpMethod::GET,
+            HttpMethod::Get,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/ability/dimensions",
             None,
         );
@@ -1003,7 +1003,7 @@ impl EduDataFetcher {
 
     pub fn fetch_skill_radar(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
-            HttpMethod::GET,
+            HttpMethod::Get,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/ability/radars",
             None,
         );
@@ -1014,7 +1014,7 @@ impl EduDataFetcher {
 
     pub fn fetch_art_skills(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
-            HttpMethod::GET,
+            HttpMethod::Get,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/ability/artistic/dimensions",
             None,
         );
@@ -1025,7 +1025,7 @@ impl EduDataFetcher {
 
     pub fn fetch_logic_skills(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
-            HttpMethod::GET,
+            HttpMethod::Get,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/ability/logical/dimensions",
             None,
         );
@@ -1036,7 +1036,7 @@ impl EduDataFetcher {
 
     pub fn fetch_coding_skills(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
-            HttpMethod::GET,
+            HttpMethod::Get,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/ability/programming/dimensions",
             None,
         );

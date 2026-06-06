@@ -517,7 +517,7 @@ impl DataQuery {
             CommentSource::Work => {
                 let response = client
                     .build_request(
-                        HttpMethod::GET,
+                        HttpMethod::Get,
                         &format!("/creation-tools/v1/works/{}/comments", target_id),
                         Some(BaseKey::Default),
                     )
@@ -536,7 +536,7 @@ impl DataQuery {
 
                 let work_response = client
                     .build_request(
-                        HttpMethod::GET,
+                        HttpMethod::Get,
                         &format!("/creation-tools/v1/works/{}", target_id),
                         Some(BaseKey::Default),
                     )
@@ -555,7 +555,7 @@ impl DataQuery {
             CommentSource::Shop => {
                 let response = client
                     .build_request(
-                        HttpMethod::GET,
+                        HttpMethod::Get,
                         &format!("/web/discussions/{}/comments", target_id),
                         Some(BaseKey::Default),
                     )
@@ -578,7 +578,7 @@ impl DataQuery {
             CommentSource::Forum => {
                 let response = client
                     .build_request(
-                        HttpMethod::GET,
+                        HttpMethod::Get,
                         &format!("/web/forums/posts/{}/details", target_id),
                         Some(BaseKey::Default),
                     )

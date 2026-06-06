@@ -145,7 +145,7 @@ impl UserDataFetcher {
         let endpoint = format!("/api/user/info/detail/{}", user_id);
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -155,7 +155,7 @@ impl UserDataFetcher {
         let endpoint = format!("/tiger/user/{}", user_id);
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -165,7 +165,7 @@ impl UserDataFetcher {
         let endpoint = format!("/web/api/user/info/detail/{}", user_id);
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -175,7 +175,7 @@ impl UserDataFetcher {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/creation-tools/v1/user/center/honor",
                 None,
             )
@@ -188,7 +188,7 @@ impl UserDataFetcher {
     pub fn fetch_user_metrics(&self, user_id: i32) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/nemo/v2/works/business/total", None)
+            .build_request(HttpMethod::Get, "/nemo/v2/works/business/total", None)
             .with_param("user_id", user_id.to_string())
             .send()?;
         self.client.response_to_json(response)
@@ -198,7 +198,7 @@ impl UserDataFetcher {
     pub fn fetch_user_intro(&self, user_id: i32) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/nemo/v2/user/dynamic/info", None)
+            .build_request(HttpMethod::Get, "/nemo/v2/user/dynamic/info", None)
             .with_param("user_id", user_id.to_string())
             .send()?;
         self.client.response_to_json(response)
@@ -209,7 +209,7 @@ impl UserDataFetcher {
         let endpoint = format!("/api/user/dynamic/{}", user_id);
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -219,7 +219,7 @@ impl UserDataFetcher {
         let endpoint = format!("/web/work-shops/{}/participators", user_id);
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -228,7 +228,7 @@ impl UserDataFetcher {
     pub fn fetch_user_annual_summary(&self, user_id: i32) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/web/activities/annual-summary", None)
+            .build_request(HttpMethod::Get, "/web/activities/annual-summary", None)
             .with_param("user_id", user_id.to_string())
             .send()?;
         self.client.response_to_json(response)
@@ -238,7 +238,7 @@ impl UserDataFetcher {
     pub fn get_account_info(&self) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/web/api/user/info", None)
+            .build_request(HttpMethod::Get, "/web/api/user/info", None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -247,7 +247,7 @@ impl UserDataFetcher {
     pub fn fetch_account_details(&self) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/web/users/details", None)
+            .build_request(HttpMethod::Get, "/web/users/details", None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -257,7 +257,7 @@ impl UserDataFetcher {
         let endpoint = format!("/tiger/v3/{}/accounts/profile", method.as_str());
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -266,7 +266,7 @@ impl UserDataFetcher {
     pub fn fetch_account_privacy(&self) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/tiger/v3/web/accounts/privacy", None)
+            .build_request(HttpMethod::Get, "/tiger/v3/web/accounts/privacy", None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -275,7 +275,7 @@ impl UserDataFetcher {
     pub fn fetch_account_tiger(&self) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/tiger/user", None)
+            .build_request(HttpMethod::Get, "/tiger/user", None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -284,7 +284,7 @@ impl UserDataFetcher {
     pub fn fetch_account_scores(&self) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/nemo/v3/user/grade/details", None)
+            .build_request(HttpMethod::Get, "/nemo/v3/user/grade/details", None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -293,7 +293,7 @@ impl UserDataFetcher {
     pub fn fetch_account_level(&self) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/nemo/v3/user/level/info", None)
+            .build_request(HttpMethod::Get, "/nemo/v3/user/level/info", None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -302,7 +302,7 @@ impl UserDataFetcher {
     pub fn fetch_account_dynamic(&self) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/api/user/dynamic", None)
+            .build_request(HttpMethod::Get, "/api/user/dynamic", None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -311,7 +311,7 @@ impl UserDataFetcher {
     pub fn fetch_account_works(&self) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/api/work/list", None)
+            .build_request(HttpMethod::Get, "/api/work/list", None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -320,7 +320,7 @@ impl UserDataFetcher {
     pub fn fetch_account_register_time(&self) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/nemo/new-people/user-info", None)
+            .build_request(HttpMethod::Get, "/nemo/new-people/user-info", None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -329,7 +329,7 @@ impl UserDataFetcher {
     pub fn fetch_account_lesson_info(&self) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/api/v2/pc/lesson/user/info", None)
+            .build_request(HttpMethod::Get, "/api/v2/pc/lesson/user/info", None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -369,7 +369,7 @@ impl UserDataFetcher {
     ) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "tiger/nemo/user/works/search", None)
+            .build_request(HttpMethod::Get, "tiger/nemo/user/works/search", None)
             .with_param("query", query)
             .with_param("query_type", query_type.unwrap_or("name"))
             .with_param("page", page.unwrap_or(1).to_string())
@@ -387,7 +387,7 @@ impl UserDataFetcher {
     ) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/creation-tools/v1/works/list/user", None)
+            .build_request(HttpMethod::Get, "/creation-tools/v1/works/list/user", None)
             .with_param("limit", limit.unwrap_or(10).to_string())
             .with_param("offset", offset.unwrap_or(0).to_string())
             .with_param("work_type", types.as_value().to_string())
@@ -400,7 +400,7 @@ impl UserDataFetcher {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "https://api-wechatsbp-codemaster.codemao.cn/user/info/certificate",
                 None,
             )
@@ -630,7 +630,7 @@ impl UserDataFetcher {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/coconut/web/work/list/all",
                 Some(BaseKey::Creation),
             )
@@ -688,7 +688,7 @@ impl UserDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/web/api/user/works/published", None)
+            .build_request(HttpMethod::Get, "/web/api/user/works/published", None)
             .with_param("user_id", user_id.to_string())
             .with_param("types", types_str.join(","))
             .with_param("limit", limit.unwrap_or(10).to_string())
@@ -700,7 +700,7 @@ impl UserDataFetcher {
     pub fn fetch_user_attention(&self, user_id: i32) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/web/api/user/me/attention", None)
+            .build_request(HttpMethod::Get, "/web/api/user/me/attention", None)
             .with_param("user_id", user_id.to_string())
             .send()?;
         self.client.response_to_json(response)
@@ -710,7 +710,7 @@ impl UserDataFetcher {
     pub fn fetch_user_followers(&self, user_id: i32) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/web/api/user/attention/me", None)
+            .build_request(HttpMethod::Get, "/web/api/user/attention/me", None)
             .with_param("user_id", user_id.to_string())
             .send()?;
         self.client.response_to_json(response)
@@ -727,7 +727,7 @@ impl UserDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/web/api/user/works/collection", None)
+            .build_request(HttpMethod::Get, "/web/api/user/works/collection", None)
             .with_param("user_id", user_id.to_string())
             .with_param("types", types_str.join(","))
             .with_param("limit", limit.unwrap_or(10).to_string())
@@ -759,7 +759,7 @@ impl UserDataFetcher {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/creation-tools/v1/user/avatar-frame/list",
                 None,
             )
@@ -772,7 +772,7 @@ impl UserDataFetcher {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/neko/works/isNewUser",
                 Some(BaseKey::Creation),
             )
@@ -817,7 +817,7 @@ impl UserManager {
 
         let response = self
             .client
-            .build_request(HttpMethod::PUT, "/nemo/v2/user/basic", None)
+            .build_request(HttpMethod::Put, "/nemo/v2/user/basic", None)
             .with_payload(payload)
             .send()?;
 
@@ -829,7 +829,7 @@ impl UserManager {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/web/users/phone_number/is_consistent",
                 None,
             )
@@ -848,7 +848,7 @@ impl UserManager {
 
         let response = self
             .client
-            .build_request(HttpMethod::PATCH, "/tiger/v3/web/accounts/password", None)
+            .build_request(HttpMethod::Patch, "/tiger/v3/web/accounts/password", None)
             .with_payload(payload)
             .send()?;
 
@@ -869,7 +869,7 @@ impl UserManager {
         let response = self
             .client
             .build_request(
-                HttpMethod::POST,
+                HttpMethod::Post,
                 "/tiger/v3/web/accounts/captcha/phone/change",
                 None,
             )
@@ -889,7 +889,7 @@ impl UserManager {
         let response = self
             .client
             .build_request(
-                HttpMethod::PATCH,
+                HttpMethod::Patch,
                 "/tiger/v3/web/accounts/phone/change",
                 None,
             )
@@ -904,7 +904,7 @@ impl UserManager {
         let response = self
             .client
             .build_request(
-                HttpMethod::PUT,
+                HttpMethod::Put,
                 "/creation-tools/v1/user/avatar-frame/cancel",
                 None,
             )
@@ -919,7 +919,7 @@ impl UserManager {
 
         let response = self
             .client
-            .build_request(HttpMethod::PUT, &endpoint, None)
+            .build_request(HttpMethod::Put, &endpoint, None)
             .send()?;
 
         Ok(response.status() == HTTPStatus::Ok as u16)
@@ -948,7 +948,7 @@ impl UserManager {
 
         let response = self
             .client
-            .build_request(HttpMethod::PATCH, "/tiger/v3/web/accounts/info", None)
+            .build_request(HttpMethod::Patch, "/tiger/v3/web/accounts/info", None)
             .with_payload(payload)
             .send()?;
 
@@ -963,7 +963,7 @@ impl UserManager {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, "/nemo/v2/user/preview", None)
+            .build_request(HttpMethod::Post, "/nemo/v2/user/preview", None)
             .with_payload(payload)
             .send()?;
 
@@ -978,7 +978,7 @@ impl UserManager {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, "/tiger/v3/web/accounts/close", None)
+            .build_request(HttpMethod::Post, "/tiger/v3/web/accounts/close", None)
             .with_payload(payload)
             .send()?;
 

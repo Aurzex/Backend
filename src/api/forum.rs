@@ -132,7 +132,7 @@ impl ForumDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/web/forums/posts/all", None)
+            .build_request(HttpMethod::Get, "/web/forums/posts/all", None)
             .with_param("ids", ids_str.join(","))
             .send()?;
 
@@ -144,7 +144,7 @@ impl ForumDataFetcher {
         let endpoint = format!("/web/forums/posts/{}/details", post_id);
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -226,7 +226,7 @@ impl ForumDataFetcher {
     pub fn fetch_my_post_num(&self) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/web/forums/posts/mine/count", None)
+            .build_request(HttpMethod::Get, "/web/forums/posts/mine/count", None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -235,7 +235,7 @@ impl ForumDataFetcher {
     pub fn fetch_post_boards(&self) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/web/forums/boards/simples/all", None)
+            .build_request(HttpMethod::Get, "/web/forums/boards/simples/all", None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -245,7 +245,7 @@ impl ForumDataFetcher {
         let endpoint = format!("/web/forums/boards/{}", board_id);
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -254,7 +254,7 @@ impl ForumDataFetcher {
     pub fn fetch_hot_posts_ids(&self) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/web/forums/posts/hots/all", None)
+            .build_request(HttpMethod::Get, "/web/forums/posts/hots/all", None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -263,7 +263,7 @@ impl ForumDataFetcher {
     pub fn fetch_top_notices(&self, limit: Option<i32>) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/web/forums/notice-boards", None)
+            .build_request(HttpMethod::Get, "/web/forums/notice-boards", None)
             .with_param("limit", limit.unwrap_or(4).to_string())
             .send()?;
         self.client.response_to_json(response)
@@ -273,7 +273,7 @@ impl ForumDataFetcher {
     pub fn fetch_key_content(&self, content_key: &str, limit: Option<i32>) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/web/contents/get-key", None)
+            .build_request(HttpMethod::Get, "/web/contents/get-key", None)
             .with_param("content_key", content_key)
             .with_param("limit", limit.unwrap_or(4).to_string())
             .send()?;
@@ -288,7 +288,7 @@ impl ForumDataFetcher {
     ) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/web/forums/posts/selections", None)
+            .build_request(HttpMethod::Get, "/web/forums/posts/selections", None)
             .with_param("limit", limit.unwrap_or(20).to_string())
             .with_param("offset", offset.unwrap_or(0).to_string())
             .send()?;
@@ -299,7 +299,7 @@ impl ForumDataFetcher {
     pub fn fetch_report_reasons(&self) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/web/reports/posts/reasons/all", None)
+            .build_request(HttpMethod::Get, "/web/reports/posts/reasons/all", None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -408,7 +408,7 @@ impl ForumActionHandler {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, &endpoint, None)
+            .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(payload)
             .send()?;
 
@@ -435,7 +435,7 @@ impl ForumActionHandler {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, &endpoint, None)
+            .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(payload)
             .send()?;
 
@@ -454,8 +454,8 @@ impl ForumActionHandler {
         item_type: ItemType,
     ) -> MewResult<bool> {
         let method = match action {
-            "like" => HttpMethod::PUT,
-            "unlike" => HttpMethod::DELETE,
+            "like" => HttpMethod::Put,
+            "unlike" => HttpMethod::Delete,
             _ => {
                 return Err(MewError::Other(
                     "无效的action，必须是 'like' 或 'unlike'".into(),
@@ -492,7 +492,7 @@ impl ForumActionHandler {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, "/web/reports/posts/discussions", None)
+            .build_request(HttpMethod::Post, "/web/reports/posts/discussions", None)
             .with_payload(payload)
             .send()?;
 
@@ -519,7 +519,7 @@ impl ForumActionHandler {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, "/web/reports/posts", None)
+            .build_request(HttpMethod::Post, "/web/reports/posts", None)
             .with_payload(payload)
             .send()?;
 
@@ -540,7 +540,7 @@ impl ForumActionHandler {
 
         let response = self
             .client
-            .build_request(HttpMethod::DELETE, &endpoint, None)
+            .build_request(HttpMethod::Delete, &endpoint, None)
             .send()?;
 
         Ok(response.status() == HTTPStatus::NoContent as u16)
@@ -553,9 +553,9 @@ impl ForumActionHandler {
         should_top: bool,
     ) -> MewResult<bool> {
         let method = if should_top {
-            HttpMethod::PUT
+            HttpMethod::Put
         } else {
-            HttpMethod::DELETE
+            HttpMethod::Delete
         };
         let endpoint = format!("/web/forums/replies/{}/top", comment_id);
 
@@ -600,7 +600,7 @@ impl ForumActionHandler {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, &endpoint, None)
+            .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(payload)
             .send()?;
 

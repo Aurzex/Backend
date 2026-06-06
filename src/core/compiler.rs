@@ -6,14 +6,12 @@ use aes_gcm::{
     aead::{Aead, KeyInit},
 };
 use base64::{Engine as _, engine::general_purpose};
-use rand::RngExt;
 use serde_json::{Value, json, to_string_pretty};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::OnceLock;
-
 use thiserror::Error;
 
 // ============ 错误定义 ============
@@ -397,10 +395,9 @@ impl IdGenerator {
     }
 
     pub fn generate(&self, length: usize) -> String {
-        let mut rng = rand::rng();
         (0..length)
             .map(|_| {
-                let idx = rng.random_range(0..self.chars.len());
+                let idx = fastrand::usize(0..self.chars.len());
                 self.chars[idx]
             })
             .collect()
@@ -584,7 +581,7 @@ impl CodeMaoHttpClient {
 
 impl HttpClient for CodeMaoHttpClient {
     fn get_json(&self, url: &str, headers: Option<Vec<(String, String)>>) -> Result<Value> {
-        let mut request_builder = self.client.build_request(HttpMethod::GET, url, None);
+        let mut request_builder = self.client.build_request(HttpMethod::Get, url, None);
         if let Some(headers_map) = headers {
             request_builder = request_builder.with_headers(headers_map);
         }
@@ -599,7 +596,7 @@ impl HttpClient for CodeMaoHttpClient {
     fn get_binary(&self, url: &str) -> Result<Vec<u8>> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, url, None)
+            .build_request(HttpMethod::Get, url, None)
             .send()
             .map_err(|e| DecompilerError::Http(format!("请求失败: {}", e)))?;
         self.client
@@ -610,7 +607,7 @@ impl HttpClient for CodeMaoHttpClient {
     fn get_text(&self, url: &str) -> Result<String> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, url, None)
+            .build_request(HttpMethod::Get, url, None)
             .send()
             .map_err(|e| DecompilerError::Http(format!("请求失败: {}", e)))?;
         self.client

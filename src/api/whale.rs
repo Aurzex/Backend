@@ -210,7 +210,7 @@ impl WhaleReportFetcher {
     ) -> MewResult<Value> {
         let mut builder = self
             .client
-            .build_request(HttpMethod::GET, "/reports/works", Some(BaseKey::Whale))
+            .build_request(HttpMethod::Get, "/reports/works", Some(BaseKey::Whale))
             .with_param("type", source_type.as_str())
             .with_param("status", status.as_str())
             .with_param("offset", "0")
@@ -236,7 +236,7 @@ impl WhaleReportFetcher {
     ) -> MewResult<Value> {
         let mut builder = self
             .client
-            .build_request(HttpMethod::GET, "/reports/works", Some(BaseKey::Whale))
+            .build_request(HttpMethod::Get, "/reports/works", Some(BaseKey::Whale))
             .with_param("type", source_type.as_str())
             .with_param("status", status.as_str())
             .with_param("offset", "0")
@@ -296,7 +296,7 @@ impl WhaleReportFetcher {
     ) -> MewResult<Value> {
         let mut builder = self
             .client
-            .build_request(HttpMethod::GET, "/reports/comments", Some(BaseKey::Whale))
+            .build_request(HttpMethod::Get, "/reports/comments", Some(BaseKey::Whale))
             .with_param("source", source_type.as_str())
             .with_param("status", status.as_str())
             .with_param("offset", "0")
@@ -358,7 +358,7 @@ impl WhaleReportFetcher {
     ) -> MewResult<Value> {
         let mut builder = self
             .client
-            .build_request(HttpMethod::GET, "/reports/posts", Some(BaseKey::Whale))
+            .build_request(HttpMethod::Get, "/reports/posts", Some(BaseKey::Whale))
             .with_param("status", status.as_str())
             .with_param("offset", "0")
             .with_param("limit", "15");
@@ -423,7 +423,7 @@ impl WhaleReportFetcher {
         let mut builder = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/reports/posts/discussions",
                 Some(BaseKey::Whale),
             )
@@ -477,7 +477,7 @@ impl ReportHandler {
 
         let response = self
             .client
-            .build_request(HttpMethod::PATCH, &endpoint, Some(BaseKey::Whale))
+            .build_request(HttpMethod::Patch, &endpoint, Some(BaseKey::Whale))
             .with_payload(payload)
             .send()?;
 
@@ -498,7 +498,7 @@ impl ReportHandler {
 
         let response = self
             .client
-            .build_request(HttpMethod::PATCH, &endpoint, Some(BaseKey::Whale))
+            .build_request(HttpMethod::Patch, &endpoint, Some(BaseKey::Whale))
             .with_payload(payload)
             .send()?;
 
@@ -519,7 +519,7 @@ impl ReportHandler {
 
         let response = self
             .client
-            .build_request(HttpMethod::PATCH, &endpoint, Some(BaseKey::Whale))
+            .build_request(HttpMethod::Patch, &endpoint, Some(BaseKey::Whale))
             .with_payload(payload)
             .send()?;
 
@@ -547,7 +547,7 @@ impl ReportHandler {
 
         let response = self
             .client
-            .build_request(HttpMethod::PATCH, &endpoint, Some(BaseKey::Whale))
+            .build_request(HttpMethod::Patch, &endpoint, Some(BaseKey::Whale))
             .with_payload(payload)
             .send()?;
 

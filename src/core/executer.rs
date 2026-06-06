@@ -6,7 +6,6 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use rand::RngExt;
 use serde_json::{Map, Value};
 
 use crate::api::forum::{
@@ -1104,7 +1103,7 @@ impl ViolationChecker {
             "work" => {
                 let resp = KittyFactory::global_client()
                     .build_request(
-                        HttpMethod::GET,
+                        HttpMethod::Get,
                         &format!("/creation-tools/v1/works/{}/comments", source_id),
                         Some(BaseKey::Default),
                     )
@@ -1117,7 +1116,7 @@ impl ViolationChecker {
             "shop" => {
                 let resp = KittyFactory::global_client()
                     .build_request(
-                        HttpMethod::GET,
+                        HttpMethod::Get,
                         &format!("/web/discussions/{}/comments", source_id),
                         Some(BaseKey::Default),
                     )
@@ -1132,7 +1131,7 @@ impl ViolationChecker {
             "forum" => {
                 let resp = KittyFactory::global_client()
                     .build_request(
-                        HttpMethod::GET,
+                        HttpMethod::Get,
                         &format!("/web/forums/posts/{}/details", source_id),
                         Some(BaseKey::Default),
                     )
@@ -1372,7 +1371,7 @@ impl ViolationChecker {
                             .map_err(|e| ProcessorError::External(e.into()))?;
                     }
                     "shop" => {
-                        let reporter_id = rand::rng().random_range(10000..=199999999);
+                        let reporter_id = fastrand::i32(10000..=199999999);
                         if is_reply {
                             WorkshopActionHandler::new()
                                 .execute_report_comment(
@@ -1488,7 +1487,7 @@ impl ReplyProcessor {
                         if arr.is_empty() {
                             String::new()
                         } else {
-                            let idx = rand::rng().random_range(0..arr.len());
+                            let idx = fastrand::usize(0..arr.len());
                             arr.get(idx)
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("")
@@ -1505,7 +1504,7 @@ impl ReplyProcessor {
         let chosen = if formatted_replies.is_empty() {
             String::new()
         } else {
-            let idx = rand::rng().random_range(0..formatted_replies.len());
+            let idx = fastrand::usize(0..formatted_replies.len());
             formatted_replies.get(idx).cloned().unwrap_or_default()
         };
 

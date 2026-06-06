@@ -1,6 +1,5 @@
 use crate::utils::acquire::{BaseKey, Catsona, CodeMaoClient, HttpMethod, MewError, MewResult};
 use crate::utils::data::{CodeMaoFile, FileContent, PathConfig};
-use rand::RngExt;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
@@ -237,7 +236,7 @@ pub fn init_global_auth_manager() -> Arc<AuthManager> {
 pub fn fetch_current_timestamp_with_provider(provider: &dyn ClientProvider) -> MewResult<i64> {
     let client = provider.client();
     let response = client
-        .build_request(HttpMethod::GET, "/coconut/clouddb/currentTime", None)
+        .build_request(HttpMethod::Get, "/coconut/clouddb/currentTime", None)
         .send()?;
     let json = client.response_to_json(response)?;
     Ok(json["data"].as_i64().unwrap_or(0))
@@ -307,7 +306,7 @@ impl AuthProcessor {
 
         let response = client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "https://api.codemao.cn/web/users/details",
                 None,
             )
@@ -338,7 +337,7 @@ impl AuthProcessor {
 
         let response = client
             .build_request(
-                HttpMethod::POST,
+                HttpMethod::Post,
                 "https://open-service.codemao.cn/captcha/rule/v3",
                 None,
             )
@@ -364,7 +363,7 @@ impl AuthProcessor {
 
         let response = client
             .build_request(
-                HttpMethod::POST,
+                HttpMethod::Post,
                 "https://api.codemao.cn/tiger/v3/web/accounts/login/security",
                 None,
             )
@@ -401,7 +400,7 @@ impl AuthProcessor {
         });
 
         let response = client
-            .build_request(HttpMethod::POST, "/admins/login", Some(BaseKey::Whale))
+            .build_request(HttpMethod::Post, "/admins/login", Some(BaseKey::Whale))
             .with_payload(payload)
             .send()?;
         client.response_to_json(response)
@@ -412,7 +411,7 @@ impl AuthProcessor {
         let endpoint = format!("/admins/captcha/{}", timestamp);
 
         let response = client
-            .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Whale))
+            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Whale))
             .send()?;
 
         if response.status() == 200 {
@@ -448,7 +447,7 @@ impl AuthProcessor {
         });
 
         let response = client
-            .build_request(HttpMethod::POST, "/tiger/accounts/login", None)
+            .build_request(HttpMethod::Post, "/tiger/accounts/login", None)
             .with_payload(payload)
             .send()?;
         client.response_to_json(response)
@@ -468,7 +467,7 @@ impl AuthProcessor {
         });
 
         let response = client
-            .build_request(HttpMethod::POST, "/tiger/v3/web/accounts/login", None)
+            .build_request(HttpMethod::Post, "/tiger/v3/web/accounts/login", None)
             .with_payload(payload)
             .send()?;
         client.response_to_json(response)
@@ -985,7 +984,7 @@ impl AuthManager {
     pub fn execute_logout_v0(&self) -> MewResult<bool> {
         let client = self.client();
         let response = client
-            .build_request(HttpMethod::POST, "/tiger/accounts/logout", None)
+            .build_request(HttpMethod::Post, "/tiger/accounts/logout", None)
             .with_payload(json!({}))
             .send()?;
         Ok(response.status() == 204)
@@ -995,7 +994,7 @@ impl AuthManager {
         let client = self.client();
         let endpoint = format!("/tiger/v3/{}/accounts/logout", method);
         let response = client
-            .build_request(HttpMethod::POST, &endpoint, None)
+            .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(json!({}))
             .send()?;
         Ok(response.status() == 204)
@@ -1004,7 +1003,7 @@ impl AuthManager {
     pub fn admin_logout(&self) -> MewResult<bool> {
         let client = self.client();
         let response = client
-            .build_request(HttpMethod::DELETE, "/admins/logout", Some(BaseKey::Whale))
+            .build_request(HttpMethod::Delete, "/admins/logout", Some(BaseKey::Whale))
             .send()?;
         Ok(response.status() == 204)
     }
@@ -1012,7 +1011,7 @@ impl AuthManager {
     pub fn fetch_admin_dashboard_data(&self) -> MewResult<Value> {
         let client = self.client();
         let response = client
-            .build_request(HttpMethod::GET, "/admins/info", Some(BaseKey::Whale))
+            .build_request(HttpMethod::Get, "/admins/info", Some(BaseKey::Whale))
             .send()?;
         client.response_to_json(response)
     }
@@ -1076,10 +1075,9 @@ impl CloudAuthenticator {
 
     fn generate_client_id(length: usize) -> String {
         const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
-        let mut rng = rand::rng();
         (0..length)
             .map(|_| {
-                let idx = rng.random_range(0..CHARSET.len());
+                let idx = fastrand::usize(0..CHARSET.len());
                 CHARSET[idx] as char
             })
             .collect()

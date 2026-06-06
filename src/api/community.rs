@@ -142,7 +142,7 @@ impl CommunityDataFetcher {
     pub fn fetch_random_nickname(&self) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/api/user/random/nickname", None)
+            .build_request(HttpMethod::Get, "/api/user/random/nickname", None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -156,7 +156,7 @@ impl CommunityDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, endpoint, None)
+            .build_request(HttpMethod::Get, endpoint, None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -165,7 +165,7 @@ impl CommunityDataFetcher {
     pub fn fetch_replies(&self, types: ReplyTypes, limit: i32, offset: i32) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/web/message-record", None)
+            .build_request(HttpMethod::Get, "/web/message-record", None)
             .with_param("query_type", types.as_str())
             .with_param("limit", limit.to_string())
             .with_param("offset", offset.to_string())
@@ -179,7 +179,7 @@ impl CommunityDataFetcher {
             .client
             .paginated("/web/message-record")
             .with_param("query_type", types.as_str())
-            .with_method(HttpMethod::GET)
+            .with_method(HttpMethod::Get)
             .with_pagination_method(PaginationMethod::Offset)
             .with_total_key("total")
             .with_data_key("items");
@@ -200,7 +200,7 @@ impl CommunityDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -209,7 +209,7 @@ impl CommunityDataFetcher {
     pub fn fetch_pc_client(&self) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/tiger/pc_client/releases/latest", None)
+            .build_request(HttpMethod::Get, "/tiger/pc_client/releases/latest", None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -219,7 +219,7 @@ impl CommunityDataFetcher {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "https://update.codemao.cn/updatev2/appsdk",
                 None,
             )
@@ -235,7 +235,7 @@ impl CommunityDataFetcher {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "https://kn-cdn.codemao.cn/kitten4/application/kitten4_update_info.json",
                 None,
             )
@@ -252,7 +252,7 @@ impl CommunityDataFetcher {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "https://kn-cdn.codemao.cn/application/kitten_update_info.json",
                 None,
             )
@@ -269,7 +269,7 @@ impl CommunityDataFetcher {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "https://static-am.codemao.cn/wood/client/xp/prod/package.json",
                 None,
             )
@@ -286,7 +286,7 @@ impl CommunityDataFetcher {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "https://public-static-edu.codemao.cn/matrix/publish/desktop_matrix.json",
                 None,
             )
@@ -299,7 +299,7 @@ impl CommunityDataFetcher {
     pub fn fetch_current_timestamp_10(&self) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/coconut/clouddb/currentTime", None)
+            .build_request(HttpMethod::Get, "/coconut/clouddb/currentTime", None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -309,7 +309,7 @@ impl CommunityDataFetcher {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "https://time.codemao.cn/time/current",
                 None,
             )
@@ -321,7 +321,7 @@ impl CommunityDataFetcher {
     pub fn fetch_web_banners(&self, banner_type: Option<BannerType>) -> MewResult<Value> {
         let mut builder = self
             .client
-            .build_request(HttpMethod::GET, "/web/banners/all", None);
+            .build_request(HttpMethod::Get, "/web/banners/all", None);
 
         if let Some(b_type) = banner_type {
             builder = builder.with_param("type", b_type.as_str());
@@ -335,7 +335,7 @@ impl CommunityDataFetcher {
     pub fn fetch_nemo_banners(&self, banner_type: NemoBannerType) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/nemo/v2/home/banners", None)
+            .build_request(HttpMethod::Get, "/nemo/v2/home/banners", None)
             .with_param("banner_type", (banner_type as i32).to_string())
             .send()?;
         self.client.response_to_json(response)
@@ -346,7 +346,7 @@ impl CommunityDataFetcher {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/coconut/banner/list",
                 Some(BaseKey::Creation),
             )
@@ -359,7 +359,7 @@ impl CommunityDataFetcher {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/coconut/topic/list",
                 Some(BaseKey::Creation),
             )
@@ -371,7 +371,7 @@ impl CommunityDataFetcher {
     pub fn fetch_report_reasons(&self) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/web/reports/reasons/all", None)
+            .build_request(HttpMethod::Get, "/web/reports/reasons/all", None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -380,7 +380,7 @@ impl CommunityDataFetcher {
     pub fn fetch_nemo_config(&self) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "https://nemo.codemao.cn/config", None)
+            .build_request(HttpMethod::Get, "https://nemo.codemao.cn/config", None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -389,7 +389,7 @@ impl CommunityDataFetcher {
     pub fn fetch_community_config(&self) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "https://c.codemao.cn/config", None)
+            .build_request(HttpMethod::Get, "https://c.codemao.cn/config", None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -399,7 +399,7 @@ impl CommunityDataFetcher {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "https://player.codemao.cn/new/client_config.json",
                 None,
             )
@@ -412,7 +412,7 @@ impl CommunityDataFetcher {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/creation-tools/v1/pc/home/recommend-work",
                 None,
             )
@@ -425,7 +425,7 @@ impl CommunityDataFetcher {
     pub fn fetch_new_recommend_works(&self, limit: i32, offset: i32) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/nemo/v3/new-recommend/more/list", None)
+            .build_request(HttpMethod::Get, "/nemo/v3/new-recommend/more/list", None)
             .with_param("limit", limit.to_string())
             .with_param("offset", offset.to_string())
             .send()?;
@@ -436,7 +436,7 @@ impl CommunityDataFetcher {
     pub fn fetch_recommended_works_nemo(&self) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/nemo/v2/system/recommended/pool", None)
+            .build_request(HttpMethod::Get, "/nemo/v2/system/recommended/pool", None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -445,7 +445,7 @@ impl CommunityDataFetcher {
     pub fn fetch_work_channels(&self, channel_type: WorkChannelType) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/web/works/channels/list", None)
+            .build_request(HttpMethod::Get, "/web/works/channels/list", None)
             .with_param("type", channel_type.as_str())
             .send()?;
         self.client.response_to_json(response)
@@ -463,7 +463,7 @@ impl CommunityDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .with_param("type", channel_type.as_str())
             .with_param("page", page.to_string())
             .with_param("limit", limit.to_string())
@@ -475,7 +475,7 @@ impl CommunityDataFetcher {
     pub fn fetch_recommended_users(&self) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/web/users/recommended", None)
+            .build_request(HttpMethod::Get, "/web/users/recommended", None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -485,7 +485,7 @@ impl CommunityDataFetcher {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "https://backend.box3.fun/diversion/codemao/post",
                 None,
             )
@@ -498,7 +498,7 @@ impl CommunityDataFetcher {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/creation-tools/v1/home/especially/course",
                 None,
             )
@@ -531,7 +531,7 @@ impl CommunityDataFetcher {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/neko/sample/list",
                 Some(BaseKey::Creation),
             )
@@ -549,7 +549,7 @@ impl CommunityDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -559,7 +559,7 @@ impl CommunityDataFetcher {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "/kitten/activity/choiceness/list",
                 Some(BaseKey::Creation),
             )
@@ -624,7 +624,7 @@ impl CommunityDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -635,7 +635,7 @@ impl CommunityDataFetcher {
 
         let response = self
             .client
-            .build_request(HttpMethod::GET, &endpoint, None)
+            .build_request(HttpMethod::Get, &endpoint, None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -725,7 +725,7 @@ impl CommunityDataFetcher {
     pub fn fetch_work_labels(&self) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/api/work/label/list", None)
+            .build_request(HttpMethod::Get, "/api/work/label/list", None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -734,7 +734,7 @@ impl CommunityDataFetcher {
     pub fn fetch_work_category(&self) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/api/label/list", None)
+            .build_request(HttpMethod::Get, "/api/label/list", None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -748,7 +748,7 @@ impl CommunityDataFetcher {
     ) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/tiger/work/ide/recommended", None)
+            .build_request(HttpMethod::Get, "/tiger/work/ide/recommended", None)
             .with_param("type", work_type)
             .with_param("page_number", page_number.to_string())
             .with_param("amount_items", amount_items.to_string())
@@ -766,7 +766,7 @@ impl CommunityDataFetcher {
     ) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/tiger/work/list/all", None)
+            .build_request(HttpMethod::Get, "/tiger/work/list/all", None)
             .with_param("type", work_type)
             .with_param("page", page_number.to_string())
             .with_param("per_page", amount_items.to_string())
@@ -784,7 +784,7 @@ impl CommunityDataFetcher {
     ) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/tiger/material/recommend", None)
+            .build_request(HttpMethod::Get, "/tiger/material/recommend", None)
             .with_param("category_id", category_id.to_string())
             .with_param("limit", limit.to_string())
             .with_param("offset", offset.to_string())
@@ -815,7 +815,7 @@ impl UserAction {
     pub fn execute_sign_agreement(&self) -> MewResult<bool> {
         let response = self
             .client
-            .build_request(HttpMethod::POST, "/nemo/v3/user/level/signature", None)
+            .build_request(HttpMethod::Post, "/nemo/v3/user/level/signature", None)
             .with_payload(json!({}))
             .send()?;
         Ok(response.status() == HTTPStatus::Ok as u16)
@@ -825,7 +825,7 @@ impl UserAction {
     pub fn fetch_agreements(&self) -> MewResult<Value> {
         let response = self
             .client
-            .build_request(HttpMethod::GET, "/tiger/v3/web/accounts/agreements", None)
+            .build_request(HttpMethod::Get, "/tiger/v3/web/accounts/agreements", None)
             .send()?;
         self.client.response_to_json(response)
     }
@@ -858,7 +858,7 @@ impl UserAction {
         let response = self
             .client
             .build_request(
-                HttpMethod::POST,
+                HttpMethod::Post,
                 "/tiger/v3/web/accounts/register/phone/with-agreement",
                 None,
             )
@@ -873,7 +873,7 @@ impl UserAction {
 
         let response = self
             .client
-            .build_request(HttpMethod::DELETE, &endpoint, None)
+            .build_request(HttpMethod::Delete, &endpoint, None)
             .send()?;
         Ok(response.status() == 204)
     }

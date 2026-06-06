@@ -1,4 +1,3 @@
-use rand::Rng;
 use serde_json::Value;
 use std::fmt;
 use std::path::Path;
@@ -276,23 +275,23 @@ impl Default for KittyConfig {
 // ==================== HTTP 方法 ====================
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HttpMethod {
-    GET,
-    POST,
-    DELETE,
-    PATCH,
-    PUT,
-    HEAD,
+    Get,
+    Post,
+    Delete,
+    Patch,
+    Put,
+    Head,
 }
 
 impl From<HttpMethod> for &'static str {
     fn from(m: HttpMethod) -> Self {
         match m {
-            HttpMethod::GET => "GET",
-            HttpMethod::POST => "POST",
-            HttpMethod::DELETE => "DELETE",
-            HttpMethod::PATCH => "PATCH",
-            HttpMethod::PUT => "PUT",
-            HttpMethod::HEAD => "HEAD",
+            HttpMethod::Get => "GET",
+            HttpMethod::Post => "POST",
+            HttpMethod::Delete => "DELETE",
+            HttpMethod::Patch => "PATCH",
+            HttpMethod::Put => "PUT",
+            HttpMethod::Head => "HEAD",
         }
     }
 }
@@ -594,7 +593,7 @@ impl KittyCore {
         self.log_request(method, &url, params, payload);
 
         let response = match method {
-            HttpMethod::GET => {
+            HttpMethod::Get => {
                 let builder = self.agent.get(&url);
                 let builder = Self::apply_to_request_builder(
                     builder,
@@ -604,7 +603,7 @@ impl KittyCore {
                 );
                 builder.call()?
             }
-            HttpMethod::POST => {
+            HttpMethod::Post => {
                 let builder = self.agent.post(&url);
                 let builder = Self::apply_to_request_builder(
                     builder,
@@ -618,7 +617,7 @@ impl KittyCore {
                     builder.send_empty()?
                 }
             }
-            HttpMethod::DELETE => {
+            HttpMethod::Delete => {
                 let builder = self.agent.delete(&url);
                 let builder = Self::apply_to_request_builder(
                     builder,
@@ -628,7 +627,7 @@ impl KittyCore {
                 );
                 builder.call()?
             }
-            HttpMethod::PATCH => {
+            HttpMethod::Patch => {
                 let builder = self.agent.patch(&url);
                 let builder = Self::apply_to_request_builder(
                     builder,
@@ -642,7 +641,7 @@ impl KittyCore {
                     builder.send_empty()?
                 }
             }
-            HttpMethod::PUT => {
+            HttpMethod::Put => {
                 let builder = self.agent.put(&url);
                 let builder = Self::apply_to_request_builder(
                     builder,
@@ -656,7 +655,7 @@ impl KittyCore {
                     builder.send_empty()?
                 }
             }
-            HttpMethod::HEAD => {
+            HttpMethod::Head => {
                 let builder = self.agent.head(&url);
                 let builder = Self::apply_to_request_builder(
                     builder,
@@ -685,9 +684,9 @@ impl KittyCore {
         self.log_request(method, &url, params, None); // multipart 无 JSON 负载
 
         let builder = match method {
-            HttpMethod::POST => self.agent.post(&url),
-            HttpMethod::PUT => self.agent.put(&url),
-            HttpMethod::PATCH => self.agent.patch(&url),
+            HttpMethod::Post => self.agent.post(&url),
+            HttpMethod::Put => self.agent.put(&url),
+            HttpMethod::Patch => self.agent.patch(&url),
             _ => {
                 return Err(MewError::Other(
                     "Multipart only supports POST/PUT/PATCH".into(),
@@ -932,7 +931,7 @@ impl PaginatedIter {
     pub fn new(client: CodeMaoClient, endpoint: impl Into<String>) -> Self {
         Self {
             client,
-            method: HttpMethod::GET,
+            method: HttpMethod::Get,
             endpoint: endpoint.into(),
             base_params: Arc::new(Vec::new()),
             payload: None,
@@ -1216,7 +1215,7 @@ impl FileUploader {
         let response = self
             .client
             .build_request(
-                HttpMethod::POST,
+                HttpMethod::Post,
                 "https://api.pgaot.com/user/up_cat_file",
                 None,
             )
@@ -1237,7 +1236,7 @@ impl FileUploader {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, &token_info.upload_url, None)
+            .build_request(HttpMethod::Post, &token_info.upload_url, None)
             .send_multipart(form)?;
 
         let json = self.client.response_to_json(response)?;
@@ -1266,7 +1265,7 @@ impl FileUploader {
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, &token_info.upload_url, None)
+            .build_request(HttpMethod::Post, &token_info.upload_url, None)
             .send_multipart(form)?;
 
         let json = self.client.response_to_json(response)?;
@@ -1278,7 +1277,7 @@ impl FileUploader {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "https://open-service.codemao.cn/cdn/qi-niu/tokens/uploading",
                 Some(BaseKey::Default),
             )
@@ -1315,7 +1314,7 @@ impl FileUploader {
         let response = self
             .client
             .build_request(
-                HttpMethod::GET,
+                HttpMethod::Get,
                 "https://oversea-api.code.game/tiger/kitten/cdn/token/1",
                 Some(BaseKey::Default),
             )
@@ -1359,13 +1358,10 @@ struct CodeGameTokenInfo {
 // ==================== 辅助函数 ====================
 fn generate_meow_id(length: usize) -> String {
     const CHARSET: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    let mut rng = rand::rng();
-    let mut bytes = vec![0u8; length];
-    rng.fill_bytes(&mut bytes);
-    for b in &mut bytes {
-        *b = CHARSET[(*b as usize) % CHARSET.len()];
-    }
-    String::from_utf8(bytes).unwrap_or_default()
+
+    (0..length)
+        .map(|_| CHARSET[fastrand::usize(0..CHARSET.len())] as char)
+        .collect()
 }
 
 // ==================== HTTP 状态码枚举 ====================
