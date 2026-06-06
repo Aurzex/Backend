@@ -33,8 +33,9 @@ pub enum MewError {
 pub type MewResult<T> = std::result::Result<T, MewError>;
 
 // ==================== 基础 URL 键枚举 ====================
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum BaseKey {
+    #[default]
     Default,
     Creation,
     Whale,
@@ -81,12 +82,6 @@ impl FromStr for BaseKey {
             "education" => Ok(BaseKey::Education),
             _ => Err(MewError::Other(format!("invalid base key: {}", s))),
         }
-    }
-}
-
-impl Default for BaseKey {
-    fn default() -> Self {
-        BaseKey::Default
     }
 }
 
@@ -222,7 +217,7 @@ impl KittyIdentityManager {
 static GLOBAL_IDENTITY_MANAGER: OnceLock<KittyIdentityManager> = OnceLock::new();
 
 fn get_global_identity_manager() -> &'static KittyIdentityManager {
-    GLOBAL_IDENTITY_MANAGER.get_or_init(|| KittyIdentityManager::new())
+    GLOBAL_IDENTITY_MANAGER.get_or_init(KittyIdentityManager::new)
 }
 
 // ==================== 客户端配置 ====================
@@ -1091,10 +1086,10 @@ impl PaginatedIter {
 
         self.total_items = Self::extract_total(&json, &self.total_key)?;
 
-        if let Some(response_amount_key) = &self.config.response_amount_key {
-            if let Some(amount) = Self::extract_nested_u64(&json, response_amount_key) {
-                self.items_per_page = amount as usize;
-            }
+        if let Some(response_amount_key) = &self.config.response_amount_key
+            && let Some(amount) = Self::extract_nested_u64(&json, response_amount_key)
+        {
+            self.items_per_page = amount as usize;
         }
 
         if let Some(items) = json
@@ -1142,10 +1137,10 @@ impl PaginatedIter {
 
     /// 获取下一个项目（同步迭代）
     pub fn next_item(&mut self) -> Option<MewResult<Value>> {
-        if !self.initialized {
-            if let Err(e) = self.initialize() {
-                return Some(Err(e));
-            }
+        if !self.initialized
+            && let Err(e) = self.initialize()
+        {
+            return Some(Err(e));
         }
         if self.finished || self.reached_limit() {
             return None;
@@ -1300,7 +1295,7 @@ impl FileUploader {
             .as_array()
             .ok_or_else(|| MewError::Other("No tokens array".into()))?;
         let token_info = tokens
-            .get(0)
+            .first()
             .ok_or_else(|| MewError::Other("No token".into()))?;
 
         Ok(CodeMaoTokenInfo {
@@ -1334,7 +1329,7 @@ impl FileUploader {
             .as_array()
             .ok_or_else(|| MewError::Other("No data array".into()))?;
         let token_data = data
-            .get(0)
+            .first()
             .ok_or_else(|| MewError::Other("No token data".into()))?;
 
         Ok(CodeGameTokenInfo {

@@ -99,20 +99,17 @@ pub fn value_to_i64(v: &serde_json::Value) -> Option<i64> {
 }
 
 pub fn timestamp_to_string(ts: &serde_json::Value) -> String {
-    if let Some(secs) = ts.as_i64() {
-        if secs > 0 {
-            // Convert UNIX timestamp to local time string without using chrono or external crates
-            let secs_u64 = secs as u64;
-            let t = UNIX_EPOCH + Duration::from_secs(secs_u64);
-            match t.elapsed() {
-                Ok(_) => {
-                    // Get seconds since UNIX_EPOCH and format as YYYY-MM-DD HH:MM:SS
-                    let time = t;
-                    let timestamp = time.duration_since(UNIX_EPOCH).unwrap().as_secs();
-                    return format!("{}", timestamp);
-                }
-                Err(_) => {}
-            }
+    if let Some(secs) = ts.as_i64()
+        && secs > 0
+    {
+        // Convert UNIX timestamp to local time string without using chrono or external crates
+        let secs_u64 = secs as u64;
+        let t = UNIX_EPOCH + Duration::from_secs(secs_u64);
+        if t.elapsed().is_ok() {
+            // Get seconds since UNIX_EPOCH and format as YYYY-MM-DD HH:MM:SS
+            let time = t;
+            let timestamp = time.duration_since(UNIX_EPOCH).unwrap().as_secs();
+            return format!("{}", timestamp);
         }
     }
     ts.to_string()
@@ -730,20 +727,18 @@ impl ReportFetcher {
                     }
                 };
 
-                let generator = (config.fetch_generator)(status.clone());
+                let generator = (config.fetch_generator)(status);
                 let mut type_items = Vec::new();
 
                 for result in generator {
                     match result {
                         Ok(mut item) => {
-                            if status == ReportStatus::ToBeDone {
-                                if let Some(state) =
+                            if status == ReportStatus::ToBeDone
+                                && let Some(state) =
                                     item.get(&config.status_field).and_then(|v| v.as_str())
-                                {
-                                    if state != "TOBEDONE" {
-                                        continue;
-                                    }
-                                }
+                                && state != "TOBEDONE"
+                            {
+                                continue;
                             }
                             // ★ 注入类型标记
                             if let Value::Object(ref mut map) = item {
@@ -794,12 +789,11 @@ impl ReportFetcher {
     pub fn get_total_reports(&self, status: ReportStatus) -> i64 {
         let mut total = 0i64;
         for rtype in self.registry.get_all_types() {
-            if let Some(config) = self.registry.get_config(&rtype) {
-                if let Ok(result) = (config.fetch_total)(status) {
-                    if let Some(t) = result.get("total").and_then(|v| v.as_i64()) {
-                        total += t;
-                    }
-                }
+            if let Some(config) = self.registry.get_config(&rtype)
+                && let Ok(result) = (config.fetch_total)(status)
+                && let Some(t) = result.get("total").and_then(|v| v.as_i64())
+            {
+                total += t;
             }
         }
         total
