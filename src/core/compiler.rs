@@ -1003,9 +1003,8 @@ impl BaseDecompiler for NekoDecompiler {
             .map_err(|e| DecompilerError::Other(format!("生成设备认证失败: {}", e)))?;
 
         let device_auth_str = serde_json::to_string(&device_auth)?;
-
-        let mut headers: Vec<(String, String)> = Vec::new();
-        headers.push(("x-creation-tools-device-auth".to_string(), device_auth_str));
+        let headers: Vec<(String, String)> =
+            vec![("x-creation-tools-device-auth".to_string(), device_auth_str)];
 
         let detail = self
             .context

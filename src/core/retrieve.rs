@@ -809,7 +809,7 @@ impl DataQuery {
             };
         }
 
-        stats.sort_by(|a, b| b.total_reports.cmp(&a.total_reports));
+        stats.sort_by_key(|b| std::cmp::Reverse(b.total_reports));
 
         Ok(AdminReportStatistics {
             total_admins: stats.len() as i32,
@@ -1004,7 +1004,7 @@ impl Iterator for CommunityReplyStream {
             return None;
         }
 
-        let batch_size = self.remaining.min(200).max(5);
+        let batch_size = self.remaining.clamp(5, 200);
         match CommunityDataFetcher::new().fetch_replies(self.reply_type, batch_size, self.offset) {
             Ok(response) => {
                 let items: Vec<JsonObject> = response
