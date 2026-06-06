@@ -1107,7 +1107,8 @@ impl CloudAuthenticator {
         let sign_str = format!("{}{}{}", self.client_secret, timestamp, self.client_id);
         let mut hasher = Sha256::new();
         hasher.update(sign_str.as_bytes());
-        let sign = format!("{:X}", hasher.finalize());
+        let result = hasher.finalize();
+        let sign: String = result.iter().map(|b| format!("{:02X}", b)).collect();
 
         let auth_json = json!({
             "sign": sign,
