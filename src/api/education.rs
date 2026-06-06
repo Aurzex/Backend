@@ -1,5 +1,6 @@
 use crate::utils::acquire::{
-    CodeMaoClient, HTTPStatus, HttpMethod, PaginatedIter, PaginationMethod,
+    CodeMaoClient, HTTPStatus, HttpMethod, KittyRequestBuilder, MewResult, PaginatedIter,
+    PaginationMethod,
 };
 use serde_json::{Value, json};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -24,11 +25,7 @@ impl EduUserAction {
         }
     }
 
-    pub fn update_user_real_name(
-        &self,
-        user_id: i32,
-        real_name: &str,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn update_user_real_name(&self, user_id: i32, real_name: &str) -> MewResult<bool> {
         let timestamp = current_timestamp_13();
 
         let response = self
@@ -46,7 +43,7 @@ impl EduUserAction {
         Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
-    pub fn create_class(&self, name: &str) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn create_class(&self, name: &str) -> MewResult<Value> {
         let data = json!({ "name": name });
 
         let response = self
@@ -59,10 +56,10 @@ impl EduUserAction {
             .with_payload(data)
             .send()?;
 
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
-    pub fn delete_class(&self, class_id: i32) -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn delete_class(&self, class_id: i32) -> MewResult<bool> {
         let timestamp = current_timestamp_13();
         let endpoint = format!("https://eduzone.codemao.cn/edu/zone/class/{}", class_id);
 
@@ -75,11 +72,7 @@ impl EduUserAction {
         Ok(response.status() == HTTPStatus::NoContent as u16)
     }
 
-    pub fn add_students_to_class(
-        &self,
-        names: &[String],
-        class_id: i32,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn add_students_to_class(&self, names: &[String], class_id: i32) -> MewResult<bool> {
         let data = json!({ "student_names": names });
         let endpoint = format!(
             "https://eduzone.codemao.cn/edu/zone/class/{}/students",
@@ -95,7 +88,7 @@ impl EduUserAction {
         Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
-    pub fn reset_student_password(&self, stu_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn reset_student_password(&self, stu_id: i32) -> MewResult<Value> {
         let endpoint = format!(
             "https://eduzone.codemao.cn/edu/zone/students/{}/password",
             stu_id
@@ -107,13 +100,10 @@ impl EduUserAction {
             .with_payload(json!({}))
             .send()?;
 
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
-    pub fn execute_bulk_reset_passwords(
-        &self,
-        stu_list: &[i32],
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn execute_bulk_reset_passwords(&self, stu_list: &[i32]) -> MewResult<Value> {
         let data = json!({ "student_id": stu_list });
 
         let response = self
@@ -126,13 +116,10 @@ impl EduUserAction {
             .with_payload(data)
             .send()?;
 
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
-    pub fn delete_student_from_class(
-        &self,
-        stu_id: i32,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn delete_student_from_class(&self, stu_id: i32) -> MewResult<bool> {
         let endpoint = format!(
             "https://eduzone.codemao.cn/edu/zone/student/remove/{}",
             stu_id
@@ -154,7 +141,7 @@ impl EduUserAction {
         description: &str,
         name: &str,
         return_data: bool,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let data = json!({
             "avatar_url": avatar_url,
             "description": description,
@@ -172,13 +159,13 @@ impl EduUserAction {
             .send()?;
 
         if return_data {
-            Ok(self.client.response_to_json(response)?)
+            self.client.response_to_json(response)
         } else {
             Ok(json!({ "success": response.status() == HTTPStatus::Ok as u16 }))
         }
     }
 
-    pub fn delete_work(&self, work_id: i32) -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn delete_work(&self, work_id: i32) -> MewResult<bool> {
         let endpoint = format!(
             "https://eduzone.codemao.cn/edu/zone/work/{}/delete",
             work_id
@@ -193,11 +180,7 @@ impl EduUserAction {
         Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
-    pub fn execute_transfer_to_unassigned(
-        &self,
-        class_id: i32,
-        stu_id: i32,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn execute_transfer_to_unassigned(&self, class_id: i32, stu_id: i32) -> MewResult<bool> {
         let endpoint = format!(
             "https://eduzone.codemao.cn/edu/zone/class/{}/students",
             class_id
@@ -212,10 +195,7 @@ impl EduUserAction {
         Ok(response.status() == HTTPStatus::NoContent as u16)
     }
 
-    pub fn fetch_activity_package_details(
-        &self,
-        package_id: i32,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_activity_package_details(&self, package_id: i32) -> MewResult<Value> {
         let data = json!({ "packageId": package_id });
 
         let response = self
@@ -228,10 +208,10 @@ impl EduUserAction {
             .with_payload(data)
             .send()?;
 
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
-    pub fn fetch_activity_packages(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_activity_packages(&self) -> MewResult<Value> {
         let response = self
             .client
             .build_request(
@@ -242,10 +222,10 @@ impl EduUserAction {
             .with_payload(json!({}))
             .send()?;
 
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
-    pub fn execute_mark_all_messages_as_read(&self) -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn execute_mark_all_messages_as_read(&self) -> MewResult<bool> {
         let response = self
             .client
             .build_request(
@@ -268,7 +248,7 @@ impl EduUserAction {
         commentary: &str,
         logical_score: i32,
         programming_score: i32,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    ) -> MewResult<bool> {
         let data = json!({
             "artistic_score": artistic_score,
             "commentary": commentary,
@@ -297,7 +277,7 @@ impl EduUserAction {
         class_id: i32,
         types: &str,
         identity: Value,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    ) -> MewResult<bool> {
         let data = json!({
             "identity": identity,
             "type": types,
@@ -318,10 +298,7 @@ impl EduUserAction {
         Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
-    pub fn execute_accept_class_invite(
-        &self,
-        message_id: i32,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn execute_accept_class_invite(&self, message_id: i32) -> MewResult<bool> {
         let endpoint = format!(
             "https://eduzone.codemao.cn/edu/zone/invite/student/message/{}/accept",
             message_id
@@ -349,7 +326,7 @@ impl EduUserAction {
         city_id: i32,
         district_id: i32,
         teacher_card_number: &str,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    ) -> MewResult<bool> {
         let data = json!({
             "id": user_id,
             "real_name": real_name,
@@ -395,23 +372,21 @@ impl EduDataFetcher {
         }
     }
 
-    fn add_timestamp_to_builder(
-        builder: crate::utils::acquire::InnerBuilder,
-    ) -> crate::utils::acquire::InnerBuilder {
+    fn add_timestamp_to_builder(builder: KittyRequestBuilder) -> KittyRequestBuilder {
         let timestamp = current_timestamp_13();
         builder.with_param("TIME", timestamp.to_string())
     }
 
-    pub fn fetch_user_profile(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_user_profile(&self) -> MewResult<Value> {
         let builder =
             self.client
                 .build_request(HttpMethod::GET, "https://eduzone.codemao.cn/edu/zone", None);
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
-    pub fn fetch_account_role(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_account_role(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/api/home/account",
@@ -419,10 +394,10 @@ impl EduDataFetcher {
         );
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
-    pub fn fetch_unread_message_count(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_unread_message_count(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/system/message/unread/num",
@@ -430,7 +405,7 @@ impl EduDataFetcher {
         );
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     pub fn fetch_notices_gen(&self, limit: Option<usize>) -> PaginatedIter {
@@ -478,7 +453,7 @@ impl EduDataFetcher {
         paginated
     }
 
-    pub fn fetch_school_categories(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_school_categories(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/school/open/grade/list",
@@ -486,14 +461,10 @@ impl EduDataFetcher {
         );
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
-    pub fn fetch_classrooms(
-        &self,
-        method: &str,
-        limit: Option<usize>,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_classrooms(&self, method: &str, limit: Option<usize>) -> MewResult<Value> {
         if method == "simple" {
             let response = self
                 .client
@@ -503,7 +474,7 @@ impl EduDataFetcher {
                     None,
                 )
                 .send()?;
-            Ok(self.client.response_to_json(response)?)
+            self.client.response_to_json(response)
         } else if method == "detail" {
             let _paginated = self
                 .client
@@ -514,7 +485,6 @@ impl EduDataFetcher {
                 .with_response_amount_key("limit")
                 .with_limit(limit.unwrap_or(20));
 
-            // Note: This returns a marker value, actual data should be fetched via iterator
             Ok(json!({ "paginated": "Use iterator to fetch data" }))
         } else {
             Ok(json!({}))
@@ -563,7 +533,7 @@ impl EduDataFetcher {
         paginated
     }
 
-    pub fn fetch_navigation_menus(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_navigation_menus(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/api/home/eduzone/menus",
@@ -571,10 +541,10 @@ impl EduDataFetcher {
         );
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
-    pub fn fetch_edu_banners(&self, type_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_edu_banners(&self, type_id: i32) -> MewResult<Value> {
         let builder = self
             .client
             .build_request(
@@ -585,10 +555,10 @@ impl EduDataFetcher {
             .with_param("type_id", type_id.to_string());
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
-    pub fn fetch_server_time(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_server_time(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/base/server/time",
@@ -596,10 +566,10 @@ impl EduDataFetcher {
         );
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
-    pub fn fetch_lesson_package_status(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_lesson_package_status(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/lessons/person/package/remind/status",
@@ -607,10 +577,10 @@ impl EduDataFetcher {
         );
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
-    pub fn fetch_configuration(&self, tag: &str) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_configuration(&self, tag: &str) -> MewResult<Value> {
         let builder = self
             .client
             .build_request(
@@ -621,10 +591,10 @@ impl EduDataFetcher {
             .with_param("tag", tag);
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
-    pub fn fetch_extended_profile(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_extended_profile(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/user-extend/info",
@@ -632,10 +602,10 @@ impl EduDataFetcher {
         );
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
-    pub fn fetch_operation_logs(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_operation_logs(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/operation/records",
@@ -643,10 +613,10 @@ impl EduDataFetcher {
         );
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
-    pub fn fetch_teaching_status(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_teaching_status(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/teaching/class/remind",
@@ -654,10 +624,10 @@ impl EduDataFetcher {
         );
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
-    pub fn fetch_dashboard_stats(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_dashboard_stats(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/homepage/statistic",
@@ -665,10 +635,10 @@ impl EduDataFetcher {
         );
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
-    pub fn fetch_tool_menu(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_tool_menu(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/homepage/menus",
@@ -676,7 +646,7 @@ impl EduDataFetcher {
         );
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     pub fn fetch_all_works_gen(&self, limit: Option<usize>) -> PaginatedIter {
@@ -741,7 +711,7 @@ impl EduDataFetcher {
         class_id: Option<i32>,
         year: i32,
         month: i32,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let mut builder = self
             .client
             .build_request(
@@ -758,7 +728,7 @@ impl EduDataFetcher {
 
         builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     pub fn fetch_teaching_records_gen(&self, limit: Option<usize>) -> PaginatedIter {
@@ -781,7 +751,7 @@ impl EduDataFetcher {
         paginated
     }
 
-    pub fn fetch_teaching_classes(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_teaching_classes(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/teaching/class/teacher/list",
@@ -789,10 +759,10 @@ impl EduDataFetcher {
         );
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
-    pub fn fetch_school_info(&self, unit_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_school_info(&self, unit_id: i32) -> MewResult<Value> {
         let builder = self
             .client
             .build_request(
@@ -803,7 +773,7 @@ impl EduDataFetcher {
             .with_param("unitId", unit_id.to_string());
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     pub fn fetch_official_lesson_packages_gen(&self, limit: Option<usize>) -> PaginatedIter {
@@ -830,7 +800,7 @@ impl EduDataFetcher {
         paginated
     }
 
-    pub fn fetch_lesson_topics(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_lesson_topics(&self) -> MewResult<Value> {
         let builder = self
             .client
             .build_request(
@@ -842,10 +812,10 @@ impl EduDataFetcher {
             .with_param("topicType", "all");
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
-    pub fn fetch_lesson_tags(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_lesson_tags(&self) -> MewResult<Value> {
         let builder = self
             .client
             .build_request(
@@ -857,7 +827,7 @@ impl EduDataFetcher {
             .with_param("topicType", "all");
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     pub fn fetch_custom_lesson_packages_gen(&self, limit: Option<usize>) -> PaginatedIter {
@@ -884,7 +854,7 @@ impl EduDataFetcher {
         &self,
         package_id: i32,
         method: HttpMethod,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let endpoint = format!(
             "https://eduzone.codemao.cn/edu/zone/lesson/customized/packages/{}",
             package_id
@@ -895,17 +865,13 @@ impl EduDataFetcher {
         let response = builder.send()?;
 
         if method == HttpMethod::GET {
-            Ok(self.client.response_to_json(response)?)
+            self.client.response_to_json(response)
         } else {
             Ok(json!({ "success": response.status() == HTTPStatus::Ok as u16 }))
         }
     }
 
-    pub fn fetch_custom_package_contents(
-        &self,
-        package_id: i32,
-        limit: i32,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_custom_package_contents(&self, package_id: i32, limit: i32) -> MewResult<Value> {
         let builder = self
             .client
             .build_request(
@@ -917,10 +883,10 @@ impl EduDataFetcher {
             .with_param("package_id", package_id.to_string());
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
-    pub fn fetch_class_invites(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_class_invites(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/invite/student/message/next",
@@ -928,10 +894,10 @@ impl EduDataFetcher {
         );
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
-    pub fn fetch_expiring_lessons(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_expiring_lessons(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/lesson/offical/packages/expired",
@@ -939,23 +905,26 @@ impl EduDataFetcher {
         );
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
-    pub fn fetch_organization_ids(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_organization_ids(&self) -> MewResult<Value> {
         let timestamp = current_timestamp_13();
 
         let response = self
             .client
-            .agent()
-            .get("https://static.codemao.cn/teacher-edu/organization_ids.json")
-            .query("CMTIME", &timestamp.to_string())
-            .call()?;
+            .build_request(
+                HttpMethod::GET,
+                "https://static.codemao.cn/teacher-edu/organization_ids.json",
+                None,
+            )
+            .with_param("CMTIME", timestamp.to_string())
+            .send()?;
 
-        Ok(response.into_body().read_json()?)
+        self.client.response_to_json(response)
     }
 
-    pub fn fetch_report_metadata(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_report_metadata(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/analysis/report/info",
@@ -963,10 +932,10 @@ impl EduDataFetcher {
         );
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
-    pub fn fetch_course_analytics(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_course_analytics(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/course",
@@ -974,10 +943,10 @@ impl EduDataFetcher {
         );
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
-    pub fn fetch_lesson_package_analytics(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_lesson_package_analytics(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/packages",
@@ -985,10 +954,10 @@ impl EduDataFetcher {
         );
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
-    pub fn fetch_classroom_analytics(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_classroom_analytics(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/class/info",
@@ -996,10 +965,10 @@ impl EduDataFetcher {
         );
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
-    pub fn fetch_work_performance(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_work_performance(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/works/situations",
@@ -1007,10 +976,10 @@ impl EduDataFetcher {
         );
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
-    pub fn fetch_work_ratings(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_work_ratings(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/works/star/info",
@@ -1018,10 +987,10 @@ impl EduDataFetcher {
         );
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
-    pub fn fetch_skill_assessment(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_skill_assessment(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/ability/dimensions",
@@ -1029,10 +998,10 @@ impl EduDataFetcher {
         );
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
-    pub fn fetch_skill_radar(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_skill_radar(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/ability/radars",
@@ -1040,10 +1009,10 @@ impl EduDataFetcher {
         );
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
-    pub fn fetch_art_skills(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_art_skills(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/ability/artistic/dimensions",
@@ -1051,10 +1020,10 @@ impl EduDataFetcher {
         );
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
-    pub fn fetch_logic_skills(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_logic_skills(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/ability/logical/dimensions",
@@ -1062,10 +1031,10 @@ impl EduDataFetcher {
         );
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
-    pub fn fetch_coding_skills(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_coding_skills(&self) -> MewResult<Value> {
         let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/ability/programming/dimensions",
@@ -1073,7 +1042,7 @@ impl EduDataFetcher {
         );
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 }
 

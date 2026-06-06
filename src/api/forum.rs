@@ -1,4 +1,6 @@
-use crate::utils::acquire::{CodeMaoClient, HttpMethod, PaginatedIter, PaginationMethod};
+use crate::utils::acquire::{
+    CodeMaoClient, HTTPStatus, HttpMethod, MewError, MewResult, PaginatedIter, PaginationMethod,
+};
 use serde_json::{Value, json};
 
 // 帖子类型枚举
@@ -121,12 +123,9 @@ impl ForumDataFetcher {
     }
 
     // 获取多个帖子信息
-    pub fn fetch_posts_details(
-        &self,
-        post_ids: Vec<i32>,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_posts_details(&self, post_ids: Vec<i32>) -> MewResult<Value> {
         if post_ids.len() >= 20 {
-            return Err("数据长度需小于 20".into());
+            return Err(MewError::Other("数据长度需小于 20".into()));
         }
 
         let ids_str: Vec<String> = post_ids.iter().map(|id| id.to_string()).collect();
@@ -137,20 +136,17 @@ impl ForumDataFetcher {
             .with_param("ids", ids_str.join(","))
             .send()?;
 
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取单个帖子信息
-    pub fn fetch_single_post_details(
-        &self,
-        post_id: i32,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_single_post_details(&self, post_id: i32) -> MewResult<Value> {
         let endpoint = format!("/web/forums/posts/{}/details", post_id);
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取帖子回帖生成器
@@ -227,68 +223,61 @@ impl ForumDataFetcher {
     }
 
     // 获取我的帖子或回复的帖子数目
-    pub fn fetch_my_post_num(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_my_post_num(&self) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/web/forums/posts/mine/count", None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取论坛帖子各个栏目
-    pub fn fetch_post_boards(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_post_boards(&self) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/web/forums/boards/simples/all", None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取论坛单个版块详细信息
-    pub fn fetch_board_details(&self, board_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_board_details(&self, board_id: i32) -> MewResult<Value> {
         let endpoint = format!("/web/forums/boards/{}", board_id);
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取社区所有热门帖子 ID
-    pub fn fetch_hot_posts_ids(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_hot_posts_ids(&self) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/web/forums/posts/hots/all", None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取论坛顶部公告
-    pub fn fetch_top_notices(
-        &self,
-        limit: Option<i32>,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_top_notices(&self, limit: Option<i32>) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/web/forums/notice-boards", None)
             .with_param("limit", limit.unwrap_or(4).to_string())
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取论坛本周精选帖子
-    pub fn fetch_key_content(
-        &self,
-        content_key: &str,
-        limit: Option<i32>,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_key_content(&self, content_key: &str, limit: Option<i32>) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/web/contents/get-key", None)
             .with_param("content_key", content_key)
             .with_param("limit", limit.unwrap_or(4).to_string())
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取社区精品合集帖子
@@ -296,23 +285,23 @@ impl ForumDataFetcher {
         &self,
         limit: Option<i32>,
         offset: Option<i32>,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/web/forums/posts/selections", None)
             .with_param("limit", limit.unwrap_or(20).to_string())
             .with_param("offset", offset.unwrap_or(0).to_string())
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取论坛举报原因
-    pub fn fetch_report_reasons(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_report_reasons(&self) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/web/reports/posts/reasons/all", None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 通过标题搜索帖子生成器
@@ -411,7 +400,7 @@ impl ForumActionHandler {
         post_id: i32,
         content: &str,
         return_data: bool,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let endpoint = format!("/web/forums/posts/{}/replies", post_id);
         let payload = json!({
             "content": content
@@ -424,9 +413,9 @@ impl ForumActionHandler {
             .send()?;
 
         if return_data {
-            Ok(self.client.response_to_json(response)?)
+            self.client.response_to_json(response)
         } else {
-            Ok(json!({ "success": response.status() == 201 }))
+            Ok(json!({ "success": response.status() == HTTPStatus::Created as u16 }))
         }
     }
 
@@ -437,7 +426,7 @@ impl ForumActionHandler {
         parent_id: i32,
         content: &str,
         return_data: bool,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let endpoint = format!("/web/forums/replies/{}/comments", reply_id);
         let payload = json!({
             "content": content,
@@ -451,9 +440,9 @@ impl ForumActionHandler {
             .send()?;
 
         if return_data {
-            Ok(self.client.response_to_json(response)?)
+            self.client.response_to_json(response)
         } else {
-            Ok(json!({ "success": response.status() == 201 }))
+            Ok(json!({ "success": response.status() == HTTPStatus::Created as u16 }))
         }
     }
 
@@ -463,11 +452,15 @@ impl ForumActionHandler {
         action: &str,
         item_id: i32,
         item_type: ItemType,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    ) -> MewResult<bool> {
         let method = match action {
             "like" => HttpMethod::PUT,
             "unlike" => HttpMethod::DELETE,
-            _ => return Err("无效的action，必须是 'like' 或 'unlike'".into()),
+            _ => {
+                return Err(MewError::Other(
+                    "无效的action，必须是 'like' 或 'unlike'".into(),
+                ));
+            }
         };
 
         let endpoint = format!("/web/forums/comments/{}/liked", item_id);
@@ -478,7 +471,7 @@ impl ForumActionHandler {
             .with_param("source", item_type.as_str())
             .send()?;
 
-        Ok(response.status() == 204)
+        Ok(response.status() == HTTPStatus::NoContent as u16)
     }
 
     // 举报某个回帖或评论
@@ -489,7 +482,7 @@ impl ForumActionHandler {
         description: &str,
         item_type: ItemType,
         return_data: bool,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let payload = json!({
             "reason_id": reason_id as i32,
             "description": description,
@@ -504,9 +497,9 @@ impl ForumActionHandler {
             .send()?;
 
         if return_data {
-            Ok(self.client.response_to_json(response)?)
+            self.client.response_to_json(response)
         } else {
-            Ok(json!({ "success": response.status() == 201 }))
+            Ok(json!({ "success": response.status() == HTTPStatus::Created as u16 }))
         }
     }
 
@@ -517,7 +510,7 @@ impl ForumActionHandler {
         reason_id: PostReportReasonId,
         description: &str,
         return_data: bool,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let payload = json!({
             "reason_id": reason_id as i32,
             "description": description,
@@ -531,18 +524,14 @@ impl ForumActionHandler {
             .send()?;
 
         if return_data {
-            Ok(self.client.response_to_json(response)?)
+            self.client.response_to_json(response)
         } else {
-            Ok(json!({ "success": response.status() == 201 }))
+            Ok(json!({ "success": response.status() == HTTPStatus::Created as u16 }))
         }
     }
 
     // 删除某个回帖或评论或帖子
-    pub fn delete_item(
-        &self,
-        item_id: i32,
-        item_type: DeleteItemType,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn delete_item(&self, item_id: i32, item_type: DeleteItemType) -> MewResult<bool> {
         let endpoint = match item_type {
             DeleteItemType::Reply => format!("/web/forums/replies/{}", item_id),
             DeleteItemType::Comment => format!("/web/forums/comments/{}", item_id),
@@ -554,7 +543,7 @@ impl ForumActionHandler {
             .build_request(HttpMethod::DELETE, &endpoint, None)
             .send()?;
 
-        Ok(response.status() == 204)
+        Ok(response.status() == HTTPStatus::NoContent as u16)
     }
 
     // 置顶或取消置顶某个回帖
@@ -562,7 +551,7 @@ impl ForumActionHandler {
         &self,
         comment_id: i32,
         should_top: bool,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    ) -> MewResult<bool> {
         let method = if should_top {
             HttpMethod::PUT
         } else {
@@ -572,7 +561,7 @@ impl ForumActionHandler {
 
         let response = self.client.build_request(method, &endpoint, None).send()?;
 
-        Ok(response.status() == 204)
+        Ok(response.status() == HTTPStatus::NoContent as u16)
     }
 
     // 发布帖子
@@ -584,15 +573,23 @@ impl ForumActionHandler {
         board_id: Option<BoardId>,
         workshop_id: Option<i32>,
         return_data: bool,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let endpoint = match target_type {
             TargetType::Board => match board_id {
                 Some(id) => format!("/web/forums/boards/{}/posts", id as i32),
-                None => return Err("board_id is required when target_type is 'board'".into()),
+                None => {
+                    return Err(MewError::Other(
+                        "board_id is required when target_type is 'board'".into(),
+                    ));
+                }
             },
             TargetType::Workshop => match workshop_id {
                 Some(id) => format!("/web/works/subjects/{}/post", id),
-                None => return Err("workshop_id is required when target_type is 'workshop'".into()),
+                None => {
+                    return Err(MewError::Other(
+                        "workshop_id is required when target_type is 'workshop'".into(),
+                    ));
+                }
             },
         };
 
@@ -608,9 +605,9 @@ impl ForumActionHandler {
             .send()?;
 
         if return_data {
-            Ok(self.client.response_to_json(response)?)
+            self.client.response_to_json(response)
         } else {
-            Ok(json!({ "success": response.status() == 201 }))
+            Ok(json!({ "success": response.status() == HTTPStatus::Created as u16 }))
         }
     }
 }

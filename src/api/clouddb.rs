@@ -1,4 +1,4 @@
-use crate::utils::acquire::{BaseKey, CodeMaoClient, HttpMethod};
+use crate::utils::acquire::{BaseKey, CodeMaoClient, HttpMethod, MewResult};
 use serde_json::{Value, json};
 
 // Ranking struct
@@ -20,7 +20,7 @@ impl Ranking {
     ///
     /// # Returns
     /// 更新结果
-    pub fn update_ranking_list(&self, data: Value) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn update_ranking_list(&self, data: Value) -> MewResult<Value> {
         let response = self
             .client
             .build_request(
@@ -30,7 +30,7 @@ impl Ranking {
             )
             .with_payload(data)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     /// 清空排行榜
@@ -40,10 +40,7 @@ impl Ranking {
     ///
     /// # Returns
     /// 清空结果
-    pub fn clear_ranking_list(
-        &self,
-        ranking_id: &str,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn clear_ranking_list(&self, ranking_id: &str) -> MewResult<Value> {
         let response = self
             .client
             .build_request(
@@ -53,7 +50,7 @@ impl Ranking {
             )
             .with_param("id", ranking_id)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     /// 获取排行榜记录
@@ -64,11 +61,7 @@ impl Ranking {
     ///
     /// # Returns
     /// 排行榜记录列表
-    pub fn fetch_ranking_records(
-        &self,
-        ranking_id: &str,
-        work_id: i32,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_ranking_records(&self, ranking_id: &str, work_id: i32) -> MewResult<Value> {
         let response = self
             .client
             .build_request(
@@ -79,7 +72,7 @@ impl Ranking {
             .with_param("id", ranking_id)
             .with_param("work_id", work_id.to_string())
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     /// 添加排行榜记录
@@ -96,7 +89,7 @@ impl Ranking {
         work_id: i32,
         value: &str,
         ranking_id: i32,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let data = json!({
             "work_id": work_id,
             "value": value,
@@ -112,7 +105,7 @@ impl Ranking {
             )
             .with_payload(data)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     /// 创建排行榜
@@ -122,7 +115,7 @@ impl Ranking {
     ///
     /// # Returns
     /// 创建结果
-    pub fn create_ranking_list(&self, data: Value) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn create_ranking_list(&self, data: Value) -> MewResult<Value> {
         let response = self
             .client
             .build_request(
@@ -132,7 +125,7 @@ impl Ranking {
             )
             .with_payload(data)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     /// 删除排行榜
@@ -143,11 +136,7 @@ impl Ranking {
     ///
     /// # Returns
     /// 删除结果
-    pub fn delete_ranking_list(
-        &self,
-        ranking_id: &str,
-        work_id: i32,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn delete_ranking_list(&self, ranking_id: &str, work_id: i32) -> MewResult<Value> {
         let endpoint = format!("/neko/ranking-list/{}", ranking_id);
 
         let response = self
@@ -156,7 +145,7 @@ impl Ranking {
             .with_param("id", ranking_id)
             .with_param("work_id", work_id.to_string())
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 }
 
@@ -187,13 +176,7 @@ impl CoconutCloud {
     ///
     /// # Returns
     /// 操作结果
-    pub fn set_dictionary_value(
-        &self,
-        dict_id: &str,
-        key: &str,
-        value: Value,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
-        // Get type name of the value
+    pub fn set_dictionary_value(&self, dict_id: &str, key: &str, value: Value) -> MewResult<Value> {
         let type_name = match value {
             Value::String(_) => "str",
             Value::Number(_) => "int",
@@ -216,7 +199,7 @@ impl CoconutCloud {
             .build_request(HttpMethod::POST, &endpoint, Some(BaseKey::Creation))
             .with_payload(data)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     /// 删除云字典键
@@ -227,11 +210,7 @@ impl CoconutCloud {
     ///
     /// # Returns
     /// 操作结果
-    pub fn delete_dictionary_key(
-        &self,
-        dict_id: &str,
-        key: &str,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn delete_dictionary_key(&self, dict_id: &str, key: &str) -> MewResult<Value> {
         let endpoint = format!("/coconut/webdb/try/dict/{}/remove", dict_id);
 
         let response = self
@@ -239,7 +218,7 @@ impl CoconutCloud {
             .build_request(HttpMethod::DELETE, &endpoint, Some(BaseKey::Creation))
             .with_param("key", key)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     /// 清空云字典
@@ -249,14 +228,14 @@ impl CoconutCloud {
     ///
     /// # Returns
     /// 操作结果
-    pub fn clear_dictionary(&self, dict_id: &str) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn clear_dictionary(&self, dict_id: &str) -> MewResult<Value> {
         let endpoint = format!("/coconut/webdb/try/dict/clear/{}", dict_id);
 
         let response = self
             .client
             .build_request(HttpMethod::DELETE, &endpoint, Some(BaseKey::Creation))
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     /// 获取云字典所有键
@@ -266,14 +245,14 @@ impl CoconutCloud {
     ///
     /// # Returns
     /// 键名列表
-    pub fn get_dictionary_keys(&self, dict_id: &str) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn get_dictionary_keys(&self, dict_id: &str) -> MewResult<Value> {
         let endpoint = format!("/coconut/webdb/try/dict/{}/keys", dict_id);
 
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     /// 获取云字典值
@@ -284,11 +263,7 @@ impl CoconutCloud {
     ///
     /// # Returns
     /// 键值
-    pub fn get_dictionary_value(
-        &self,
-        dict_id: &str,
-        key: &str,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn get_dictionary_value(&self, dict_id: &str, key: &str) -> MewResult<Value> {
         let endpoint = format!("/coconut/webdb/try/dict/{}/getvalue", dict_id);
 
         let response = self
@@ -296,7 +271,7 @@ impl CoconutCloud {
             .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
             .with_param("key", key)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     /// 查询云数据表
@@ -307,11 +282,7 @@ impl CoconutCloud {
     ///
     /// # Returns
     /// 查询结果
-    pub fn query_table(
-        &self,
-        table_id: &str,
-        queries: Value,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn query_table(&self, table_id: &str, queries: Value) -> MewResult<Value> {
         let data = json!({
             "querys": {
                 "querys": queries
@@ -325,7 +296,7 @@ impl CoconutCloud {
             .build_request(HttpMethod::POST, &endpoint, Some(BaseKey::Creation))
             .with_payload(data)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     /// 更新云数据表
@@ -342,7 +313,7 @@ impl CoconutCloud {
         table_id: &str,
         queries: Value,
         values: Value,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let data = json!({
             "querys": {
                 "querys": queries
@@ -357,7 +328,7 @@ impl CoconutCloud {
             .build_request(HttpMethod::PUT, &endpoint, Some(BaseKey::Creation))
             .with_payload(data)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     /// 插入云数据表行
@@ -368,11 +339,7 @@ impl CoconutCloud {
     ///
     /// # Returns
     /// 插入结果
-    pub fn insert_table_rows(
-        &self,
-        table_id: &str,
-        values: Value,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn insert_table_rows(&self, table_id: &str, values: Value) -> MewResult<Value> {
         let data = json!({
             "values": values
         });
@@ -384,7 +351,7 @@ impl CoconutCloud {
             .build_request(HttpMethod::POST, &endpoint, Some(BaseKey::Creation))
             .with_payload(data)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     /// 删除云数据表行
@@ -395,11 +362,7 @@ impl CoconutCloud {
     ///
     /// # Returns
     /// 删除结果
-    pub fn delete_table_rows(
-        &self,
-        table_id: &str,
-        queries: Value,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn delete_table_rows(&self, table_id: &str, queries: Value) -> MewResult<Value> {
         let data = json!({
             "querys": {
                 "querys": queries
@@ -413,7 +376,7 @@ impl CoconutCloud {
             .build_request(HttpMethod::PUT, &endpoint, Some(BaseKey::Creation))
             .with_payload(data)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     /// 清空云数据表
@@ -423,14 +386,14 @@ impl CoconutCloud {
     ///
     /// # Returns
     /// 清空结果
-    pub fn clear_table(&self, table_id: &str) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn clear_table(&self, table_id: &str) -> MewResult<Value> {
         let endpoint = format!("/coconut/clouddb/v2/runtime/{}/clear", table_id);
 
         let response = self
             .client
             .build_request(HttpMethod::PUT, &endpoint, Some(BaseKey::Creation))
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     /// 获取云数据表行数
@@ -440,7 +403,7 @@ impl CoconutCloud {
     ///
     /// # Returns
     /// 行数信息
-    pub fn get_table_row_count(&self, table_id: &str) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn get_table_row_count(&self, table_id: &str) -> MewResult<Value> {
         let endpoint = format!("/coconut/clouddb/runtime/{}/count", table_id);
 
         let response = self
@@ -448,7 +411,7 @@ impl CoconutCloud {
             .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
             .with_param("type", "RECORD")
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     /// 获取云数据表信息
@@ -458,10 +421,7 @@ impl CoconutCloud {
     ///
     /// # Returns
     /// 表信息列表
-    pub fn get_table_info(
-        &self,
-        table_ids: &[String],
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn get_table_info(&self, table_ids: &[String]) -> MewResult<Value> {
         let ids_str = table_ids.join(",");
 
         let response = self
@@ -473,7 +433,7 @@ impl CoconutCloud {
             )
             .with_param("db_ids", ids_str)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     /// 加载作品数据
@@ -484,11 +444,7 @@ impl CoconutCloud {
     ///
     /// # Returns
     /// 作品数据
-    pub fn load_work_data(
-        &self,
-        work_id: i32,
-        channel: &str,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn load_work_data(&self, work_id: i32, channel: &str) -> MewResult<Value> {
         let endpoint = format!("/coconut/web/work/{}/load", work_id);
 
         let response = self
@@ -496,7 +452,7 @@ impl CoconutCloud {
             .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
             .with_param("channel", channel)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 }
 
@@ -531,10 +487,7 @@ impl CoconutCloudAdmin {
     ///
     /// # Returns
     /// 数据库列表
-    pub fn list_user_databases(
-        &self,
-        db_type: Option<CloudDatabaseType>,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn list_user_databases(&self, db_type: Option<CloudDatabaseType>) -> MewResult<Value> {
         let mut builder = self.client.build_request(
             HttpMethod::GET,
             "/coconut/clouddb/user/list",
@@ -546,7 +499,7 @@ impl CoconutCloudAdmin {
         }
 
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     /// 获取用户云数据库详细信息列表
@@ -559,7 +512,7 @@ impl CoconutCloudAdmin {
     pub fn list_user_databases_detail(
         &self,
         db_type: Option<CloudDatabaseType>,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let mut builder = self.client.build_request(
             HttpMethod::GET,
             "/coconut/clouddb/user/list/detail",
@@ -571,7 +524,7 @@ impl CoconutCloudAdmin {
         }
 
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     /// 获取作品关联的云字典列表
@@ -581,7 +534,7 @@ impl CoconutCloudAdmin {
     ///
     /// # Returns
     /// 云字典列表
-    pub fn list_work_dicts(&self, work_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn list_work_dicts(&self, work_id: i32) -> MewResult<Value> {
         let response = self
             .client
             .build_request(
@@ -591,7 +544,7 @@ impl CoconutCloudAdmin {
             )
             .with_param("work_id", work_id.to_string())
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     /// 按类型获取云字典列表
@@ -601,10 +554,7 @@ impl CoconutCloudAdmin {
     ///
     /// # Returns
     /// 云字典列表
-    pub fn list_work_dicts_by_type(
-        &self,
-        dict_type: i32,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn list_work_dicts_by_type(&self, dict_type: i32) -> MewResult<Value> {
         let response = self
             .client
             .build_request(
@@ -614,7 +564,7 @@ impl CoconutCloudAdmin {
             )
             .with_param("type", dict_type.to_string())
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     /// 获取云字典条目列表(分页)
@@ -633,7 +583,7 @@ impl CoconutCloudAdmin {
         work_id: i32,
         offset: Option<i32>,
         limit: Option<i32>,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let endpoint = format!("/coconut/webdb/admin/dict/{}", dict_id);
 
         let response = self
@@ -643,7 +593,7 @@ impl CoconutCloudAdmin {
             .with_param("offset", offset.unwrap_or(1).to_string())
             .with_param("limit", limit.unwrap_or(500).to_string())
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     /// 迁移云字典环境
@@ -655,12 +605,7 @@ impl CoconutCloudAdmin {
     ///
     /// # Returns
     /// 迁移结果
-    pub fn migrate_dict(
-        &self,
-        db_id: &str,
-        from_env: i32,
-        to_env: i32,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn migrate_dict(&self, db_id: &str, from_env: i32, to_env: i32) -> MewResult<Value> {
         let data = json!({
             "db_id": db_id,
             "from_env": from_env,
@@ -676,7 +621,7 @@ impl CoconutCloudAdmin {
             )
             .with_payload(data)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 }
 

@@ -1,4 +1,6 @@
-use crate::utils::acquire::{BaseKey, CodeMaoClient, HttpMethod, PaginatedIter};
+use crate::utils::acquire::{
+    BaseKey, CodeMaoClient, HTTPStatus, HttpMethod, MewResult, PaginatedIter,
+};
 use serde_json::{Value, json};
 
 // ==================== 用户相关枚举 ====================
@@ -139,37 +141,37 @@ impl UserDataFetcher {
     }
 
     // 获取用户详细信息
-    pub fn fetch_user_profile(&self, user_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_user_profile(&self, user_id: i32) -> MewResult<Value> {
         let endpoint = format!("/api/user/info/detail/{}", user_id);
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取用户 Tiger 信息
-    pub fn fetch_user_tiger(&self, user_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_user_tiger(&self, user_id: i32) -> MewResult<Value> {
         let endpoint = format!("/tiger/user/{}", user_id);
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取用户 info 信息
-    pub fn fetch_user_info(&self, user_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_user_info(&self, user_id: i32) -> MewResult<Value> {
         let endpoint = format!("/web/api/user/info/detail/{}", user_id);
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取用户荣誉信息
-    pub fn fetch_user_honors(&self, user_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_user_honors(&self, user_id: i32) -> MewResult<Value> {
         let response = self
             .client
             .build_request(
@@ -179,163 +181,157 @@ impl UserDataFetcher {
             )
             .with_param("user_id", user_id.to_string())
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取用户业务数据指标
-    pub fn fetch_user_metrics(&self, user_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_user_metrics(&self, user_id: i32) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/nemo/v2/works/business/total", None)
             .with_param("user_id", user_id.to_string())
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取用户基本信息
-    pub fn fetch_user_intro(&self, user_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_user_intro(&self, user_id: i32) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/nemo/v2/user/dynamic/info", None)
             .with_param("user_id", user_id.to_string())
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取用户动态信息
-    pub fn fetch_user_dynamic(&self, user_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_user_dynamic(&self, user_id: i32) -> MewResult<Value> {
         let endpoint = format!("/api/user/dynamic/{}", user_id);
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取用户加入的工作室信息
-    pub fn fetch_user_studio(&self, user_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_user_studio(&self, user_id: i32) -> MewResult<Value> {
         let endpoint = format!("/web/work-shops/{}/participators", user_id);
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取用户年度总结
-    pub fn fetch_user_annual_summary(
-        &self,
-        user_id: i32,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_user_annual_summary(&self, user_id: i32) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/web/activities/annual-summary", None)
             .with_param("user_id", user_id.to_string())
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取账户信息 (简略)
-    pub fn get_account_info(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn get_account_info(&self) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/web/api/user/info", None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取当前账号详细信息
-    pub fn fetch_account_details(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_account_details(&self) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/web/users/details", None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取平台账号资料
-    pub fn fetch_account_platform_profile(
-        &self,
-        method: PlatformMethod,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_account_platform_profile(&self, method: PlatformMethod) -> MewResult<Value> {
         let endpoint = format!("/tiger/v3/{}/accounts/profile", method.as_str());
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取账号隐私设置
-    pub fn fetch_account_privacy(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_account_privacy(&self) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/tiger/v3/web/accounts/privacy", None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取 Tiger 账号信息
-    pub fn fetch_account_tiger(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_account_tiger(&self) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/tiger/user", None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取用户评分数据
-    pub fn fetch_account_scores(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_account_scores(&self) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/nemo/v3/user/grade/details", None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取用户等级信息
-    pub fn fetch_account_level(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_account_level(&self) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/nemo/v3/user/level/info", None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取用户动态信息
-    pub fn fetch_account_dynamic(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_account_dynamic(&self) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/api/user/dynamic", None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取用户作品
-    pub fn fetch_account_works(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_account_works(&self) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/api/work/list", None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取用户注册时间
-    pub fn fetch_account_register_time(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_account_register_time(&self) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/nemo/new-people/user-info", None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取课程账号信息
-    pub fn fetch_account_lesson_info(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_account_lesson_info(&self) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/api/v2/pc/lesson/user/info", None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取用户作品列表生成器 (Web 端)
@@ -370,7 +366,7 @@ impl UserDataFetcher {
         query_type: Option<&str>,
         page: Option<i32>,
         limit: Option<i32>,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "tiger/nemo/user/works/search", None)
@@ -379,7 +375,7 @@ impl UserDataFetcher {
             .with_param("page", page.unwrap_or(1).to_string())
             .with_param("limit", limit.unwrap_or(10).to_string())
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取用户云端作品
@@ -388,7 +384,7 @@ impl UserDataFetcher {
         types: CloudWorkType,
         limit: Option<i32>,
         offset: Option<i32>,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/creation-tools/v1/works/list/user", None)
@@ -396,14 +392,11 @@ impl UserDataFetcher {
             .with_param("offset", offset.unwrap_or(0).to_string())
             .with_param("work_type", types.as_value().to_string())
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取用户证书信息
-    pub fn fetch_user_certificate(
-        &self,
-        user_id: i32,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_user_certificate(&self, user_id: i32) -> MewResult<Value> {
         let response = self
             .client
             .build_request(
@@ -413,7 +406,7 @@ impl UserDataFetcher {
             )
             .with_param("user_id", user_id.to_string())
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取用户已发布 Nemo 作品生成器
@@ -633,10 +626,7 @@ impl UserDataFetcher {
     }
 
     // 获取用户所有Coco作品
-    pub fn fetch_coco_all_works(
-        &self,
-        limit: Option<i32>,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_coco_all_works(&self, limit: Option<i32>) -> MewResult<Value> {
         let response = self
             .client
             .build_request(
@@ -646,7 +636,7 @@ impl UserDataFetcher {
             )
             .with_param("limit", limit.unwrap_or(20).to_string())
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取用户粉丝列表生成器
@@ -693,7 +683,7 @@ impl UserDataFetcher {
         user_id: i32,
         types: Vec<WorkType>,
         limit: Option<i32>,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let types_str: Vec<String> = types.iter().map(|t| t.as_str().to_string()).collect();
 
         let response = self
@@ -703,27 +693,27 @@ impl UserDataFetcher {
             .with_param("types", types_str.join(","))
             .with_param("limit", limit.unwrap_or(10).to_string())
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取用户关注列表
-    pub fn fetch_user_attention(&self, user_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_user_attention(&self, user_id: i32) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/web/api/user/me/attention", None)
             .with_param("user_id", user_id.to_string())
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取用户粉丝列表
-    pub fn fetch_user_followers(&self, user_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_user_followers(&self, user_id: i32) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/web/api/user/attention/me", None)
             .with_param("user_id", user_id.to_string())
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取用户收藏的作品
@@ -732,7 +722,7 @@ impl UserDataFetcher {
         user_id: i32,
         types: Vec<WorkType>,
         limit: Option<i32>,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let types_str: Vec<String> = types.iter().map(|t| t.as_str().to_string()).collect();
 
         let response = self
@@ -742,7 +732,7 @@ impl UserDataFetcher {
             .with_param("types", types_str.join(","))
             .with_param("limit", limit.unwrap_or(10).to_string())
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取用户收藏作品生成器
@@ -765,7 +755,7 @@ impl UserDataFetcher {
     }
 
     // 获取用户头像框列表
-    pub fn fetch_avatar_frames(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_avatar_frames(&self) -> MewResult<Value> {
         let response = self
             .client
             .build_request(
@@ -774,11 +764,11 @@ impl UserDataFetcher {
                 None,
             )
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 检查用户是否为新用户
-    pub fn check_new_user_status(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn check_new_user_status(&self) -> MewResult<Value> {
         let response = self
             .client
             .build_request(
@@ -787,7 +777,7 @@ impl UserDataFetcher {
                 Some(BaseKey::Creation),
             )
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 }
 
@@ -810,11 +800,7 @@ impl UserManager {
     }
 
     // 更新用户状态
-    pub fn update_status(
-        &self,
-        doing: Option<&str>,
-        avatar: Option<&str>,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn update_status(&self, doing: Option<&str>, avatar: Option<&str>) -> MewResult<bool> {
         let mut payload_map = serde_json::Map::new();
 
         if let Some(doing_val) = doing {
@@ -835,14 +821,11 @@ impl UserManager {
             .with_payload(payload)
             .send()?;
 
-        Ok(response.status() == 200)
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
     // 验证手机号码
-    pub fn validate_phone_number(
-        &self,
-        phone_num: i32,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn validate_phone_number(&self, phone_num: i32) -> MewResult<Value> {
         let response = self
             .client
             .build_request(
@@ -852,15 +835,11 @@ impl UserManager {
             )
             .with_param("phone_number", phone_num.to_string())
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 修改密码
-    pub fn update_password(
-        &self,
-        old_password: &str,
-        new_password: &str,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn update_password(&self, old_password: &str, new_password: &str) -> MewResult<bool> {
         let payload = json!({
             "old_password": old_password,
             "password": new_password,
@@ -873,7 +852,7 @@ impl UserManager {
             .with_payload(payload)
             .send()?;
 
-        Ok(response.status() == 204)
+        Ok(response.status() == HTTPStatus::NoContent as u16)
     }
 
     // 请求更换手机号验证码
@@ -881,7 +860,7 @@ impl UserManager {
         &self,
         old_phonenum: i32,
         new_phonenum: i32,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    ) -> MewResult<bool> {
         let payload = json!({
             "phone_number": new_phonenum,
             "old_phone_number": old_phonenum,
@@ -897,15 +876,11 @@ impl UserManager {
             .with_payload(payload)
             .send()?;
 
-        Ok(response.status() == 204)
+        Ok(response.status() == HTTPStatus::NoContent as u16)
     }
 
     // 更新手机号码
-    pub fn update_phone_number(
-        &self,
-        captcha: i32,
-        phonenum: i32,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn update_phone_number(&self, captcha: i32, phonenum: i32) -> MewResult<Value> {
         let payload = json!({
             "phone_number": phonenum,
             "captcha": captcha,
@@ -921,11 +896,11 @@ impl UserManager {
             .with_payload(payload)
             .send()?;
 
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 移除头像框
-    pub fn delete_avatar_frame(&self) -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn delete_avatar_frame(&self) -> MewResult<bool> {
         let response = self
             .client
             .build_request(
@@ -935,14 +910,11 @@ impl UserManager {
             )
             .send()?;
 
-        Ok(response.status() == 200)
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
     // 应用头像框
-    pub fn execute_apply_avatar_frame(
-        &self,
-        frame_id: AvatarFrameId,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn execute_apply_avatar_frame(&self, frame_id: AvatarFrameId) -> MewResult<bool> {
         let endpoint = format!("/creation-tools/v1/user/avatar-frame/{}", frame_id as i32);
 
         let response = self
@@ -950,7 +922,7 @@ impl UserManager {
             .build_request(HttpMethod::PUT, &endpoint, None)
             .send()?;
 
-        Ok(response.status() == 200)
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
     // 更新个人资料详细信息
@@ -963,7 +935,7 @@ impl UserManager {
         fullname: &str,
         qq: &str,
         sex: Gender,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    ) -> MewResult<bool> {
         let payload = json!({
             "avatar_url": avatar_url,
             "nickname": nickname,
@@ -980,14 +952,11 @@ impl UserManager {
             .with_payload(payload)
             .send()?;
 
-        Ok(response.status() == 204)
+        Ok(response.status() == HTTPStatus::NoContent as u16)
     }
 
     // 更新个人主页封面
-    pub fn update_profile_cover(
-        &self,
-        cover_url: &str,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn update_profile_cover(&self, cover_url: &str) -> MewResult<bool> {
         let payload = json!({
             "preview": cover_url,
         });
@@ -998,15 +967,11 @@ impl UserManager {
             .with_payload(payload)
             .send()?;
 
-        Ok(response.status() == 200)
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
     // 注销用户
-    pub fn delete_user(
-        &self,
-        reason: &str,
-        return_data: bool,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn delete_user(&self, reason: &str, return_data: bool) -> MewResult<Value> {
         let payload = json!({
             "closeReason": reason,
         });
@@ -1018,9 +983,9 @@ impl UserManager {
             .send()?;
 
         if return_data {
-            Ok(self.client.response_to_json(response)?)
+            self.client.response_to_json(response)
         } else {
-            Ok(json!({ "success": response.status() == 200 }))
+            Ok(json!({ "success": response.status() == HTTPStatus::Ok as u16 }))
         }
     }
 }

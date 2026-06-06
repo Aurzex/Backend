@@ -1,4 +1,6 @@
-use crate::utils::acquire::{CodeMaoClient, HttpMethod, PaginatedIter};
+use crate::utils::acquire::{
+    CodeMaoClient, HTTPStatus, HttpMethod, MewError, MewResult, PaginatedIter,
+};
 use serde_json::{Value, json};
 
 // ==================== 工作室相关枚举 ====================
@@ -58,25 +60,22 @@ impl WorkshopDataFetcher {
     }
 
     // 获取工作室简介 (简易, 需登录工作室成员账号)
-    pub fn fetch_workshop_info(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_workshop_info(&self) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/web/work_shops/simple", None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取工作室详情
-    pub fn fetch_workshop_details(
-        &self,
-        workshop_id: &str,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_workshop_details(&self, workshop_id: &str) -> MewResult<Value> {
         let endpoint = format!("/web/shops/{}", workshop_id);
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取工作室列表
@@ -87,7 +86,7 @@ impl WorkshopDataFetcher {
         works_limit: Option<i32>,
         offset: Option<i32>,
         sort: Option<Vec<String>>,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let mut builder = self
             .client
             .build_request(HttpMethod::GET, "/web/work-shops/search", None)
@@ -103,7 +102,7 @@ impl WorkshopDataFetcher {
         }
 
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取工作室成员生成器
@@ -137,7 +136,7 @@ impl WorkshopDataFetcher {
         max_number: Option<i32>,
         works_limit: Option<i32>,
         sort: Option<Vec<String>>,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let mut builder = self
             .client
             .build_request(HttpMethod::GET, "/web/shops", None);
@@ -160,7 +159,7 @@ impl WorkshopDataFetcher {
         }
 
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取工作室讨论生成器
@@ -222,16 +221,13 @@ impl WorkshopDataFetcher {
     }
 
     // 获取与工作室关系
-    pub fn fetch_workshop_relation(
-        &self,
-        relation_id: i32,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_workshop_relation(&self, relation_id: i32) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/web/work_shops/users/relation", None)
             .with_param("id", relation_id.to_string())
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取工作室讨论区的帖子生成器
@@ -259,7 +255,7 @@ impl WorkshopDataFetcher {
         workshop_id: i32,
         limit: Option<i32>,
         offset: Option<i32>,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let response = self
             .client
             .build_request(
@@ -271,7 +267,7 @@ impl WorkshopDataFetcher {
             .with_param("offset", offset.unwrap_or(0).to_string())
             .with_param("id", workshop_id.to_string())
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 }
 
@@ -300,7 +296,7 @@ impl WorkshopActionHandler {
         workshop_id: &str,
         name: &str,
         preview_url: &str,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    ) -> MewResult<bool> {
         let payload = json!({
             "description": description,
             "id": workshop_id,
@@ -314,7 +310,7 @@ impl WorkshopActionHandler {
             .with_payload(payload)
             .send()?;
 
-        Ok(response.status() == 200)
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
     // 创建工作室
@@ -323,7 +319,7 @@ impl WorkshopActionHandler {
         name: &str,
         description: &str,
         preview_url: &str,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let payload = json!({
             "name": name,
             "description": description,
@@ -336,11 +332,11 @@ impl WorkshopActionHandler {
             .with_payload(payload)
             .send()?;
 
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 解散工作室
-    pub fn delete_workshop(&self, workshop_id: i32) -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn delete_workshop(&self, workshop_id: i32) -> MewResult<bool> {
         let payload = json!({
             "id": workshop_id,
         });
@@ -351,15 +347,11 @@ impl WorkshopActionHandler {
             .with_payload(payload)
             .send()?;
 
-        Ok(response.status() == 200)
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
     // 在指定工作室投稿作品
-    pub fn create_work_contribution(
-        &self,
-        workshop_id: i32,
-        work_id: i32,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn create_work_contribution(&self, workshop_id: i32, work_id: i32) -> MewResult<bool> {
         let payload = json!({
             "id": workshop_id,
             "work_id": work_id,
@@ -371,15 +363,11 @@ impl WorkshopActionHandler {
             .with_payload(payload)
             .send()?;
 
-        Ok(response.status() == 200)
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
     // 在指定工作室删除作品
-    pub fn delete_workshop_work(
-        &self,
-        workshop_id: i32,
-        work_id: i32,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn delete_workshop_work(&self, workshop_id: i32, work_id: i32) -> MewResult<bool> {
         let payload = json!({
             "id": workshop_id,
             "work_id": work_id,
@@ -391,15 +379,11 @@ impl WorkshopActionHandler {
             .with_payload(payload)
             .send()?;
 
-        Ok(response.status() == 200)
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
     // 申请加入工作室
-    pub fn execute_apply_to_join(
-        &self,
-        workshop_id: i32,
-        qq: Option<&str>,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn execute_apply_to_join(&self, workshop_id: i32, qq: Option<&str>) -> MewResult<bool> {
         let mut payload_map = serde_json::Map::new();
         payload_map.insert("id".to_string(), Value::Number(workshop_id.into()));
 
@@ -417,7 +401,7 @@ impl WorkshopActionHandler {
             .with_payload(payload)
             .send()?;
 
-        Ok(response.status() == 200)
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
     // 审核已经申请加入工作室的用户
@@ -426,7 +410,7 @@ impl WorkshopActionHandler {
         workshop_id: i32,
         status: AuditStatus,
         user_id: i32,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    ) -> MewResult<bool> {
         let payload = json!({
             "id": workshop_id,
             "status": status.as_str(),
@@ -439,7 +423,7 @@ impl WorkshopActionHandler {
             .with_payload(payload)
             .send()?;
 
-        Ok(response.status() == 200)
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
     // 举报讨论区下的评论
@@ -452,7 +436,7 @@ impl WorkshopActionHandler {
         comment_source: Option<Source>,
         comment_parent_id: Option<i32>,
         description: Option<&str>,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    ) -> MewResult<bool> {
         let payload = json!({
             "comment_id": comment_id,
             "comment_parent_id": comment_parent_id.unwrap_or(0),
@@ -469,7 +453,7 @@ impl WorkshopActionHandler {
             .with_payload(payload)
             .send()?;
 
-        Ok(response.status() == 201)
+        Ok(response.status() == HTTPStatus::Created as u16)
     }
 
     // 回复评论
@@ -481,7 +465,7 @@ impl WorkshopActionHandler {
         source: Option<Source>,
         parent_id: Option<i32>,
         return_data: bool,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let endpoint = format!(
             "/web/discussions/{}/comments/{}/reply",
             workshop_id, comment_id
@@ -500,18 +484,14 @@ impl WorkshopActionHandler {
             .send()?;
 
         if return_data {
-            Ok(self.client.response_to_json(response)?)
+            self.client.response_to_json(response)
         } else {
-            Ok(json!({ "success": response.status() == 201 }))
+            Ok(json!({ "success": response.status() == HTTPStatus::Created as u16 }))
         }
     }
 
     // 删除回复
-    pub fn delete_reply(
-        &self,
-        comment_id: i32,
-        source: Option<Source>,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn delete_reply(&self, comment_id: i32, source: Option<Source>) -> MewResult<bool> {
         let endpoint = format!("/web/discussions/replies/{}", comment_id);
 
         let response = self
@@ -520,7 +500,7 @@ impl WorkshopActionHandler {
             .with_param("source", source.unwrap_or(Source::WorkShop).as_str())
             .send()?;
 
-        Ok(response.status() == 204)
+        Ok(response.status() == HTTPStatus::NoContent as u16)
     }
 
     // 评论
@@ -531,7 +511,7 @@ impl WorkshopActionHandler {
         rich_content: &str,
         source: Option<Source>,
         return_data: bool,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let endpoint = format!("/web/discussions/{}/comment", workshop_id);
 
         let payload = json!({
@@ -547,18 +527,14 @@ impl WorkshopActionHandler {
             .send()?;
 
         if return_data {
-            Ok(self.client.response_to_json(response)?)
+            self.client.response_to_json(response)
         } else {
-            Ok(json!({ "success": response.status() == 201 }))
+            Ok(json!({ "success": response.status() == HTTPStatus::Created as u16 }))
         }
     }
 
     // 删除评论
-    pub fn delete_comment(
-        &self,
-        comment_id: i32,
-        source: Option<Source>,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn delete_comment(&self, comment_id: i32, source: Option<Source>) -> MewResult<bool> {
         let endpoint = format!("/web/discussions/comments/{}", comment_id);
 
         let response = self
@@ -567,7 +543,7 @@ impl WorkshopActionHandler {
             .with_param("source", source.unwrap_or(Source::WorkShop).as_str())
             .send()?;
 
-        Ok(response.status() == 204)
+        Ok(response.status() == HTTPStatus::NoContent as u16)
     }
 }
 

@@ -1,5 +1,6 @@
 use crate::utils::acquire::{
-    BaseKey, CodeMaoClient, HTTPStatus, HttpMethod, PaginatedIter, PaginationMethod,
+    BaseKey, CodeMaoClient, HTTPStatus, HttpMethod, KittyRequestBuilder, MewError, MewResult,
+    PaginatedIter, PaginationMethod,
 };
 use serde_json::{Value, json};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -155,9 +156,7 @@ impl WhaleReportFetcher {
         }
     }
 
-    fn add_timestamp_to_builder(
-        builder: crate::utils::acquire::InnerBuilder,
-    ) -> crate::utils::acquire::InnerBuilder {
+    fn add_timestamp_to_builder(builder: KittyRequestBuilder) -> KittyRequestBuilder {
         let timestamp = current_timestamp_13();
         builder.with_param("TIME", timestamp.to_string())
     }
@@ -208,7 +207,7 @@ impl WhaleReportFetcher {
         status: ReportStatus,
         filter_type: Option<WorkReportFilterType>,
         target_id: Option<i32>,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let mut builder = self
             .client
             .build_request(HttpMethod::GET, "/reports/works", Some(BaseKey::Whale))
@@ -224,7 +223,7 @@ impl WhaleReportFetcher {
         }
 
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 作品举报总数（额外端点）
@@ -234,7 +233,7 @@ impl WhaleReportFetcher {
         status: ReportStatus,
         filter_type: Option<WorkReportFilterType>,
         target_id: Option<i32>,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let mut builder = self
             .client
             .build_request(HttpMethod::GET, "/reports/works", Some(BaseKey::Whale))
@@ -250,7 +249,7 @@ impl WhaleReportFetcher {
         }
 
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 评论举报（分页）
@@ -294,7 +293,7 @@ impl WhaleReportFetcher {
         status: ReportStatus,
         filter_type: Option<CommentReportFilterType>,
         target_id: Option<i32>,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let mut builder = self
             .client
             .build_request(HttpMethod::GET, "/reports/comments", Some(BaseKey::Whale))
@@ -310,7 +309,7 @@ impl WhaleReportFetcher {
         }
 
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 帖子举报（分页）
@@ -356,7 +355,7 @@ impl WhaleReportFetcher {
         board_id: Option<i32>,
         filter_type: Option<PostReportFilterType>,
         target_id: Option<i32>,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let mut builder = self
             .client
             .build_request(HttpMethod::GET, "/reports/posts", Some(BaseKey::Whale))
@@ -374,7 +373,7 @@ impl WhaleReportFetcher {
         }
 
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 讨论区举报（分页）
@@ -420,7 +419,7 @@ impl WhaleReportFetcher {
         board_id: Option<i32>,
         filter_type: Option<PostReportFilterType>,
         target_id: Option<i32>,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let mut builder = self
             .client
             .build_request(
@@ -442,7 +441,7 @@ impl WhaleReportFetcher {
         }
 
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 }
 
@@ -469,7 +468,7 @@ impl ReportHandler {
         report_id: i32,
         admin_id: i32,
         resolution: Resolution,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    ) -> MewResult<bool> {
         let endpoint = format!("/reports/posts/{}", report_id);
         let payload = json!({
             "admin_id": admin_id,
@@ -490,7 +489,7 @@ impl ReportHandler {
         report_id: i32,
         admin_id: i32,
         resolution: Resolution,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    ) -> MewResult<bool> {
         let endpoint = format!("/reports/posts/discussions/{}", report_id);
         let payload = json!({
             "admin_id": admin_id,
@@ -511,7 +510,7 @@ impl ReportHandler {
         report_id: i32,
         admin_id: i32,
         resolution: Resolution,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    ) -> MewResult<bool> {
         let endpoint = format!("/reports/comments/{}", report_id);
         let payload = json!({
             "admin_id": admin_id,
@@ -532,12 +531,12 @@ impl ReportHandler {
         report_id: i32,
         admin_id: i32,
         resolution: Resolution,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    ) -> MewResult<bool> {
         let resolution_str = match resolution {
             Resolution::Pass | Resolution::Delete | Resolution::Unload | Resolution::Tobedone => {
                 resolution.as_str()
             }
-            _ => return Err("作品举报不支持此决议类型".into()),
+            _ => return Err(MewError::Other("作品举报不支持此决议类型".into())),
         };
 
         let endpoint = format!("/reports/works/{}", report_id);

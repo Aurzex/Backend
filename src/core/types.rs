@@ -48,8 +48,8 @@ impl From<ParseIntError> for ProcessorError {
         ProcessorError::ParseInt(e)
     }
 }
-impl From<acquire::Error> for ProcessorError {
-    fn from(e: acquire::Error) -> Self {
+impl From<acquire::MewError> for ProcessorError {
+    fn from(e: acquire::MewError) -> Self {
         ProcessorError::External(Box::new(e))
     }
 }

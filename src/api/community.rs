@@ -1,4 +1,6 @@
-use crate::utils::acquire::{BaseKey, CodeMaoClient, HttpMethod, PaginatedIter, PaginationMethod};
+use crate::utils::acquire::{
+    BaseKey, CodeMaoClient, HTTPStatus, HttpMethod, MewResult, PaginatedIter, PaginationMethod,
+};
 use serde_json::{Value, json};
 
 // 回复类型枚举
@@ -137,19 +139,16 @@ impl CommunityDataFetcher {
     }
 
     // 获取随机昵称
-    pub fn fetch_random_nickname(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_random_nickname(&self) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/api/user/random/nickname", None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取新消息数量
-    pub fn fetch_message_count(
-        &self,
-        method: MessageMethod,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_message_count(&self, method: MessageMethod) -> MewResult<Value> {
         let endpoint = match method {
             MessageMethod::Web => "/web/message-record/count",
             MessageMethod::Nemo => "/nemo/v2/user/message/count",
@@ -159,16 +158,11 @@ impl CommunityDataFetcher {
             .client
             .build_request(HttpMethod::GET, endpoint, None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取回复
-    pub fn fetch_replies(
-        &self,
-        types: ReplyTypes,
-        limit: i32,
-        offset: i32,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_replies(&self, types: ReplyTypes, limit: i32, offset: i32) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/web/message-record", None)
@@ -176,7 +170,7 @@ impl CommunityDataFetcher {
             .with_param("limit", limit.to_string())
             .with_param("offset", offset.to_string())
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取回复生成器
@@ -200,7 +194,7 @@ impl CommunityDataFetcher {
     }
 
     // 获取nemo消息
-    pub fn fetch_nemo_messages(&self, types: &str) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_nemo_messages(&self, types: &str) -> MewResult<Value> {
         let extra_url = if types == "like" { "1" } else { "3" };
         let endpoint = format!("/nemo/v2/user/message/{}", extra_url);
 
@@ -208,109 +202,123 @@ impl CommunityDataFetcher {
             .client
             .build_request(HttpMethod::GET, &endpoint, None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取pc客户端更新
-    pub fn fetch_pc_client(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_pc_client(&self) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/tiger/pc_client/releases/latest", None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取点个猫更新
-    pub fn fetch_pickcat_update(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        // 使用 agent 直接发送请求到外部 URL
+    pub fn fetch_pickcat_update(&self) -> MewResult<Value> {
         let response = self
             .client
-            .agent()
-            .get("https://update.codemao.cn/updatev2/appsdk")
-            .call()?;
-        Ok(response.into_body().read_json()?)
+            .build_request(
+                HttpMethod::GET,
+                "https://update.codemao.cn/updatev2/appsdk",
+                None,
+            )
+            .send()?;
+        self.client.response_to_json(response)
     }
 
     // 获取kitten4更新
-    pub fn fetch_kitten4_update(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_kitten4_update(&self) -> MewResult<Value> {
         let timestamp = self.fetch_current_timestamp_10()?;
         let time_value = timestamp["data"].as_str().unwrap_or("").to_string();
 
         let response = self
             .client
-            .agent()
-            .get("https://kn-cdn.codemao.cn/kitten4/application/kitten4_update_info.json")
-            .query("TIME", &time_value)
-            .call()?;
-        Ok(response.into_body().read_json()?)
+            .build_request(
+                HttpMethod::GET,
+                "https://kn-cdn.codemao.cn/kitten4/application/kitten4_update_info.json",
+                None,
+            )
+            .with_param("TIME", &time_value)
+            .send()?;
+        self.client.response_to_json(response)
     }
 
     // 获取kitten更新
-    pub fn fetch_kitten_update(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_kitten_update(&self) -> MewResult<Value> {
         let timestamp = self.fetch_current_timestamp_10()?;
         let time_value = timestamp["data"].as_str().unwrap_or("").to_string();
 
         let response = self
             .client
-            .agent()
-            .get("https://kn-cdn.codemao.cn/application/kitten_update_info.json")
-            .query("timeStamp", &time_value)
-            .call()?;
-        Ok(response.into_body().read_json()?)
+            .build_request(
+                HttpMethod::GET,
+                "https://kn-cdn.codemao.cn/application/kitten_update_info.json",
+                None,
+            )
+            .with_param("timeStamp", &time_value)
+            .send()?;
+        self.client.response_to_json(response)
     }
 
     // 获取海龟编辑器更新
-    pub fn fetch_wood_editor_update(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_wood_editor_update(&self) -> MewResult<Value> {
         let timestamp = self.fetch_current_timestamp_10()?;
         let time_value = timestamp["data"].as_str().unwrap_or("").to_string();
 
         let response = self
             .client
-            .agent()
-            .get("https://static-am.codemao.cn/wood/client/xp/prod/package.json")
-            .query("timeStamp", &time_value)
-            .call()?;
-        Ok(response.into_body().read_json()?)
+            .build_request(
+                HttpMethod::GET,
+                "https://static-am.codemao.cn/wood/client/xp/prod/package.json",
+                None,
+            )
+            .with_param("timeStamp", &time_value)
+            .send()?;
+        self.client.response_to_json(response)
     }
 
     // 获取源码智造编辑器更新
-    pub fn fetch_matrix_editor_update(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_matrix_editor_update(&self) -> MewResult<Value> {
         let timestamp = self.fetch_current_timestamp_10()?;
         let time_value = timestamp["data"].as_str().unwrap_or("").to_string();
 
         let response = self
             .client
-            .agent()
-            .get("https://public-static-edu.codemao.cn/matrix/publish/desktop_matrix.json")
-            .query("timeStamp", &time_value)
-            .call()?;
-        Ok(response.into_body().read_json()?)
+            .build_request(
+                HttpMethod::GET,
+                "https://public-static-edu.codemao.cn/matrix/publish/desktop_matrix.json",
+                None,
+            )
+            .with_param("timeStamp", &time_value)
+            .send()?;
+        self.client.response_to_json(response)
     }
 
     // 获取10位时间戳
-    pub fn fetch_current_timestamp_10(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_current_timestamp_10(&self) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/coconut/clouddb/currentTime", None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取13位时间戳
-    pub fn fetch_current_timestamp_13(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_current_timestamp_13(&self) -> MewResult<Value> {
         let response = self
             .client
-            .agent()
-            .get("https://time.codemao.cn/time/current")
-            .call()?;
-        Ok(response.into_body().read_json()?)
+            .build_request(
+                HttpMethod::GET,
+                "https://time.codemao.cn/time/current",
+                None,
+            )
+            .send()?;
+        self.client.response_to_json(response)
     }
 
     // 获取Web端头图
-    pub fn fetch_web_banners(
-        &self,
-        banner_type: Option<BannerType>,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_web_banners(&self, banner_type: Option<BannerType>) -> MewResult<Value> {
         let mut builder = self
             .client
             .build_request(HttpMethod::GET, "/web/banners/all", None);
@@ -320,24 +328,21 @@ impl CommunityDataFetcher {
         }
 
         let response = builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取Nemo端头图
-    pub fn fetch_nemo_banners(
-        &self,
-        banner_type: NemoBannerType,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_nemo_banners(&self, banner_type: NemoBannerType) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/nemo/v2/home/banners", None)
             .with_param("banner_type", (banner_type as i32).to_string())
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取Coco端头图
-    pub fn fetch_coco_banners(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_coco_banners(&self) -> MewResult<Value> {
         let response = self
             .client
             .build_request(
@@ -346,11 +351,11 @@ impl CommunityDataFetcher {
                 Some(BaseKey::Creation),
             )
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取Coco话题
-    pub fn fetch_coco_topic(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_coco_topic(&self) -> MewResult<Value> {
         let response = self
             .client
             .build_request(
@@ -359,53 +364,51 @@ impl CommunityDataFetcher {
                 Some(BaseKey::Creation),
             )
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取举报类型
-    pub fn fetch_report_reasons(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_report_reasons(&self) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/web/reports/reasons/all", None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取nemo配置
-    pub fn fetch_nemo_config(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_nemo_config(&self) -> MewResult<Value> {
         let response = self
             .client
-            .agent()
-            .get("https://nemo.codemao.cn/config")
-            .call()?;
-        Ok(response.into_body().read_json()?)
+            .build_request(HttpMethod::GET, "https://nemo.codemao.cn/config", None)
+            .send()?;
+        self.client.response_to_json(response)
     }
 
     // 获取社区网络服务
-    pub fn fetch_community_config(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_community_config(&self) -> MewResult<Value> {
         let response = self
             .client
-            .agent()
-            .get("https://c.codemao.cn/config")
-            .call()?;
-        Ok(response.into_body().read_json()?)
+            .build_request(HttpMethod::GET, "https://c.codemao.cn/config", None)
+            .send()?;
+        self.client.response_to_json(response)
     }
 
     // 获取编程猫网络服务
-    pub fn fetch_client_config(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_client_config(&self) -> MewResult<Value> {
         let response = self
             .client
-            .agent()
-            .get("https://player.codemao.cn/new/client_config.json")
-            .call()?;
-        Ok(response.into_body().read_json()?)
+            .build_request(
+                HttpMethod::GET,
+                "https://player.codemao.cn/new/client_config.json",
+                None,
+            )
+            .send()?;
+        self.client.response_to_json(response)
     }
 
     // 获取编程猫首页作品
-    pub fn fetch_recommended_works(
-        &self,
-        recommend_type: WorkRecommendType,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_recommended_works(&self, recommend_type: WorkRecommendType) -> MewResult<Value> {
         let response = self
             .client
             .build_request(
@@ -415,44 +418,37 @@ impl CommunityDataFetcher {
             )
             .with_param("type", (recommend_type as i32).to_string())
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取nemo端新作喵喵看作品
-    pub fn fetch_new_recommend_works(
-        &self,
-        limit: i32,
-        offset: i32,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_new_recommend_works(&self, limit: i32, offset: i32) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/nemo/v3/new-recommend/more/list", None)
             .with_param("limit", limit.to_string())
             .with_param("offset", offset.to_string())
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取编程猫nemo作品推荐
-    pub fn fetch_recommended_works_nemo(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_recommended_works_nemo(&self) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/nemo/v2/system/recommended/pool", None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取编程猫首页推荐channel
-    pub fn fetch_work_channels(
-        &self,
-        channel_type: WorkChannelType,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_work_channels(&self, channel_type: WorkChannelType) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/web/works/channels/list", None)
             .with_param("type", channel_type.as_str())
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取指定channel
@@ -462,7 +458,7 @@ impl CommunityDataFetcher {
         channel_type: WorkChannelType,
         limit: i32,
         page: i32,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let endpoint = format!("/web/works/channels/{}/works", channel_id);
 
         let response = self
@@ -472,30 +468,33 @@ impl CommunityDataFetcher {
             .with_param("page", page.to_string())
             .with_param("limit", limit.to_string())
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取社区星推荐
-    pub fn fetch_recommended_users(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_recommended_users(&self) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/web/users/recommended", None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取训练师小课堂
-    pub fn fetch_training_courses(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_training_courses(&self) -> MewResult<Value> {
         let response = self
             .client
-            .agent()
-            .get("https://backend.box3.fun/diversion/codemao/post")
-            .call()?;
-        Ok(response.into_body().read_json()?)
+            .build_request(
+                HttpMethod::GET,
+                "https://backend.box3.fun/diversion/codemao/post",
+                None,
+            )
+            .send()?;
+        self.client.response_to_json(response)
     }
 
     // 获取KN课程
-    pub fn fetch_kn_courses(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_kn_courses(&self) -> MewResult<Value> {
         let response = self
             .client
             .build_request(
@@ -504,7 +503,7 @@ impl CommunityDataFetcher {
                 None,
             )
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取KN公开课生成器
@@ -528,10 +527,7 @@ impl CommunityDataFetcher {
     }
 
     // 获取KN模板作品
-    pub fn fetch_sample_works(
-        &self,
-        subject_id: SubjectId,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_sample_works(&self, subject_id: SubjectId) -> MewResult<Value> {
         let response = self
             .client
             .build_request(
@@ -541,14 +537,11 @@ impl CommunityDataFetcher {
             )
             .with_param("subject_id", (subject_id as i32).to_string())
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取社区各个部分开启状态
-    pub fn fetch_community_status(
-        &self,
-        status_type: CommunityStatusType,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_community_status(&self, status_type: CommunityStatusType) -> MewResult<Value> {
         let endpoint = format!(
             "/web/config/tab/on-off/status?config_type={}",
             status_type.as_str()
@@ -558,11 +551,11 @@ impl CommunityDataFetcher {
             .client
             .build_request(HttpMethod::GET, &endpoint, None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取kitten编辑页面精选活动
-    pub fn fetch_kitten_activities(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_kitten_activities(&self) -> MewResult<Value> {
         let response = self
             .client
             .build_request(
@@ -571,7 +564,7 @@ impl CommunityDataFetcher {
                 Some(BaseKey::Creation),
             )
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取nemo端教程合集生成器
@@ -626,28 +619,25 @@ impl CommunityDataFetcher {
     }
 
     // 获取未读板块消息数量
-    pub fn fetch_board_unread_count(
-        &self,
-        board_id: i32,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_board_unread_count(&self, board_id: i32) -> MewResult<Value> {
         let endpoint = format!("/web/forums/boards/{}/unread-count", board_id);
 
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取活动页面
-    pub fn fetch_studio_info(&self, studio_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_studio_info(&self, studio_id: i32) -> MewResult<Value> {
         let endpoint = format!("/web/studios/{}", studio_id);
 
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取活动帖子生成器
@@ -732,21 +722,21 @@ impl CommunityDataFetcher {
     }
 
     // 获取旧版全部作品标签
-    pub fn fetch_work_labels(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_work_labels(&self) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/api/work/label/list", None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取旧版全部作品标签
-    pub fn fetch_work_category(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_work_category(&self) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/api/label/list", None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取推荐作品
@@ -755,7 +745,7 @@ impl CommunityDataFetcher {
         work_type: &str,
         page_number: i32,
         amount_items: i32,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/tiger/work/ide/recommended", None)
@@ -763,7 +753,7 @@ impl CommunityDataFetcher {
             .with_param("page_number", page_number.to_string())
             .with_param("amount_items", amount_items.to_string())
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取推荐作品
@@ -773,7 +763,7 @@ impl CommunityDataFetcher {
         page_number: i32,
         amount_items: i32,
         order_by: OrderBy,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/tiger/work/list/all", None)
@@ -782,7 +772,7 @@ impl CommunityDataFetcher {
             .with_param("per_page", amount_items.to_string())
             .with_param("order_by", order_by.as_str())
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 获取素材推荐
@@ -791,7 +781,7 @@ impl CommunityDataFetcher {
         category_id: i32,
         limit: i32,
         offset: i32,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/tiger/material/recommend", None)
@@ -799,7 +789,7 @@ impl CommunityDataFetcher {
             .with_param("limit", limit.to_string())
             .with_param("offset", offset.to_string())
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 }
 
@@ -822,22 +812,22 @@ impl UserAction {
     }
 
     // 签订友好协议
-    pub fn execute_sign_agreement(&self) -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn execute_sign_agreement(&self) -> MewResult<bool> {
         let response = self
             .client
             .build_request(HttpMethod::POST, "/nemo/v3/user/level/signature", None)
             .with_payload(json!({}))
             .send()?;
-        Ok(response.status() == 200)
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
     // 获取用户协议
-    pub fn fetch_agreements(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_agreements(&self) -> MewResult<Value> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/tiger/v3/web/accounts/agreements", None)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 注册
@@ -848,7 +838,7 @@ impl UserAction {
         captcha: &str,
         pid: Option<&str>,
         agreement_ids: Option<Vec<i32>>,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let mut data = serde_json::Map::new();
         data.insert("identity".to_string(), Value::String(identity.to_string()));
         data.insert("password".to_string(), Value::String(password.to_string()));
@@ -874,11 +864,11 @@ impl UserAction {
             )
             .with_payload(payload)
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     // 删除消息
-    pub fn delete_message(&self, message_id: i32) -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn delete_message(&self, message_id: i32) -> MewResult<bool> {
         let endpoint = format!("/web/message-record/{}", message_id);
 
         let response = self

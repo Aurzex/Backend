@@ -1,4 +1,4 @@
-use crate::utils::acquire::{CodeMaoClient, HTTPStatus, HttpMethod};
+use crate::utils::acquire::{CodeMaoClient, HTTPStatus, HttpMethod, MewResult};
 use serde_json::{Value, json};
 
 /// 海外平台数据访问客户端
@@ -14,8 +14,7 @@ impl OverseaDataClient {
     }
 
     /// 获取 Tiger 账号信息
-    pub fn fetch_tiger_accounts(&self) -> Result<Value, Box<dyn std::error::Error>> {
-        // 使用完整 URL 时 base_key 应该为 None
+    pub fn fetch_tiger_accounts(&self) -> MewResult<Value> {
         let response = self
             .client
             .build_request(
@@ -24,11 +23,11 @@ impl OverseaDataClient {
                 None,
             )
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 
     /// 获取平台配置信息
-    pub fn fetch_platform_config(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_platform_config(&self) -> MewResult<Value> {
         let response = self
             .client
             .build_request(
@@ -37,7 +36,7 @@ impl OverseaDataClient {
                 None,
             )
             .send()?;
-        Ok(self.client.response_to_json(response)?)
+        self.client.response_to_json(response)
     }
 }
 
@@ -48,8 +47,9 @@ impl Default for OverseaDataClient {
 }
 
 /// 语言类型枚举
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub enum Language {
+    #[default]
     En,
 }
 
@@ -58,12 +58,6 @@ impl Language {
         match self {
             Language::En => "en",
         }
-    }
-}
-
-impl Default for Language {
-    fn default() -> Self {
-        Language::En
     }
 }
 
@@ -97,7 +91,7 @@ impl UserActionHandler {
         password: &str,
         pid: Option<&str>,
         language: Option<Language>,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    ) -> MewResult<bool> {
         let payload = json!({
             "email": email,
             "language": language.unwrap_or_default().as_str(),
@@ -132,7 +126,7 @@ impl UserActionHandler {
         identity: &str,
         password: &str,
         pid: Option<&str>,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    ) -> MewResult<bool> {
         let payload = json!({
             "identity": identity,
             "password": password,

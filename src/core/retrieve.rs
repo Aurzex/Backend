@@ -13,7 +13,7 @@ use crate::api::whale::{
     WorkReportFilterType, WorkSourceType,
 };
 use crate::api::work::{NemoWorkType, WorkDataFetcher};
-use crate::utils::acquire::{BaseKey, ClientFactory, HttpMethod, Identity};
+use crate::utils::acquire::{BaseKey, Catsona, CodeMaoClient, HttpMethod, MewError};
 
 // ==================== 错误类型 ====================
 
@@ -23,8 +23,6 @@ pub enum DataQueryError {
     InvalidSource(String),
     #[error("无效的查询方法: {0}")]
     InvalidMethod(String),
-    #[error("网络请求失败: {0}")]
-    RequestFailed(String),
     #[error("数据解析失败: {0}")]
     ParseError(String),
     #[error("未找到请求的资源")]
@@ -32,12 +30,21 @@ pub enum DataQueryError {
     #[error("内部错误: {0}")]
     Internal(String),
     #[error("外部错误: {0}")]
-    External(Box<dyn std::error::Error>),
+    External(MewError),
 }
 
-/// 安全地将具体错误类型转换为 DataQueryError
-fn to_external_err<E: std::error::Error + 'static>(e: E) -> DataQueryError {
-    DataQueryError::External(Box::new(e))
+/// 使得可以直接将 `MewError` 转换成 `DataQueryError`，内部直接使用 `?` 传播
+impl From<MewError> for DataQueryError {
+    fn from(e: MewError) -> Self {
+        DataQueryError::External(e)
+    }
+}
+
+/// 字符串解析错误也可转换为 `DataQueryError`
+impl From<serde_json::Error> for DataQueryError {
+    fn from(e: serde_json::Error) -> Self {
+        DataQueryError::ParseError(e.to_string())
+    }
 }
 
 // ==================== 枚举定义 ====================
@@ -175,7 +182,7 @@ impl CommentQueryBuilder {
         self
     }
 
-    /// 根据来源获取评论数据的惰性迭代器
+    /// 根据来源获取评论数据的惰性迭代器（已统一为 MewError）
     fn build_comment_stream(
         &self,
     ) -> Result<Box<dyn Iterator<Item = Result<JsonValue, DataQueryError>>>, DataQueryError> {
@@ -191,19 +198,19 @@ impl CommentQueryBuilder {
             CommentSource::Work => {
                 let iter = WorkDataFetcher::new()
                     .fetch_work_comments_gen(target_id, limit)
-                    .map(|item| item.map_err(to_external_err));
+                    .map(|item| item.map_err(DataQueryError::from));
                 Ok(Box::new(iter))
             }
             CommentSource::Forum => {
                 let iter = ForumDataFetcher::new()
                     .fetch_post_replies_gen(target_id, None, limit)
-                    .map(|item| item.map_err(to_external_err));
+                    .map(|item| item.map_err(DataQueryError::from));
                 Ok(Box::new(iter))
             }
             CommentSource::Shop => {
                 let iter = WorkshopDataFetcher::new()
                     .fetch_workshop_discussions_gen(target_id, None, None, limit)
-                    .map(|item| item.map_err(to_external_err));
+                    .map(|item| item.map_err(DataQueryError::from));
                 Ok(Box::new(iter))
             }
         }
@@ -243,6 +250,7 @@ impl CommentQueryBuilder {
             CommentQueryMode::UserId => {
                 let mut user_ids = Vec::new();
                 for comment in &comments {
+                    // 主评论用户
                     if let Some(id) = comment
                         .get("user")
                         .and_then(|u| u.as_object())
@@ -254,9 +262,8 @@ impl CommentQueryBuilder {
 
                     let comment_id = comment.get("id").and_then(|id| id.as_i64()).unwrap_or(0);
 
-                    // 提取回复中的用户ID，不构造完整对象
+                    // 回复中的用户
                     if source == CommentSource::Forum {
-                        // Forum 需要拉取子回复流
                         let reply_stream = ForumDataFetcher::new()
                             .fetch_reply_comments_gen(comment_id as i32, None);
                         for reply_result in reply_stream {
@@ -269,7 +276,6 @@ impl CommentQueryBuilder {
                             }
                         }
                     } else {
-                        // Work / Shop 内嵌 replies
                         if let Some(replies) = comment
                             .get("replies")
                             .and_then(|r| r.as_object())
@@ -296,7 +302,6 @@ impl CommentQueryBuilder {
                     }
                     let comment_id = comment.get("id").and_then(|id| id.as_i64()).unwrap_or(0);
 
-                    // 仅提取回复ID，不构建完整对象
                     if source == CommentSource::Forum {
                         let reply_stream = ForumDataFetcher::new()
                             .fetch_reply_comments_gen(comment_id as i32, None);
@@ -337,7 +342,6 @@ impl CommentQueryBuilder {
                 for comment in &comments {
                     let comment_id = comment.get("id").and_then(|id| id.as_i64()).unwrap_or(0);
 
-                    // 获取回复流，直接构建精简对象
                     let replies: Vec<JsonObject> = if source == CommentSource::Forum {
                         let reply_stream = ForumDataFetcher::new()
                             .fetch_reply_comments_gen(comment_id as i32, None);
@@ -369,7 +373,6 @@ impl CommentQueryBuilder {
                             .unwrap_or_default()
                     };
 
-                    // 构建主评论精简对象
                     let mut comment_data = JsonObject::new();
                     if let Some(user) = comment.get("user").and_then(|u| u.as_object()) {
                         if let Some(id) = user.get("id") {
@@ -492,7 +495,7 @@ impl DataQuery {
     ) -> Box<dyn Iterator<Item = Result<JsonObject, DataQueryError>> + 'static> {
         let total = match CommunityDataFetcher::new()
             .fetch_message_count(MessageMethod::Web)
-            .map_err(|e| DataQueryError::External(e.into()))
+            .map_err(DataQueryError::from)
         {
             Ok(data) => data.get("count").and_then(|c| c.as_i64()).unwrap_or(0) as i32,
             Err(e) => return Box::new(std::iter::once(Err(e))),
@@ -514,9 +517,10 @@ impl DataQuery {
         source: CommentSource,
         target_id: i32,
     ) -> Result<i32, DataQueryError> {
+        let client = CodeMaoClient::global();
         match source {
             CommentSource::Work => {
-                let comments_response = ClientFactory::global_client()
+                let response = client
                     .build_request(
                         HttpMethod::GET,
                         &format!("/creation-tools/v1/works/{}/comments", target_id),
@@ -525,28 +529,28 @@ impl DataQuery {
                     .with_param("offset", "0")
                     .with_param("limit", "15")
                     .send()
-                    .map_err(to_external_err)?;
+                    .map_err(DataQueryError::from)?;
 
-                let json = ClientFactory::global_client()
-                    .response_to_json(comments_response)
-                    .map_err(to_external_err)?;
+                let json = client
+                    .response_to_json(response)
+                    .map_err(DataQueryError::from)?;
 
                 if let Some(total) = json.get("total").and_then(|t| t.as_i64()) {
                     return Ok(total as i32);
                 }
 
-                let work_response = ClientFactory::global_client()
+                let work_response = client
                     .build_request(
                         HttpMethod::GET,
                         &format!("/creation-tools/v1/works/{}", target_id),
                         Some(BaseKey::Default),
                     )
                     .send()
-                    .map_err(to_external_err)?;
+                    .map_err(DataQueryError::from)?;
 
-                let work_json = ClientFactory::global_client()
+                let work_json = client
                     .response_to_json(work_response)
-                    .map_err(to_external_err)?;
+                    .map_err(DataQueryError::from)?;
 
                 Ok(work_json
                     .get("comment_times")
@@ -554,7 +558,7 @@ impl DataQuery {
                     .unwrap_or(0) as i32)
             }
             CommentSource::Shop => {
-                let response = ClientFactory::global_client()
+                let response = client
                     .build_request(
                         HttpMethod::GET,
                         &format!("/web/discussions/{}/comments", target_id),
@@ -565,11 +569,11 @@ impl DataQuery {
                     .with_param("limit", "15")
                     .with_param("offset", "0")
                     .send()
-                    .map_err(to_external_err)?;
+                    .map_err(DataQueryError::from)?;
 
-                let json = ClientFactory::global_client()
+                let json = client
                     .response_to_json(response)
-                    .map_err(to_external_err)?;
+                    .map_err(DataQueryError::from)?;
 
                 let total = json.get("total").and_then(|t| t.as_i64()).unwrap_or(0) as i32;
                 let total_reply =
@@ -577,18 +581,18 @@ impl DataQuery {
                 Ok(total + total_reply)
             }
             CommentSource::Forum => {
-                let response = ClientFactory::global_client()
+                let response = client
                     .build_request(
                         HttpMethod::GET,
                         &format!("/web/forums/posts/{}/details", target_id),
                         Some(BaseKey::Default),
                     )
                     .send()
-                    .map_err(to_external_err)?;
+                    .map_err(DataQueryError::from)?;
 
-                let json = ClientFactory::global_client()
+                let json = client
                     .response_to_json(response)
-                    .map_err(to_external_err)?;
+                    .map_err(DataQueryError::from)?;
 
                 let n_replies = json.get("n_replies").and_then(|r| r.as_i64()).unwrap_or(0) as i32;
                 let n_comments =
@@ -634,7 +638,8 @@ impl DataQuery {
         );
         let web_result = WorkDataFetcher::new().fetch_new_works_web(per_source_limit, None, true);
 
-        let process_result = |res: Result<Value, _>, mapping: HashMap<&str, &str>| match res {
+        let process_result = |res: Result<Value, MewError>, mapping: HashMap<&str, &str>| match res
+        {
             Ok(val) => {
                 let items = val
                     .get("items")
@@ -658,7 +663,7 @@ impl DataQuery {
                     as Box<dyn Iterator<Item = Result<JsonObject, DataQueryError>>>
             }
             Err(e) => Box::new(std::iter::once::<Result<JsonObject, DataQueryError>>(Err(
-                DataQueryError::External(e),
+                DataQueryError::from(e),
             ))),
         };
 
@@ -768,7 +773,7 @@ impl DataQuery {
                     Some(CommentReportFilterType::AdminId),
                     Some(admin_id),
                 )
-                .map_err(|e| DataQueryError::External(e.into()))?
+                .map_err(DataQueryError::from)?
                 .get("total")
                 .and_then(|t| t.as_i64())
                 .unwrap_or(0) as i32;
@@ -780,7 +785,7 @@ impl DataQuery {
                     Some(WorkReportFilterType::AdminId),
                     Some(admin_id),
                 )
-                .map_err(|e| DataQueryError::External(e.into()))?
+                .map_err(DataQueryError::from)?
                 .get("total")
                 .and_then(|t| t.as_i64())
                 .unwrap_or(0) as i32;
@@ -834,7 +839,7 @@ impl DataQuery {
         let mut total_fans = 0;
 
         for fan_result in fans_stream {
-            let fan = fan_result.map_err(to_external_err)?;
+            let fan = fan_result.map_err(DataQueryError::from)?;
             total_fans += 1;
 
             let total_likes = fan.get("total_likes").and_then(|l| l.as_i64()).unwrap_or(0) as i32;
@@ -843,10 +848,10 @@ impl DataQuery {
                 let mut fan_obj = JsonObject::new();
                 if let Some(id) = fan.get("id").and_then(|i| i.as_i64()) {
                     fan_obj.insert("user_id".into(), Value::Number(id.into()));
-                    let honors = UserDataFetcher::new()
+                    let honors_result = UserDataFetcher::new()
                         .fetch_user_honors(id as i32)
-                        .map_err(|e| DataQueryError::External(e.into()));
-                    if let Ok(ref honors_data) = honors {
+                        .map_err(DataQueryError::from);
+                    if let Ok(ref honors_data) = honors_result {
                         if let Some(fans_total) = honors_data.get("fans_total") {
                             fan_obj.insert("fans_total".into(), fans_total.clone());
                         } else {
@@ -901,8 +906,8 @@ impl DataQuery {
     ) -> Box<dyn Iterator<Item = Result<(String, String), DataQueryError>> + 'static> {
         const MAX_EDU_STUDENTS: usize = 2000;
 
-        if let Err(e) = ClientFactory::global_client().switch_identity(Identity::Edu) {
-            return Box::new(std::iter::once(Err(to_external_err(e))));
+        if let Err(e) = CodeMaoClient::global().switch_identity(Catsona::Scholar) {
+            return Box::new(std::iter::once(Err(DataQueryError::from(e))));
         }
 
         let effective_limit = limit.unwrap_or(MAX_EDU_STUDENTS).min(MAX_EDU_STUDENTS);
@@ -913,7 +918,7 @@ impl DataQuery {
             .filter_map(move |student_result| {
                 let student = match student_result {
                     Ok(s) => s,
-                    Err(e) => return Some(Err(DataQueryError::External(e.into()))),
+                    Err(e) => return Some(Err(DataQueryError::from(e))),
                 };
 
                 let student_id = student.get("id").and_then(|i| i.as_i64())? as i32;
@@ -924,7 +929,7 @@ impl DataQuery {
 
                 let password_result = EduUserAction::new()
                     .reset_student_password(student_id)
-                    .map_err(|e| DataQueryError::External(e.into()));
+                    .map_err(DataQueryError::from);
 
                 match password_result {
                     Ok(password_data) => {
@@ -1016,7 +1021,7 @@ impl Iterator for CommunityReplyStream {
 
                 let fetched_count = items.len() as i32;
                 if fetched_count == 0 {
-                    return None; // 无更多数据
+                    return None;
                 }
 
                 let take_count = fetched_count.min(self.remaining) as usize;
@@ -1025,14 +1030,14 @@ impl Iterator for CommunityReplyStream {
                 self.buffer.extend(items.into_iter().take(take_count));
                 self.buffer.pop_front().map(Ok)
             }
-            Err(e) => Some(Err(DataQueryError::External(e.into()))),
+            Err(e) => Some(Err(DataQueryError::from(e))),
         }
     }
 }
 
 // ==================== 工具函数 ====================
 
-/// 字符串数组去重
+/// 字符串数组去重（保留原始顺序）
 fn deduplicate(items: &[String]) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
     let mut result = Vec::new();

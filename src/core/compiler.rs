@@ -1,5 +1,5 @@
 use crate::api::auth::CloudAuthenticator;
-use crate::utils::acquire::{ClientFactory, CodeMaoClient, HttpMethod};
+use crate::utils::acquire::{CodeMaoClient, HttpMethod, KittyFactory};
 use crate::utils::data::PathConfig;
 use aes_gcm::{
     Aes256Gcm, Key, Nonce,
@@ -2495,7 +2495,7 @@ impl CodemaoDecompiler {
         let config = Arc::new(config.unwrap_or_default());
         Self {
             config,
-            client: ClientFactory::create_global_client(None),
+            client: KittyFactory::create_global_client(None),
             id_generator: IdGenerator::new(),
         }
     }

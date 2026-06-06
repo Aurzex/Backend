@@ -16,7 +16,7 @@ use crate::api::shop::{WorkShopReportReasonId, WorkshopActionHandler, WorkshopDa
 use crate::api::whale::{ReportHandler, ReportStatus, Resolution};
 use crate::api::work::{BaseWorkOperations, CommentOperations, WorkDataFetcher};
 use crate::core::types::CommentConfig;
-use crate::utils::acquire::{BaseKey, ClientFactory, FileUploader, HttpMethod, Identity};
+use crate::utils::acquire::{BaseKey, Catsona, FileUploader, HttpMethod, KittyFactory};
 use crate::utils::data::{DataManager, PathConfig, SettingManager};
 
 use super::types::{
@@ -1110,7 +1110,7 @@ impl ViolationChecker {
     fn get_comment_total(&self, source_id: i64, source_type: &str) -> Result<i64, ProcessorError> {
         match source_type {
             "work" => {
-                let resp = ClientFactory::global_client()
+                let resp = KittyFactory::global_client()
                     .build_request(
                         HttpMethod::GET,
                         &format!("/creation-tools/v1/works/{}/comments", source_id),
@@ -1119,11 +1119,11 @@ impl ViolationChecker {
                     .with_param("offset", "0")
                     .with_param("limit", "1")
                     .send()?;
-                let json = ClientFactory::global_client().response_to_json(resp)?;
+                let json = KittyFactory::global_client().response_to_json(resp)?;
                 Ok(json.get("total").and_then(|v| v.as_i64()).unwrap_or(0))
             }
             "shop" => {
-                let resp = ClientFactory::global_client()
+                let resp = KittyFactory::global_client()
                     .build_request(
                         HttpMethod::GET,
                         &format!("/web/discussions/{}/comments", source_id),
@@ -1132,20 +1132,20 @@ impl ViolationChecker {
                     .with_param("source", "WORK_SHOP")
                     .with_param("limit", "1")
                     .send()?;
-                let json = ClientFactory::global_client().response_to_json(resp)?;
+                let json = KittyFactory::global_client().response_to_json(resp)?;
                 let total = json.get("total").and_then(|v| v.as_i64()).unwrap_or(0);
                 let total_reply = json.get("totalReply").and_then(|v| v.as_i64()).unwrap_or(0);
                 Ok(total + total_reply)
             }
             "forum" => {
-                let resp = ClientFactory::global_client()
+                let resp = KittyFactory::global_client()
                     .build_request(
                         HttpMethod::GET,
                         &format!("/web/forums/posts/{}/details", source_id),
                         Some(BaseKey::Default),
                     )
                     .send()?;
-                let json = ClientFactory::global_client().response_to_json(resp)?;
+                let json = KittyFactory::global_client().response_to_json(resp)?;
                 let n_replies = json.get("n_replies").and_then(|v| v.as_i64()).unwrap_or(0);
                 let n_comments = json.get("n_comments").and_then(|v| v.as_i64()).unwrap_or(0);
                 Ok(n_replies + n_comments)
@@ -1215,7 +1215,7 @@ impl ViolationChecker {
     }
 
     fn process_auto_report(&self, violations: HashSet<String>) -> Result<(), ProcessorError> {
-        let mut multi_account = MultiAccount::new(Identity::Edu);
+        let mut multi_account = MultiAccount::new(Catsona::Scholar);
         let password_path = PathConfig::password_file_path();
         if password_path.exists() {
             multi_account.load_from_file(&password_path)?;
@@ -1293,8 +1293,8 @@ impl ViolationChecker {
             }
         }
 
-        ClientFactory::global_client()
-            .switch_identity(Identity::Judgement)
+        KittyFactory::global_client()
+            .switch_identity(Catsona::Judge)
             .ok();
         println!("自动举报完成，成功 {}/{}", success, violations_vec.len());
         Ok(())
@@ -1571,11 +1571,11 @@ impl ReplyProcessor {
 // ==================== 多账号管理器 ====================
 pub struct MultiAccount {
     pub accounts: Vec<(String, String)>,
-    identity_type: Identity,
+    identity_type: Catsona,
 }
 
 impl MultiAccount {
-    pub fn new(identity_type: Identity) -> Self {
+    pub fn new(identity_type: Catsona) -> Self {
         MultiAccount {
             accounts: Vec::new(),
             identity_type,
@@ -1645,7 +1645,7 @@ impl FileProcessor {
             )));
         }
 
-        let client = ClientFactory::global_client().clone();
+        let client = KittyFactory::global_client().clone();
         let uploader = FileUploader::new(client);
         let url = uploader
             .upload(file_path, method, save_path)

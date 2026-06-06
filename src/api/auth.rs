@@ -1,12 +1,13 @@
-use crate::utils::acquire::{BaseKey, CodeMaoClient, HttpMethod, Identity};
+use crate::utils::acquire::{
+    BaseKey, Catsona, CodeMaoClient, HttpMethod, KittyRequestBuilder, MewError, MewResult,
+};
 use crate::utils::data::{CodeMaoFile, FileContent, PathConfig};
-use rand::RngExt;
+use rand::{Rng, RngExt};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use std::sync::{Arc, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
-use ureq::http::HeaderValue;
 
 // ==================== 枚举定义 ====================
 
@@ -109,11 +110,11 @@ impl AccountStatus {
         }
     }
 
-    pub fn to_identity(&self) -> Identity {
+    pub fn to_identity(&self) -> Catsona {
         match self {
-            AccountStatus::Judgement => Identity::Judgement,
-            AccountStatus::Average => Identity::Average,
-            AccountStatus::Edu => Identity::Edu,
+            AccountStatus::Judgement => Catsona::Judge,
+            AccountStatus::Average => Catsona::Fluffy,
+            AccountStatus::Edu => Catsona::Scholar,
         }
     }
 }
@@ -235,9 +236,7 @@ pub fn init_global_auth_manager() -> Arc<AuthManager> {
 
 // ==================== 辅助函数 ====================
 
-pub fn fetch_current_timestamp_with_provider(
-    provider: &dyn ClientProvider,
-) -> Result<i64, Box<dyn std::error::Error>> {
+pub fn fetch_current_timestamp_with_provider(provider: &dyn ClientProvider) -> MewResult<i64> {
     let client = provider.client();
     let response = client
         .build_request(HttpMethod::GET, "/coconut/clouddb/currentTime", None)
@@ -246,7 +245,7 @@ pub fn fetch_current_timestamp_with_provider(
     Ok(json["data"].as_i64().unwrap_or(0))
 }
 
-pub fn fetch_current_timestamp() -> Result<i64, Box<dyn std::error::Error>> {
+pub fn fetch_current_timestamp() -> MewResult<i64> {
     fetch_current_timestamp_with_provider(&GlobalClientProvider::new())
 }
 
@@ -254,28 +253,28 @@ fn determine_user_login_method(
     token: Option<&str>,
     identity: Option<&str>,
     password: Option<&str>,
-) -> Result<LoginMethod, Box<dyn std::error::Error>> {
+) -> MewResult<LoginMethod> {
     if token.is_some() {
         return Ok(LoginMethod::Token);
     }
     if identity.is_some() && password.is_some() {
         return Ok(LoginMethod::PasswordV2);
     }
-    Err("缺少必要的登录凭据".into())
+    Err(MewError::Auth("缺少必要的登录凭据".into()))
 }
 
 fn determine_admin_login_method(
     token: Option<&str>,
     identity: Option<&str>,
     password: Option<&str>,
-) -> Result<LoginMethod, Box<dyn std::error::Error>> {
+) -> MewResult<LoginMethod> {
     if token.is_some() {
         return Ok(LoginMethod::AdminToken);
     }
     if identity.is_some() || password.is_some() {
         return Ok(LoginMethod::AdminPassword);
     }
-    Err("缺少必要的管理员登录凭据".into())
+    Err(MewError::Auth("缺少必要的管理员登录凭据".into()))
 }
 
 // ==================== 认证处理器 ====================
@@ -304,37 +303,34 @@ impl AuthProcessor {
         self.client_provider.client()
     }
 
-    pub fn fetch_auth_details(&self, token: &str) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_auth_details(&self, token: &str) -> MewResult<Value> {
         let client = self.client();
         let cookie_str = format!("authorization={}", token);
 
         let response = client
-            .agent()
-            .get("https://api.codemao.cn/web/users/details")
-            .header("Cookie", &cookie_str)
-            .call()?;
+            .build_request(
+                HttpMethod::GET,
+                "https://api.codemao.cn/web/users/details",
+                None,
+            )
+            .with_header("Cookie", cookie_str)
+            .send()?;
 
+        // 仍然可以读取 set-cookie 用于调试
         let headers = response.headers();
         let set_cookie_headers = headers.get_all("set-cookie");
         let cookies: Vec<String> = set_cookie_headers
             .iter()
-            .map(|header: &HeaderValue| header.to_str().unwrap_or("").to_string())
+            .map(|header| header.to_str().unwrap_or("").to_string())
             .collect();
-
         for cookie in &cookies {
             println!("Received cookie: {}", cookie);
         }
 
-        let json = client.response_to_json(response)?;
-        Ok(json)
+        client.response_to_json(response)
     }
 
-    pub fn get_login_ticket(
-        &self,
-        identity: &str,
-        timestamp: i64,
-        pid: &str,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn get_login_ticket(&self, identity: &str, timestamp: i64, pid: &str) -> MewResult<Value> {
         let client = self.client();
         let payload = json!({
             "identity": identity,
@@ -350,7 +346,7 @@ impl AuthProcessor {
             )
             .with_payload(payload)
             .send()?;
-        Ok(client.response_to_json(response)?)
+        client.response_to_json(response)
     }
 
     pub fn get_login_security_info(
@@ -359,7 +355,7 @@ impl AuthProcessor {
         password: &str,
         ticket: &str,
         pid: &str,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let client = self.client();
         let payload = json!({
             "identity": identity,
@@ -369,20 +365,26 @@ impl AuthProcessor {
         });
 
         let response = client
-            .agent()
-            .post("https://api.codemao.cn/tiger/v3/web/accounts/login/security")
-            .header("x-captcha-ticket", ticket)
-            .send_json(&payload)?;
+            .build_request(
+                HttpMethod::POST,
+                "https://api.codemao.cn/tiger/v3/web/accounts/login/security",
+                None,
+            )
+            .with_header("x-captcha-ticket", ticket)
+            .with_payload(payload)
+            .send()?;
 
         let status = response.status();
         if status != 200 {
             let body = response.into_body().read_to_string().unwrap_or_default();
-            return Err(format!("API返回错误状态码: {}, Body: {}", status, body).into());
+            return Err(MewError::Auth(format!(
+                "API返回错误状态码: {}, Body: {}",
+                status, body
+            )));
         }
 
         let body = response.into_body().read_to_string()?;
-        let json_value: Value = serde_json::from_str(&body)?;
-        Ok(json_value)
+        Ok(serde_json::from_str(&body)?)
     }
 
     pub fn authenticate_admin_user(
@@ -391,7 +393,7 @@ impl AuthProcessor {
         password: &str,
         key: i64,
         code: &str,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let client = self.client();
         let payload = json!({
             "username": username,
@@ -404,13 +406,10 @@ impl AuthProcessor {
             .build_request(HttpMethod::POST, "/admins/login", Some(BaseKey::Whale))
             .with_payload(payload)
             .send()?;
-        Ok(client.response_to_json(response)?)
+        client.response_to_json(response)
     }
 
-    pub fn fetch_admin_captcha(
-        &self,
-        timestamp: i64,
-    ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    pub fn fetch_admin_captcha(&self, timestamp: i64) -> MewResult<Vec<u8>> {
         let client = self.client();
         let endpoint = format!("/admins/captcha/{}", timestamp);
 
@@ -424,7 +423,8 @@ impl AuthProcessor {
                 &PathConfig::captcha_file_path(),
                 &FileContent::Bytes(bytes.clone()),
                 "b",
-            )?;
+            )
+            .unwrap();
             println!(
                 "验证码已保存至: {:?}",
                 &PathConfig::captcha_file_path().to_str()
@@ -441,7 +441,7 @@ impl AuthProcessor {
         identity: &str,
         password: &str,
         pid: &str,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let client = self.client();
         let payload = json!({
             "identity": identity,
@@ -453,7 +453,7 @@ impl AuthProcessor {
             .build_request(HttpMethod::POST, "/tiger/accounts/login", None)
             .with_payload(payload)
             .send()?;
-        Ok(client.response_to_json(response)?)
+        client.response_to_json(response)
     }
 
     pub fn handle_password_v1(
@@ -461,7 +461,7 @@ impl AuthProcessor {
         identity: &str,
         password: &str,
         pid: &str,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let client = self.client();
         let payload = json!({
             "identity": identity,
@@ -473,7 +473,7 @@ impl AuthProcessor {
             .build_request(HttpMethod::POST, "/tiger/v3/web/accounts/login", None)
             .with_payload(payload)
             .send()?;
-        Ok(client.response_to_json(response)?)
+        client.response_to_json(response)
     }
 
     pub fn handle_password_v2(
@@ -481,12 +481,14 @@ impl AuthProcessor {
         identity: &str,
         password: &str,
         pid: &str,
-    ) -> Result<Value, Box<dyn std::error::Error>> {
+    ) -> MewResult<Value> {
         let timestamp = self.fetch_current_timestamp()?;
         let ticket_response = self.get_login_ticket(identity, timestamp, pid)?;
         println!("Ticket response: {:?}", ticket_response);
 
-        let ticket = ticket_response["ticket"].as_str().ok_or("无法获取ticket")?;
+        let ticket = ticket_response["ticket"]
+            .as_str()
+            .ok_or_else(|| MewError::Auth("无法获取ticket".into()))?;
 
         let security_response = self.get_login_security_info(identity, password, ticket, pid)?;
         println!(
@@ -497,7 +499,7 @@ impl AuthProcessor {
         Ok(security_response)
     }
 
-    fn fetch_current_timestamp(&self) -> Result<i64, Box<dyn std::error::Error>> {
+    fn fetch_current_timestamp(&self) -> MewResult<i64> {
         fetch_current_timestamp_with_provider(&*self.client_provider)
     }
 }
@@ -535,9 +537,9 @@ impl LoginHandler {
         password: &str,
         pid: &str,
         status: AccountStatus,
-    ) -> Result<LoginResult, Box<dyn std::error::Error>> {
+    ) -> MewResult<LoginResult> {
         let client = self.client();
-        let _ = client.switch_identity(Identity::Blank);
+        let _ = client.switch_identity(Catsona::Blanky);
 
         match self.processor.handle_password_v0(identity, password, pid) {
             Ok(data) => {
@@ -571,9 +573,9 @@ impl LoginHandler {
         password: &str,
         pid: &str,
         status: AccountStatus,
-    ) -> Result<LoginResult, Box<dyn std::error::Error>> {
+    ) -> MewResult<LoginResult> {
         let client = self.client();
-        let _ = client.switch_identity(Identity::Blank);
+        let _ = client.switch_identity(Catsona::Blanky);
 
         match self.processor.handle_password_v1(identity, password, pid) {
             Ok(data) => {
@@ -611,9 +613,9 @@ impl LoginHandler {
         password: &str,
         pid: &str,
         status: AccountStatus,
-    ) -> Result<LoginResult, Box<dyn std::error::Error>> {
+    ) -> MewResult<LoginResult> {
         let client = self.client();
-        let _ = client.switch_identity(Identity::Blank);
+        let _ = client.switch_identity(Catsona::Blanky);
 
         match self.processor.handle_password_v2(identity, password, pid) {
             Ok(data) => {
@@ -637,15 +639,11 @@ impl LoginHandler {
                     )
                 }
             }
-            Err(e) => Err(format!("password_v2 登录失败: {}", e).into()),
+            Err(e) => Err(MewError::Auth(format!("password_v2 登录失败: {}", e))),
         }
     }
 
-    pub fn handle_token(
-        &self,
-        token: &str,
-        status: AccountStatus,
-    ) -> Result<LoginResult, Box<dyn std::error::Error>> {
+    pub fn handle_token(&self, token: &str, status: AccountStatus) -> MewResult<LoginResult> {
         let client = self.client();
         let auth_details = self.processor.fetch_auth_details(token)?;
 
@@ -657,10 +655,7 @@ impl LoginHandler {
             .with_auth_details(auth_details))
     }
 
-    pub fn handle_admin_token(
-        &self,
-        token: Option<&str>,
-    ) -> Result<LoginResult, Box<dyn std::error::Error>> {
+    pub fn handle_admin_token(&self, token: Option<&str>) -> MewResult<LoginResult> {
         let client = self.client();
 
         let token = match token {
@@ -673,8 +668,8 @@ impl LoginHandler {
             }
         };
 
-        client.set_token(Identity::Judgement, &token)?;
-        let _ = client.switch_identity(Identity::Judgement);
+        client.set_token(Catsona::Judge, &token)?;
+        let _ = client.switch_identity(Catsona::Judge);
 
         Ok(
             LoginResult::new(true, LoginMethod::AdminToken, "管理员 Token 登录成功")
@@ -686,7 +681,7 @@ impl LoginHandler {
         &self,
         username: Option<&str>,
         password: Option<&str>,
-    ) -> Result<LoginResult, Box<dyn std::error::Error>> {
+    ) -> MewResult<LoginResult> {
         let client = self.client();
 
         let mut username = match username {
@@ -729,8 +724,8 @@ impl LoginHandler {
             {
                 Ok(response) => {
                     if let Some(token) = response.get("token").and_then(|t| t.as_str()) {
-                        client.set_token(Identity::Judgement, token)?;
-                        let _ = client.switch_identity(Identity::Judgement);
+                        client.set_token(Catsona::Judge, token)?;
+                        let _ = client.switch_identity(Catsona::Judge);
 
                         return Ok(LoginResult::new(
                             true,
@@ -746,20 +741,19 @@ impl LoginHandler {
                         .unwrap_or("未知错误");
                     println!("登录失败: {}", error_msg);
 
-                    if let Some(error_code) = response.get("error_code").and_then(|e| e.as_str()) {
-                        if error_code == "Admin-Password-Error@Community-Admin"
-                            || error_code == "Param-Invalid@Common"
-                        {
-                            println!("请输入用户名:");
-                            let mut input = String::new();
-                            std::io::stdin().read_line(&mut input)?;
-                            username = input.trim().to_string();
+                    if let Some(error_code) = response.get("error_code").and_then(|e| e.as_str())
+                        && (error_code == "Admin-Password-Error@Community-Admin"
+                            || error_code == "Param-Invalid@Common")
+                    {
+                        println!("请输入用户名:");
+                        let mut input = String::new();
+                        std::io::stdin().read_line(&mut input)?;
+                        username = input.trim().to_string();
 
-                            println!("请输入密码:");
-                            let mut input = String::new();
-                            std::io::stdin().read_line(&mut input)?;
-                            password = input.trim().to_string();
-                        }
+                        println!("请输入密码:");
+                        let mut input = String::new();
+                        std::io::stdin().read_line(&mut input)?;
+                        password = input.trim().to_string();
                     }
                 }
                 Err(e) => {
@@ -811,7 +805,7 @@ impl AuthManager {
         &mut self,
         credentials: &LoginCredentials,
         prefer_method: Option<LoginMethod>,
-    ) -> Result<LoginResult, Box<dyn std::error::Error>> {
+    ) -> MewResult<LoginResult> {
         self.validate_login_parameters(credentials, prefer_method)?;
         self.current_credentials = Some(credentials.clone());
 
@@ -825,14 +819,20 @@ impl AuthManager {
         &self,
         credentials: &LoginCredentials,
         prefer_method: Option<LoginMethod>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> MewResult<()> {
         if let Some(method) = prefer_method {
             match credentials.role {
                 UserRole::User if !method.is_user_method() => {
-                    return Err(format!("用户角色不支持登录方法 '{}'", method.as_str()).into());
+                    return Err(MewError::Auth(format!(
+                        "用户角色不支持登录方法 '{}'",
+                        method.as_str()
+                    )));
                 }
                 UserRole::Admin if !method.is_admin_method() => {
-                    return Err(format!("管理员角色不支持登录方法 '{}'", method.as_str()).into());
+                    return Err(MewError::Auth(format!(
+                        "管理员角色不支持登录方法 '{}'",
+                        method.as_str()
+                    )));
                 }
                 _ => {}
             }
@@ -844,14 +844,16 @@ impl AuthManager {
                 | LoginMethod::AdminPassword
                     if credentials.identity.is_empty() || credentials.password.is_empty() =>
                 {
-                    return Err(format!(
+                    return Err(MewError::Auth(format!(
                         "登录方法 '{}' 需要提供 identity 和 password",
                         method.as_str()
-                    )
-                    .into());
+                    )));
                 }
                 LoginMethod::Token | LoginMethod::AdminToken if credentials.token.is_empty() => {
-                    return Err(format!("登录方法 '{}' 需要提供 token", method.as_str()).into());
+                    return Err(MewError::Auth(format!(
+                        "登录方法 '{}' 需要提供 token",
+                        method.as_str()
+                    )));
                 }
                 _ => {}
             }
@@ -863,12 +865,15 @@ impl AuthManager {
         &self,
         credentials: &LoginCredentials,
         prefer_method: Option<LoginMethod>,
-    ) -> Result<LoginMethod, Box<dyn std::error::Error>> {
+    ) -> MewResult<LoginMethod> {
         if let Some(method) = prefer_method {
             if method.is_user_method() {
                 return Ok(method);
             }
-            return Err(format!("'{}' 不是有效的用户登录方法", method.as_str()).into());
+            return Err(MewError::Auth(format!(
+                "'{}' 不是有效的用户登录方法",
+                method.as_str()
+            )));
         }
 
         determine_user_login_method(
@@ -894,12 +899,15 @@ impl AuthManager {
         &self,
         credentials: &LoginCredentials,
         prefer_method: Option<LoginMethod>,
-    ) -> Result<LoginMethod, Box<dyn std::error::Error>> {
+    ) -> MewResult<LoginMethod> {
         if let Some(method) = prefer_method {
             if method.is_admin_method() {
                 return Ok(method);
             }
-            return Err(format!("'{}' 不是有效的管理员登录方法", method.as_str()).into());
+            return Err(MewError::Auth(format!(
+                "'{}' 不是有效的管理员登录方法",
+                method.as_str()
+            )));
         }
 
         determine_admin_login_method(
@@ -925,7 +933,7 @@ impl AuthManager {
         &self,
         credentials: &LoginCredentials,
         prefer_method: Option<LoginMethod>,
-    ) -> Result<LoginResult, Box<dyn std::error::Error>> {
+    ) -> MewResult<LoginResult> {
         let method = self.get_user_login_method(credentials, prefer_method)?;
 
         match method {
@@ -950,7 +958,10 @@ impl AuthManager {
             LoginMethod::Token => self
                 .handler
                 .handle_token(&credentials.token, credentials.status),
-            _ => Err(format!("不支持的登录方式: {}", method.as_str()).into()),
+            _ => Err(MewError::Auth(format!(
+                "不支持的登录方式: {}",
+                method.as_str()
+            ))),
         }
     }
 
@@ -958,7 +969,7 @@ impl AuthManager {
         &self,
         credentials: &LoginCredentials,
         prefer_method: Option<LoginMethod>,
-    ) -> Result<LoginResult, Box<dyn std::error::Error>> {
+    ) -> MewResult<LoginResult> {
         let method = self.get_admin_login_method(credentials, prefer_method)?;
 
         match method {
@@ -966,11 +977,14 @@ impl AuthManager {
             LoginMethod::AdminPassword => self
                 .handler
                 .handle_admin_password(Some(&credentials.identity), Some(&credentials.password)),
-            _ => Err(format!("不支持的管理员登录方式: {}", method.as_str()).into()),
+            _ => Err(MewError::Auth(format!(
+                "不支持的管理员登录方式: {}",
+                method.as_str()
+            ))),
         }
     }
 
-    pub fn execute_logout_v0(&self) -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn execute_logout_v0(&self) -> MewResult<bool> {
         let client = self.client();
         let response = client
             .build_request(HttpMethod::POST, "/tiger/accounts/logout", None)
@@ -979,7 +993,7 @@ impl AuthManager {
         Ok(response.status() == 204)
     }
 
-    pub fn execute_logout_v12(&self, method: &str) -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn execute_logout_v12(&self, method: &str) -> MewResult<bool> {
         let client = self.client();
         let endpoint = format!("/tiger/v3/{}/accounts/logout", method);
         let response = client
@@ -989,7 +1003,7 @@ impl AuthManager {
         Ok(response.status() == 204)
     }
 
-    pub fn admin_logout(&self) -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn admin_logout(&self) -> MewResult<bool> {
         let client = self.client();
         let response = client
             .build_request(HttpMethod::DELETE, "/admins/logout", Some(BaseKey::Whale))
@@ -997,19 +1011,19 @@ impl AuthManager {
         Ok(response.status() == 204)
     }
 
-    pub fn fetch_admin_dashboard_data(&self) -> Result<Value, Box<dyn std::error::Error>> {
+    pub fn fetch_admin_dashboard_data(&self) -> MewResult<Value> {
         let client = self.client();
         let response = client
             .build_request(HttpMethod::GET, "/admins/info", Some(BaseKey::Whale))
             .send()?;
-        Ok(client.response_to_json(response)?)
+        client.response_to_json(response)
     }
 
     pub fn configure_authentication_token(
         &self,
         token: &str,
         status: AccountStatus,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> MewResult<()> {
         let client = self.client();
         client.set_token(status.to_identity(), token)?;
         let _ = client.switch_identity(status.to_identity());
@@ -1073,7 +1087,7 @@ impl CloudAuthenticator {
             .collect()
     }
 
-    pub fn get_calibrated_timestamp(&mut self) -> Result<i64, Box<dyn std::error::Error>> {
+    pub fn get_calibrated_timestamp(&mut self) -> MewResult<i64> {
         if self.time_difference == 0 {
             let server_time = fetch_current_timestamp_with_provider(&*self.client_provider)?;
             let local_time = SystemTime::now()
@@ -1090,7 +1104,7 @@ impl CloudAuthenticator {
     }
 
     /// 生成设备认证（返回 JSON 字符串）
-    pub fn generate_x_device_auth(&mut self) -> Result<String, Box<dyn std::error::Error>> {
+    pub fn generate_x_device_auth(&mut self) -> MewResult<String> {
         let timestamp = self.get_calibrated_timestamp()?;
         let sign_str = format!("{}{}{}", self.client_secret, timestamp, self.client_id);
         let mut hasher = Sha256::new();
@@ -1103,19 +1117,16 @@ impl CloudAuthenticator {
             "client_id": self.client_id,
         });
 
-        // 返回 JSON 字符串
         Ok(serde_json::to_string(&auth_json)?)
     }
 
     /// 获取授权 token
     pub fn authorization_token(&self) -> Option<String> {
-        // 1. 优先使用显式设置的 token（保留手动覆盖能力）
-        if let Some(ref token) = self.authorization_token {
-            if !token.is_empty() {
-                return Some(token.clone());
-            }
+        if let Some(ref token) = self.authorization_token
+            && !token.is_empty()
+        {
+            return Some(token.clone());
         }
-        // 2. 否则自动从全局 CodeMaoClient 获取当前身份的 token
         self.client().current_token()
     }
 
@@ -1124,9 +1135,9 @@ impl CloudAuthenticator {
         self.authorization_token = token;
     }
 }
+
 // ==================== 链式调用构建器 ====================
 
-/// 登录请求构建器，支持链式调用并强制使用 LoginMethod 枚举
 #[derive(Debug)]
 pub struct LoginBuilder {
     auth_manager: AuthManager,
@@ -1153,50 +1164,42 @@ impl LoginBuilder {
         }
     }
 
-    /// 设置登录标识
     pub fn identity(mut self, val: impl Into<String>) -> Self {
         self.identity = Some(val.into());
         self
     }
 
-    /// 设置密码
     pub fn password(mut self, val: impl Into<String>) -> Self {
         self.password = Some(val.into());
         self
     }
 
-    /// 设置 bearer token
     pub fn token(mut self, val: impl Into<String>) -> Self {
         self.token = Some(val.into());
         self
     }
 
-    /// 设置客户端 PID
     pub fn pid(mut self, val: impl Into<String>) -> Self {
         self.pid = Some(val.into());
         self
     }
 
-    /// 设置账号状态
     pub fn status(mut self, val: AccountStatus) -> Self {
         self.status = val;
         self
     }
 
-    /// 设置用户角色
     pub fn role(mut self, val: UserRole) -> Self {
         self.role = val;
         self
     }
 
-    /// 强制指定登录方法（使用 LoginMethod 枚举），不调用则自动推断
     pub fn method(mut self, val: LoginMethod) -> Self {
         self.prefer_method = Some(val);
         self
     }
 
-    /// 执行登录
-    pub fn execute(mut self) -> Result<LoginResult, Box<dyn std::error::Error>> {
+    pub fn execute(mut self) -> MewResult<LoginResult> {
         let credentials = LoginCredentials {
             identity: self.identity.unwrap_or_default(),
             password: self.password.unwrap_or_default(),
