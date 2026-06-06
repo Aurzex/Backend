@@ -1,20 +1,5 @@
-use crate::utils::acquire::{CodeMaoClient, HttpMethod, MewError, MewResult};
+use crate::utils::acquire::{CodeMaoClient, HTTPStatus, HttpMethod};
 use serde_json::{Value, json};
-
-/// 语言类型枚举
-#[derive(Debug, Clone, Copy, Default)]
-pub enum Language {
-    #[default]
-    En,
-}
-
-impl Language {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Language::En => "en",
-        }
-    }
-}
 
 /// 海外平台数据访问客户端
 pub struct OverseaDataClient {
@@ -29,39 +14,56 @@ impl OverseaDataClient {
     }
 
     /// 获取 Tiger 账号信息
-    pub async fn fetch_tiger_accounts(&self) -> MewResult<Value> {
-        self.client
+    pub fn fetch_tiger_accounts(&self) -> Result<Value, Box<dyn std::error::Error>> {
+        // 使用完整 URL 时 base_key 应该为 None
+        let response = self
+            .client
             .build_request(
                 HttpMethod::GET,
                 "https://oversea-api.code.game/tiger/accounts",
                 None,
             )
-            .send()
-            .await?
-            .json()
-            .await
-            .map_err(MewError::from)
+            .send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
     /// 获取平台配置信息
-    pub async fn fetch_platform_config(&self) -> MewResult<Value> {
-        self.client
+    pub fn fetch_platform_config(&self) -> Result<Value, Box<dyn std::error::Error>> {
+        let response = self
+            .client
             .build_request(
                 HttpMethod::GET,
                 "https://oversea-api.code.game/config",
                 None,
             )
-            .send()
-            .await?
-            .json()
-            .await
-            .map_err(MewError::from)
+            .send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 }
 
 impl Default for OverseaDataClient {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// 语言类型枚举
+#[derive(Debug, Clone, Copy)]
+pub enum Language {
+    En,
+}
+
+impl Language {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Language::En => "en",
+        }
+    }
+}
+
+impl Default for Language {
+    fn default() -> Self {
+        Language::En
     }
 }
 
@@ -89,13 +91,20 @@ impl UserActionHandler {
     ///
     /// # Returns
     /// 注册成功返回 true, 否则返回 false
-    pub async fn register_with_email(
+    pub fn register_with_email(
         &self,
         email: &str,
         password: &str,
         pid: Option<&str>,
         language: Option<Language>,
-    ) -> MewResult<bool> {
+    ) -> Result<bool, Box<dyn std::error::Error>> {
+        let payload = json!({
+            "email": email,
+            "language": language.unwrap_or_default().as_str(),
+            "password": password,
+            "pid": pid.unwrap_or(Self::DEFAULT_PID),
+        });
+
         let response = self
             .client
             .build_request(
@@ -103,16 +112,10 @@ impl UserActionHandler {
                 "https://oversea-api.code.game/tiger/accounts/register/email",
                 None,
             )
-            .with_payload(json!({
-                "email": email,
-                "language": language.unwrap_or_default().as_str(),
-                "password": password,
-                "pid": pid.unwrap_or(Self::DEFAULT_PID),
-            }))
-            .send()
-            .await?;
+            .with_payload(payload)
+            .send()?;
 
-        Ok(response.status().as_u16() == 201)
+        Ok(response.status() == HTTPStatus::Created as u16)
     }
 
     /// 使用账号密码登录
@@ -124,12 +127,18 @@ impl UserActionHandler {
     ///
     /// # Returns
     /// 登录成功返回 true, 否则返回 false
-    pub async fn authenticate_with_credentials(
+    pub fn authenticate_with_credentials(
         &self,
         identity: &str,
         password: &str,
         pid: Option<&str>,
-    ) -> MewResult<bool> {
+    ) -> Result<bool, Box<dyn std::error::Error>> {
+        let payload = json!({
+            "identity": identity,
+            "password": password,
+            "pid": pid.unwrap_or(Self::DEFAULT_PID),
+        });
+
         let response = self
             .client
             .build_request(
@@ -137,15 +146,10 @@ impl UserActionHandler {
                 "https://oversea-api.code.game/tiger/accounts/login",
                 None,
             )
-            .with_payload(json!({
-                "identity": identity,
-                "password": password,
-                "pid": pid.unwrap_or(Self::DEFAULT_PID),
-            }))
-            .send()
-            .await?;
+            .with_payload(payload)
+            .send()?;
 
-        Ok(response.status().is_success())
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 }
 

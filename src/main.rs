@@ -1,20 +1,29 @@
-use crate::{api::auth, core::executer::ReportProcessor};
+use crate::{
+    api::auth,
+    core::retrieve::{self},
+};
 
 mod api;
 mod core;
 mod utils;
-use tokio::main;
-#[tokio::main]
-async fn main() {
+
+fn main() {
     auth::LoginBuilder::new()
-        .identity("")
-        .password("")
+        .identity("identity")
+        .password("password")
         .role(auth::UserRole::Admin)
         .method(auth::LoginMethod::AdminPassword)
-        .execute()
-        .await
-        .unwrap();
+        .execute();
 
-    let processor = ReportProcessor::new().await;
-    processor.process_all_reports(223).await.unwrap();
+    let comments = retrieve::DataQuery::new()
+        .query_comments()
+        .source(retrieve::CommentSource::Work)
+        .limit(Some(50))
+        .mode(retrieve::CommentQueryMode::Comments)
+        .target_id(130866720)
+        .execute();
+    dbg!(comments);
+
+    let result = retrieve::DataQuery::new().compute_admin_report_stats();
+    dbg!(result);
 }

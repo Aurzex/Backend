@@ -291,7 +291,7 @@ pub fn default_data_data() -> CodeMaoData {
     answers.push(answer4);
 
     let mut answer5 = HashMap::new();
-    let reasons = [
+    let reasons = vec![
         "不许你黑我家鸽鸽!😡",
         "想要绿尸函了食不食?",
         "香精煎鱼食不食?",

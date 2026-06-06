@@ -1,28 +1,31 @@
-use futures_util::{SinkExt, StreamExt};
-use serde_json::{Value, json};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, RwLock};
-use std::time::Duration;
-use tokio::sync::Notify as AsyncNotify;
-use wreq::Client;
-use wreq_util::Emulation;
+use std::io::{self};
+use std::net::TcpStream;
+use std::sync::{Arc, Condvar, Mutex, RwLock};
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
 use crate::api::auth::CloudAuthenticator;
+use rustls::crypto::ring::default_provider;
+use rustls::version::TLS13;
+use rustls::{ClientConfig, ProtocolVersion, RootCertStore, SupportedCipherSuite};
+use serde_json::{Value, json};
+use tungstenite::Connector;
 
-// ==================== 常量 ====================
-const MAX_DISPLAY_LENGTH: usize = 50;
-const TRUNCATED_SUFFIX: &str = "...";
-const MAX_LIST_DISPLAY_ELEMENTS: usize = 6;
-const PARTIAL_LIST_DISPLAY_COUNT: usize = 3;
-const BATCH_UPLOAD_INTERVAL_MS: u64 = 100;
-
+use tungstenite::WebSocket;
+use tungstenite::client::IntoClientRequest;
+use tungstenite::protocol::Message;
+use tungstenite::stream::MaybeTlsStream;
+use webpki_roots::TLS_SERVER_ROOTS;
 // ==================== 错误类型 ====================
 #[derive(Debug, thiserror::Error)]
 pub enum CloudError {
     #[error("JSON 解析错误: {0}")]
     Json(#[from] serde_json::Error),
     #[error("WebSocket 错误: {0}")]
-    WebSocket(String),
+    WebSocket(#[from] tungstenite::Error),
+    #[error("HTTP 请求错误: {0}")]
+    Http(#[from] ureq::Error),
     #[error("连接超时")]
     Timeout,
     #[error("无效的变量类型")]
@@ -33,14 +36,10 @@ pub enum CloudError {
     UnsupportedWorkType,
     #[error("连接未就绪")]
     NotConnected,
+    #[error("IO 错误: {0}")]
+    Io(#[from] io::Error),
     #[error("其他错误: {0}")]
     Other(String),
-}
-
-impl From<wreq::Error> for CloudError {
-    fn from(e: wreq::Error) -> Self {
-        CloudError::WebSocket(e.to_string())
-    }
 }
 
 // ==================== 枚举与配置 ====================
@@ -48,7 +47,7 @@ impl From<wreq::Error> for CloudError {
 pub enum EditorType {
     NEMO,
     KITTEN,
-    NEKO,
+    NEKO, // Neko
     COCO,
 }
 
@@ -134,13 +133,46 @@ impl From<&str> for ReceiveMessageType {
     }
 }
 
-// ==================== 回调类型 ====================
+/// 配置常量
+const MAX_DISPLAY_LENGTH: usize = 50;
+const TRUNCATED_SUFFIX: &str = "...";
+const MAX_LIST_DISPLAY_ELEMENTS: usize = 6;
+const PARTIAL_LIST_DISPLAY_COUNT: usize = 3;
+const DATA_TIMEOUT_SECS: u64 = 30;
+const DEFAULT_RANKING_LIMIT: u32 = 31;
+const MAX_INACTIVITY_SECS: u64 = 30;
+const MAX_RECONNECT_ATTEMPTS: u32 = 5;
+const PING_INTERVAL_SECS: u64 = 25;
+const PING_TIMEOUT_SECS: u64 = 5;
+const RECONNECT_INTERVAL_SECS: u64 = 8;
+const WS_PING_MESSAGE: &str = "2";
+const WS_PONG_MESSAGE: &str = "3";
+const WS_CONNECT_MESSAGE: &str = "40";
+const WS_SERVER_CLOSED_PREFIX: &str = "41";
+const WS_EVENT_MESSAGE_PREFIX: &str = "42";
+const WS_HANDSHAKE_MESSAGE_PREFIX: &str = "0";
+const MESSAGE_TYPE_LENGTH: usize = 2;
+const BATCH_UPLOAD_INTERVAL_MS: u64 = 100;
+
+// ==================== 命令模式（批量上传） ====================
+#[derive(Debug, Clone)]
+enum Command {
+    VariableUpdate {
+        cmd_type: String, // "update_private_vars" 或 "update_vars"
+        data: Value,
+    },
+    ListUpdate {
+        cvid: String,
+        operations: Vec<Value>,
+    },
+}
+
+// ==================== 云数据对象 ====================
 type ChangeCallback = Box<dyn Fn(Value, Value, String) + Send + Sync>;
 type RankingCallback = Box<dyn Fn(Vec<Value>) + Send + Sync>;
 type ListOperationCallback = Box<dyn Fn(Vec<Value>) + Send + Sync>;
 type EventCallback = Box<dyn Fn(Value) + Send + Sync>;
 
-// ==================== 云数据对象 ====================
 struct CloudDataItem {
     cloud_variable_id: String,
     name: String,
@@ -157,11 +189,9 @@ impl CloudDataItem {
             change_callbacks: Vec::new(),
         }
     }
-
     fn on_change(&mut self, cb: ChangeCallback) {
         self.change_callbacks.push(cb);
     }
-
     fn emit_change(&self, old: Value, new: Value, source: &str) {
         for cb in &self.change_callbacks {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -181,11 +211,9 @@ impl CloudVariable {
             base: CloudDataItem::new(cvid, name, value),
         }
     }
-
     fn get(&self) -> &Value {
         &self.base.value
     }
-
     fn set(&mut self, value: Value) -> Result<(), CloudError> {
         if !value.is_number() && !value.is_string() {
             return Err(CloudError::InvalidVariableType);
@@ -195,7 +223,6 @@ impl CloudVariable {
         self.base.emit_change(old, self.base.value.clone(), "local");
         Ok(())
     }
-
     fn on_change(&mut self, cb: ChangeCallback) {
         self.base.on_change(cb);
     }
@@ -213,23 +240,18 @@ impl PrivateCloudVariable {
             ranking_callbacks: Vec::new(),
         }
     }
-
     fn get(&self) -> &Value {
         self.var.get()
     }
-
     fn set(&mut self, value: Value) -> Result<(), CloudError> {
         self.var.set(value)
     }
-
     fn on_change(&mut self, cb: ChangeCallback) {
         self.var.on_change(cb);
     }
-
     fn on_ranking_received(&mut self, cb: RankingCallback) {
         self.ranking_callbacks.push(cb);
     }
-
     fn emit_ranking(&self, data: Vec<Value>) {
         for cb in &self.ranking_callbacks {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -249,15 +271,12 @@ impl PublicCloudVariable {
             var: CloudVariable::new(cvid, name, value),
         }
     }
-
     fn get(&self) -> &Value {
         self.var.get()
     }
-
     fn set(&mut self, value: Value) -> Result<(), CloudError> {
         self.var.set(value)
     }
-
     fn on_change(&mut self, cb: ChangeCallback) {
         self.var.on_change(cb);
     }
@@ -431,245 +450,161 @@ impl CloudList {
     }
 }
 
-// ==================== 命令模式（批量上传） ====================
-#[derive(Debug, Clone)]
-enum Command {
-    VariableUpdate {
-        cmd_type: String,
-        data: Value,
-    },
-    ListUpdate {
-        cvid: String,
-        operations: Vec<Value>,
-    },
+// ==================== 内部数据结构（用于线程间传递） ====================
+struct CloudConnectionData {
+    data_ready: Arc<(Mutex<bool>, Condvar)>,
+    online_users: Arc<RwLock<u32>>,
+    private_variables: Arc<RwLock<HashMap<String, PrivateCloudVariable>>>,
+    public_variables: Arc<RwLock<HashMap<String, PublicCloudVariable>>>,
+    lists: Arc<RwLock<HashMap<String, CloudList>>>,
+    command_queue: Arc<Mutex<Vec<Command>>>,
+    event_callbacks: Arc<RwLock<HashMap<String, Vec<EventCallback>>>>,
+    pending_ranking_requests: Arc<Mutex<Vec<String>>>,
 }
 
-// ==================== 内部共享状态 ====================
-struct CloudSharedState {
-    // ★ 用 AsyncNotify 替换 Condvar
-    data_ready: (Mutex<bool>, AsyncNotify),
-    online_users: RwLock<u32>,
-    private_variables: RwLock<HashMap<String, PrivateCloudVariable>>,
-    public_variables: RwLock<HashMap<String, PublicCloudVariable>>,
-    lists: RwLock<HashMap<String, CloudList>>,
-    command_queue: Mutex<Vec<Command>>,
-    event_callbacks: RwLock<HashMap<String, Vec<EventCallback>>>,
-    pending_ranking_requests: Mutex<Vec<String>>,
-    shutdown: Mutex<bool>,
-}
-
-// ==================== CloudConnection ====================
+// ==================== CloudConnection (已连接状态) ====================
 pub struct CloudConnection {
     work_id: u64,
     editor: EditorType,
     authenticator: CloudAuthenticator,
-    state: Arc<CloudSharedState>,
-    // ★ 移除 runtime 字段
-    writer_tx: tokio::sync::mpsc::Sender<String>,
-    _tasks: Vec<tokio::task::JoinHandle<()>>,
-    connected: Arc<(Mutex<bool>, AsyncNotify)>,
+    // 连接相关
+    ws: Arc<Mutex<WebSocket<MaybeTlsStream<TcpStream>>>>,
+    connected: Arc<(Mutex<bool>, Condvar)>,
+    data_ready: Arc<(Mutex<bool>, Condvar)>,
+    online_users: Arc<RwLock<u32>>,
+    // 数据存储
+    private_variables: Arc<RwLock<HashMap<String, PrivateCloudVariable>>>,
+    public_variables: Arc<RwLock<HashMap<String, PublicCloudVariable>>>,
+    lists: Arc<RwLock<HashMap<String, CloudList>>>,
+    // 命令队列及上传线程
+    command_queue: Arc<Mutex<Vec<Command>>>,
+    upload_thread: Option<JoinHandle<()>>,
+    stop_upload: Arc<Mutex<bool>>,
+    // 事件回调
+    event_callbacks: Arc<RwLock<HashMap<String, Vec<EventCallback>>>>,
+    pending_ranking_requests: Arc<Mutex<Vec<String>>>,
+    // 生命周期管理
+    shutdown: Arc<Mutex<bool>>,
+    reader_thread: Option<JoinHandle<()>>,
+    ping_thread: Option<JoinHandle<()>>,
+    // 重连参数
+    auto_reconnect: bool,
 }
 
 impl CloudConnection {
-    // ---------- 构造与初始化 ----------
-
-    async fn new_async(
+    /// 由 Builder 调用此构造函数（内部用）
+    fn new_connected(
         work_id: u64,
         editor: EditorType,
         authenticator: CloudAuthenticator,
-        url: &str,
-        device_auth: &str,
-        auth_token: Option<String>,
-    ) -> Result<Self, CloudError> {
-        // ★ 创建带指纹模拟的 Client
-        let client = Client::builder().emulation(Emulation::Chrome137).build()?;
+        ws: WebSocket<MaybeTlsStream<TcpStream>>,
+    ) -> Self {
+        let ws = Arc::new(Mutex::new(ws));
+        let connected = Arc::new((Mutex::new(true), Condvar::new()));
+        let data_ready = Arc::new((Mutex::new(false), Condvar::new()));
+        let online_users = Arc::new(RwLock::new(0));
+        let private_variables = Arc::new(RwLock::new(HashMap::new()));
+        let public_variables = Arc::new(RwLock::new(HashMap::new()));
+        let lists = Arc::new(RwLock::new(HashMap::new()));
+        let command_queue = Arc::new(Mutex::new(Vec::new()));
+        let stop_upload = Arc::new(Mutex::new(false));
+        let event_callbacks = Arc::new(RwLock::new(HashMap::new()));
+        let pending_ranking_requests = Arc::new(Mutex::new(Vec::new()));
+        let shutdown = Arc::new(Mutex::new(false));
 
-        let mut req = client.websocket(url);
-        req = req.header("X-Creation-Tools-Device-Auth", device_auth);
-        req = req.header("Origin", "https://socketcv.codemao.cn:9096");
-        if let Some(token) = auth_token {
-            req = req.header("Cookie", format!("Authorization={}", token));
-        }
-
-        let ws_response = req.send().await?;
-        let (mut ws_sink, mut ws_stream) = ws_response.into_websocket().await?.split();
-
-        // 创建状态，注意 data_ready 现在用 AsyncNotify
-        let state = Arc::new(CloudSharedState {
-            data_ready: (Mutex::new(false), AsyncNotify::new()),
-            online_users: RwLock::new(0),
-            private_variables: RwLock::new(HashMap::new()),
-            public_variables: RwLock::new(HashMap::new()),
-            lists: RwLock::new(HashMap::new()),
-            command_queue: Mutex::new(Vec::new()),
-            event_callbacks: RwLock::new(HashMap::new()),
-            pending_ranking_requests: Mutex::new(Vec::new()),
-            shutdown: Mutex::new(false),
+        // 创建内部数据结构（用于线程传递）
+        let conn_data = Arc::new(CloudConnectionData {
+            data_ready: data_ready.clone(),
+            online_users: online_users.clone(),
+            private_variables: private_variables.clone(),
+            public_variables: public_variables.clone(),
+            lists: lists.clone(),
+            command_queue: command_queue.clone(),
+            event_callbacks: event_callbacks.clone(),
+            pending_ranking_requests: pending_ranking_requests.clone(),
         });
 
-        let connected = Arc::new((Mutex::new(true), AsyncNotify::new()));
-
-        // 创建消息通道
-        let (writer_tx, mut writer_rx) = tokio::sync::mpsc::channel::<String>(256);
-
-        // writer 任务
-        let writer_handle = tokio::spawn(async move {
-            while let Some(msg) = writer_rx.recv().await {
-                if let Err(e) = ws_sink.send(wreq::Message::text(msg)).await {
-                    eprintln!("WS send error: {}", e);
-                    break;
-                }
-            }
-            let _ = ws_sink.close().await;
-        });
-
-        // reader 任务
-        let reader_state = state.clone();
-        let reader_connected = connected.clone();
-        let reader_handle = tokio::spawn(async move {
-            while let Some(msg) = ws_stream.next().await {
-                match msg {
-                    Ok(wreq::Message::Text(text)) => {
-                        Self::process_message(&text, &reader_state, &reader_connected);
-                    }
-                    Ok(wreq::Message::Close(_)) => {
-                        break;
-                    }
-                    Err(e) => {
-                        eprintln!("WS read error: {}", e);
-                        break;
-                    }
-                    _ => {}
-                }
-            }
-            *reader_connected.0.lock().unwrap() = false;
-            reader_connected.1.notify_one();
-        });
-
-        // upload 循环任务（★ 已修复 MutexGuard 跨越 .await）
-        let upload_state = state.clone();
-        let upload_tx = writer_tx.clone();
-        let upload_handle = tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(Duration::from_millis(BATCH_UPLOAD_INTERVAL_MS)).await;
-
-                if *upload_state.shutdown.lock().unwrap() {
-                    break;
-                }
-
-                // ★ 将锁的获取放入独立作用域，确保在 .await 前释放
-                let commands: Vec<Command> = {
-                    let mut q = upload_state.command_queue.lock().unwrap();
-                    if q.is_empty() {
-                        continue;
-                    }
-                    q.drain(..).collect()
-                }; // 锁在此释放
-
-                let mut private_updates = Vec::new();
-                let mut public_updates = Vec::new();
-                let mut list_updates: HashMap<String, Vec<Value>> = HashMap::new();
-
-                for cmd in commands {
-                    match cmd {
-                        Command::VariableUpdate { cmd_type, data } => {
-                            if cmd_type == "update_private_vars" {
-                                private_updates.push(data);
-                            } else if cmd_type == "update_vars" {
-                                public_updates.push(data);
-                            }
-                        }
-                        Command::ListUpdate { cvid, operations } => {
-                            list_updates.entry(cvid).or_default().extend(operations);
-                        }
-                    }
-                }
-
-                if !private_updates.is_empty() {
-                    let payload = json!(["update_private_vars", private_updates]);
-                    let msg = format!("42{}", serde_json::to_string(&payload).unwrap());
-                    let _ = upload_tx.send(msg).await;
-                }
-                if !public_updates.is_empty() {
-                    let payload = json!(["update_vars", public_updates]);
-                    let msg = format!("42{}", serde_json::to_string(&payload).unwrap());
-                    let _ = upload_tx.send(msg).await;
-                }
-                for (cvid, ops) in list_updates {
-                    let payload = json!(["update_lists", {cvid: ops}]);
-                    let msg = format!("42{}", serde_json::to_string(&payload).unwrap());
-                    let _ = upload_tx.send(msg).await;
-                }
-            }
-        });
-
-        // 发送初始握手 "40"
-        writer_tx
-            .send("40".to_string())
-            .await
-            .map_err(|_| CloudError::WebSocket("Failed to send init message".into()))?;
-
-        Ok(CloudConnection {
+        let mut conn = CloudConnection {
             work_id,
             editor,
             authenticator,
-            state,
-            writer_tx,
-            _tasks: vec![writer_handle, reader_handle, upload_handle],
-            connected,
-        })
-    }
+            ws: ws.clone(),
+            connected: connected.clone(),
+            data_ready: data_ready.clone(),
+            online_users: online_users.clone(),
+            private_variables: private_variables.clone(),
+            public_variables: public_variables.clone(),
+            lists: lists.clone(),
+            command_queue: command_queue.clone(),
+            upload_thread: None,
+            stop_upload: stop_upload.clone(),
+            event_callbacks: event_callbacks.clone(),
+            pending_ranking_requests: pending_ranking_requests.clone(),
+            shutdown: shutdown.clone(),
+            reader_thread: None,
+            ping_thread: None,
+            auto_reconnect: true,
+        };
 
-    // ---------- 内部消息发送（现在全部异步） ----------
+        // 启动 reader 线程
+        let reader_ws = ws.clone();
+        let reader_shutdown = shutdown.clone();
+        let reader_connected = connected.clone();
+        let reader_conn_data = conn_data.clone();
+        let reader = thread::spawn(move || {
+            Self::reader_loop(
+                reader_ws,
+                reader_shutdown,
+                reader_connected,
+                reader_conn_data,
+            );
+        });
+        conn.reader_thread = Some(reader);
 
-    async fn send_message_async(
-        &self,
-        msg_type: SendMessageType,
-        data: Value,
-    ) -> Result<(), CloudError> {
-        let payload = json!([msg_type.as_str(), data]);
-        let msg = format!("42{}", serde_json::to_string(&payload)?);
-        self.writer_tx
-            .send(msg)
-            .await
-            .map_err(|_| CloudError::WebSocket("Send channel closed".into()))
-    }
+        // 启动 upload 线程
+        let upload_ws = ws;
+        let upload_stop = stop_upload;
+        let upload_shutdown = shutdown;
+        let upload_queue = command_queue;
+        let upload = thread::spawn(move || {
+            Self::upload_loop(upload_ws, upload_shutdown, upload_stop, upload_queue);
+        });
+        conn.upload_thread = Some(upload);
 
-    async fn send_raw(&self, msg: String) -> Result<(), CloudError> {
-        self.writer_tx
-            .send(msg)
-            .await
-            .map_err(|_| CloudError::WebSocket("Send channel closed".into()))
+        conn
     }
 
     // ---------- 公共 API ----------
 
-    /// 等待数据就绪（异步）
-    pub async fn wait_for_data(&self, timeout: Duration) -> Result<(), CloudError> {
-        let (lock, notify) = &self.state.data_ready;
-        let start = tokio::time::Instant::now();
-        loop {
-            if *lock.lock().unwrap() {
-                return Ok(());
-            }
-            if start.elapsed() >= timeout {
+    /// 等待数据就绪（阻塞式）
+    pub fn wait_for_data(&self, timeout: Duration) -> Result<(), CloudError> {
+        let (lock, cvar) = &*self.data_ready;
+        let mut ready = lock.lock().unwrap();
+        let deadline = Instant::now() + timeout;
+        while !*ready {
+            let now = Instant::now();
+            if now >= deadline {
                 return Err(CloudError::Timeout);
             }
-            tokio::select! {
-                _ = notify.notified() => {},
-                _ = tokio::time::sleep(Duration::from_millis(100)) => {},
+            let remaining = deadline - now;
+            let (result, timeout_res) = cvar.wait_timeout(ready, remaining).unwrap();
+            ready = result;
+            if timeout_res.timed_out() {
+                return Err(CloudError::Timeout);
             }
         }
+        Ok(())
     }
 
     /// 是否连接
     pub fn is_connected(&self) -> bool {
-        *self.connected.0.lock().unwrap()
+        let (lock, _) = &*self.connected;
+        *lock.lock().unwrap()
     }
 
     /// 在线用户数
     pub fn online_users(&self) -> u32 {
-        *self.state.online_users.read().unwrap()
+        *self.online_users.read().unwrap()
     }
 
     /// 注册事件回调
@@ -677,209 +612,85 @@ impl CloudConnection {
     where
         F: Fn(Value) + Send + Sync + 'static,
     {
-        self.state
-            .event_callbacks
-            .write()
-            .unwrap()
+        let mut cb_map = self.event_callbacks.write().unwrap();
+        cb_map
             .entry(event.to_string())
             .or_default()
             .push(Box::new(callback));
         self
     }
 
-    /// 获取所有私有变量名称
-    pub fn get_all_private_variable_names(&self) -> Vec<String> {
-        self.state
-            .private_variables
-            .read()
-            .unwrap()
-            .keys()
-            .cloned()
-            .collect()
+    /// 发送底层消息
+    fn send_message(&self, msg_type: SendMessageType, data: Value) -> Result<(), CloudError> {
+        let payload = json!([msg_type.as_str(), data]);
+        let msg = format!("42{}", serde_json::to_string(&payload)?);
+        let mut ws = self.ws.lock().unwrap();
+        ws.send(Message::Text(msg.into()))?;
+        Ok(())
     }
 
-    /// 获取所有公共变量名称
-    pub fn get_all_public_variable_names(&self) -> Vec<String> {
-        self.state
-            .public_variables
-            .read()
-            .unwrap()
-            .keys()
-            .cloned()
-            .collect()
-    }
-
-    /// 获取所有列表名称
-    pub fn get_all_list_names(&self) -> Vec<String> {
-        self.state.lists.read().unwrap().keys().cloned().collect()
-    }
-
-    // ---------- 私有变量操作 ----------
-
+    // ---------- 变量操作 ----------
     pub fn get_private_variable(&self, name: &str) -> Option<Value> {
-        self.state
-            .private_variables
-            .read()
-            .unwrap()
-            .get(name)
-            .map(|v| v.get().clone())
+        let vars = self.private_variables.read().unwrap();
+        vars.get(name).map(|v| v.get().clone())
     }
 
     pub fn set_private_variable(&self, name: &str, value: Value) -> Result<&Self, CloudError> {
-        let mut vars = self.state.private_variables.write().unwrap();
+        let mut vars = self.private_variables.write().unwrap();
         if let Some(var) = vars.get_mut(name) {
             var.set(value.clone())?;
             let cvid = var.var.base.cloud_variable_id.clone();
             drop(vars);
-            self.state
-                .command_queue
-                .lock()
-                .unwrap()
-                .push(Command::VariableUpdate {
-                    cmd_type: "update_private_vars".into(),
-                    data: json!({"cvid": cvid, "value": value}),
-                });
+            let cmd = Command::VariableUpdate {
+                cmd_type: "update_private_vars".into(),
+                data: json!({"cvid": cvid, "value": value}),
+            };
+            self.command_queue.lock().unwrap().push(cmd);
             Ok(self)
         } else {
             Err(CloudError::InvalidVariableType)
         }
     }
-
-    pub fn on_private_variable_change<F>(&self, name: &str, cb: F) -> &Self
-    where
-        F: Fn(Value, Value, String) + Send + Sync + 'static,
-    {
-        if let Some(var) = self.state.private_variables.write().unwrap().get_mut(name) {
-            var.on_change(Box::new(cb));
-        }
-        self
-    }
-
-    pub fn request_ranking(
-        &self,
-        variable_name: &str,
-        limit: u32,
-        order: i32,
-    ) -> Result<&Self, CloudError> {
-        let vars = self.state.private_variables.read().unwrap();
-        if let Some(var) = vars.get(variable_name) {
-            let cvid = var.var.base.cloud_variable_id.clone();
-            self.state
-                .pending_ranking_requests
-                .lock()
-                .unwrap()
-                .push(cvid.clone());
-            drop(vars);
-            let data = json!({"cvid": cvid, "limit": limit, "order_type": order});
-            // 注意：这里需要异步发送，但当前方法是同步的，为了保持 API 兼容，我们使用 tokio::task::spawn 发送？
-            // 更好的办法是改为 async，这里暂时用 spawn 来避免阻塞，但需要确保运行时仍在。
-            // 由于整个 CloudConnection 已去除自己的 Runtime，我们需要调用者确保在 Tokio 上下文中。
-            let writer = self.writer_tx.clone();
-            tokio::spawn(async move {
-                let payload = json!(["list_ranking", data]);
-                let msg = format!("42{}", serde_json::to_string(&payload).unwrap());
-                let _ = writer.send(msg).await;
-            });
-            Ok(self)
-        } else {
-            Err(CloudError::InvalidVariableType)
-        }
-    }
-
-    pub fn on_private_variable_ranking<F>(&self, name: &str, cb: F) -> &Self
-    where
-        F: Fn(Vec<Value>) + Send + Sync + 'static,
-    {
-        if let Some(var) = self.state.private_variables.write().unwrap().get_mut(name) {
-            var.on_ranking_received(Box::new(cb));
-        }
-        self
-    }
-
-    // ---------- 公共变量操作 ----------
 
     pub fn get_public_variable(&self, name: &str) -> Option<Value> {
-        self.state
-            .public_variables
-            .read()
-            .unwrap()
-            .get(name)
-            .map(|v| v.get().clone())
+        let vars = self.public_variables.read().unwrap();
+        vars.get(name).map(|v| v.get().clone())
     }
 
     pub fn set_public_variable(&self, name: &str, value: Value) -> Result<&Self, CloudError> {
-        let mut vars = self.state.public_variables.write().unwrap();
+        let mut vars = self.public_variables.write().unwrap();
         if let Some(var) = vars.get_mut(name) {
             var.set(value.clone())?;
             let cvid = var.var.base.cloud_variable_id.clone();
             drop(vars);
-            self.state
-                .command_queue
-                .lock()
-                .unwrap()
-                .push(Command::VariableUpdate {
-                    cmd_type: "update_vars".into(),
-                    data: json!({"action": "set", "cvid": cvid, "value": value}),
-                });
+            let cmd = Command::VariableUpdate {
+                cmd_type: "update_vars".into(),
+                data: json!({"action": "set", "cvid": cvid, "value": value}),
+            };
+            self.command_queue.lock().unwrap().push(cmd);
             Ok(self)
         } else {
             Err(CloudError::InvalidVariableType)
         }
     }
 
-    pub fn on_public_variable_change<F>(&self, name: &str, cb: F) -> &Self
-    where
-        F: Fn(Value, Value, String) + Send + Sync + 'static,
-    {
-        if let Some(var) = self.state.public_variables.write().unwrap().get_mut(name) {
-            var.on_change(Box::new(cb));
-        }
-        self
-    }
-
     // ---------- 列表操作 ----------
-
     pub fn get_list(&self, name: &str) -> Option<Vec<Value>> {
-        self.state
-            .lists
-            .read()
-            .unwrap()
-            .get(name)
-            .map(|l| l.value().clone())
-    }
-
-    pub fn get_list_length(&self, name: &str) -> Option<usize> {
-        self.state
-            .lists
-            .read()
-            .unwrap()
-            .get(name)
-            .map(|l| l.length())
-    }
-
-    pub fn get_list_item(&self, name: &str, index: usize) -> Option<Value> {
-        self.state
-            .lists
-            .read()
-            .unwrap()
-            .get(name)
-            .and_then(|l| l.value().get(index).cloned())
+        let lists = self.lists.read().unwrap();
+        lists.get(name).map(|l| l.value().clone())
     }
 
     pub fn list_push(&self, name: &str, value: Value) -> Result<&Self, CloudError> {
-        let mut lists = self.state.lists.write().unwrap();
+        let mut lists = self.lists.write().unwrap();
         if let Some(list) = lists.get_mut(name) {
             list.push(value.clone())?;
             let cvid = list.base.cloud_variable_id.clone();
             drop(lists);
-            self.state
-                .command_queue
-                .lock()
-                .unwrap()
-                .push(Command::ListUpdate {
-                    cvid,
-                    operations: vec![json!({"action": "append", "value": value})],
-                });
+            let cmd = Command::ListUpdate {
+                cvid,
+                operations: vec![json!({"action": "append", "value": value})],
+            };
+            self.command_queue.lock().unwrap().push(cmd);
             Ok(self)
         } else {
             Err(CloudError::InvalidListItemType)
@@ -887,19 +698,16 @@ impl CloudConnection {
     }
 
     pub fn list_pop(&self, name: &str) -> Result<&Self, CloudError> {
-        let mut lists = self.state.lists.write().unwrap();
+        let mut lists = self.lists.write().unwrap();
         if let Some(list) = lists.get_mut(name) {
             if list.pop().is_some() {
                 let cvid = list.base.cloud_variable_id.clone();
                 drop(lists);
-                self.state
-                    .command_queue
-                    .lock()
-                    .unwrap()
-                    .push(Command::ListUpdate {
-                        cvid,
-                        operations: vec![json!({"action": "delete", "nth": "last"})],
-                    });
+                let cmd = Command::ListUpdate {
+                    cvid,
+                    operations: vec![json!({"action": "delete", "nth": "last"})],
+                };
+                self.command_queue.lock().unwrap().push(cmd);
                 Ok(self)
             } else {
                 Err(CloudError::InvalidListItemType)
@@ -910,19 +718,16 @@ impl CloudConnection {
     }
 
     pub fn list_unshift(&self, name: &str, value: Value) -> Result<&Self, CloudError> {
-        let mut lists = self.state.lists.write().unwrap();
+        let mut lists = self.lists.write().unwrap();
         if let Some(list) = lists.get_mut(name) {
             list.unshift(value.clone())?;
             let cvid = list.base.cloud_variable_id.clone();
             drop(lists);
-            self.state
-                .command_queue
-                .lock()
-                .unwrap()
-                .push(Command::ListUpdate {
-                    cvid,
-                    operations: vec![json!({"action": "unshift", "value": value})],
-                });
+            let cmd = Command::ListUpdate {
+                cvid,
+                operations: vec![json!({"action": "unshift", "value": value})],
+            };
+            self.command_queue.lock().unwrap().push(cmd);
             Ok(self)
         } else {
             Err(CloudError::InvalidListItemType)
@@ -930,19 +735,16 @@ impl CloudConnection {
     }
 
     pub fn list_shift(&self, name: &str) -> Result<&Self, CloudError> {
-        let mut lists = self.state.lists.write().unwrap();
+        let mut lists = self.lists.write().unwrap();
         if let Some(list) = lists.get_mut(name) {
             if list.shift().is_some() {
                 let cvid = list.base.cloud_variable_id.clone();
                 drop(lists);
-                self.state
-                    .command_queue
-                    .lock()
-                    .unwrap()
-                    .push(Command::ListUpdate {
-                        cvid,
-                        operations: vec![json!({"action": "delete", "nth": 1})],
-                    });
+                let cmd = Command::ListUpdate {
+                    cvid,
+                    operations: vec![json!({"action": "delete", "nth": 1})],
+                };
+                self.command_queue.lock().unwrap().push(cmd);
                 Ok(self)
             } else {
                 Err(CloudError::InvalidListItemType)
@@ -953,19 +755,16 @@ impl CloudConnection {
     }
 
     pub fn list_insert(&self, name: &str, index: usize, value: Value) -> Result<&Self, CloudError> {
-        let mut lists = self.state.lists.write().unwrap();
+        let mut lists = self.lists.write().unwrap();
         if let Some(list) = lists.get_mut(name) {
             list.insert(index, value.clone())?;
             let cvid = list.base.cloud_variable_id.clone();
             drop(lists);
-            self.state
-                .command_queue
-                .lock()
-                .unwrap()
-                .push(Command::ListUpdate {
-                    cvid,
-                    operations: vec![json!({"action": "insert", "nth": index + 1, "value": value})],
-                });
+            let cmd = Command::ListUpdate {
+                cvid,
+                operations: vec![json!({"action": "insert", "nth": index + 1, "value": value})],
+            };
+            self.command_queue.lock().unwrap().push(cmd);
             Ok(self)
         } else {
             Err(CloudError::InvalidListItemType)
@@ -973,19 +772,16 @@ impl CloudConnection {
     }
 
     pub fn list_remove(&self, name: &str, index: usize) -> Result<&Self, CloudError> {
-        let mut lists = self.state.lists.write().unwrap();
+        let mut lists = self.lists.write().unwrap();
         if let Some(list) = lists.get_mut(name) {
             if list.remove(index).is_some() {
                 let cvid = list.base.cloud_variable_id.clone();
                 drop(lists);
-                self.state
-                    .command_queue
-                    .lock()
-                    .unwrap()
-                    .push(Command::ListUpdate {
-                        cvid,
-                        operations: vec![json!({"action": "delete", "nth": index + 1})],
-                    });
+                let cmd = Command::ListUpdate {
+                    cvid,
+                    operations: vec![json!({"action": "delete", "nth": index + 1})],
+                };
+                self.command_queue.lock().unwrap().push(cmd);
                 Ok(self)
             } else {
                 Err(CloudError::InvalidListItemType)
@@ -1001,21 +797,16 @@ impl CloudConnection {
         index: usize,
         value: Value,
     ) -> Result<&Self, CloudError> {
-        let mut lists = self.state.lists.write().unwrap();
+        let mut lists = self.lists.write().unwrap();
         if let Some(list) = lists.get_mut(name) {
             list.replace(index, value.clone())?;
             let cvid = list.base.cloud_variable_id.clone();
             drop(lists);
-            self.state
-                .command_queue
-                .lock()
-                .unwrap()
-                .push(Command::ListUpdate {
-                    cvid,
-                    operations: vec![
-                        json!({"action": "replace", "nth": index + 1, "value": value}),
-                    ],
-                });
+            let cmd = Command::ListUpdate {
+                cvid,
+                operations: vec![json!({"action": "replace", "nth": index + 1, "value": value})],
+            };
+            self.command_queue.lock().unwrap().push(cmd);
             Ok(self)
         } else {
             Err(CloudError::InvalidListItemType)
@@ -1023,19 +814,16 @@ impl CloudConnection {
     }
 
     pub fn list_replace_last(&self, name: &str, value: Value) -> Result<&Self, CloudError> {
-        let mut lists = self.state.lists.write().unwrap();
+        let mut lists = self.lists.write().unwrap();
         if let Some(list) = lists.get_mut(name) {
             list.replace_last(value.clone())?;
             let cvid = list.base.cloud_variable_id.clone();
             drop(lists);
-            self.state
-                .command_queue
-                .lock()
-                .unwrap()
-                .push(Command::ListUpdate {
-                    cvid,
-                    operations: vec![json!({"action": "replace", "nth": "last", "value": value})],
-                });
+            let cmd = Command::ListUpdate {
+                cvid,
+                operations: vec![json!({"action": "replace", "nth": "last", "value": value})],
+            };
+            self.command_queue.lock().unwrap().push(cmd);
             Ok(self)
         } else {
             Err(CloudError::InvalidListItemType)
@@ -1043,92 +831,141 @@ impl CloudConnection {
     }
 
     pub fn list_clear(&self, name: &str) -> Result<&Self, CloudError> {
-        let mut lists = self.state.lists.write().unwrap();
+        let mut lists = self.lists.write().unwrap();
         if let Some(list) = lists.get_mut(name) {
             list.clear();
             let cvid = list.base.cloud_variable_id.clone();
             drop(lists);
-            self.state
-                .command_queue
-                .lock()
-                .unwrap()
-                .push(Command::ListUpdate {
-                    cvid,
-                    operations: vec![json!({"action": "delete", "nth": "all"})],
-                });
+            let cmd = Command::ListUpdate {
+                cvid,
+                operations: vec![json!({"action": "delete", "nth": "all"})],
+            };
+            self.command_queue.lock().unwrap().push(cmd);
             Ok(self)
         } else {
             Err(CloudError::InvalidListItemType)
         }
     }
 
-    pub fn on_list_change<F>(&self, name: &str, cb: F) -> &Self
-    where
-        F: Fn(Value, Value, String) + Send + Sync + 'static,
-    {
-        if let Some(list) = self.state.lists.write().unwrap().get_mut(name) {
-            list.on_change(Box::new(cb));
-        }
-        self
-    }
-
-    pub fn on_list_operation<F>(&self, name: &str, op: &str, cb: F) -> &Self
-    where
-        F: Fn(Vec<Value>) + Send + Sync + 'static,
-    {
-        if let Some(list) = self.state.lists.write().unwrap().get_mut(name) {
-            list.on_operation(op, Box::new(cb));
-        }
-        self
-    }
-
-    // ---------- 清理 ----------
-
-    /// 关闭连接（异步）
-    pub async fn close(mut self) {
-        *self.state.shutdown.lock().unwrap() = true;
-        // 中止所有后台任务
-        for task in self._tasks.drain(..) {
-            task.abort();
+    /// 请求排行榜
+    pub fn request_ranking(
+        &self,
+        variable_name: &str,
+        limit: u32,
+        order: i32,
+    ) -> Result<&Self, CloudError> {
+        let vars = self.private_variables.read().unwrap();
+        if let Some(var) = vars.get(variable_name) {
+            let cvid = var.var.base.cloud_variable_id.clone();
+            self.pending_ranking_requests
+                .lock()
+                .unwrap()
+                .push(cvid.clone());
+            drop(vars);
+            let data = json!({"cvid": cvid, "limit": limit, "order_type": order});
+            self.send_message(SendMessageType::GetPrivateVariableRankingList, data)?;
+            Ok(self)
+        } else {
+            Err(CloudError::InvalidVariableType)
         }
     }
-}
 
-impl Drop for CloudConnection {
-    fn drop(&mut self) {
-        *self.state.shutdown.lock().unwrap() = true;
+    /// 关闭连接
+    pub fn close(mut self) {
+        *self.shutdown.lock().unwrap() = true;
+        *self.stop_upload.lock().unwrap() = true;
+        if let Some(handle) = self.reader_thread.take() {
+            let _ = handle.join();
+        }
+        if let Some(handle) = self.upload_thread.take() {
+            let _ = handle.join();
+        }
+        if let Some(handle) = self.ping_thread.take() {
+            let _ = handle.join();
+        }
     }
-}
 
-// ==================== 消息处理（内部） ====================
+    // ---------- 内部方法 ----------
 
-impl CloudConnection {
-    fn process_message(
-        text: &str,
-        state: &Arc<CloudSharedState>,
-        _connected: &Arc<(Mutex<bool>, AsyncNotify)>,
+    fn emit_event(&self, event: &str, data: Value) {
+        let cb_map = self.event_callbacks.read().unwrap();
+        if let Some(cbs) = cb_map.get(event) {
+            for cb in cbs {
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    cb(data.clone());
+                }));
+            }
+        }
+    }
+
+    fn reader_loop(
+        ws: Arc<Mutex<WebSocket<MaybeTlsStream<TcpStream>>>>,
+        shutdown: Arc<Mutex<bool>>,
+        connected: Arc<(Mutex<bool>, Condvar)>,
+        conn_data: Arc<CloudConnectionData>,
     ) {
-        if text == "2" || text == "3" {
+        loop {
+            if *shutdown.lock().unwrap() {
+                break;
+            }
+            let msg = {
+                let mut ws_lock = ws.lock().unwrap();
+                match ws_lock.read() {
+                    Ok(m) => m,
+                    Err(e) => {
+                        eprintln!("WebSocket read error: {}", e);
+                        break;
+                    }
+                }
+            };
+            Self::process_message(msg, &connected, &conn_data, &shutdown);
+        }
+        let (lock, cvar) = &*connected;
+        *lock.lock().unwrap() = false;
+        cvar.notify_all();
+    }
+
+    fn process_message(
+        msg: Message,
+        _connected: &Arc<(Mutex<bool>, Condvar)>,
+        conn_data: &Arc<CloudConnectionData>,
+        shutdown: &Arc<Mutex<bool>>,
+    ) {
+        let text = match msg {
+            Message::Text(t) => t.to_string(),
+            Message::Binary(b) => match String::from_utf8(b.to_vec()) {
+                Ok(s) => s,
+                Err(_) => return,
+            },
+            Message::Ping(_) => {
+                return;
+            }
+            Message::Close(_) => {
+                *shutdown.lock().unwrap() = true;
+                return;
+            }
+            _ => return,
+        };
+
+        if text == WS_PING_MESSAGE || text == WS_PONG_MESSAGE {
             return;
         }
 
-        if text.starts_with("0") {
-            // 握手消息，忽略
-        } else if text.starts_with("41") {
-            *state.shutdown.lock().unwrap() = true;
-        } else if text.starts_with("42") {
-            let payload = &text[2..];
+        if text.starts_with(WS_HANDSHAKE_MESSAGE_PREFIX) {
+            // 握手处理
+        } else if text.starts_with(WS_SERVER_CLOSED_PREFIX) {
+            *shutdown.lock().unwrap() = true;
+        } else if text.starts_with(WS_EVENT_MESSAGE_PREFIX) {
+            let payload = &text[MESSAGE_TYPE_LENGTH..];
             if let Ok(arr) = serde_json::from_str::<Vec<Value>>(payload) {
                 if arr.len() >= 2 {
                     let msg_type = arr[0].as_str().unwrap_or("");
                     let msg_data = arr[1].clone();
-
                     let parsed = if let Some(inner) = msg_data.as_str() {
                         serde_json::from_str::<Value>(inner).unwrap_or(msg_data)
                     } else {
                         msg_data
                     };
-
                     match ReceiveMessageType::from(msg_type) {
                         ReceiveMessageType::Join => {
                             // 发送获取所有数据请求
@@ -1151,11 +988,10 @@ impl CloudConnection {
                                             obj.get("value").cloned().unwrap_or(Value::Null);
                                         let dtype: i64 =
                                             obj.get("type").and_then(|v| v.as_i64()).unwrap_or(-1);
-
                                         if let Ok(dt) = DataType::try_from(dtype) {
                                             match dt {
                                                 DataType::PrivateVariable => {
-                                                    state
+                                                    conn_data
                                                         .private_variables
                                                         .write()
                                                         .unwrap()
@@ -1167,17 +1003,23 @@ impl CloudConnection {
                                                         );
                                                 }
                                                 DataType::PublicVariable => {
-                                                    state.public_variables.write().unwrap().insert(
-                                                        name.clone(),
-                                                        PublicCloudVariable::new(cvid, name, value),
-                                                    );
+                                                    conn_data
+                                                        .public_variables
+                                                        .write()
+                                                        .unwrap()
+                                                        .insert(
+                                                            name.clone(),
+                                                            PublicCloudVariable::new(
+                                                                cvid, name, value,
+                                                            ),
+                                                        );
                                                 }
                                                 DataType::List => {
                                                     let arr = value
                                                         .as_array()
                                                         .cloned()
                                                         .unwrap_or_default();
-                                                    state.lists.write().unwrap().insert(
+                                                    conn_data.lists.write().unwrap().insert(
                                                         name.clone(),
                                                         CloudList::new(cvid, name, arr),
                                                     );
@@ -1187,17 +1029,16 @@ impl CloudConnection {
                                     }
                                 }
                             }
-                            // ★ 设置数据就绪，使用 AsyncNotify
-                            let (lock, notify) = &state.data_ready;
+                            let (lock, cvar) = &*conn_data.data_ready;
                             *lock.lock().unwrap() = true;
-                            notify.notify_one();
+                            cvar.notify_all();
                         }
                         ReceiveMessageType::UpdatePrivateVariable => {
                             if let Some(obj) = parsed.as_object() {
                                 let cvid = obj.get("cvid").and_then(|v| v.as_str());
                                 let value = obj.get("value");
                                 if let (Some(cvid), Some(value)) = (cvid, value) {
-                                    let mut vars = state.private_variables.write().unwrap();
+                                    let mut vars = conn_data.private_variables.write().unwrap();
                                     for var in vars.values_mut() {
                                         if var.var.base.cloud_variable_id == cvid {
                                             let old = var.get().clone();
@@ -1216,7 +1057,8 @@ impl CloudConnection {
                                         let cvid = obj.get("cvid").and_then(|v| v.as_str());
                                         let value = obj.get("value");
                                         if let (Some(cvid), Some(value)) = (cvid, value) {
-                                            let mut vars = state.public_variables.write().unwrap();
+                                            let mut vars =
+                                                conn_data.public_variables.write().unwrap();
                                             for var in vars.values_mut() {
                                                 if var.var.base.cloud_variable_id == cvid {
                                                     let old = var.get().clone();
@@ -1235,37 +1077,25 @@ impl CloudConnection {
                             }
                         }
                         ReceiveMessageType::ReceivePrivateVariableRankingList => {
-                            let mut pending = state.pending_ranking_requests.lock().unwrap();
+                            let mut pending = conn_data.pending_ranking_requests.lock().unwrap();
                             if pending.is_empty() {
                                 return;
                             }
                             let cvid = pending.remove(0);
                             drop(pending);
-
                             if let Some(items) = parsed.get("items").and_then(|v| v.as_array()) {
-                                let rankings: Vec<Value> = items
-                                    .iter()
-                                    .filter_map(|item| {
-                                        let obj = item.as_object()?;
-                                        Some(json!({
-                                            "value": obj.get("value").cloned().unwrap_or(Value::Null),
-                                            "user": {
-                                                "id": obj.get("identifier")
-                                                    .and_then(|v| v.as_str())
-                                                    .and_then(|s| s.parse::<u64>().ok())
-                                                    .unwrap_or(0),
-                                                "nickname": obj.get("nickname")
-                                                    .and_then(|v| v.as_str())
-                                                    .unwrap_or(""),
-                                                "avatar_url": obj.get("avatar_url")
-                                                    .and_then(|v| v.as_str())
-                                                    .unwrap_or("")
-                                            }
-                                        }))
-                                    })
-                                    .collect();
-
-                                let vars = state.private_variables.read().unwrap();
+                                let rankings: Vec<Value> = items.iter().filter_map(|item| {
+                                    let obj = item.as_object()?;
+                                    Some(json!({
+                                        "value": obj.get("value").cloned().unwrap_or(Value::Null),
+                                        "user": {
+                                            "id": obj.get("identifier").and_then(|v| v.as_str()).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0),
+                                            "nickname": obj.get("nickname").and_then(|v| v.as_str()).unwrap_or(""),
+                                            "avatar_url": obj.get("avatar_url").and_then(|v| v.as_str()).unwrap_or("")
+                                        }
+                                    }))
+                                }).collect();
+                                let vars = conn_data.private_variables.read().unwrap();
                                 for var in vars.values() {
                                     if var.var.base.cloud_variable_id == cvid {
                                         var.emit_ranking(rankings.clone());
@@ -1276,7 +1106,7 @@ impl CloudConnection {
                         }
                         ReceiveMessageType::UpdateList => {
                             if let Some(obj) = parsed.as_object() {
-                                let mut lists_guard = state.lists.write().unwrap();
+                                let mut lists_guard = conn_data.lists.write().unwrap();
                                 for (cvid, ops_val) in obj {
                                     if let Some(list) = lists_guard.get_mut(cvid.as_str()) {
                                         if let Some(ops_arr) = ops_val.as_array() {
@@ -1377,19 +1207,104 @@ impl CloudConnection {
                         }
                         ReceiveMessageType::OnlineUsersChange => {
                             if let Some(total) = parsed.get("total").and_then(|v| v.as_u64()) {
-                                *state.online_users.write().unwrap() = total as u32;
+                                *conn_data.online_users.write().unwrap() = total as u32;
                             }
                         }
                         ReceiveMessageType::IllegalEvent => {
-                            eprintln!("[Cloud] 检测到非法事件");
+                            eprintln!("检测到非法事件");
                         }
                         ReceiveMessageType::Unknown(t) => {
-                            eprintln!("[Cloud] 未知消息类型: {}", t);
+                            eprintln!("未知消息类型: {}", t);
                         }
                     }
                 }
             }
         }
+    }
+
+    fn upload_loop(
+        ws: Arc<Mutex<WebSocket<MaybeTlsStream<TcpStream>>>>,
+        shutdown: Arc<Mutex<bool>>,
+        stop: Arc<Mutex<bool>>,
+        queue: Arc<Mutex<Vec<Command>>>,
+    ) {
+        loop {
+            if *shutdown.lock().unwrap() || *stop.lock().unwrap() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(BATCH_UPLOAD_INTERVAL_MS));
+            let mut q = queue.lock().unwrap();
+            if q.is_empty() {
+                continue;
+            }
+            let commands: Vec<Command> = q.drain(..).collect();
+            drop(q);
+
+            let mut private_updates = Vec::new();
+            let mut public_updates = Vec::new();
+            let mut list_updates: HashMap<String, Vec<Value>> = HashMap::new();
+
+            for cmd in commands {
+                match cmd {
+                    Command::VariableUpdate { cmd_type, data } => {
+                        if cmd_type == "update_private_vars" {
+                            private_updates.push(data);
+                        } else if cmd_type == "update_vars" {
+                            public_updates.push(data);
+                        }
+                    }
+                    Command::ListUpdate { cvid, operations } => {
+                        list_updates.entry(cvid).or_default().extend(operations);
+                    }
+                }
+            }
+
+            let mut ws_lock = ws.lock().unwrap();
+            if !private_updates.is_empty() {
+                let payload = json!(["update_private_vars", private_updates]);
+                let msg = format!("42{}", serde_json::to_string(&payload).unwrap());
+                if ws_lock.send(Message::Text(msg.into())).is_err() {
+                    break;
+                }
+            }
+            if !public_updates.is_empty() {
+                let payload = json!(["update_vars", public_updates]);
+                let msg = format!("42{}", serde_json::to_string(&payload).unwrap());
+                if ws_lock.send(Message::Text(msg.into())).is_err() {
+                    break;
+                }
+            }
+            for (cvid, ops) in list_updates {
+                let payload = json!(["update_lists", {cvid: ops}]);
+                let msg = format!("42{}", serde_json::to_string(&payload).unwrap());
+                if ws_lock.send(Message::Text(msg.into())).is_err() {
+                    break;
+                }
+            }
+        }
+    }
+    pub fn get_all_private_variable_names(&self) -> Vec<String> {
+        self.private_variables
+            .read()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    /// 获取所有公共变量名称
+    pub fn get_all_public_variable_names(&self) -> Vec<String> {
+        self.public_variables
+            .read()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    /// 获取所有列表名称
+    pub fn get_all_list_names(&self) -> Vec<String> {
+        self.lists.read().unwrap().keys().cloned().collect()
     }
 }
 
@@ -1419,8 +1334,9 @@ impl CloudConnectionBuilder {
         self
     }
 
-    /// ★ 现在完全是异步的，不再创建内部 Runtime
-    pub async fn connect(self) -> Result<CloudConnection, CloudError> {
+    pub fn connect(self) -> Result<CloudConnection, CloudError> {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
         let mut authenticator = CloudAuthenticator::new(self.auth_token);
         let (auth_type, stag) = self.editor.as_param();
 
@@ -1431,31 +1347,121 @@ impl CloudConnectionBuilder {
 
         let device_auth_str = authenticator
             .generate_x_device_auth()
-            .await
             .map_err(|e| CloudError::Other(format!("Failed to generate device auth: {}", e)))?;
 
-        let auth_cookie = authenticator.authorization_token();
+        // ---- 1. 构建 HTTP 升级请求 ----
+        let mut request = url_str
+            .clone()
+            .into_client_request()
+            .map_err(|e| CloudError::Other(format!("Failed to create client request: {}", e)))?;
 
-        let conn = CloudConnection::new_async(
+        // ---- 2. 添加自定义头部 ----
+        request.headers_mut().insert(
+            "X-Creation-Tools-Device-Auth",
+            http::HeaderValue::from_str(&device_auth_str)
+                .map_err(|e| CloudError::Other(format!("Invalid device auth header: {}", e)))?,
+        );
+        if let Some(token) = authenticator.authorization_token() {
+            request.headers_mut().insert(
+                "Cookie",
+                http::HeaderValue::from_str(&format!("Authorization={}", token))
+                    .map_err(|e| CloudError::Other(format!("Invalid cookie header: {}", e)))?,
+            );
+        }
+        request.headers_mut().insert(
+            "Origin",
+            http::HeaderValue::from_static("https://socketcv.codemao.cn:9096"),
+        );
+
+        // ---- 3. 打印请求头 ----
+        println!("=== Sending WebSocket handshake request headers ===");
+        for (name, value) in request.headers().iter() {
+            println!("{}: {:?}", name, value);
+        }
+        println!("====================================================");
+
+        // ---- 4. 构建 rustls 配置（使用系统根证书 + 默认密码套件 + 自定义椭圆曲线） ----
+        let mut root_store = rustls::RootCertStore::empty();
+        for cert in rustls_native_certs::load_native_certs().expect("could not load platform certs")
+        {
+            root_store
+                .add(cert)
+                .map_err(|e| CloudError::Other(format!("Failed to add cert: {}", e)))?;
+        }
+
+        let mut provider = rustls::crypto::ring::default_provider();
+        // 不再手动设置 cipher_suites，使用默认的密码套件顺序
+        // 保持原有的椭圆曲线设置
+        provider.kx_groups = rustls::crypto::ring::ALL_KX_GROUPS.to_vec();
+
+        let mut tls_config =
+            rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(provider))
+                .with_safe_default_protocol_versions()
+                .map_err(|e| CloudError::Other(format!("TLS config error: {:?}", e)))?
+                .with_root_certificates(root_store)
+                .with_no_client_auth();
+        let dangerous = tls_config.dangerous();
+        let config = std::sync::Arc::new(tls_config);
+        let connector = Connector::Rustls(config);
+
+        // ---- 5. 解析 URL，建立 TCP 连接 ----
+        let url = url::Url::parse(&url_str)
+            .map_err(|e| CloudError::Other(format!("Invalid URL: {}", e)))?;
+        let host = url
+            .host_str()
+            .ok_or_else(|| CloudError::Other("No host in URL".into()))?;
+        let port = url.port_or_known_default().unwrap_or(443);
+        let tcp_stream = TcpStream::connect((host, port))
+            .map_err(|e| CloudError::Other(format!("TCP connection failed: {}", e)))?;
+
+        // ---- 6. 进行 TLS 握手和 WebSocket 升级 ----
+        let (ws, response) =
+            match tungstenite::client_tls_with_config(request, tcp_stream, None, Some(connector)) {
+                Ok(pair) => pair,
+                Err(tungstenite::handshake::HandshakeError::Failure(tungstenite::Error::Http(
+                    mut resp,
+                ))) => {
+                    eprintln!("=== 401 Response ===");
+                    eprintln!("Status: {}", resp.status());
+                    for (name, value) in resp.headers() {
+                        eprintln!("{}: {:?}", name, value);
+                    }
+                    let body = resp.body_mut().take().unwrap_or_default();
+                    let body_str = String::from_utf8_lossy(&body);
+                    eprintln!("Body: {}", body_str);
+                    eprintln!("====================");
+                    return Err(CloudError::Other("WebSocket handshake got 401".into()));
+                }
+                Err(e) => {
+                    return Err(CloudError::Other(format!(
+                        "WebSocket handshake error: {:?}",
+                        e
+                    )));
+                }
+            };
+
+        // ---- 7. 打印握手响应 ----
+        println!("=== Received handshake response ===");
+        println!("Status: {}", response.status());
+        for (name, value) in response.headers().iter() {
+            println!("{}: {:?}", name, value);
+        }
+        println!("====================================");
+
+        // ---- 8. 进入 WebSocket 协议层 ----
+        let mut ws = ws;
+        let _handshake_msg = ws
+            .read()
+            .map_err(|e| CloudError::Other(format!("Read handshake message error: {}", e)))?;
+        ws.send(tungstenite::Message::Text("40".into()))
+            .map_err(|e| CloudError::Other(format!("Send connect message error: {}", e)))?;
+
+        Ok(CloudConnection::new_connected(
             self.work_id,
             self.editor,
             authenticator,
-            &url_str,
-            &device_auth_str,
-            auth_cookie,
-        )
-        .await?;
-
-        // 发送 join 和 get 数据
-        conn.send_message_async(SendMessageType::Join, json!({"session_id": conn.work_id}))
-            .await?;
-        conn.send_message_async(SendMessageType::GetAllData, Value::Null)
-            .await?;
-
-        // 等待数据就绪（现在也是异步的）
-        conn.wait_for_data(Duration::from_secs(30)).await?;
-
-        Ok(conn)
+            ws,
+        ))
     }
 }
 

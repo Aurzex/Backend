@@ -1,32 +1,17 @@
 use crate::utils::acquire::{
-    CodeMaoClient, HttpMethod, MewError, MewResult, PaginatedIter, PaginationMethod,
+    CodeMaoClient, HTTPStatus, HttpMethod, PaginatedIter, PaginationMethod,
 };
 use serde_json::{Value, json};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-// ==================== 工具函数 ====================
-
-/// 获取13位时间戳
+// 工具函数：获取13位时间戳
 fn current_timestamp_13() -> u128 {
-    SystemTime::now()
+    let start = SystemTime::now();
+    let since_the_epoch = start
         .duration_since(UNIX_EPOCH)
-        .expect("Time went backwards")
-        .as_millis()
+        .expect("Time went backwards");
+    since_the_epoch.as_millis()
 }
-
-/// 为请求构建器添加时间戳参数
-fn with_timestamp(
-    builder: crate::utils::acquire::KittyRequestBuilder,
-) -> crate::utils::acquire::KittyRequestBuilder {
-    builder.with_param("TIME", current_timestamp_13().to_string())
-}
-
-/// 为分页迭代器添加时间戳参数
-fn paginated_with_timestamp(paginated: PaginatedIter) -> PaginatedIter {
-    paginated.with_param("TIME", current_timestamp_13().to_string())
-}
-
-// ==================== EduUserAction ====================
 
 pub struct EduUserAction {
     client: &'static CodeMaoClient,
@@ -39,8 +24,13 @@ impl EduUserAction {
         }
     }
 
-    /// 更新用户真实姓名
-    pub async fn update_user_real_name(&self, user_id: i32, real_name: &str) -> MewResult<bool> {
+    pub fn update_user_real_name(
+        &self,
+        user_id: i32,
+        real_name: &str,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
+        let timestamp = current_timestamp_13();
+
         let response = self
             .client
             .build_request(
@@ -48,47 +38,49 @@ impl EduUserAction {
                 "https://eduzone.codemao.cn/edu/zone/account/updateName",
                 None,
             )
-            .with_param("TIME", current_timestamp_13().to_string())
+            .with_param("TIME", timestamp.to_string())
             .with_param("userId", user_id.to_string())
             .with_param("realName", real_name)
-            .send()
-            .await?;
+            .send()?;
 
-        Ok(response.status().is_success())
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
-    /// 创建班级
-    pub async fn create_class(&self, name: &str) -> MewResult<Value> {
-        self.client
+    pub fn create_class(&self, name: &str) -> Result<Value, Box<dyn std::error::Error>> {
+        let data = json!({ "name": name });
+
+        let response = self
+            .client
             .build_request(
                 HttpMethod::POST,
                 "https://eduzone.codemao.cn/edu/zone/class",
                 None,
             )
-            .with_payload(json!({ "name": name }))
-            .send()
-            .await?
-            .json()
-            .await
-            .map_err(MewError::from)
+            .with_payload(data)
+            .send()?;
+
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 删除班级
-    pub async fn delete_class(&self, class_id: i32) -> MewResult<bool> {
+    pub fn delete_class(&self, class_id: i32) -> Result<bool, Box<dyn std::error::Error>> {
+        let timestamp = current_timestamp_13();
         let endpoint = format!("https://eduzone.codemao.cn/edu/zone/class/{}", class_id);
 
         let response = self
             .client
             .build_request(HttpMethod::DELETE, &endpoint, None)
-            .with_param("TIME", current_timestamp_13().to_string())
-            .send()
-            .await?;
+            .with_param("TIME", timestamp.to_string())
+            .send()?;
 
-        Ok(response.status().as_u16() == 204)
+        Ok(response.status() == HTTPStatus::NoContent as u16)
     }
 
-    /// 向班级添加学生
-    pub async fn add_students_to_class(&self, names: &[String], class_id: i32) -> MewResult<bool> {
+    pub fn add_students_to_class(
+        &self,
+        names: &[String],
+        class_id: i32,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
+        let data = json!({ "student_names": names });
         let endpoint = format!(
             "https://eduzone.codemao.cn/edu/zone/class/{}/students",
             class_id
@@ -97,48 +89,50 @@ impl EduUserAction {
         let response = self
             .client
             .build_request(HttpMethod::POST, &endpoint, None)
-            .with_payload(json!({ "student_names": names }))
-            .send()
-            .await?;
+            .with_payload(data)
+            .send()?;
 
-        Ok(response.status().is_success())
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
-    /// 重置学生密码
-    pub async fn reset_student_password(&self, stu_id: i32) -> MewResult<Value> {
+    pub fn reset_student_password(&self, stu_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!(
             "https://eduzone.codemao.cn/edu/zone/students/{}/password",
             stu_id
         );
 
-        self.client
+        let response = self
+            .client
             .build_request(HttpMethod::PATCH, &endpoint, None)
             .with_payload(json!({}))
-            .send()
-            .await?
-            .json()
-            .await
-            .map_err(MewError::from)
+            .send()?;
+
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 批量重置密码
-    pub async fn execute_bulk_reset_passwords(&self, stu_list: &[i32]) -> MewResult<Value> {
-        self.client
+    pub fn execute_bulk_reset_passwords(
+        &self,
+        stu_list: &[i32],
+    ) -> Result<Value, Box<dyn std::error::Error>> {
+        let data = json!({ "student_id": stu_list });
+
+        let response = self
+            .client
             .build_request(
                 HttpMethod::PATCH,
                 "https://eduzone.codemao.cn/edu/zone/students/password",
                 None,
             )
-            .with_payload(json!({ "student_id": stu_list }))
-            .send()
-            .await?
-            .json()
-            .await
-            .map_err(MewError::from)
+            .with_payload(data)
+            .send()?;
+
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 从班级删除学生
-    pub async fn delete_student_from_class(&self, stu_id: i32) -> MewResult<bool> {
+    pub fn delete_student_from_class(
+        &self,
+        stu_id: i32,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!(
             "https://eduzone.codemao.cn/edu/zone/student/remove/{}",
             stu_id
@@ -148,21 +142,25 @@ impl EduUserAction {
             .client
             .build_request(HttpMethod::POST, &endpoint, None)
             .with_payload(json!({}))
-            .send()
-            .await?;
+            .send()?;
 
-        Ok(response.status().is_success())
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
-    /// 创建或更新课程包
-    pub async fn create_or_update_lesson_package(
+    pub fn create_or_update_lesson_package(
         &self,
         method: HttpMethod,
         avatar_url: &str,
         description: &str,
         name: &str,
         return_data: bool,
-    ) -> MewResult<Value> {
+    ) -> Result<Value, Box<dyn std::error::Error>> {
+        let data = json!({
+            "avatar_url": avatar_url,
+            "description": description,
+            "name": name
+        });
+
         let response = self
             .client
             .build_request(
@@ -170,23 +168,17 @@ impl EduUserAction {
                 "https://eduzone.codemao.cn/edu/zone/lesson/customized/packages",
                 None,
             )
-            .with_payload(json!({
-                "avatar_url": avatar_url,
-                "description": description,
-                "name": name
-            }))
-            .send()
-            .await?;
+            .with_payload(data)
+            .send()?;
 
         if return_data {
-            response.json().await.map_err(MewError::from)
+            Ok(self.client.response_to_json(response)?)
         } else {
-            Ok(json!({ "success": response.status().is_success() }))
+            Ok(json!({ "success": response.status() == HTTPStatus::Ok as u16 }))
         }
     }
 
-    /// 删除作品
-    pub async fn delete_work(&self, work_id: i32) -> MewResult<bool> {
+    pub fn delete_work(&self, work_id: i32) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!(
             "https://eduzone.codemao.cn/edu/zone/work/{}/delete",
             work_id
@@ -196,18 +188,16 @@ impl EduUserAction {
             .client
             .build_request(HttpMethod::POST, &endpoint, None)
             .with_payload(json!({}))
-            .send()
-            .await?;
+            .send()?;
 
-        Ok(response.status().is_success())
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
-    /// 将学生转移到未分配
-    pub async fn execute_transfer_to_unassigned(
+    pub fn execute_transfer_to_unassigned(
         &self,
         class_id: i32,
         stu_id: i32,
-    ) -> MewResult<bool> {
+    ) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!(
             "https://eduzone.codemao.cn/edu/zone/class/{}/students",
             class_id
@@ -217,46 +207,45 @@ impl EduUserAction {
             .client
             .build_request(HttpMethod::DELETE, &endpoint, None)
             .with_param("student_ids[]", stu_id.to_string())
-            .send()
-            .await?;
+            .send()?;
 
-        Ok(response.status().as_u16() == 204)
+        Ok(response.status() == HTTPStatus::NoContent as u16)
     }
 
-    /// 获取活动包详情
-    pub async fn fetch_activity_package_details(&self, package_id: i32) -> MewResult<Value> {
-        self.client
+    pub fn fetch_activity_package_details(
+        &self,
+        package_id: i32,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
+        let data = json!({ "packageId": package_id });
+
+        let response = self
+            .client
             .build_request(
                 HttpMethod::POST,
                 "https://eduzone.codemao.cn/edu/zone/activity/open/package",
                 None,
             )
-            .with_payload(json!({ "packageId": package_id }))
-            .send()
-            .await?
-            .json()
-            .await
-            .map_err(MewError::from)
+            .with_payload(data)
+            .send()?;
+
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 获取活动包列表
-    pub async fn fetch_activity_packages(&self) -> MewResult<Value> {
-        self.client
+    pub fn fetch_activity_packages(&self) -> Result<Value, Box<dyn std::error::Error>> {
+        let response = self
+            .client
             .build_request(
                 HttpMethod::POST,
                 "https://eduzone.codemao.cn/edu/zone/activity/list/activity/package",
                 None,
             )
             .with_payload(json!({}))
-            .send()
-            .await?
-            .json()
-            .await
-            .map_err(MewError::from)
+            .send()?;
+
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 标记所有消息为已读
-    pub async fn execute_mark_all_messages_as_read(&self) -> MewResult<bool> {
+    pub fn execute_mark_all_messages_as_read(&self) -> Result<bool, Box<dyn std::error::Error>> {
         let response = self
             .client
             .build_request(
@@ -265,14 +254,12 @@ impl EduUserAction {
                 None,
             )
             .with_payload(json!({}))
-            .send()
-            .await?;
+            .send()?;
 
-        Ok(response.status().is_success())
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
-    /// 评分学生作品
-    pub async fn execute_grade_student_work(
+    pub fn execute_grade_student_work(
         &self,
         work_id: i32,
         work_name: &str,
@@ -281,7 +268,17 @@ impl EduUserAction {
         commentary: &str,
         logical_score: i32,
         programming_score: i32,
-    ) -> MewResult<bool> {
+    ) -> Result<bool, Box<dyn std::error::Error>> {
+        let data = json!({
+            "artistic_score": artistic_score,
+            "commentary": commentary,
+            "creative_score": creative_score,
+            "id": work_id,
+            "logical_score": logical_score,
+            "programming_score": programming_score,
+            "work_name": work_name
+        });
+
         let response = self
             .client
             .build_request(
@@ -289,28 +286,24 @@ impl EduUserAction {
                 "https://eduzone.codemao.cn/edu/zone/work/manager/works/scores",
                 None,
             )
-            .with_payload(json!({
-                "artistic_score": artistic_score,
-                "commentary": commentary,
-                "creative_score": creative_score,
-                "id": work_id,
-                "logical_score": logical_score,
-                "programming_score": programming_score,
-                "work_name": work_name
-            }))
-            .send()
-            .await?;
+            .with_payload(data)
+            .send()?;
 
-        Ok(response.status().as_u16() == 204)
+        Ok(response.status() == HTTPStatus::NoContent as u16)
     }
 
-    /// 邀请加入班级
-    pub async fn execute_invite_to_class(
+    pub fn execute_invite_to_class(
         &self,
         class_id: i32,
         types: &str,
         identity: Value,
-    ) -> MewResult<bool> {
+    ) -> Result<bool, Box<dyn std::error::Error>> {
+        let data = json!({
+            "identity": identity,
+            "type": types,
+            "classId": class_id
+        });
+
         let endpoint = format!(
             "https://eduzone.codemao.cn/edu/zone/class/{}/students/invite",
             class_id
@@ -319,19 +312,16 @@ impl EduUserAction {
         let response = self
             .client
             .build_request(HttpMethod::POST, &endpoint, None)
-            .with_payload(json!({
-                "identity": identity,
-                "type": types,
-                "classId": class_id
-            }))
-            .send()
-            .await?;
+            .with_payload(data)
+            .send()?;
 
-        Ok(response.status().is_success())
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
-    /// 接受班级邀请
-    pub async fn execute_accept_class_invite(&self, message_id: i32) -> MewResult<bool> {
+    pub fn execute_accept_class_invite(
+        &self,
+        message_id: i32,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!(
             "https://eduzone.codemao.cn/edu/zone/invite/student/message/{}/accept",
             message_id
@@ -341,14 +331,12 @@ impl EduUserAction {
             .client
             .build_request(HttpMethod::POST, &endpoint, None)
             .with_payload(json!({}))
-            .send()
-            .await?;
+            .send()?;
 
-        Ok(response.status().is_success())
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
-    /// 完善教师信息
-    pub async fn execute_improve_teacher_info(
+    pub fn execute_improve_teacher_info(
         &self,
         user_id: i32,
         real_name: &str,
@@ -361,7 +349,21 @@ impl EduUserAction {
         city_id: i32,
         district_id: i32,
         teacher_card_number: &str,
-    ) -> MewResult<bool> {
+    ) -> Result<bool, Box<dyn std::error::Error>> {
+        let data = json!({
+            "id": user_id,
+            "real_name": real_name,
+            "grade": grade,
+            "schoolId": school_id,
+            "schoolName": school_name,
+            "schoolType": school_type,
+            "country_id": country_id,
+            "province_id": province_id,
+            "city_id": city_id,
+            "district_id": district_id,
+            "teacherCardNumber": teacher_card_number
+        });
+
         let response = self
             .client
             .build_request(
@@ -369,23 +371,10 @@ impl EduUserAction {
                 "https://eduzone.codemao.cn/edu/zone/sign/login/teacher/info/improve",
                 None,
             )
-            .with_payload(json!({
-                "id": user_id,
-                "real_name": real_name,
-                "grade": grade,
-                "schoolId": school_id,
-                "schoolName": school_name,
-                "schoolType": school_type,
-                "country_id": country_id,
-                "province_id": province_id,
-                "city_id": city_id,
-                "district_id": district_id,
-                "teacherCardNumber": teacher_card_number
-            }))
-            .send()
-            .await?;
+            .with_payload(data)
+            .send()?;
 
-        Ok(response.status().is_success())
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 }
 
@@ -394,8 +383,6 @@ impl Default for EduUserAction {
         Self::new()
     }
 }
-
-// ==================== EduDataFetcher ====================
 
 pub struct EduDataFetcher {
     client: &'static CodeMaoClient,
@@ -408,343 +395,353 @@ impl EduDataFetcher {
         }
     }
 
-    /// 获取用户资料
-    pub async fn fetch_user_profile(&self) -> MewResult<Value> {
-        with_timestamp(self.client.build_request(
-            HttpMethod::GET,
-            "https://eduzone.codemao.cn/edu/zone",
-            None,
-        ))
-        .send()
-        .await?
-        .json()
-        .await
-        .map_err(MewError::from)
+    fn add_timestamp_to_builder(
+        builder: crate::utils::acquire::InnerBuilder,
+    ) -> crate::utils::acquire::InnerBuilder {
+        let timestamp = current_timestamp_13();
+        builder.with_param("TIME", timestamp.to_string())
     }
 
-    /// 获取账户角色
-    pub async fn fetch_account_role(&self) -> MewResult<Value> {
-        with_timestamp(self.client.build_request(
+    pub fn fetch_user_profile(&self) -> Result<Value, Box<dyn std::error::Error>> {
+        let builder =
+            self.client
+                .build_request(HttpMethod::GET, "https://eduzone.codemao.cn/edu/zone", None);
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
+    }
+
+    pub fn fetch_account_role(&self) -> Result<Value, Box<dyn std::error::Error>> {
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/api/home/account",
             None,
-        ))
-        .send()
-        .await?
-        .json()
-        .await
-        .map_err(MewError::from)
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 获取未读消息数量
-    pub async fn fetch_unread_message_count(&self) -> MewResult<Value> {
-        with_timestamp(self.client.build_request(
+    pub fn fetch_unread_message_count(&self) -> Result<Value, Box<dyn std::error::Error>> {
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/system/message/unread/num",
             None,
-        ))
-        .send()
-        .await?
-        .json()
-        .await
-        .map_err(MewError::from)
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 获取通知生成器
     pub fn fetch_notices_gen(&self, limit: Option<usize>) -> PaginatedIter {
-        paginated_with_timestamp(
-            self.client
-                .paginated("https://eduzone.codemao.cn/edu/zone/system/message/list")
-                .with_param("page", "1")
-                .with_param("limit", "10")
-                .with_pagination_method(PaginationMethod::Page)
-                .with_offset_key("page")
-                .with_amount_key("limit")
-                .with_limit(limit.unwrap_or(10)),
-        )
+        let mut paginated = self
+            .client
+            .paginated("https://eduzone.codemao.cn/edu/zone/system/message/list")
+            .with_param("page", "1")
+            .with_param("limit", "10")
+            .with_pagination_method(PaginationMethod::Page)
+            .with_offset_key("page")
+            .with_amount_key("limit");
+
+        paginated = Self::add_timestamp_to_paginated(paginated);
+
+        if let Some(limit_val) = limit {
+            paginated = paginated.with_limit(limit_val);
+        } else {
+            paginated = paginated.with_limit(10);
+        }
+        paginated
     }
 
-    /// 获取提醒生成器
+    fn add_timestamp_to_paginated(paginated: PaginatedIter) -> PaginatedIter {
+        let timestamp = current_timestamp_13();
+        paginated.with_param("TIME", timestamp.to_string())
+    }
+
     pub fn fetch_reminders_gen(&self, limit: Option<usize>) -> PaginatedIter {
-        paginated_with_timestamp(
-            self.client
-                .paginated("https://eduzone.codemao.cn/edu/zone/invite/teacher/messages")
-                .with_param("page", "1")
-                .with_param("limit", "10")
-                .with_pagination_method(PaginationMethod::Page)
-                .with_offset_key("page")
-                .with_amount_key("limit")
-                .with_limit(limit.unwrap_or(10)),
-        )
+        let mut paginated = self
+            .client
+            .paginated("https://eduzone.codemao.cn/edu/zone/invite/teacher/messages")
+            .with_param("page", "1")
+            .with_param("limit", "10")
+            .with_pagination_method(PaginationMethod::Page)
+            .with_offset_key("page")
+            .with_amount_key("limit");
+
+        paginated = Self::add_timestamp_to_paginated(paginated);
+
+        if let Some(limit_val) = limit {
+            paginated = paginated.with_limit(limit_val);
+        } else {
+            paginated = paginated.with_limit(10);
+        }
+        paginated
     }
 
-    /// 获取学校类别
-    pub async fn fetch_school_categories(&self) -> MewResult<Value> {
-        with_timestamp(self.client.build_request(
+    pub fn fetch_school_categories(&self) -> Result<Value, Box<dyn std::error::Error>> {
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/school/open/grade/list",
             None,
-        ))
-        .send()
-        .await?
-        .json()
-        .await
-        .map_err(MewError::from)
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 获取教室列表
-    pub async fn fetch_classrooms(&self, method: &str, limit: Option<usize>) -> MewResult<Value> {
-        match method {
-            "simple" => self
+    pub fn fetch_classrooms(
+        &self,
+        method: &str,
+        limit: Option<usize>,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
+        if method == "simple" {
+            let response = self
                 .client
                 .build_request(
                     HttpMethod::GET,
                     "https://eduzone.codemao.cn/edu/zone/classes/simple",
                     None,
                 )
-                .send()
-                .await?
-                .json()
-                .await
-                .map_err(MewError::from),
-            "detail" => {
-                let _paginated = self
-                    .client
-                    .paginated("https://eduzone.codemao.cn/edu/zone/classes/")
-                    .with_param("page", "1")
-                    .with_pagination_method(PaginationMethod::Page)
-                    .with_offset_key("page")
-                    .with_response_amount_key("limit")
-                    .with_limit(limit.unwrap_or(20));
+                .send()?;
+            Ok(self.client.response_to_json(response)?)
+        } else if method == "detail" {
+            let _paginated = self
+                .client
+                .paginated("https://eduzone.codemao.cn/edu/zone/classes/")
+                .with_param("page", "1")
+                .with_pagination_method(PaginationMethod::Page)
+                .with_offset_key("page")
+                .with_response_amount_key("limit")
+                .with_limit(limit.unwrap_or(20));
 
-                Ok(json!({ "paginated": "Use iterator to fetch data" }))
-            }
-            _ => Ok(json!({})),
+            // Note: This returns a marker value, actual data should be fetched via iterator
+            Ok(json!({ "paginated": "Use iterator to fetch data" }))
+        } else {
+            Ok(json!({}))
         }
     }
 
-    /// 获取学生移除记录生成器
     pub fn fetch_student_removal_records_gen(&self, limit: Option<usize>) -> PaginatedIter {
-        paginated_with_timestamp(
-            self.client
-                .paginated("https://eduzone.codemao.cn/edu/zone/student/remove/record")
-                .with_param("page", "1")
-                .with_param("limit", "10")
-                .with_pagination_method(PaginationMethod::Page)
-                .with_offset_key("page")
-                .with_amount_key("limit")
-                .with_limit(limit.unwrap_or(10)),
-        )
+        let mut paginated = self
+            .client
+            .paginated("https://eduzone.codemao.cn/edu/zone/student/remove/record")
+            .with_param("page", "1")
+            .with_param("limit", "10")
+            .with_pagination_method(PaginationMethod::Page)
+            .with_offset_key("page")
+            .with_amount_key("limit");
+
+        paginated = Self::add_timestamp_to_paginated(paginated);
+
+        if let Some(limit_val) = limit {
+            paginated = paginated.with_limit(limit_val);
+        } else {
+            paginated = paginated.with_limit(10);
+        }
+        paginated
     }
 
-    /// 获取班级学生生成器
     pub fn fetch_class_students_gen(&self, invalid: i32, limit: Option<usize>) -> PaginatedIter {
-        self.client
+        let data = json!({ "invalid": invalid });
+
+        let mut paginated = self
+            .client
             .paginated("https://eduzone.codemao.cn/edu/zone/students")
             .with_param("page", "1")
             .with_param("limit", "100")
-            .with_payload(json!({ "invalid": invalid }))
+            .with_payload(data)
             .with_method(HttpMethod::POST)
             .with_pagination_method(PaginationMethod::Page)
             .with_offset_key("page")
-            .with_amount_key("limit")
-            .with_limit(limit.unwrap_or(100))
+            .with_amount_key("limit");
+
+        if let Some(limit_val) = limit {
+            paginated = paginated.with_limit(limit_val);
+        } else {
+            paginated = paginated.with_limit(100);
+        }
+        paginated
     }
 
-    /// 获取导航菜单
-    pub async fn fetch_navigation_menus(&self) -> MewResult<Value> {
-        with_timestamp(self.client.build_request(
+    pub fn fetch_navigation_menus(&self) -> Result<Value, Box<dyn std::error::Error>> {
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/api/home/eduzone/menus",
             None,
-        ))
-        .send()
-        .await?
-        .json()
-        .await
-        .map_err(MewError::from)
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 获取教育横幅
-    pub async fn fetch_edu_banners(&self, type_id: i32) -> MewResult<Value> {
-        with_timestamp(
-            self.client
-                .build_request(
-                    HttpMethod::GET,
-                    "https://eduzone.codemao.cn/api/home/banners",
-                    None,
-                )
-                .with_param("type_id", type_id.to_string()),
-        )
-        .send()
-        .await?
-        .json()
-        .await
-        .map_err(MewError::from)
+    pub fn fetch_edu_banners(&self, type_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
+        let builder = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "https://eduzone.codemao.cn/api/home/banners",
+                None,
+            )
+            .with_param("type_id", type_id.to_string());
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 获取服务器时间
-    pub async fn fetch_server_time(&self) -> MewResult<Value> {
-        with_timestamp(self.client.build_request(
+    pub fn fetch_server_time(&self) -> Result<Value, Box<dyn std::error::Error>> {
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/base/server/time",
             None,
-        ))
-        .send()
-        .await?
-        .json()
-        .await
-        .map_err(MewError::from)
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 获取课程包状态
-    pub async fn fetch_lesson_package_status(&self) -> MewResult<Value> {
-        with_timestamp(self.client.build_request(
+    pub fn fetch_lesson_package_status(&self) -> Result<Value, Box<dyn std::error::Error>> {
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/lessons/person/package/remind/status",
             None,
-        ))
-        .send()
-        .await?
-        .json()
-        .await
-        .map_err(MewError::from)
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 获取配置
-    pub async fn fetch_configuration(&self, tag: &str) -> MewResult<Value> {
-        with_timestamp(
-            self.client
-                .build_request(
-                    HttpMethod::GET,
-                    "https://eduzone.codemao.cn/edu/base/general/conf",
-                    None,
-                )
-                .with_param("tag", tag),
-        )
-        .send()
-        .await?
-        .json()
-        .await
-        .map_err(MewError::from)
+    pub fn fetch_configuration(&self, tag: &str) -> Result<Value, Box<dyn std::error::Error>> {
+        let builder = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "https://eduzone.codemao.cn/edu/base/general/conf",
+                None,
+            )
+            .with_param("tag", tag);
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 获取扩展资料
-    pub async fn fetch_extended_profile(&self) -> MewResult<Value> {
-        with_timestamp(self.client.build_request(
+    pub fn fetch_extended_profile(&self) -> Result<Value, Box<dyn std::error::Error>> {
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/user-extend/info",
             None,
-        ))
-        .send()
-        .await?
-        .json()
-        .await
-        .map_err(MewError::from)
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 获取操作日志
-    pub async fn fetch_operation_logs(&self) -> MewResult<Value> {
-        with_timestamp(self.client.build_request(
+    pub fn fetch_operation_logs(&self) -> Result<Value, Box<dyn std::error::Error>> {
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/operation/records",
             None,
-        ))
-        .send()
-        .await?
-        .json()
-        .await
-        .map_err(MewError::from)
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 获取教学状态
-    pub async fn fetch_teaching_status(&self) -> MewResult<Value> {
-        with_timestamp(self.client.build_request(
+    pub fn fetch_teaching_status(&self) -> Result<Value, Box<dyn std::error::Error>> {
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/teaching/class/remind",
             None,
-        ))
-        .send()
-        .await?
-        .json()
-        .await
-        .map_err(MewError::from)
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 获取仪表板统计
-    pub async fn fetch_dashboard_stats(&self) -> MewResult<Value> {
-        with_timestamp(self.client.build_request(
+    pub fn fetch_dashboard_stats(&self) -> Result<Value, Box<dyn std::error::Error>> {
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/homepage/statistic",
             None,
-        ))
-        .send()
-        .await?
-        .json()
-        .await
-        .map_err(MewError::from)
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 获取工具菜单
-    pub async fn fetch_tool_menu(&self) -> MewResult<Value> {
-        with_timestamp(self.client.build_request(
+    pub fn fetch_tool_menu(&self) -> Result<Value, Box<dyn std::error::Error>> {
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/homepage/menus",
             None,
-        ))
-        .send()
-        .await?
-        .json()
-        .await
-        .map_err(MewError::from)
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 获取所有作品生成器
     pub fn fetch_all_works_gen(&self, limit: Option<usize>) -> PaginatedIter {
-        paginated_with_timestamp(
-            self.client
-                .paginated("https://eduzone.codemao.cn/edu/zone/work/manager/student/works")
-                .with_param("page", "1")
-                .with_pagination_method(PaginationMethod::Page)
-                .with_offset_key("page")
-                .with_response_amount_key("limit")
-                .with_limit(limit.unwrap_or(50)),
-        )
+        let mut paginated = self
+            .client
+            .paginated("https://eduzone.codemao.cn/edu/zone/work/manager/student/works")
+            .with_param("page", "1")
+            .with_pagination_method(PaginationMethod::Page)
+            .with_offset_key("page")
+            .with_response_amount_key("limit");
+
+        paginated = Self::add_timestamp_to_paginated(paginated);
+
+        if let Some(limit_val) = limit {
+            paginated = paginated.with_limit(limit_val);
+        } else {
+            paginated = paginated.with_limit(50);
+        }
+        paginated
     }
 
-    /// 获取管理作品生成器
     pub fn fetch_managed_works_gen(&self, limit: Option<usize>) -> PaginatedIter {
-        paginated_with_timestamp(
-            self.client
-                .paginated("https://eduzone.codemao.cn/edu/zone/work/manager/works")
-                .with_param("page", "1")
-                .with_pagination_method(PaginationMethod::Page)
-                .with_offset_key("page")
-                .with_response_amount_key("limit")
-                .with_limit(limit.unwrap_or(50)),
-        )
+        let mut paginated = self
+            .client
+            .paginated("https://eduzone.codemao.cn/edu/zone/work/manager/works")
+            .with_param("page", "1")
+            .with_pagination_method(PaginationMethod::Page)
+            .with_offset_key("page")
+            .with_response_amount_key("limit");
+
+        paginated = Self::add_timestamp_to_paginated(paginated);
+
+        if let Some(limit_val) = limit {
+            paginated = paginated.with_limit(limit_val);
+        } else {
+            paginated = paginated.with_limit(50);
+        }
+        paginated
     }
 
-    /// 获取个人作品生成器
     pub fn fetch_personal_works_gen(&self, limit: Option<usize>) -> PaginatedIter {
-        paginated_with_timestamp(
-            self.client
-                .paginated("https://eduzone.codemao.cn/edu/zone/work/manager/self/works")
-                .with_param("page", "1")
-                .with_pagination_method(PaginationMethod::Page)
-                .with_offset_key("page")
-                .with_response_amount_key("limit")
-                .with_limit(limit.unwrap_or(50)),
-        )
+        let mut paginated = self
+            .client
+            .paginated("https://eduzone.codemao.cn/edu/zone/work/manager/self/works")
+            .with_param("page", "1")
+            .with_pagination_method(PaginationMethod::Page)
+            .with_offset_key("page")
+            .with_response_amount_key("limit");
+
+        paginated = Self::add_timestamp_to_paginated(paginated);
+
+        if let Some(limit_val) = limit {
+            paginated = paginated.with_limit(limit_val);
+        } else {
+            paginated = paginated.with_limit(50);
+        }
+        paginated
     }
 
-    /// 获取作品分析
-    pub async fn fetch_work_analytics(
+    pub fn fetch_work_analytics(
         &self,
         class_id: Option<i32>,
         year: i32,
         month: i32,
-    ) -> MewResult<Value> {
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let mut builder = self
             .client
             .build_request(
@@ -759,370 +756,324 @@ impl EduDataFetcher {
             builder = builder.with_param("class_id", cid.to_string());
         }
 
-        with_timestamp(builder)
-            .send()
-            .await?
-            .json()
-            .await
-            .map_err(MewError::from)
+        builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 获取教学记录生成器
     pub fn fetch_teaching_records_gen(&self, limit: Option<usize>) -> PaginatedIter {
-        paginated_with_timestamp(
-            self.client
-                .paginated("https://eduzone.codemao.cn/edu/zone/teaching/record/list")
-                .with_param("page", "1")
-                .with_param("limit", "10")
-                .with_pagination_method(PaginationMethod::Page)
-                .with_offset_key("page")
-                .with_amount_key("limit")
-                .with_limit(limit.unwrap_or(10)),
-        )
+        let mut paginated = self
+            .client
+            .paginated("https://eduzone.codemao.cn/edu/zone/teaching/record/list")
+            .with_param("page", "1")
+            .with_param("limit", "10")
+            .with_pagination_method(PaginationMethod::Page)
+            .with_offset_key("page")
+            .with_amount_key("limit");
+
+        paginated = Self::add_timestamp_to_paginated(paginated);
+
+        if let Some(limit_val) = limit {
+            paginated = paginated.with_limit(limit_val);
+        } else {
+            paginated = paginated.with_limit(10);
+        }
+        paginated
     }
 
-    /// 获取教学班级
-    pub async fn fetch_teaching_classes(&self) -> MewResult<Value> {
-        with_timestamp(self.client.build_request(
+    pub fn fetch_teaching_classes(&self) -> Result<Value, Box<dyn std::error::Error>> {
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/teaching/class/teacher/list",
             None,
-        ))
-        .send()
-        .await?
-        .json()
-        .await
-        .map_err(MewError::from)
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 获取学校信息
-    pub async fn fetch_school_info(&self, unit_id: i32) -> MewResult<Value> {
-        with_timestamp(
-            self.client
-                .build_request(
-                    HttpMethod::GET,
-                    "https://eduzone.codemao.cn/edu/zone/school/info",
-                    None,
-                )
-                .with_param("unitId", unit_id.to_string()),
-        )
-        .send()
-        .await?
-        .json()
-        .await
-        .map_err(MewError::from)
+    pub fn fetch_school_info(&self, unit_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
+        let builder = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "https://eduzone.codemao.cn/edu/zone/school/info",
+                None,
+            )
+            .with_param("unitId", unit_id.to_string());
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 获取官方课程包生成器
     pub fn fetch_official_lesson_packages_gen(&self, limit: Option<usize>) -> PaginatedIter {
-        paginated_with_timestamp(
-            self.client
-                .paginated("https://eduzone.codemao.cn/edu/zone/lesson/offical/packages")
-                .with_param("pacakgeEntryType", "0")
-                .with_param("topicType", "all")
-                .with_param("topicId", "all")
-                .with_param("tagId", "all")
-                .with_param("page", "1")
-                .with_param("limit", "150")
-                .with_pagination_method(PaginationMethod::Page)
-                .with_offset_key("page")
-                .with_amount_key("limit")
-                .with_limit(limit.unwrap_or(150)),
-        )
+        let mut paginated = self
+            .client
+            .paginated("https://eduzone.codemao.cn/edu/zone/lesson/offical/packages")
+            .with_param("pacakgeEntryType", "0")
+            .with_param("topicType", "all")
+            .with_param("topicId", "all")
+            .with_param("tagId", "all")
+            .with_param("page", "1")
+            .with_param("limit", "150")
+            .with_pagination_method(PaginationMethod::Page)
+            .with_offset_key("page")
+            .with_amount_key("limit");
+
+        paginated = Self::add_timestamp_to_paginated(paginated);
+
+        if let Some(limit_val) = limit {
+            paginated = paginated.with_limit(limit_val);
+        } else {
+            paginated = paginated.with_limit(150);
+        }
+        paginated
     }
 
-    /// 获取课程主题
-    pub async fn fetch_lesson_topics(&self) -> MewResult<Value> {
-        with_timestamp(
-            self.client
-                .build_request(
-                    HttpMethod::GET,
-                    "https://eduzone.codemao.cn/edu/zone/lessons/official/packages/topics",
-                    None,
-                )
-                .with_param("pacakgeEntryType", "0")
-                .with_param("topicType", "all"),
-        )
-        .send()
-        .await?
-        .json()
-        .await
-        .map_err(MewError::from)
+    pub fn fetch_lesson_topics(&self) -> Result<Value, Box<dyn std::error::Error>> {
+        let builder = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "https://eduzone.codemao.cn/edu/zone/lessons/official/packages/topics",
+                None,
+            )
+            .with_param("pacakgeEntryType", "0")
+            .with_param("topicType", "all");
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 获取课程标签
-    pub async fn fetch_lesson_tags(&self) -> MewResult<Value> {
-        with_timestamp(
-            self.client
-                .build_request(
-                    HttpMethod::GET,
-                    "https://eduzone.codemao.cn/edu/zone/lessons/official/packages/topics/all/tags",
-                    None,
-                )
-                .with_param("pacakgeEntryType", "0")
-                .with_param("topicType", "all"),
-        )
-        .send()
-        .await?
-        .json()
-        .await
-        .map_err(MewError::from)
+    pub fn fetch_lesson_tags(&self) -> Result<Value, Box<dyn std::error::Error>> {
+        let builder = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "https://eduzone.codemao.cn/edu/zone/lessons/official/packages/topics/all/tags",
+                None,
+            )
+            .with_param("pacakgeEntryType", "0")
+            .with_param("topicType", "all");
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 获取自定义课程包生成器
     pub fn fetch_custom_lesson_packages_gen(&self, limit: Option<usize>) -> PaginatedIter {
-        paginated_with_timestamp(
-            self.client
-                .paginated("https://eduzone.codemao.cn/edu/zone/lesson/offical/packages")
-                .with_param("page", "1")
-                .with_param("limit", "100")
-                .with_pagination_method(PaginationMethod::Page)
-                .with_offset_key("page")
-                .with_amount_key("limit")
-                .with_limit(limit.unwrap_or(100)),
-        )
+        let mut paginated = self
+            .client
+            .paginated("https://eduzone.codemao.cn/edu/zone/lesson/offical/packages")
+            .with_param("page", "1")
+            .with_param("limit", "100")
+            .with_pagination_method(PaginationMethod::Page)
+            .with_offset_key("page")
+            .with_amount_key("limit");
+
+        paginated = Self::add_timestamp_to_paginated(paginated);
+
+        if let Some(limit_val) = limit {
+            paginated = paginated.with_limit(limit_val);
+        } else {
+            paginated = paginated.with_limit(100);
+        }
+        paginated
     }
 
-    /// 获取或删除自定义课程包
-    pub async fn get_or_delete_custom_package(
+    pub fn get_or_delete_custom_package(
         &self,
         package_id: i32,
         method: HttpMethod,
-    ) -> MewResult<Value> {
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!(
             "https://eduzone.codemao.cn/edu/zone/lesson/customized/packages/{}",
             package_id
         );
 
-        let response = with_timestamp(self.client.build_request(method, &endpoint, None))
-            .send()
-            .await?;
+        let builder = self.client.build_request(method, &endpoint, None);
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
 
         if method == HttpMethod::GET {
-            response.json().await.map_err(MewError::from)
+            Ok(self.client.response_to_json(response)?)
         } else {
-            Ok(json!({ "success": response.status().is_success() }))
+            Ok(json!({ "success": response.status() == HTTPStatus::Ok as u16 }))
         }
     }
 
-    /// 获取自定义课程包内容
-    pub async fn fetch_custom_package_contents(
+    pub fn fetch_custom_package_contents(
         &self,
         package_id: i32,
         limit: i32,
-    ) -> MewResult<Value> {
-        with_timestamp(
-            self.client
-                .build_request(
-                    HttpMethod::GET,
-                    "https://eduzone.codemao.cn/edu/zone/lesson/customized/package/lessons",
-                    None,
-                )
-                .with_param("limit", limit.to_string())
-                .with_param("package_id", package_id.to_string()),
-        )
-        .send()
-        .await?
-        .json()
-        .await
-        .map_err(MewError::from)
+    ) -> Result<Value, Box<dyn std::error::Error>> {
+        let builder = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "https://eduzone.codemao.cn/edu/zone/lesson/customized/package/lessons",
+                None,
+            )
+            .with_param("limit", limit.to_string())
+            .with_param("package_id", package_id.to_string());
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 获取班级邀请
-    pub async fn fetch_class_invites(&self) -> MewResult<Value> {
-        with_timestamp(self.client.build_request(
+    pub fn fetch_class_invites(&self) -> Result<Value, Box<dyn std::error::Error>> {
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/invite/student/message/next",
             None,
-        ))
-        .send()
-        .await?
-        .json()
-        .await
-        .map_err(MewError::from)
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 获取即将过期的课程
-    pub async fn fetch_expiring_lessons(&self) -> MewResult<Value> {
-        with_timestamp(self.client.build_request(
+    pub fn fetch_expiring_lessons(&self) -> Result<Value, Box<dyn std::error::Error>> {
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/lesson/offical/packages/expired",
             None,
-        ))
-        .send()
-        .await?
-        .json()
-        .await
-        .map_err(MewError::from)
-    }
-
-    /// 获取组织ID (外部URL)
-    pub async fn fetch_organization_ids(&self) -> MewResult<Value> {
-        let timestamp = current_timestamp_13();
-        let url = format!(
-            "https://static.codemao.cn/teacher-edu/organization_ids.json?CMTIME={}",
-            timestamp
         );
-        reqwest::get(&url)
-            .await
-            .map_err(MewError::from)?
-            .json()
-            .await
-            .map_err(MewError::from)
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 获取报告元数据
-    pub async fn fetch_report_metadata(&self) -> MewResult<Value> {
-        with_timestamp(self.client.build_request(
+    pub fn fetch_organization_ids(&self) -> Result<Value, Box<dyn std::error::Error>> {
+        let timestamp = current_timestamp_13();
+
+        let response = self
+            .client
+            .agent()
+            .get("https://static.codemao.cn/teacher-edu/organization_ids.json")
+            .query("CMTIME", &timestamp.to_string())
+            .call()?;
+
+        Ok(response.into_body().read_json()?)
+    }
+
+    pub fn fetch_report_metadata(&self) -> Result<Value, Box<dyn std::error::Error>> {
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/analysis/report/info",
             None,
-        ))
-        .send()
-        .await?
-        .json()
-        .await
-        .map_err(MewError::from)
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 获取课程分析
-    pub async fn fetch_course_analytics(&self) -> MewResult<Value> {
-        with_timestamp(self.client.build_request(
+    pub fn fetch_course_analytics(&self) -> Result<Value, Box<dyn std::error::Error>> {
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/course",
             None,
-        ))
-        .send()
-        .await?
-        .json()
-        .await
-        .map_err(MewError::from)
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 获取课程包分析
-    pub async fn fetch_lesson_package_analytics(&self) -> MewResult<Value> {
-        with_timestamp(self.client.build_request(
+    pub fn fetch_lesson_package_analytics(&self) -> Result<Value, Box<dyn std::error::Error>> {
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/packages",
             None,
-        ))
-        .send()
-        .await?
-        .json()
-        .await
-        .map_err(MewError::from)
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 获取教室分析
-    pub async fn fetch_classroom_analytics(&self) -> MewResult<Value> {
-        with_timestamp(self.client.build_request(
+    pub fn fetch_classroom_analytics(&self) -> Result<Value, Box<dyn std::error::Error>> {
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/class/info",
             None,
-        ))
-        .send()
-        .await?
-        .json()
-        .await
-        .map_err(MewError::from)
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 获取作品表现
-    pub async fn fetch_work_performance(&self) -> MewResult<Value> {
-        with_timestamp(self.client.build_request(
+    pub fn fetch_work_performance(&self) -> Result<Value, Box<dyn std::error::Error>> {
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/works/situations",
             None,
-        ))
-        .send()
-        .await?
-        .json()
-        .await
-        .map_err(MewError::from)
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 获取作品评分
-    pub async fn fetch_work_ratings(&self) -> MewResult<Value> {
-        with_timestamp(self.client.build_request(
+    pub fn fetch_work_ratings(&self) -> Result<Value, Box<dyn std::error::Error>> {
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/works/star/info",
             None,
-        ))
-        .send()
-        .await?
-        .json()
-        .await
-        .map_err(MewError::from)
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 获取技能评估
-    pub async fn fetch_skill_assessment(&self) -> MewResult<Value> {
-        with_timestamp(self.client.build_request(
+    pub fn fetch_skill_assessment(&self) -> Result<Value, Box<dyn std::error::Error>> {
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/ability/dimensions",
             None,
-        ))
-        .send()
-        .await?
-        .json()
-        .await
-        .map_err(MewError::from)
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 获取技能雷达
-    pub async fn fetch_skill_radar(&self) -> MewResult<Value> {
-        with_timestamp(self.client.build_request(
+    pub fn fetch_skill_radar(&self) -> Result<Value, Box<dyn std::error::Error>> {
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/ability/radars",
             None,
-        ))
-        .send()
-        .await?
-        .json()
-        .await
-        .map_err(MewError::from)
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 获取美术技能
-    pub async fn fetch_art_skills(&self) -> MewResult<Value> {
-        with_timestamp(self.client.build_request(
+    pub fn fetch_art_skills(&self) -> Result<Value, Box<dyn std::error::Error>> {
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/ability/artistic/dimensions",
             None,
-        ))
-        .send()
-        .await?
-        .json()
-        .await
-        .map_err(MewError::from)
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 获取逻辑技能
-    pub async fn fetch_logic_skills(&self) -> MewResult<Value> {
-        with_timestamp(self.client.build_request(
+    pub fn fetch_logic_skills(&self) -> Result<Value, Box<dyn std::error::Error>> {
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/ability/logical/dimensions",
             None,
-        ))
-        .send()
-        .await?
-        .json()
-        .await
-        .map_err(MewError::from)
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
-    /// 获取编程技能
-    pub async fn fetch_coding_skills(&self) -> MewResult<Value> {
-        with_timestamp(self.client.build_request(
+    pub fn fetch_coding_skills(&self) -> Result<Value, Box<dyn std::error::Error>> {
+        let builder = self.client.build_request(
             HttpMethod::GET,
             "https://eduzone.codemao.cn/edu/zone/analysis/student/ability/programming/dimensions",
             None,
-        ))
-        .send()
-        .await?
-        .json()
-        .await
-        .map_err(MewError::from)
+        );
+        let builder = Self::add_timestamp_to_builder(builder);
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 }
 

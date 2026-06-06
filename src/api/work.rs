@@ -1,5 +1,5 @@
 use crate::utils::acquire::{
-    BaseKey, CodeMaoClient, HttpMethod, MewError, MewResult, PaginatedIter, PaginationMethod,
+    BaseKey, CodeMaoClient, HTTPStatus, HttpMethod, PaginatedIter, PaginationMethod,
 };
 use serde_json::{Value, json};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -22,14 +22,14 @@ pub enum SelectMethod {
 }
 
 impl SelectMethod {
-    pub fn as_str(&self) -> &'static str {
+    fn as_str(&self) -> &'static str {
         match self {
             SelectMethod::Post => "POST",
             SelectMethod::Delete => "DELETE",
         }
     }
 
-    pub fn to_http_method(&self) -> HttpMethod {
+    fn to_http_method(&self) -> HttpMethod {
         match self {
             SelectMethod::Post => HttpMethod::POST,
             SelectMethod::Delete => HttpMethod::DELETE,
@@ -44,7 +44,7 @@ pub enum PublishStatus {
 }
 
 impl PublishStatus {
-    pub fn as_str(&self) -> &'static str {
+    fn as_str(&self) -> &'static str {
         match self {
             PublishStatus::Published => "PUBLISHED",
             PublishStatus::Unpublished => "UNPUBLISHED",
@@ -66,7 +66,7 @@ pub enum KittenVersion {
 }
 
 impl KittenVersion {
-    pub fn as_str(&self) -> &'static str {
+    fn as_str(&self) -> &'static str {
         match self {
             KittenVersion::V3 => "KITTEN_V3",
             KittenVersion::V4 => "KITTEN_V4",
@@ -81,7 +81,7 @@ pub enum CollabWorkType {
 }
 
 impl CollabWorkType {
-    pub fn as_str(&self) -> &'static str {
+    fn as_str(&self) -> &'static str {
         match self {
             CollabWorkType::Kitten => "kitten",
             CollabWorkType::Coco => "coco",
@@ -96,7 +96,7 @@ pub enum CollabPermission {
 }
 
 impl CollabPermission {
-    pub fn as_code(&self) -> i32 {
+    fn as_code(&self) -> i32 {
         match self {
             CollabPermission::Edit => 1,
             CollabPermission::View => 2,
@@ -113,7 +113,7 @@ pub enum NemoWorkType {
 }
 
 impl NemoWorkType {
-    pub fn as_str(&self) -> &'static str {
+    fn as_str(&self) -> &'static str {
         match self {
             NemoWorkType::CourseWork => "course-work",
             NemoWorkType::Template => "template",
@@ -130,7 +130,7 @@ pub enum ResourcePackType {
 }
 
 impl ResourcePackType {
-    pub fn as_value(&self) -> i32 {
+    fn as_value(&self) -> i32 {
         match self {
             ResourcePackType::Block => 1,
             ResourcePackType::Character => 0,
@@ -151,90 +151,89 @@ impl BaseWorkOperations {
     }
 
     // 关注或取消关注用户
-    pub async fn execute_toggle_follow(
+    pub fn execute_toggle_follow(
         &self,
         user_id: i32,
         method: SelectMethod,
-    ) -> MewResult<bool> {
+    ) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!("/nemo/v2/user/{}/follow", user_id);
 
         let response = self
             .client
             .build_request(method.to_http_method(), &endpoint, None)
             .with_payload(json!({}))
-            .send()
-            .await?;
+            .send()?;
 
-        Ok(response.status().as_u16() == 204)
+        Ok(response.status() == HTTPStatus::NoContent as u16)
     }
 
     // 收藏或取消收藏作品
-    pub async fn execute_toggle_collection(
+    pub fn execute_toggle_collection(
         &self,
         work_id: i32,
         method: SelectMethod,
-    ) -> MewResult<bool> {
+    ) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!("/nemo/v2/works/{}/collection", work_id);
 
         let response = self
             .client
             .build_request(method.to_http_method(), &endpoint, None)
             .with_payload(json!({}))
-            .send()
-            .await?;
+            .send()?;
 
-        Ok(response.status().is_success())
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
     // 点赞或取消点赞作品
-    pub async fn execute_toggle_like(&self, work_id: i32, method: SelectMethod) -> MewResult<bool> {
+    pub fn execute_toggle_like(
+        &self,
+        work_id: i32,
+        method: SelectMethod,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!("/nemo/v2/works/{}/like", work_id);
 
         let response = self
             .client
             .build_request(method.to_http_method(), &endpoint, None)
             .with_payload(json!({}))
-            .send()
-            .await?;
+            .send()?;
 
-        Ok(response.status().is_success())
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
     // 再创作作品
-    pub async fn execute_fork_work(&self, work_id: i32) -> MewResult<bool> {
+    pub fn execute_fork_work(&self, work_id: i32) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!("/nemo/v2/works/{}/fork", work_id);
 
         let response = self
             .client
             .build_request(HttpMethod::POST, &endpoint, None)
             .with_payload(json!({}))
-            .send()
-            .await?;
+            .send()?;
 
-        Ok(response.status().is_success())
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
     // 分享作品
-    pub async fn execute_share_work(&self, work_id: i32) -> MewResult<bool> {
+    pub fn execute_share_work(&self, work_id: i32) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!("/nemo/v2/works/{}/share", work_id);
 
         let response = self
             .client
             .build_request(HttpMethod::POST, &endpoint, None)
             .with_payload(json!({}))
-            .send()
-            .await?;
+            .send()?;
 
-        Ok(response.status().is_success())
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
     // 举报作品
-    pub async fn execute_report_work(
+    pub fn execute_report_work(
         &self,
         work_id: i32,
         describe: &str,
         reason: &str,
-    ) -> MewResult<bool> {
+    ) -> Result<bool, Box<dyn std::error::Error>> {
         let data = json!({
             "work_id": work_id,
             "report_reason": reason,
@@ -245,20 +244,19 @@ impl BaseWorkOperations {
             .client
             .build_request(HttpMethod::POST, "/nemo/v2/report/work", None)
             .with_payload(data)
-            .send()
-            .await?;
+            .send()?;
 
-        Ok(response.status().is_success())
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
     // 重命名作品
-    pub async fn update_work_name(
+    pub fn update_work_name(
         &self,
         work_id: i32,
         name: &str,
         work_type: Option<i32>,
         is_check_name: bool,
-    ) -> MewResult<bool> {
+    ) -> Result<bool, Box<dyn std::error::Error>> {
         let timestamp = current_timestamp_13();
         let endpoint = format!("/work/works/{}/rename", work_id);
 
@@ -273,9 +271,9 @@ impl BaseWorkOperations {
             builder = builder.with_param("work_type", wt.to_string());
         }
 
-        let response = builder.send().await?;
+        let response = builder.send()?;
 
-        Ok(response.status().is_success())
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 }
 
@@ -298,43 +296,46 @@ impl CommentOperations {
     }
 
     // 添加作品评论
-    pub async fn create_work_comment(
+    pub fn create_work_comment(
         &self,
         work_id: i32,
         comment: &str,
         emoji: Option<&str>,
         return_data: bool,
-    ) -> MewResult<Value> {
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/creation-tools/v1/works/{}/comment", work_id);
 
-        let payload = json!({
-            "content": comment,
-            "emoji_content": emoji.unwrap_or(""),
-        });
+        let mut payload_map = serde_json::Map::new();
+        payload_map.insert("content".to_string(), Value::String(comment.to_string()));
+        payload_map.insert(
+            "emoji_content".to_string(),
+            Value::String(emoji.unwrap_or("").to_string()),
+        );
+
+        let payload = Value::Object(payload_map);
 
         let response = self
             .client
             .build_request(HttpMethod::POST, &endpoint, None)
             .with_payload(payload)
-            .send()
-            .await?;
+            .send()?;
 
         if return_data {
-            response.json().await.map_err(MewError::from)
+            Ok(self.client.response_to_json(response)?)
         } else {
-            Ok(json!({ "success": response.status().as_u16() == 201 }))
+            Ok(json!({ "success": response.status() == HTTPStatus::Created as u16 }))
         }
     }
 
     // 回复作品评论
-    pub async fn create_comment_reply(
+    pub fn create_comment_reply(
         &self,
         comment: &str,
         work_id: i32,
         comment_id: i32,
         parent_id: Option<i32>,
         return_data: bool,
-    ) -> MewResult<Value> {
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!(
             "/creation-tools/v1/works/{}/comment/{}/reply",
             work_id, comment_id
@@ -349,18 +350,21 @@ impl CommentOperations {
             .client
             .build_request(HttpMethod::POST, &endpoint, None)
             .with_payload(data)
-            .send()
-            .await?;
+            .send()?;
 
         if return_data {
-            response.json().await.map_err(MewError::from)
+            Ok(self.client.response_to_json(response)?)
         } else {
-            Ok(json!({ "success": response.status().as_u16() == 201 }))
+            Ok(json!({ "success": response.status() == HTTPStatus::Created as u16 }))
         }
     }
 
     // 删除作品评论
-    pub async fn delete_comment(&self, work_id: i32, comment_id: i32) -> MewResult<bool> {
+    pub fn delete_comment(
+        &self,
+        work_id: i32,
+        comment_id: i32,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!(
             "/creation-tools/v1/works/{}/comment/{}",
             work_id, comment_id
@@ -369,19 +373,18 @@ impl CommentOperations {
         let response = self
             .client
             .build_request(HttpMethod::DELETE, &endpoint, None)
-            .send()
-            .await?;
+            .send()?;
 
-        Ok(response.status().as_u16() == 204)
+        Ok(response.status() == HTTPStatus::NoContent as u16)
     }
 
     // 置顶或取消置顶评论
-    pub async fn execute_toggle_comment_pin(
+    pub fn execute_toggle_comment_pin(
         &self,
         method: HttpMethod,
         work_id: i32,
         comment_id: i32,
-    ) -> MewResult<bool> {
+    ) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!(
             "/creation-tools/v1/works/{}/comment/{}/top",
             work_id, comment_id
@@ -391,19 +394,18 @@ impl CommentOperations {
             .client
             .build_request(method, &endpoint, None)
             .with_payload(json!({}))
-            .send()
-            .await?;
+            .send()?;
 
-        Ok(response.status().as_u16() == 204)
+        Ok(response.status() == HTTPStatus::NoContent as u16)
     }
 
     // 点赞或取消点赞评论
-    pub async fn execute_toggle_comment_like(
+    pub fn execute_toggle_comment_like(
         &self,
         work_id: i32,
         comment_id: i32,
         method: SelectMethod,
-    ) -> MewResult<bool> {
+    ) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!(
             "/creation-tools/v1/works/{}/comment/{}/liked",
             work_id, comment_id
@@ -413,19 +415,18 @@ impl CommentOperations {
             .client
             .build_request(method.to_http_method(), &endpoint, None)
             .with_payload(json!({}))
-            .send()
-            .await?;
+            .send()?;
 
-        Ok(response.status().as_u16() == 201)
+        Ok(response.status() == HTTPStatus::Created as u16)
     }
 
     // 举报作品评论
-    pub async fn execute_report_comment(
+    pub fn execute_report_comment(
         &self,
         work_id: i32,
         comment_id: i32,
         reason: &str,
-    ) -> MewResult<bool> {
+    ) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!("/creation-tools/v1/works/{}/comment/report", work_id);
 
         let data = json!({
@@ -437,10 +438,9 @@ impl CommentOperations {
             .client
             .build_request(HttpMethod::POST, &endpoint, None)
             .with_payload(data)
-            .send()
-            .await?;
+            .send()?;
 
-        Ok(response.status().is_success())
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 }
 
@@ -467,7 +467,7 @@ impl KittenWorkManager {
     }
 
     // 创建 Kitten 作品
-    pub async fn create_kitten_work(
+    pub fn create_kitten_work(
         &self,
         name: &str,
         work_url: &str,
@@ -477,30 +477,42 @@ impl KittenWorkManager {
         sample_id: Option<&str>,
         work_source_label: Option<i32>,
         save_type: Option<i32>,
-    ) -> MewResult<Value> {
-        let payload = json!({
-            "name": name,
-            "work_url": work_url,
-            "preview": preview,
-            "orientation": orientation.unwrap_or(1),
-            "sample_id": sample_id.unwrap_or(""),
-            "version": version,
-            "work_source_label": work_source_label.unwrap_or(1),
-            "save_type": save_type.unwrap_or(2),
-        });
+    ) -> Result<Value, Box<dyn std::error::Error>> {
+        let mut payload_map = serde_json::Map::new();
+        payload_map.insert("name".to_string(), Value::String(name.to_string()));
+        payload_map.insert("work_url".to_string(), Value::String(work_url.to_string()));
+        payload_map.insert("preview".to_string(), Value::String(preview.to_string()));
+        payload_map.insert(
+            "orientation".to_string(),
+            Value::Number(serde_json::Number::from(orientation.unwrap_or(1))),
+        );
+        payload_map.insert(
+            "sample_id".to_string(),
+            Value::String(sample_id.unwrap_or("").to_string()),
+        );
+        payload_map.insert("version".to_string(), Value::String(version.to_string()));
+        payload_map.insert(
+            "work_source_label".to_string(),
+            Value::Number(serde_json::Number::from(work_source_label.unwrap_or(1))),
+        );
+        payload_map.insert(
+            "save_type".to_string(),
+            Value::Number(serde_json::Number::from(save_type.unwrap_or(2))),
+        );
+
+        let payload = Value::Object(payload_map);
 
         let response = self
             .client
             .build_request(HttpMethod::POST, "/kitten/r2/work", Some(BaseKey::Creation))
             .with_payload(payload)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 发布 Kitten 作品
-    pub async fn execute_publish_kitten_work(
+    pub fn execute_publish_kitten_work(
         &self,
         work_id: i32,
         name: &str,
@@ -515,7 +527,7 @@ impl KittenWorkManager {
         version: &str,
         cover_type: Option<i32>,
         user_labels: Option<Vec<Value>>,
-    ) -> MewResult<bool> {
+    ) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!("/kitten/r2/work/{}/publish", work_id);
 
         let payload = json!({
@@ -530,62 +542,61 @@ impl KittenWorkManager {
             "if_default_cover": if_default_cover,
             "version": version,
             "cover_type": cover_type.unwrap_or(1),
-            "user_labels": user_labels.unwrap_or_else(std::vec::Vec::new),
+            "user_labels": user_labels.unwrap_or_else(|| vec![]),
         });
 
         let response = self
             .client
             .build_request(HttpMethod::PUT, &endpoint, Some(BaseKey::Creation))
             .with_payload(payload)
-            .send()
-            .await?;
+            .send()?;
 
-        Ok(response.status().is_success())
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
     // 删除未发布的 Kitten 作品草稿
-    pub async fn delete_kitten_draft(&self, work_id: i32) -> MewResult<bool> {
+    pub fn delete_kitten_draft(&self, work_id: i32) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!("/kitten/common/work/{}/temporarily", work_id);
 
         let response = self
             .client
             .build_request(HttpMethod::DELETE, &endpoint, Some(BaseKey::Creation))
-            .send()
-            .await?;
+            .send()?;
 
-        Ok(response.status().is_success())
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
     // 取消发布作品
-    pub async fn execute_unpublish_work(&self, work_id: i32) -> MewResult<bool> {
+    pub fn execute_unpublish_work(&self, work_id: i32) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!("/tiger/work/{}/unpublish", work_id);
 
         let response = self
             .client
             .build_request(HttpMethod::PATCH, &endpoint, None)
             .with_payload(json!({}))
-            .send()
-            .await?;
+            .send()?;
 
-        Ok(response.status().as_u16() == 204)
+        Ok(response.status() == HTTPStatus::NoContent as u16)
     }
 
     // 通过 Web 端取消发布作品
-    pub async fn execute_unpublish_work_web(&self, work_id: i32) -> MewResult<bool> {
+    pub fn execute_unpublish_work_web(
+        &self,
+        work_id: i32,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!("/web/works/r2/unpublish/{}", work_id);
 
         let response = self
             .client
             .build_request(HttpMethod::PUT, &endpoint, None)
             .with_payload(json!({}))
-            .send()
-            .await?;
+            .send()?;
 
-        Ok(response.status().is_success())
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
     // 清空 Kitten 作品回收站
-    pub async fn execute_empty_kitten_trash(&self) -> MewResult<bool> {
+    pub fn execute_empty_kitten_trash(&self) -> Result<bool, Box<dyn std::error::Error>> {
         let response = self
             .client
             .build_request(
@@ -593,14 +604,13 @@ impl KittenWorkManager {
                 "/work/user/works/permanently",
                 Some(BaseKey::Creation),
             )
-            .send()
-            .await?;
+            .send()?;
 
-        Ok(response.status().as_u16() == 204)
+        Ok(response.status() == HTTPStatus::NoContent as u16)
     }
 
     // 翻译 Kitten 作品
-    pub async fn translate_kitten_work(&self, data: Value) -> MewResult<Value> {
+    pub fn translate_kitten_work(&self, data: Value) -> Result<Value, Box<dyn std::error::Error>> {
         let response = self
             .client
             .build_request(
@@ -609,10 +619,9 @@ impl KittenWorkManager {
                 Some(BaseKey::Creation),
             )
             .with_payload(data)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 }
 
@@ -639,7 +648,7 @@ impl NekoWorkManager {
     }
 
     // 创建 KN 作品
-    pub async fn create_kn_work(
+    pub fn create_kn_work(
         &self,
         name: &str,
         work_url: &str,
@@ -651,7 +660,7 @@ impl NekoWorkManager {
         n_roles: Option<i32>,
         n_scenes: Option<i32>,
         pic_need_check_file_url: Option<&str>,
-    ) -> MewResult<Value> {
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let payload = json!({
             "bcm_version": bcm_version,
             "save_type": save_type.unwrap_or(2),
@@ -669,14 +678,13 @@ impl NekoWorkManager {
             .client
             .build_request(HttpMethod::POST, "/neko/works", Some(BaseKey::Creation))
             .with_payload(payload)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 发布 KN 作品
-    pub async fn execute_publish_kn_work(
+    pub fn execute_publish_kn_work(
         &self,
         work_id: i32,
         name: &str,
@@ -689,7 +697,7 @@ impl NekoWorkManager {
         work_url: &str,
         bcm_version: &str,
         cover_url: Option<&str>,
-    ) -> MewResult<bool> {
+    ) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!("/neko/community/work/publish/{}", work_id);
 
         let payload = json!({
@@ -709,14 +717,17 @@ impl NekoWorkManager {
             .client
             .build_request(HttpMethod::POST, &endpoint, Some(BaseKey::Creation))
             .with_payload(payload)
-            .send()
-            .await?;
+            .send()?;
 
-        Ok(response.status().is_success())
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
     // 删除未发布的 KN 作品草稿
-    pub async fn delete_kn_draft(&self, work_id: i32, force: i32) -> MewResult<bool> {
+    pub fn delete_kn_draft(
+        &self,
+        work_id: i32,
+        force: i32,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
         let timestamp = current_timestamp_13();
         let endpoint = format!("/neko/works/{}", work_id);
 
@@ -725,27 +736,28 @@ impl NekoWorkManager {
             .build_request(HttpMethod::DELETE, &endpoint, Some(BaseKey::Creation))
             .with_param("TIME", timestamp.to_string())
             .with_param("force", force.to_string())
-            .send()
-            .await?;
+            .send()?;
 
-        Ok(response.status().is_success())
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
     // 取消发布 KN 作品
-    pub async fn execute_unpublish_kn_work(&self, work_id: i32) -> MewResult<bool> {
+    pub fn execute_unpublish_kn_work(
+        &self,
+        work_id: i32,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!("/neko/community/work/unpublish/{}", work_id);
 
         let response = self
             .client
             .build_request(HttpMethod::PUT, &endpoint, Some(BaseKey::Creation))
-            .send()
-            .await?;
+            .send()?;
 
-        Ok(response.status().is_success())
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
     // 清空 KN 作品回收站
-    pub async fn execute_empty_kn_trash(&self) -> MewResult<bool> {
+    pub fn execute_empty_kn_trash(&self) -> Result<bool, Box<dyn std::error::Error>> {
         let response = self
             .client
             .build_request(
@@ -753,27 +765,28 @@ impl NekoWorkManager {
                 "/neko/works/permanently",
                 Some(BaseKey::Creation),
             )
-            .send()
-            .await?;
+            .send()?;
 
-        Ok(response.status().is_success())
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
     // 恢复 KN 作品回收站作品
-    pub async fn execute_recover_kn_trash(&self, work_id: i32) -> MewResult<bool> {
+    pub fn execute_recover_kn_trash(
+        &self,
+        work_id: i32,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!("/neko/works/{}/recover", work_id);
 
         let response = self
             .client
             .build_request(HttpMethod::PATCH, &endpoint, Some(BaseKey::Creation))
-            .send()
-            .await?;
+            .send()?;
 
-        Ok(response.status().is_success())
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
     // 保存教师作品
-    pub async fn save_teacher_work(&self, data: Value) -> MewResult<Value> {
+    pub fn save_teacher_work(&self, data: Value) -> Result<Value, Box<dyn std::error::Error>> {
         let response = self
             .client
             .build_request(
@@ -782,14 +795,13 @@ impl NekoWorkManager {
                 Some(BaseKey::Creation),
             )
             .with_payload(data)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 复制作品
-    pub async fn copy_work(&self, work_id: i32) -> MewResult<Value> {
+    pub fn copy_work(&self, work_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
         let data = json!({ "work_id": work_id });
 
         let response = self
@@ -800,23 +812,24 @@ impl NekoWorkManager {
                 Some(BaseKey::Creation),
             )
             .with_payload(data)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 作品图片故障排查
-    pub async fn troubleshoot_work_pics(&self, work_id: i32) -> MewResult<Value> {
+    pub fn troubleshoot_work_pics(
+        &self,
+        work_id: i32,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/neko/works/pic-troubleshoot/{}", work_id);
 
         let response = self
             .client
             .build_request(HttpMethod::PUT, &endpoint, Some(BaseKey::Creation))
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 }
 
@@ -839,7 +852,7 @@ impl WoodWorkManager {
     }
 
     // 获取海龟编辑器项目信息
-    pub async fn fetch_wood_project(&self, work_id: i32) -> MewResult<Value> {
+    pub fn fetch_wood_project(&self, work_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
         let timestamp = current_timestamp_13();
 
         let response = self
@@ -847,14 +860,13 @@ impl WoodWorkManager {
             .build_request(HttpMethod::GET, "/wood/project", Some(BaseKey::Creation))
             .with_param("TIME", timestamp.to_string())
             .with_param("work_id", work_id.to_string())
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 创建海龟编辑器作品
-    pub async fn create_wood_project(
+    pub fn create_wood_project(
         &self,
         work_name: Option<&str>,
         language_type: Option<i32>,
@@ -865,7 +877,7 @@ impl WoodWorkManager {
         is_turn_on_debug: Option<bool>,
         editor_mode: Option<&str>,
         update_time: Option<i32>,
-    ) -> MewResult<Value> {
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let payload = json!({
             "work_name": work_name.unwrap_or("新的作品"),
             "language_type": language_type.unwrap_or(3),
@@ -886,33 +898,31 @@ impl WoodWorkManager {
             .client
             .build_request(HttpMethod::POST, "/wood/project", Some(BaseKey::Creation))
             .with_payload(payload)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 删除海龟编辑器草稿
-    pub async fn delete_wood_draft(&self, work_id: i32) -> MewResult<bool> {
+    pub fn delete_wood_draft(&self, work_id: i32) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!("/wood/project/{}/temporarily", work_id);
 
         let response = self
             .client
             .build_request(HttpMethod::DELETE, &endpoint, Some(BaseKey::Creation))
-            .send()
-            .await?;
+            .send()?;
 
-        Ok(response.status().is_success())
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
     // 搜索用户的Wood作品
-    pub async fn search_user_wood_projects(
+    pub fn search_user_wood_projects(
         &self,
         query: Option<&str>,
         page: Option<i32>,
         limit: Option<i32>,
         language_type: Option<i32>,
-    ) -> MewResult<Value> {
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let timestamp = current_timestamp_13();
 
         let response = self
@@ -927,23 +937,22 @@ impl WoodWorkManager {
             .with_param("page", page.unwrap_or(1).to_string())
             .with_param("limit", limit.unwrap_or(15).to_string())
             .with_param("language_type", language_type.unwrap_or(0).to_string())
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 在海龟编辑器作品中创建文件
-    pub async fn create_wood_file(
+    pub fn create_wood_file(
         &self,
         work_id: i32,
         file_name: Option<&str>,
         source_code: Option<&str>,
         file_type: Option<i32>,
         is_open: bool,
-    ) -> MewResult<Value> {
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         // 先获取现有项目
-        let project = self.fetch_wood_project(work_id).await?;
+        let project = self.fetch_wood_project(work_id)?;
 
         let mut files = project["files"]
             .as_array()
@@ -964,17 +973,20 @@ impl WoodWorkManager {
 
         // 更新项目
         self.create_wood_project(
-            project["work_name"].as_str(),
-            project["language_type"].as_i64().map(|v| v as i32),
-            project["run_mode"].as_i64().map(|v| v as i32),
+            Some(project["work_name"].as_str().unwrap_or("新的作品")),
+            Some(project["language_type"].as_i64().unwrap_or(3) as i32),
+            Some(project["run_mode"].as_i64().unwrap_or(0) as i32),
             Some(files),
             project["preview_code"].as_str(),
             project["preview_url"].as_str(),
-            project["addition"]["isTurnOnDebug"].as_bool(),
+            Some(
+                project["addition"]["isTurnOnDebug"]
+                    .as_bool()
+                    .unwrap_or(true),
+            ),
             project["addition"]["editorMode"].as_str(),
-            project["update_time"].as_i64().map(|v| v as i32),
+            Some(project["update_time"].as_i64().unwrap_or(0) as i32),
         )
-        .await
     }
 }
 
@@ -997,7 +1009,7 @@ impl CocoWorkManager {
     }
 
     // 获取 Coco 平台的主要课程列表
-    pub async fn fetch_coco_primary_courses(&self) -> MewResult<Value> {
+    pub fn fetch_coco_primary_courses(&self) -> Result<Value, Box<dyn std::error::Error>> {
         let response = self
             .client
             .build_request(
@@ -1005,10 +1017,9 @@ impl CocoWorkManager {
                 "/coconut/primary-course/list",
                 Some(BaseKey::Creation),
             )
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取 Coco 的自定义控件列表生成器
@@ -1038,7 +1049,7 @@ impl CocoWorkManager {
     }
 
     // 获取 Coco 的示范教程列表
-    pub async fn fetch_demo_courses(&self) -> MewResult<Value> {
+    pub fn fetch_demo_courses(&self) -> Result<Value, Box<dyn std::error::Error>> {
         let response = self
             .client
             .build_request(
@@ -1046,27 +1057,28 @@ impl CocoWorkManager {
                 "/coconut/sample/list",
                 Some(BaseKey::Creation),
             )
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取 Coco 的白名单作品链接
-    pub async fn fetch_whitelisted_works(&self) -> MewResult<Value> {
-        let response = reqwest::get("https://static.bcmcdn.com/coco/whitelist.json")
-            .await
-            .map_err(MewError::from)?;
+    pub fn fetch_whitelisted_works(&self) -> Result<Value, Box<dyn std::error::Error>> {
+        let response = self
+            .client
+            .agent()
+            .get("https://static.bcmcdn.com/coco/whitelist.json")
+            .call()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(response.into_body().read_json()?)
     }
 
     // 获取 Coco 的 web 控件
-    pub async fn fetch_web_widget(
+    pub fn fetch_web_widget(
         &self,
         page: Option<i32>,
         page_size: Option<i32>,
-    ) -> MewResult<Value> {
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let timestamp = current_timestamp_13();
 
         let response = self
@@ -1079,14 +1091,13 @@ impl CocoWorkManager {
             .with_param("TIME", timestamp.to_string())
             .with_param("current_page", page.unwrap_or(1).to_string())
             .with_param("page_size", page_size.unwrap_or(100).to_string())
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 更新 Coco 作品
-    pub async fn execute_update_coco_work(
+    pub fn execute_update_coco_work(
         &self,
         work_id: i32,
         work_name: &str,
@@ -1094,7 +1105,7 @@ impl CocoWorkManager {
         preview_url: &str,
         archive_version: Option<&str>,
         save_type: Option<i32>,
-    ) -> MewResult<Value> {
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let data = json!({
             "id": work_id,
             "name": work_name,
@@ -1112,14 +1123,13 @@ impl CocoWorkManager {
                 Some(BaseKey::Creation),
             )
             .with_payload(data)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 发布 Coco 作品
-    pub async fn execute_publish_coco_work(
+    pub fn execute_publish_coco_work(
         &self,
         work_id: i32,
         work_name: &str,
@@ -1127,7 +1137,7 @@ impl CocoWorkManager {
         cover_url: &str,
         description: &str,
         operation: &str,
-    ) -> MewResult<Value> {
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/coconut/web/work/{}/publish", work_id);
 
         let data = json!({
@@ -1143,10 +1153,9 @@ impl CocoWorkManager {
             .client
             .build_request(HttpMethod::PUT, &endpoint, Some(BaseKey::Creation))
             .with_payload(data)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 }
 
@@ -1169,31 +1178,27 @@ impl CollaborationManager {
     }
 
     // 获取或删除 Kitten 协作邀请码
-    pub async fn fetch_kitten_collaboration_code(
+    pub fn fetch_kitten_collaboration_code(
         &self,
         work_id: i32,
         method: HttpMethod,
-    ) -> MewResult<Value> {
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!(
             "https://socketcoll.codemao.cn/coll/kitten/collaborator/code/{}",
             work_id
         );
 
-        let response = self
-            .client
-            .build_request(method, &endpoint, None)
-            .send()
-            .await?;
+        let response = self.client.build_request(method, &endpoint, None).send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取 Coco 协作邀请码
-    pub async fn fetch_coco_collaboration_code(
+    pub fn fetch_coco_collaboration_code(
         &self,
         work_id: i32,
         permission: CollabPermission,
-    ) -> MewResult<Value> {
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let timestamp = current_timestamp_13();
         let endpoint = format!(
             "https://socketcoll.codemao.cn/coll/coco/collaborator/code/{}",
@@ -1205,10 +1210,9 @@ impl CollaborationManager {
             .build_request(HttpMethod::GET, &endpoint, None)
             .with_param("TIME", timestamp.to_string())
             .with_param("edit_permission", permission.as_code().to_string())
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取协作者列表生成器
@@ -1247,37 +1251,41 @@ impl CollaborationManager {
     }
 
     // 获取协作状态
-    pub async fn fetch_collaboration_status(&self, work_id: i32) -> MewResult<Value> {
+    pub fn fetch_collaboration_status(
+        &self,
+        work_id: i32,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/collaboration/user/{}", work_id);
 
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取协作用户
-    pub async fn fetch_collaboration_user(&self, work_id: i32) -> MewResult<Value> {
+    pub fn fetch_collaboration_user(
+        &self,
+        work_id: i32,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/collaboration/user/edited/{}", work_id);
 
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 启用 Kitten/Coco 作品协作功能
-    pub async fn execute_enable_collaboration(
+    pub fn execute_enable_collaboration(
         &self,
         work_id: i32,
         work_type: CollabWorkType,
-    ) -> MewResult<bool> {
+    ) -> Result<bool, Box<dyn std::error::Error>> {
         let endpoint = format!(
             "https://socketcoll.codemao.cn/coll/{}/{}",
             work_type.as_str(),
@@ -1288,10 +1296,9 @@ impl CollaborationManager {
             .client
             .build_request(HttpMethod::POST, &endpoint, None)
             .with_payload(json!({}))
-            .send()
-            .await?;
+            .send()?;
 
-        Ok(response.status().is_success())
+        Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
     // 获取协作的 Coco 作品生成器
@@ -1339,7 +1346,7 @@ impl AIServices {
     }
 
     // 获取文生图提示词
-    pub async fn fetch_text2img_prompt(&self) -> MewResult<Value> {
+    pub fn fetch_text2img_prompt(&self) -> Result<Value, Box<dyn std::error::Error>> {
         let response = self
             .client
             .build_request(
@@ -1347,14 +1354,16 @@ impl AIServices {
                 "/neko/text2img/prompt",
                 Some(BaseKey::Creation),
             )
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取 AI 绘画模板
-    pub async fn fetch_ai_painting_templates(&self, template_type: &str) -> MewResult<Value> {
+    pub fn fetch_ai_painting_templates(
+        &self,
+        template_type: &str,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let timestamp = current_timestamp_13();
 
         let response = self
@@ -1366,14 +1375,13 @@ impl AIServices {
             )
             .with_param("TIME", timestamp.to_string())
             .with_param("type", template_type)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // AI 绘画匹配
-    pub async fn match_ai_painting(&self, data: Value) -> MewResult<Value> {
+    pub fn match_ai_painting(&self, data: Value) -> Result<Value, Box<dyn std::error::Error>> {
         let response = self
             .client
             .build_request(
@@ -1382,21 +1390,20 @@ impl AIServices {
                 Some(BaseKey::Creation),
             )
             .with_payload(data)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 添加到灵感池
-    pub async fn add_to_inspiration_pool(
+    pub fn add_to_inspiration_pool(
         &self,
         img_url: &str,
         prompt: &str,
         style: &str,
         img_type: &str,
         generation_type: &str,
-    ) -> MewResult<Value> {
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let data = json!({
             "img_url": img_url,
             "prompt": prompt,
@@ -1413,10 +1420,9 @@ impl AIServices {
                 Some(BaseKey::Creation),
             )
             .with_payload(data)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 }
 
@@ -1439,7 +1445,7 @@ impl TeachingPlanManager {
     }
 
     // 保存团队作品 (教学计划)
-    pub async fn save_team_work(&self, data: Value) -> MewResult<Value> {
+    pub fn save_team_work(&self, data: Value) -> Result<Value, Box<dyn std::error::Error>> {
         let response = self
             .client
             .build_request(
@@ -1448,19 +1454,18 @@ impl TeachingPlanManager {
                 Some(BaseKey::Creation),
             )
             .with_payload(data)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取教学计划操作日志
-    pub async fn fetch_teaching_plan_logs(
+    pub fn fetch_teaching_plan_logs(
         &self,
         work_id: i32,
         offset: Option<i32>,
         limit: Option<i32>,
-    ) -> MewResult<Value> {
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let timestamp = current_timestamp_13();
 
         let response = self
@@ -1474,14 +1479,13 @@ impl TeachingPlanManager {
             .with_param("work_id", work_id.to_string())
             .with_param("offset", offset.unwrap_or(0).to_string())
             .with_param("limit", limit.unwrap_or(20).to_string())
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 添加教学计划操作日志
-    pub async fn add_teaching_plan_log(&self, data: Value) -> MewResult<Value> {
+    pub fn add_teaching_plan_log(&self, data: Value) -> Result<Value, Box<dyn std::error::Error>> {
         let response = self
             .client
             .build_request(
@@ -1490,27 +1494,31 @@ impl TeachingPlanManager {
                 Some(BaseKey::Creation),
             )
             .with_payload(data)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取作品编辑状态
-    pub async fn fetch_work_editing_status(&self, work_id: i32) -> MewResult<Value> {
+    pub fn fetch_work_editing_status(
+        &self,
+        work_id: i32,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/neko/teaching-plan/work/editing-status/{}", work_id);
 
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 设置作品编辑状态
-    pub async fn set_work_editing_status(&self, data: Value) -> MewResult<Value> {
+    pub fn set_work_editing_status(
+        &self,
+        data: Value,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let response = self
             .client
             .build_request(
@@ -1519,14 +1527,13 @@ impl TeachingPlanManager {
                 Some(BaseKey::Creation),
             )
             .with_payload(data)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 更新课程进度
-    pub async fn update_course_progress(&self, data: Value) -> MewResult<Value> {
+    pub fn update_course_progress(&self, data: Value) -> Result<Value, Box<dyn std::error::Error>> {
         let response = self
             .client
             .build_request(
@@ -1535,14 +1542,13 @@ impl TeachingPlanManager {
                 Some(BaseKey::Creation),
             )
             .with_payload(data)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 提交课程作品
-    pub async fn submit_course_work(&self, data: Value) -> MewResult<Value> {
+    pub fn submit_course_work(&self, data: Value) -> Result<Value, Box<dyn std::error::Error>> {
         let response = self
             .client
             .build_request(
@@ -1551,14 +1557,16 @@ impl TeachingPlanManager {
                 Some(BaseKey::Creation),
             )
             .with_payload(data)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 保存教师课程邀请链接
-    pub async fn save_teacher_course_invite_url(&self, data: Value) -> MewResult<Value> {
+    pub fn save_teacher_course_invite_url(
+        &self,
+        data: Value,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let response = self
             .client
             .build_request(
@@ -1567,10 +1575,9 @@ impl TeachingPlanManager {
                 Some(BaseKey::Creation),
             )
             .with_payload(data)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 }
 
@@ -1593,11 +1600,11 @@ impl ImageClassifyManager {
     }
 
     // 获取图像分类列表
-    pub async fn fetch_image_classify_list(
+    pub fn fetch_image_classify_list(
         &self,
         limit: Option<i32>,
         offset: Option<i32>,
-    ) -> MewResult<Value> {
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let timestamp = current_timestamp_13();
 
         let response = self
@@ -1610,14 +1617,13 @@ impl ImageClassifyManager {
             .with_param("TIME", timestamp.to_string())
             .with_param("limit", limit.unwrap_or(20).to_string())
             .with_param("offset", offset.unwrap_or(0).to_string())
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 提交图像分类
-    pub async fn submit_image_classify(&self, data: Value) -> MewResult<Value> {
+    pub fn submit_image_classify(&self, data: Value) -> Result<Value, Box<dyn std::error::Error>> {
         let response = self
             .client
             .build_request(
@@ -1626,37 +1632,41 @@ impl ImageClassifyManager {
                 Some(BaseKey::Creation),
             )
             .with_payload(data)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 更新图像分类
-    pub async fn update_image_classify(&self, classify_id: &str, data: Value) -> MewResult<Value> {
+    pub fn update_image_classify(
+        &self,
+        classify_id: &str,
+        data: Value,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/neko/image-classify/{}", classify_id);
 
         let response = self
             .client
             .build_request(HttpMethod::PUT, &endpoint, Some(BaseKey::Creation))
             .with_payload(data)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 删除图像分类
-    pub async fn delete_image_classify(&self, classify_id: &str) -> MewResult<Value> {
+    pub fn delete_image_classify(
+        &self,
+        classify_id: &str,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/neko/image-classify/{}", classify_id);
 
         let response = self
             .client
             .build_request(HttpMethod::DELETE, &endpoint, Some(BaseKey::Creation))
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 }
 
@@ -1679,12 +1689,12 @@ impl PackageManager {
     }
 
     // 获取包列表
-    pub async fn fetch_package_list(
+    pub fn fetch_package_list(
         &self,
         package_type: &str,
         limit: Option<i32>,
         offset: Option<i32>,
-    ) -> MewResult<Value> {
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let timestamp = current_timestamp_13();
 
         let response = self
@@ -1698,31 +1708,29 @@ impl PackageManager {
             .with_param("type", package_type)
             .with_param("limit", limit.unwrap_or(20).to_string())
             .with_param("offset", offset.unwrap_or(0).to_string())
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 创建包
-    pub async fn create_package(&self, data: Value) -> MewResult<Value> {
+    pub fn create_package(&self, data: Value) -> Result<Value, Box<dyn std::error::Error>> {
         let response = self
             .client
             .build_request(HttpMethod::POST, "/neko/package", Some(BaseKey::Creation))
             .with_payload(data)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 更新包信息
-    pub async fn update_package(
+    pub fn update_package(
         &self,
         package_id: &str,
         name: &str,
         description: &str,
-    ) -> MewResult<Value> {
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/neko/package/{}", package_id);
 
         let data = json!({
@@ -1734,23 +1742,21 @@ impl PackageManager {
             .client
             .build_request(HttpMethod::PUT, &endpoint, Some(BaseKey::Creation))
             .with_payload(data)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 删除包
-    pub async fn delete_package(&self, package_id: &str) -> MewResult<Value> {
+    pub fn delete_package(&self, package_id: &str) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/neko/package/{}", package_id);
 
         let response = self
             .client
             .build_request(HttpMethod::DELETE, &endpoint, Some(BaseKey::Creation))
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 }
 
@@ -1773,7 +1779,10 @@ impl SampleManager {
     }
 
     // 获取 Kitten N 示例详情
-    pub async fn fetch_sample_detail(&self, params: Vec<(String, String)>) -> MewResult<Value> {
+    pub fn fetch_sample_detail(
+        &self,
+        params: Vec<(String, String)>,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let timestamp = current_timestamp_13();
         let mut builder = self
             .client
@@ -1788,12 +1797,12 @@ impl SampleManager {
             builder = builder.with_param(key, value);
         }
 
-        let response = builder.send().await?;
-        response.json().await.map_err(MewError::from)
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取示例列表
-    pub async fn fetch_sample_list(&self, subject_id: &str) -> MewResult<Value> {
+    pub fn fetch_sample_list(&self, subject_id: &str) -> Result<Value, Box<dyn std::error::Error>> {
         let timestamp = current_timestamp_13();
 
         let response = self
@@ -1805,10 +1814,9 @@ impl SampleManager {
             )
             .with_param("TIME", timestamp.to_string())
             .with_param("subject_id", subject_id)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 }
 
@@ -1833,111 +1841,115 @@ impl WorkDataFetcher {
     // ---------- 作品详情 ----------
 
     // 获取作品详细信息
-    pub async fn fetch_work_details(&self, work_id: i32) -> MewResult<Value> {
+    pub fn fetch_work_details(&self, work_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/creation-tools/v1/works/{}", work_id);
 
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, None)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取 Kitten 作品详细信息
-    pub async fn fetch_kitten_work_details(&self, work_id: i32) -> MewResult<Value> {
+    pub fn fetch_kitten_work_details(
+        &self,
+        work_id: i32,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/kitten/work/detail/{}", work_id);
 
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取 KN 作品详细信息
-    pub async fn fetch_kn_work_details(&self, work_id: i32) -> MewResult<Value> {
+    pub fn fetch_kn_work_details(&self, work_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/neko/works/{}", work_id);
 
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取 Coco 作品信息
-    pub async fn fetch_coco_work_info(&self, work_id: i32) -> MewResult<Value> {
+    pub fn fetch_coco_work_info(&self, work_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/coconut/web/work/{}/info", work_id);
 
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取 KN 作品发布状态
-    pub async fn fetch_kn_publish_status(&self, work_id: i32) -> MewResult<Value> {
+    pub fn fetch_kn_publish_status(
+        &self,
+        work_id: i32,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/neko/community/work/detail/{}", work_id);
 
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取 KN 作品状态
-    pub async fn fetch_kn_work_state(&self, work_id: i32) -> MewResult<Value> {
+    pub fn fetch_kn_work_state(&self, work_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/neko/works/status/{}", work_id);
 
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取 KN 作品详情
-    pub async fn fetch_kn_work_detail(&self, work_id: i32) -> MewResult<Value> {
+    pub fn fetch_kn_work_detail(&self, work_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/neko/community/player/published-work-detail/{}", work_id);
 
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取玩家作品详情
-    pub async fn fetch_player_work_detail(&self, work_id: i32) -> MewResult<Value> {
+    pub fn fetch_player_work_detail(
+        &self,
+        work_id: i32,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/neko/works/player/work-detail/{}", work_id);
 
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 通过课程代码获取作品
-    pub async fn fetch_work_by_course_code(&self, course_code: &str) -> MewResult<Value> {
+    pub fn fetch_work_by_course_code(
+        &self,
+        course_code: &str,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let timestamp = current_timestamp_13();
 
         let response = self
@@ -1949,49 +1961,48 @@ impl WorkDataFetcher {
             )
             .with_param("TIME", timestamp.to_string())
             .with_param("course_code", course_code)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取作品状态
-    pub async fn fetch_work_status(&self, work_id: i32) -> MewResult<Value> {
+    pub fn fetch_work_status(&self, work_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/neko/works/status/{}", work_id);
 
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取作品参加的活动信息
-    pub async fn fetch_work_activity(&self, work_id: i32) -> MewResult<Value> {
+    pub fn fetch_work_activity(&self, work_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/web/works/activity/info/{}", work_id);
 
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, None)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 检查用户操作状态
-    pub async fn check_user_operation_status(&self, work_id: i32) -> MewResult<Value> {
+    pub fn check_user_operation_status(
+        &self,
+        work_id: i32,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/neko/community/check-user-opr-work-status/{}", work_id);
 
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // ---------- 评论相关 ----------
@@ -2021,72 +2032,85 @@ impl WorkDataFetcher {
     // ---------- 源代码 ----------
 
     // 获取作品源代码
-    pub async fn fetch_work_source_code(&self, work_id: i32) -> MewResult<Value> {
+    pub fn fetch_work_source_code(
+        &self,
+        work_id: i32,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/creation-tools/v1/works/{}/source/public", work_id);
 
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, None)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取 Kitten 作品源代码
-    pub async fn fetch_kitten_source_code(&self, work_id: i32) -> MewResult<Value> {
+    pub fn fetch_kitten_source_code(
+        &self,
+        work_id: i32,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/kitten/work/ide/load/{}", work_id);
 
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取 游玩端 Kitten 作品代码
-    pub async fn fetch_kitten_player_code(&self, work_id: i32) -> MewResult<Value> {
+    pub fn fetch_kitten_player_code(
+        &self,
+        work_id: i32,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/kitten/r2/work/player/load/{}", work_id);
 
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取 Coco 作品源代码
-    pub async fn fetch_coco_source_code(&self, work_id: i32) -> MewResult<Value> {
+    pub fn fetch_coco_source_code(
+        &self,
+        work_id: i32,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/coconut/web/work/{}/content", work_id);
 
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取 游玩端 Coco 作品代码
-    pub async fn fetch_coco_player_code(&self, work_id: i32) -> MewResult<Value> {
+    pub fn fetch_coco_player_code(
+        &self,
+        work_id: i32,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/coconut/web/work/{}/load", work_id);
 
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取 游玩端 Wood 作品代码
-    pub async fn fetch_wood_player_code(&self, work_id: i32) -> MewResult<Value> {
+    pub fn fetch_wood_player_code(
+        &self,
+        work_id: i32,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let timestamp = current_timestamp_13();
         let endpoint = format!("/wood/work/{}/publish", work_id);
 
@@ -2095,42 +2119,48 @@ impl WorkDataFetcher {
             .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
             .with_param("TIME", timestamp.to_string())
             .with_param("channel_type", "0")
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取 KN 作品历史版本
-    pub async fn fetch_kn_work_versions(&self, work_id: i32) -> MewResult<Value> {
+    pub fn fetch_kn_work_versions(
+        &self,
+        work_id: i32,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/neko/works/archive/{}", work_id);
 
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // ---------- 作品列表和推荐 ----------
 
     // 获取 Web 端相关作品推荐
-    pub async fn fetch_web_recommendations(&self, work_id: i32) -> MewResult<Value> {
+    pub fn fetch_web_recommendations(
+        &self,
+        work_id: i32,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/nemo/v2/works/web/{}/recommended", work_id);
 
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, None)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取 Nemo 端相关作品推荐
-    pub async fn fetch_nemo_recommendations(&self, work_id: i32) -> MewResult<Value> {
+    pub fn fetch_nemo_recommendations(
+        &self,
+        work_id: i32,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let timestamp = current_timestamp_13();
 
         let response = self
@@ -2142,19 +2172,45 @@ impl WorkDataFetcher {
             )
             .with_param("TIME", timestamp.to_string())
             .with_param("work_id", work_id.to_string())
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
+    }
+
+    // 获取 Web 端最新作品
+    pub fn fetch_new_works_web(
+        &self,
+        limit: Option<i32>,
+        offset: Option<i32>,
+        origin: bool,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
+        let timestamp = current_timestamp_13();
+        let mut builder = self
+            .client
+            .build_request(
+                HttpMethod::GET,
+                "/creation-tools/v1/pc/discover/newest-work",
+                None,
+            )
+            .with_param("TIME", timestamp.to_string())
+            .with_param("limit", limit.unwrap_or(15).to_string())
+            .with_param("offset", offset.unwrap_or(0).to_string());
+
+        if origin {
+            builder = builder.with_param("work_origin_type", "ORIGINAL_WORK");
+        }
+
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取 Web 端主题作品
-    pub async fn fetch_themed_works_web(
+    pub fn fetch_themed_works_web(
         &self,
         limit: i32,
         offset: Option<i32>,
         subject_id: Option<i32>,
-    ) -> MewResult<Value> {
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let timestamp = current_timestamp_13();
         let mut builder = self
             .client
@@ -2171,19 +2227,18 @@ impl WorkDataFetcher {
             builder = builder.with_param("subject_id", sid.to_string());
         }
 
-        let response = builder.send().await?;
-        response.json().await.map_err(MewError::from)
+        let response = builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取 Nemo 端发现页作品
-    pub async fn fetch_nemo_discover(&self) -> MewResult<Value> {
+    pub fn fetch_nemo_discover(&self) -> Result<Value, Box<dyn std::error::Error>> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/creation-tools/v1/home/discover", None)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取 Nemo 端最新作品
@@ -2192,62 +2247,27 @@ impl WorkDataFetcher {
         types: NemoWorkType,
         limit: Option<i32>,
         offset: Option<i32>,
-    ) -> PaginatedIter {
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let timestamp = current_timestamp_13();
-        let mut paginated = self
+        let endpoint = format!("/nemo/v3/newest/work/{}/list", types.as_str());
+
+        let response = self
             .client
-            .paginated(format!("/nemo/v3/newest/work/{}/list", types.as_str()))
-            .with_param("TIME", timestamp.to_string());
-
-        if let Some(lim) = limit {
-            paginated = paginated.with_limit(lim as usize);
-        }
-
-        paginated
-            .with_param("limit", limit.unwrap_or(15).to_string())
-            .with_param("offset", offset.unwrap_or(0).to_string())
-            .with_offset_key("offset")
-            .with_amount_key("limit")
-            .with_data_key("items")
-            .with_total_key("total")
-    }
-
-    // 获取 Web 端最新作品
-    pub fn fetch_new_works_web(
-        &self,
-        limit: Option<i32>,
-        offset: Option<i32>,
-        origin: bool,
-    ) -> PaginatedIter {
-        let timestamp = current_timestamp_13();
-        let mut paginated = self
-            .client
-            .paginated("/creation-tools/v1/pc/discover/newest-work")
+            .build_request(HttpMethod::GET, &endpoint, None)
             .with_param("TIME", timestamp.to_string())
             .with_param("limit", limit.unwrap_or(15).to_string())
-            .with_param("offset", offset.unwrap_or(0).to_string());
+            .with_param("offset", offset.unwrap_or(0).to_string())
+            .send()?;
 
-        if origin {
-            paginated = paginated.with_param("work_origin_type", "ORIGINAL_WORK");
-        }
-
-        if let Some(lim) = limit {
-            paginated = paginated.with_limit(lim as usize);
-        }
-
-        paginated
-            .with_offset_key("offset")
-            .with_amount_key("limit")
-            .with_data_key("items")
-            .with_total_key("total")
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取动态作品
-    pub async fn fetch_activity_feed(
+    pub fn fetch_activity_feed(
         &self,
         limit: Option<i32>,
         offset: Option<i32>,
-    ) -> MewResult<Value> {
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let timestamp = current_timestamp_13();
 
         let response = self
@@ -2256,14 +2276,13 @@ impl WorkDataFetcher {
             .with_param("TIME", timestamp.to_string())
             .with_param("limit", limit.unwrap_or(15).to_string())
             .with_param("offset", offset.unwrap_or(0).to_string())
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取动态推荐用户
-    pub async fn fetch_recommended_users(&self) -> MewResult<Value> {
+    pub fn fetch_recommended_users(&self) -> Result<Value, Box<dyn std::error::Error>> {
         let response = self
             .client
             .build_request(
@@ -2271,45 +2290,42 @@ impl WorkDataFetcher {
                 "/nemo/v3/dynamic/focus/user/recommend",
                 None,
             )
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // ---------- 主题相关 ----------
 
     // 获取随机作品主题 ID 列表
-    pub async fn fetch_random_subjects(&self) -> MewResult<Value> {
+    pub fn fetch_random_subjects(&self) -> Result<Value, Box<dyn std::error::Error>> {
         let response = self
             .client
             .build_request(HttpMethod::GET, "/nemo/v3/work-subject/random", None)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取主题详细信息
-    pub async fn fetch_subject_details(&self, ids: i32) -> MewResult<Value> {
+    pub fn fetch_subject_details(&self, ids: i32) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/nemo/v3/work-subject/{}/info", ids);
 
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, None)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取主题下作品
-    pub async fn fetch_subject_works(
+    pub fn fetch_subject_works(
         &self,
         ids: i32,
         limit: Option<i32>,
         offset: Option<i32>,
-    ) -> MewResult<Value> {
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let timestamp = current_timestamp_13();
         let endpoint = format!("/nemo/v3/work-subject/{}/works", ids);
 
@@ -2319,18 +2335,17 @@ impl WorkDataFetcher {
             .with_param("TIME", timestamp.to_string())
             .with_param("limit", limit.unwrap_or(15).to_string())
             .with_param("offset", offset.unwrap_or(0).to_string())
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取所有主题作品
-    pub async fn fetch_all_subject_works(
+    pub fn fetch_all_subject_works(
         &self,
         limit: Option<i32>,
         offset: Option<i32>,
-    ) -> MewResult<Value> {
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let timestamp = current_timestamp_13();
 
         let response = self
@@ -2339,38 +2354,41 @@ impl WorkDataFetcher {
             .with_param("TIME", timestamp.to_string())
             .with_param("limit", limit.unwrap_or(15).to_string())
             .with_param("offset", offset.unwrap_or(0).to_string())
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // ---------- 作品谱系 ----------
 
     // 获取 Web 端作品谱系
-    pub async fn fetch_work_lineage_web(&self, work_id: i32) -> MewResult<Value> {
+    pub fn fetch_work_lineage_web(
+        &self,
+        work_id: i32,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/tiger/work/tree/{}", work_id);
 
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, None)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取 Nemo 端作品谱系
-    pub async fn fetch_work_lineage_nemo(&self, work_id: i32) -> MewResult<Value> {
+    pub fn fetch_work_lineage_nemo(
+        &self,
+        work_id: i32,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/nemo/v2/works/root/{}", work_id);
 
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, None)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // ---------- 回收站 ----------
@@ -2583,12 +2601,12 @@ impl WorkDataFetcher {
     }
 
     // 通过名称搜索作品
-    pub async fn search_works_by_name_web(
+    pub fn search_works_by_name_web(
         &self,
         name: &str,
         limit: Option<i32>,
         offset: Option<i32>,
-    ) -> MewResult<Value> {
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let timestamp = current_timestamp_13();
 
         let response = self
@@ -2598,19 +2616,18 @@ impl WorkDataFetcher {
             .with_param("query", name)
             .with_param("offset", offset.unwrap_or(0).to_string())
             .with_param("limit", limit.unwrap_or(20).to_string())
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 通过名称搜索作品 (版本 2)
-    pub async fn search_works_by_name_nemo(
+    pub fn search_works_by_name_nemo(
         &self,
         name: &str,
         limit: Option<i32>,
         offset: Option<i32>,
-    ) -> MewResult<Value> {
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let timestamp = current_timestamp_13();
 
         let response = self
@@ -2620,29 +2637,27 @@ impl WorkDataFetcher {
             .with_param("key", name)
             .with_param("offset", offset.unwrap_or(0).to_string())
             .with_param("limit", limit.unwrap_or(20).to_string())
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // ---------- 标签和元数据 ----------
 
     // 获取作品元数据
-    pub async fn fetch_work_metadata(&self, work_id: i32) -> MewResult<Value> {
+    pub fn fetch_work_metadata(&self, work_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/api/work/info/{}", work_id);
 
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, None)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取作品标签
-    pub async fn fetch_work_tags(&self, work_id: i32) -> MewResult<Value> {
+    pub fn fetch_work_tags(&self, work_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
         let timestamp = current_timestamp_13();
 
         let response = self
@@ -2654,14 +2669,13 @@ impl WorkDataFetcher {
             )
             .with_param("TIME", timestamp.to_string())
             .with_param("work_id", work_id.to_string())
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取所有 Kitten 作品标签
-    pub async fn fetch_kitten_tags(&self) -> MewResult<Value> {
+    pub fn fetch_kitten_tags(&self) -> Result<Value, Box<dyn std::error::Error>> {
         let response = self
             .client
             .build_request(
@@ -2669,14 +2683,13 @@ impl WorkDataFetcher {
                 "/kitten/work/labels",
                 Some(BaseKey::Creation),
             )
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取 Kitten 默认封面
-    pub async fn fetch_kitten_default_covers(&self) -> MewResult<Value> {
+    pub fn fetch_kitten_default_covers(&self) -> Result<Value, Box<dyn std::error::Error>> {
         let response = self
             .client
             .build_request(
@@ -2684,27 +2697,29 @@ impl WorkDataFetcher {
                 "/kitten/work/cover/defaultCovers",
                 Some(BaseKey::Creation),
             )
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取作品最近使用的封面
-    pub async fn fetch_recent_covers(&self, work_id: i32) -> MewResult<Value> {
+    pub fn fetch_recent_covers(&self, work_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/kitten/work/cover/{}/recentCovers", work_id);
 
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, Some(BaseKey::Creation))
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 验证作品名称是否可用
-    pub async fn validate_work_name(&self, name: &str, work_id: i32) -> MewResult<Value> {
+    pub fn validate_work_name(
+        &self,
+        name: &str,
+        work_id: i32,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let timestamp = current_timestamp_13();
 
         let response = self
@@ -2713,31 +2728,35 @@ impl WorkDataFetcher {
             .with_param("TIME", timestamp.to_string())
             .with_param("name", name)
             .with_param("work_id", work_id.to_string())
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // ---------- 作者相关 ----------
 
     // 获取作者作品集
-    pub async fn fetch_author_portfolio(&self, user_id: i32) -> MewResult<Value> {
+    pub fn fetch_author_portfolio(
+        &self,
+        user_id: i32,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!("/web/works/users/{}", user_id);
 
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, None)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // ---------- 其他 ----------
 
     // 根据喵口令获取作品数据
-    pub async fn fetch_work_by_miao_code(&self, token: &str) -> MewResult<Value> {
+    pub fn fetch_work_by_miao_code(
+        &self,
+        token: &str,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let timestamp = current_timestamp_13();
 
         let response = self
@@ -2745,14 +2764,13 @@ impl WorkDataFetcher {
             .build_request(HttpMethod::GET, "/tiger/nemo/miao-codes", None)
             .with_param("TIME", timestamp.to_string())
             .with_param("token", token)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取 KN 作品变量列表
-    pub async fn fetch_kn_variables(&self, work_id: i32) -> MewResult<Value> {
+    pub fn fetch_kn_variables(&self, work_id: i32) -> Result<Value, Box<dyn std::error::Error>> {
         let endpoint = format!(
             "https://socketcv.codemao.cn/neko/cv/list/variables/{}",
             work_id
@@ -2761,19 +2779,18 @@ impl WorkDataFetcher {
         let response = self
             .client
             .build_request(HttpMethod::GET, &endpoint, None)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取积木或角色资源包
-    pub async fn fetch_resource_pack(
+    pub fn fetch_resource_pack(
         &self,
         types: ResourcePackType,
         limit: Option<i32>,
         offset: Option<i32>,
-    ) -> MewResult<Value> {
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let timestamp = current_timestamp_13();
 
         let response = self
@@ -2787,14 +2804,16 @@ impl WorkDataFetcher {
             .with_param("type", types.as_value().to_string())
             .with_param("limit", limit.unwrap_or(16).to_string())
             .with_param("offset", offset.unwrap_or(0).to_string())
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取素材分类
-    pub async fn fetch_material_categories(&self, material_type: &str) -> MewResult<Value> {
+    pub fn fetch_material_categories(
+        &self,
+        material_type: &str,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let timestamp = current_timestamp_13();
 
         let response = self
@@ -2806,19 +2825,18 @@ impl WorkDataFetcher {
             )
             .with_param("TIME", timestamp.to_string())
             .with_param("type", material_type)
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 
     // 获取素材列表
-    pub async fn fetch_material_list(
+    pub fn fetch_material_list(
         &self,
         second_id: &str,
         limit: Option<i32>,
         offset: Option<i32>,
-    ) -> MewResult<Value> {
+    ) -> Result<Value, Box<dyn std::error::Error>> {
         let timestamp = current_timestamp_13();
 
         let response = self
@@ -2832,10 +2850,9 @@ impl WorkDataFetcher {
             .with_param("second_id", second_id)
             .with_param("limit", limit.unwrap_or(20).to_string())
             .with_param("offset", offset.unwrap_or(0).to_string())
-            .send()
-            .await?;
+            .send()?;
 
-        response.json().await.map_err(MewError::from)
+        Ok(self.client.response_to_json(response)?)
     }
 }
 

@@ -1,6 +1,6 @@
 use rand::Rng;
-use reqwest::{Client, RequestBuilder, Response, header::HeaderMap, multipart};
 use serde_json::Value;
+use std::fmt;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::{
@@ -8,33 +8,59 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 use std::time::Duration;
-use thiserror::Error as ThisError;
-use tokio::sync::{Semaphore, mpsc};
-use tokio::task::JoinSet;
+use ureq::http::Response;
+use ureq::unversioned::multipart::Form;
+use ureq::{Agent, Body, RequestBuilder};
 
-// ==================== 错误定义（使用 thiserror） ====================
-#[derive(ThisError, Debug)]
-pub enum MewError {
-    #[error("HTTP error: {0}")]
-    Http(#[from] reqwest::Error),
-    #[error("I/O error: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("JSON error: {0}")]
-    Json(#[from] serde_json::Error),
-    #[error("Auth error: {0}")]
+// ==================== 错误定义 ====================
+#[derive(Debug)]
+pub enum Error {
+    Http(ureq::Error),
+    Io(std::io::Error),
+    Json(serde_json::Error),
     Auth(String),
-    #[error("Pagination error: {0}")]
     Pagination(String),
-    #[error("Other error: {0}")]
     Other(String),
 }
 
-pub type MewResult<T> = std::result::Result<T, MewError>;
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::Http(e) => write!(f, "HTTP error: {}", e),
+            Error::Io(e) => write!(f, "I/O error: {}", e),
+            Error::Json(e) => write!(f, "JSON error: {}", e),
+            Error::Auth(e) => write!(f, "Auth error: {}", e),
+            Error::Pagination(e) => write!(f, "Pagination error: {}", e),
+            Error::Other(e) => write!(f, "Other error: {}", e),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
+impl From<ureq::Error> for Error {
+    fn from(err: ureq::Error) -> Self {
+        Error::Http(err)
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(err: std::io::Error) -> Self {
+        Error::Io(err)
+    }
+}
+
+impl From<serde_json::Error> for Error {
+    fn from(err: serde_json::Error) -> Self {
+        Error::Json(err)
+    }
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
 
 // ==================== 基础 URL 键枚举 ====================
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BaseKey {
-    #[default]
     Default,
     Creation,
     Whale,
@@ -72,21 +98,27 @@ impl BaseKey {
 }
 
 impl FromStr for BaseKey {
-    type Err = MewError;
-    fn from_str(s: &str) -> MewResult<Self> {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self> {
         match s {
             "default" => Ok(BaseKey::Default),
             "creation" => Ok(BaseKey::Creation),
             "whale" => Ok(BaseKey::Whale),
             "education" => Ok(BaseKey::Education),
-            _ => Err(MewError::Other(format!("invalid base key: {}", s))),
+            _ => Err(Error::Other(format!("invalid base key: {}", s))),
         }
     }
 }
 
+impl Default for BaseKey {
+    fn default() -> Self {
+        BaseKey::Default
+    }
+}
+
 // ==================== 常量定义 ====================
-/// 默认请求头静态切片（萌化命名）
-const KITTY_HEADERS: &[(&str, &str)] = &[
+/// 默认请求头静态切片
+const DEFAULT_HEADERS: &[(&str, &str)] = &[
     ("Accept", "application/json, text/plain, */*"),
     (
         "User-Agent",
@@ -99,55 +131,55 @@ const KITTY_HEADERS: &[(&str, &str)] = &[
     ),
 ];
 
-// ==================== 身份枚举（萌化：Catsona） ====================
+// ==================== 身份枚举 ====================
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Catsona {
-    Fluffy,  // 普通用户（原 Average）
-    Scholar, // 教育（原 Edu）
-    Judge,   // 评审（原 Judgement）
-    Blanky,  // 空白（原 Blank）
+pub enum Identity {
+    Average,
+    Edu,
+    Judgement,
+    Blank,
 }
 
-impl Catsona {
+impl Identity {
     /// 转换为数组索引 (0..3)
     fn index(self) -> usize {
         match self {
-            Catsona::Fluffy => 0,
-            Catsona::Scholar => 1,
-            Catsona::Judge => 2,
-            Catsona::Blanky => 3,
+            Identity::Average => 0,
+            Identity::Edu => 1,
+            Identity::Judgement => 2,
+            Identity::Blank => 3,
         }
     }
 
     /// 所有身份变体
-    pub const ALL: [Catsona; 4] = [
-        Catsona::Fluffy,
-        Catsona::Scholar,
-        Catsona::Judge,
-        Catsona::Blanky,
+    pub const ALL: [Identity; 4] = [
+        Identity::Average,
+        Identity::Edu,
+        Identity::Judgement,
+        Identity::Blank,
     ];
 }
 
-impl FromStr for Catsona {
-    type Err = MewError;
-    fn from_str(s: &str) -> MewResult<Self> {
+impl FromStr for Identity {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self> {
         match s {
-            "average" => Ok(Catsona::Fluffy),
-            "edu" => Ok(Catsona::Scholar),
-            "judgement" => Ok(Catsona::Judge),
-            "blank" => Ok(Catsona::Blanky),
-            _ => Err(MewError::Auth(format!("invalid identity: {}", s))),
+            "average" => Ok(Identity::Average),
+            "edu" => Ok(Identity::Edu),
+            "judgement" => Ok(Identity::Judgement),
+            "blank" => Ok(Identity::Blank),
+            _ => Err(Error::Auth(format!("invalid identity: {}", s))),
         }
     }
 }
 
-impl AsRef<str> for Catsona {
+impl AsRef<str> for Identity {
     fn as_ref(&self) -> &str {
         match self {
-            Catsona::Fluffy => "average",
-            Catsona::Scholar => "edu",
-            Catsona::Judge => "judgement",
-            Catsona::Blanky => "blank",
+            Identity::Average => "average",
+            Identity::Edu => "edu",
+            Identity::Judgement => "judgement",
+            Identity::Blank => "blank",
         }
     }
 }
@@ -156,53 +188,48 @@ impl AsRef<str> for Catsona {
 /// 全局身份管理器，使用固定长度数组存储令牌
 /// 采用 RwLock + AtomicUsize 分离 token 存储和 current 索引
 #[derive(Debug)]
-pub struct KittyIdentityManager {
-    token_bowl: RwLock<[Option<Arc<str>>; 4]>, // 令牌碗
-    current_cat: AtomicUsize,                  // 当前猫猫
+pub struct GlobalIdentityManager {
+    tokens: RwLock<[Option<Arc<str>>; 4]>,
+    current: AtomicUsize,
 }
 
-impl KittyIdentityManager {
+impl GlobalIdentityManager {
     fn new() -> Self {
         Self {
-            token_bowl: RwLock::new(Default::default()),
-            current_cat: AtomicUsize::new(Catsona::Fluffy.index()),
+            tokens: RwLock::new(Default::default()),
+            current: AtomicUsize::new(Identity::Average.index()),
         }
     }
 
     /// 设置指定身份的令牌
-    fn set_token(&self, identity: Catsona, token: String) {
-        let mut bowl = self.token_bowl.write().unwrap();
+    fn set_token(&self, identity: Identity, token: String) {
+        let mut tokens = self.tokens.write().unwrap();
         if !token.is_empty() {
-            bowl[identity.index()] = Some(Arc::from(token));
+            tokens[identity.index()] = Some(Arc::from(token));
         }
     }
 
     /// 切换到指定身份
-    fn switch_identity(&self, identity: Catsona) -> MewResult<()> {
-        if identity == Catsona::Blanky
-            || self.token_bowl.read().unwrap()[identity.index()].is_some()
-        {
-            self.current_cat.store(identity.index(), Ordering::Relaxed);
+    fn switch_identity(&self, identity: Identity) -> Result<()> {
+        if identity == Identity::Blank || self.tokens.read().unwrap()[identity.index()].is_some() {
+            self.current.store(identity.index(), Ordering::Relaxed);
             Ok(())
         } else {
-            Err(MewError::Auth(format!(
-                "No token for identity {:?}",
-                identity
-            )))
+            Err(Error::Auth(format!("No token for identity {:?}", identity)))
         }
     }
 
     /// 当前身份（无锁读取）
-    fn current_identity(&self) -> Catsona {
-        let idx = self.current_cat.load(Ordering::Relaxed);
-        Catsona::ALL[idx]
+    fn current_identity(&self) -> Identity {
+        let idx = self.current.load(Ordering::Relaxed);
+        Identity::ALL[idx]
     }
 
     /// 当前身份对应的令牌
     fn current_token(&self) -> Option<Arc<str>> {
-        let idx = self.current_cat.load(Ordering::Relaxed);
-        let bowl = self.token_bowl.read().unwrap();
-        bowl[idx].clone()
+        let idx = self.current.load(Ordering::Relaxed);
+        let tokens = self.tokens.read().unwrap();
+        tokens[idx].clone()
     }
 
     /// 生成认证头
@@ -213,15 +240,15 @@ impl KittyIdentityManager {
 }
 
 /// 全局身份管理器单例
-static GLOBAL_IDENTITY_MANAGER: OnceLock<KittyIdentityManager> = OnceLock::new();
+static GLOBAL_IDENTITY_MANAGER: OnceLock<GlobalIdentityManager> = OnceLock::new();
 
-fn get_global_identity_manager() -> &'static KittyIdentityManager {
-    GLOBAL_IDENTITY_MANAGER.get_or_init(KittyIdentityManager::new)
+fn get_global_identity_manager() -> &'static GlobalIdentityManager {
+    GLOBAL_IDENTITY_MANAGER.get_or_init(|| GlobalIdentityManager::new())
 }
 
 // ==================== 客户端配置 ====================
 #[derive(Debug, Clone)]
-pub struct KittyConfig {
+pub struct ClientConfig {
     default_base_key: BaseKey,
     timeout: Duration,
     log_requests: bool,
@@ -229,7 +256,7 @@ pub struct KittyConfig {
     use_global_auth: bool,
 }
 
-impl KittyConfig {
+impl ClientConfig {
     pub fn new() -> Self {
         Self::default()
     }
@@ -261,7 +288,7 @@ impl KittyConfig {
     }
 }
 
-impl Default for KittyConfig {
+impl Default for ClientConfig {
     fn default() -> Self {
         Self {
             default_base_key: BaseKey::Default,
@@ -298,29 +325,29 @@ impl From<HttpMethod> for &'static str {
 
 // ==================== 认证特质 ====================
 /// 认证提供者特质，允许不同的认证实现
-pub trait KittyAuth: Send + Sync + std::fmt::Debug {
-    fn current_identity(&self) -> Catsona;
+pub trait AuthProvider: Send + Sync + std::fmt::Debug {
+    fn current_identity(&self) -> Identity;
     fn current_token(&self) -> Option<Arc<str>>;
     fn auth_header(&self) -> Option<(&'static str, String)> {
         self.current_token()
             .map(|token| ("Authorization", format!("Bearer {}", token)))
     }
-    fn set_token(&self, identity: Catsona, token: String) -> MewResult<()>;
-    fn switch_identity(&self, identity: Catsona) -> MewResult<()>;
+    fn set_token(&self, identity: Identity, token: String) -> Result<()>;
+    fn switch_identity(&self, identity: Identity) -> Result<()>;
 }
 
 /// 全局认证提供者
 #[derive(Debug, Clone)]
-pub struct GlobalKittyAuth;
+pub struct GlobalAuthProvider;
 
-impl GlobalKittyAuth {
+impl GlobalAuthProvider {
     pub fn new() -> Self {
         Self
     }
 }
 
-impl KittyAuth for GlobalKittyAuth {
-    fn current_identity(&self) -> Catsona {
+impl AuthProvider for GlobalAuthProvider {
+    fn current_identity(&self) -> Identity {
         get_global_identity_manager().current_identity()
     }
 
@@ -328,32 +355,32 @@ impl KittyAuth for GlobalKittyAuth {
         get_global_identity_manager().current_token()
     }
 
-    fn set_token(&self, identity: Catsona, token: String) -> MewResult<()> {
+    fn set_token(&self, identity: Identity, token: String) -> Result<()> {
         get_global_identity_manager().set_token(identity, token);
         Ok(())
     }
 
-    fn switch_identity(&self, identity: Catsona) -> MewResult<()> {
+    fn switch_identity(&self, identity: Identity) -> Result<()> {
         get_global_identity_manager().switch_identity(identity)
     }
 }
 
 /// 本地认证提供者（独立实例）
 #[derive(Debug, Clone)]
-pub struct LocalKittyAuth {
-    inner: Arc<KittyIdentityManager>,
+pub struct LocalAuthProvider {
+    inner: Arc<GlobalIdentityManager>,
 }
 
-impl LocalKittyAuth {
+impl LocalAuthProvider {
     pub fn new() -> Self {
         Self {
-            inner: Arc::new(KittyIdentityManager::new()),
+            inner: Arc::new(GlobalIdentityManager::new()),
         }
     }
 }
 
-impl KittyAuth for LocalKittyAuth {
-    fn current_identity(&self) -> Catsona {
+impl AuthProvider for LocalAuthProvider {
+    fn current_identity(&self) -> Identity {
         self.inner.current_identity()
     }
 
@@ -361,19 +388,19 @@ impl KittyAuth for LocalKittyAuth {
         self.inner.current_token()
     }
 
-    fn set_token(&self, identity: Catsona, token: String) -> MewResult<()> {
+    fn set_token(&self, identity: Identity, token: String) -> Result<()> {
         self.inner.set_token(identity, token);
         Ok(())
     }
 
-    fn switch_identity(&self, identity: Catsona) -> MewResult<()> {
+    fn switch_identity(&self, identity: Identity) -> Result<()> {
         self.inner.switch_identity(identity)
     }
 }
 
 // ==================== 请求构建器 ====================
-/// 请求构建器，支持链式设置可选参数（萌化名：KittyRequestBuilder）
-pub struct KittyRequestBuilder {
+/// 请求构建器，支持链式设置可选参数
+pub struct InnerBuilder {
     client: CodeMaoClient,
     method: HttpMethod,
     endpoint: String,
@@ -383,7 +410,7 @@ pub struct KittyRequestBuilder {
     headers: Vec<(String, String)>,
 }
 
-impl KittyRequestBuilder {
+impl InnerBuilder {
     fn new(
         client: CodeMaoClient,
         method: HttpMethod,
@@ -402,12 +429,11 @@ impl KittyRequestBuilder {
     }
 
     /// 设置查询参数，多次调用将合并参数（后添加的覆盖同名参数需要自行处理）
-    pub fn with_params(mut self, params: &[(String, String)]) -> Self {
-        self.params.extend_from_slice(params);
+    pub fn with_params(mut self, params: Vec<(String, String)>) -> Self {
+        self.params.extend(params);
         self
     }
 
-    /// 添加单个查询参数
     pub fn with_param(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.params.push((key.into(), value.into()));
         self
@@ -426,77 +452,47 @@ impl KittyRequestBuilder {
         self
     }
 
-    /// 添加单个临时请求头
     pub fn with_header(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.headers.push((key.into(), value.into()));
         self
     }
 
-    /// 异步发送请求
-    pub async fn send(self) -> MewResult<Response> {
-        self.client
-            .inner
-            .send_request(
-                self.method,
-                &self.endpoint,
-                self.base_key,
-                &self.params,
-                self.payload.as_ref(),
-                &self.headers,
-            )
-            .await
-    }
-    pub async fn send_multipart(self, form: multipart::Form) -> MewResult<Response> {
-        self.client
-            .inner
-            .send_multipart_request(
-                self.method,
-                &self.endpoint,
-                self.base_key,
-                &self.params,
-                form,
-                &self.headers,
-            )
-            .await
+    /// 发送请求，返回响应
+    pub fn send(self) -> Result<Response<Body>> {
+        self.client.inner.send_request(
+            self.method,
+            &self.endpoint,
+            self.base_key,
+            &self.params,
+            self.payload.as_ref(),
+            &self.headers,
+        )
     }
 }
 
-// ==================== 内部客户端核心（萌化名：KittyCore） ====================
+// ==================== 内部客户端结构 ====================
 #[derive(Clone)]
-struct KittyCore {
-    client: Client,
-    config: KittyConfig,
-    auth: Arc<dyn KittyAuth>,
+struct InnerClient {
+    agent: Agent,
+    config: ClientConfig,
+    auth: Arc<dyn AuthProvider>,
 }
 
-impl KittyCore {
-    fn new(config: KittyConfig, auth: Arc<dyn KittyAuth>) -> Self {
-        let mut default_headers = HeaderMap::new();
-        for &(k, v) in KITTY_HEADERS {
-            if let (Ok(key), Ok(val)) = (
-                reqwest::header::HeaderName::from_bytes(k.as_bytes()),
-                reqwest::header::HeaderValue::from_str(v),
-            ) {
-                default_headers.insert(key, val);
-            }
-        }
-
-        let client = Client::builder()
-            .timeout(config.timeout)
-            .default_headers(default_headers)
-            .cookie_store(true)
+impl InnerClient {
+    fn new(config: ClientConfig, auth: Arc<dyn AuthProvider>) -> Self {
+        let agent = Agent::config_builder()
+            .timeout_global(Some(config.timeout))
             .build()
-            .expect("Failed to build reqwest client");
-
+            .into();
         Self {
-            client,
+            agent,
             config,
             auth,
         }
     }
 
-    fn client(&self) -> &Client {
-        &self.client
+    fn agent(&self) -> &Agent {
+        &self.agent
     }
 
     fn build_url(&self, endpoint: &str, base_key: Option<BaseKey>) -> String {
@@ -527,7 +523,7 @@ impl KittyCore {
         println!("URL: {}", url);
 
         println!("请求头:");
-        for (k, v) in KITTY_HEADERS {
+        for (k, v) in DEFAULT_HEADERS {
             println!("  {}: {}", k, v);
         }
 
@@ -552,7 +548,7 @@ impl KittyCore {
         }
     }
 
-    fn log_response(&self, url: &str, response: &Response) -> MewResult<()> {
+    fn log_response(&self, url: &str, response: &Response<Body>) -> Result<()> {
         if !self.config.log_requests {
             return Ok(());
         }
@@ -561,7 +557,7 @@ impl KittyCore {
         println!("请求 URL: {}", url);
         println!(
             "状态: {} {}",
-            response.status().as_u16(),
+            response.status(),
             response.status().canonical_reason().unwrap_or("")
         );
 
@@ -576,7 +572,33 @@ impl KittyCore {
         Ok(())
     }
 
-    async fn send_request(
+    /// 为 RequestBuilder 添加默认头、认证头、额外头和查询参数
+    fn apply_to_request_builder<B>(
+        mut builder: RequestBuilder<B>,
+        auth: &dyn AuthProvider,
+        params: &[(String, String)],
+        extra_headers: &[(String, String)],
+    ) -> RequestBuilder<B> {
+        // 添加默认头
+        for (k, v) in DEFAULT_HEADERS {
+            builder = builder.header(*k, *v);
+        }
+        // 添加认证头
+        if let Some((k, v)) = auth.auth_header() {
+            builder = builder.header(k, &v);
+        }
+        // 添加额外头
+        for (k, v) in extra_headers {
+            builder = builder.header(k.as_str(), v.as_str());
+        }
+        // 添加查询参数
+        for (k, v) in params {
+            builder = builder.query(k.as_str(), v.as_str());
+        }
+        builder
+    }
+
+    fn send_request(
         &self,
         method: HttpMethod,
         endpoint: &str,
@@ -584,95 +606,167 @@ impl KittyCore {
         params: &[(String, String)],
         payload: Option<&Value>,
         extra_headers: &[(String, String)],
-    ) -> MewResult<Response> {
+    ) -> Result<Response<Body>> {
         let url = self.build_url(endpoint, base_key);
         self.log_request(method, &url, params, payload);
 
-        // 构建基础请求
-        let mut builder = match method {
-            HttpMethod::GET => self.client.get(&url),
-            HttpMethod::POST => self.client.post(&url),
-            HttpMethod::DELETE => self.client.delete(&url),
-            HttpMethod::PATCH => self.client.patch(&url),
-            HttpMethod::PUT => self.client.put(&url),
-            HttpMethod::HEAD => self.client.head(&url),
-        };
-
-        // 正确添加查询参数
-        if !params.is_empty() {
-            let query_pairs: Vec<(&str, &str)> = params
-                .iter()
-                .map(|(k, v)| (k.as_str(), v.as_str()))
-                .collect();
-            builder = builder.query(&query_pairs);
-        }
-
-        // 链式添加认证头和临时请求头
-        if let Some((k, v)) = self.auth.auth_header() {
-            builder = builder.header(k, v);
-        }
-        for (k, v) in extra_headers {
-            builder = builder.header(k.as_str(), v.as_str());
-        }
-
-        // 根据方法发送 payload
         let response = match method {
-            HttpMethod::POST | HttpMethod::PATCH | HttpMethod::PUT => {
-                if let Some(p) = payload {
-                    builder.json(p).send().await?
+            HttpMethod::GET => {
+                let builder = self.agent.get(&url);
+                let builder = Self::apply_to_request_builder(
+                    builder,
+                    self.auth.as_ref(),
+                    params,
+                    extra_headers,
+                );
+                builder.call()?
+            }
+            HttpMethod::POST => {
+                let builder = self.agent.post(&url);
+                let builder = Self::apply_to_request_builder(
+                    builder,
+                    self.auth.as_ref(),
+                    params,
+                    extra_headers,
+                );
+                if let Some(payload) = payload {
+                    builder.send_json(payload)?
                 } else {
-                    builder.send().await?
+                    builder.send_empty()?
                 }
             }
-            _ => builder.send().await?,
+            HttpMethod::DELETE => {
+                let builder = self.agent.delete(&url);
+                let builder = Self::apply_to_request_builder(
+                    builder,
+                    self.auth.as_ref(),
+                    params,
+                    extra_headers,
+                );
+                builder.call()?
+            }
+            HttpMethod::PATCH => {
+                let builder = self.agent.patch(&url);
+                let builder = Self::apply_to_request_builder(
+                    builder,
+                    self.auth.as_ref(),
+                    params,
+                    extra_headers,
+                );
+                if let Some(payload) = payload {
+                    builder.send_json(payload)?
+                } else {
+                    builder.send_empty()?
+                }
+            }
+            HttpMethod::PUT => {
+                let builder = self.agent.put(&url);
+                let builder = Self::apply_to_request_builder(
+                    builder,
+                    self.auth.as_ref(),
+                    params,
+                    extra_headers,
+                );
+                if let Some(payload) = payload {
+                    builder.send_json(payload)?
+                } else {
+                    builder.send_empty()?
+                }
+            }
+            HttpMethod::HEAD => {
+                let builder = self.agent.head(&url);
+                let builder = Self::apply_to_request_builder(
+                    builder,
+                    self.auth.as_ref(),
+                    params,
+                    extra_headers,
+                );
+                builder.call()?
+            }
         };
 
+        // 记录响应信息和响应体内容
         self.log_response(&url, &response)?;
         Ok(response)
     }
 
-    async fn send_multipart_request(
-        &self,
-        method: HttpMethod,
-        endpoint: &str,
-        base_key: Option<BaseKey>,
-        params: &[(String, String)],
-        form: multipart::Form,
-        extra_headers: &[(String, String)],
-    ) -> MewResult<Response> {
-        let url = self.build_url(endpoint, base_key);
-        self.log_request(method, &url, params, None);
-
-        let mut builder = match method {
-            HttpMethod::POST => self.client.post(&url),
-            HttpMethod::PUT => self.client.put(&url),
-            HttpMethod::PATCH => self.client.patch(&url),
-            _ => {
-                return Err(MewError::Other(
-                    "Multipart only supports POST/PUT/PATCH".into(),
-                ));
+    fn response_to_json(&self, response: Response<Body>) -> Result<Value> {
+        let mut body = response.into_body();
+        let bytes = body.read_to_vec()?;
+        if bytes.is_empty() {
+            if self.config.log_requests {
+                println!("响应体: (空)");
             }
-        };
-
-        if !params.is_empty() {
-            let query_pairs: Vec<(&str, &str)> = params
-                .iter()
-                .map(|(k, v)| (k.as_str(), v.as_str()))
-                .collect();
-            builder = builder.query(&query_pairs);
+            return Ok(Value::Null);
         }
 
-        if let Some((k, v)) = self.auth.auth_header() {
-            builder = builder.header(k, v);
-        }
-        for (k, v) in extra_headers {
-            builder = builder.header(k.as_str(), v.as_str());
+        let json: Value = serde_json::from_slice(&bytes)?;
+
+        if self.config.log_requests {
+            println!("\n---------- 响应体 (JSON) ----------");
+            if let Ok(pretty) = serde_json::to_string_pretty(&json) {
+                for line in pretty.lines() {
+                    println!("  {}", line);
+                }
+            }
+            println!("------------------------------------\n");
         }
 
-        let response = builder.multipart(form).send().await?;
+        Ok(json)
+    }
 
-        self.log_response(&url, &response)?;
-        Ok(response)
+    fn response_to_string(&self, response: Response<Body>) -> Result<String> {
+        let mut body = response.into_body();
+        let text = body.read_to_string()?;
+
+        if self.config.log_requests {
+            println!("\n---------- 响应体 (文本) ----------");
+            // 限制输出长度，避免日志过长
+            if text.len() > 1000 {
+                let preview: String = text.chars().take(1000).collect();
+                println!("  {}", preview);
+                println!("  ... (剩余 {} 字符被截断)", text.len() - 1000);
+            } else {
+                println!("  {}", text);
+            }
+            println!("-------------------------------------\n");
+        }
+
+        Ok(text)
+    }
+
+    fn response_to_binary(&self, response: Response<Body>) -> Result<Vec<u8>> {
+        let mut body = response.into_body();
+        let data = body.read_to_vec()?;
+
+        if self.config.log_requests {
+            println!("\n---------- 响应体 (二进制) ----------");
+            println!("  大小: {} 字节", data.len());
+
+            // 尝试以文本方式预览
+            if let Ok(text) = std::str::from_utf8(&data) {
+                println!("  内容预览:");
+                let preview: String = text.chars().take(200).collect();
+                println!("  {}", preview);
+                if text.len() > 200 {
+                    println!("  ... (截断)");
+                }
+            } else {
+                // 显示十六进制预览
+                let preview_len = std::cmp::min(data.len(), 64);
+                print!("  十六进制预览: ");
+                for byte in &data[..preview_len] {
+                    print!("{:02x} ", byte);
+                }
+                println!();
+                if data.len() > 64 {
+                    println!("  ... (截断)");
+                }
+            }
+            println!("--------------------------------------\n");
+        }
+
+        Ok(data)
     }
 }
 
@@ -680,7 +774,7 @@ impl KittyCore {
 /// 主客户端，支持全局单例和独立实例两种模式
 #[derive(Clone)]
 pub struct CodeMaoClient {
-    inner: Arc<KittyCore>,
+    inner: Arc<InnerClient>,
 }
 
 impl CodeMaoClient {
@@ -688,36 +782,40 @@ impl CodeMaoClient {
     pub fn global() -> &'static Self {
         static INSTANCE: OnceLock<CodeMaoClient> = OnceLock::new();
         INSTANCE.get_or_init(|| {
-            CodeMaoClient::new_with_auth(KittyConfig::default(), Arc::new(GlobalKittyAuth::new()))
+            CodeMaoClient::new_with_auth(
+                ClientConfig::default(),
+                Arc::new(GlobalAuthProvider::new()),
+            )
         })
     }
 
     /// 初始化全局实例（如果尚未初始化）
-    pub fn init_global(config: KittyConfig) -> &'static Self {
+    pub fn init_global(config: ClientConfig) -> &'static Self {
         static INSTANCE: OnceLock<CodeMaoClient> = OnceLock::new();
-        INSTANCE
-            .get_or_init(|| CodeMaoClient::new_with_auth(config, Arc::new(GlobalKittyAuth::new())))
+        INSTANCE.get_or_init(|| {
+            CodeMaoClient::new_with_auth(config, Arc::new(GlobalAuthProvider::new()))
+        })
     }
 
     /// 创建使用全局身份管理器的客户端
-    pub fn new_with_global_auth(config: KittyConfig) -> Self {
-        Self::new_with_auth(config, Arc::new(GlobalKittyAuth::new()))
+    pub fn new_with_global_auth(config: ClientConfig) -> Self {
+        Self::new_with_auth(config, Arc::new(GlobalAuthProvider::new()))
     }
 
     /// 创建使用独立身份管理器的客户端
-    pub fn new_independent(config: KittyConfig) -> Self {
-        Self::new_with_auth(config, Arc::new(LocalKittyAuth::new()))
+    pub fn new_independent(config: ClientConfig) -> Self {
+        Self::new_with_auth(config, Arc::new(LocalAuthProvider::new()))
     }
 
     /// 使用自定义认证提供者创建客户端
-    pub fn new_with_auth(config: KittyConfig, auth: Arc<dyn KittyAuth>) -> Self {
+    pub fn new_with_auth(config: ClientConfig, auth: Arc<dyn AuthProvider>) -> Self {
         Self {
-            inner: Arc::new(KittyCore::new(config, auth)),
+            inner: Arc::new(InnerClient::new(config, auth)),
         }
     }
 
     /// 创建新实例（向后兼容，使用全局身份管理器）
-    pub fn new(config: KittyConfig) -> Self {
+    pub fn new(config: ClientConfig) -> Self {
         if config.use_global_auth {
             Self::new_with_global_auth(config)
         } else {
@@ -725,18 +823,23 @@ impl CodeMaoClient {
         }
     }
 
+    /// 获取底层 Agent
+    pub fn agent(&self) -> &Agent {
+        self.inner.agent()
+    }
+
     /// 设置指定身份的令牌
-    pub fn set_token(&self, identity: Catsona, token: impl Into<String>) -> MewResult<()> {
+    pub fn set_token(&self, identity: Identity, token: impl Into<String>) -> Result<()> {
         self.inner.auth.set_token(identity, token.into())
     }
 
     /// 切换到指定身份
-    pub fn switch_identity(&self, identity: Catsona) -> MewResult<()> {
+    pub fn switch_identity(&self, identity: Identity) -> Result<()> {
         self.inner.auth.switch_identity(identity)
     }
 
     /// 获取当前身份
-    pub fn current_identity(&self) -> Catsona {
+    pub fn current_identity(&self) -> Identity {
         self.inner.auth.current_identity()
     }
 
@@ -745,48 +848,31 @@ impl CodeMaoClient {
         self.inner.auth.current_token().map(|t| t.to_string())
     }
 
-    /// 构建请求，返回支持链式设置临时请求头的 KittyRequestBuilder
+    /// 发送 HTTP 请求，返回 RequestBuilder 支持链式调用
     pub fn build_request(
         &self,
         method: HttpMethod,
         endpoint: &str,
         base_key: Option<BaseKey>,
-    ) -> KittyRequestBuilder {
-        KittyRequestBuilder::new(self.clone(), method, endpoint, base_key)
+    ) -> InnerBuilder {
+        InnerBuilder::new(self.clone(), method, endpoint, base_key)
     }
-    pub async fn concurrent_requests<I>(
-        &self,
-        builders: I,
-        max_concurrency: usize,
-    ) -> Vec<MewResult<Response>>
-    where
-        I: IntoIterator<Item = KittyRequestBuilder>,
-    {
-        let sem = Arc::new(Semaphore::new(max_concurrency));
-        let mut set = JoinSet::new();
 
-        for builder in builders {
-            let permit = sem
-                .clone()
-                .acquire_owned()
-                .await
-                .expect("semaphore closed unexpectedly");
-            set.spawn(async move {
-                let result = builder.send().await;
-                drop(permit);
-                result
-            });
-        }
-
-        let mut results = Vec::new();
-        while let Some(res) = set.join_next().await {
-            match res {
-                Ok(r) => results.push(r),
-                Err(e) => results.push(Err(MewError::Other(format!("join task panicked: {}", e)))),
-            }
-        }
-        results
+    /// 将响应体解析为 JSON
+    pub fn response_to_json(&self, response: Response<Body>) -> Result<Value> {
+        self.inner.response_to_json(response)
     }
+
+    /// 将响应体读取为字符串
+    pub fn response_to_string(&self, response: Response<Body>) -> Result<String> {
+        self.inner.response_to_string(response)
+    }
+
+    /// 将响应体读取为二进制数据
+    pub fn response_to_binary(&self, response: Response<Body>) -> Result<Vec<u8>> {
+        self.inner.response_to_binary(response)
+    }
+
     /// 创建分页迭代器
     pub fn paginated(&self, endpoint: impl Into<String>) -> PaginatedIter {
         PaginatedIter::new(self.clone(), endpoint)
@@ -878,10 +964,10 @@ impl PaginatedIter {
         self
     }
 
-    pub fn with_params(mut self, params: &[(String, String)]) -> Self {
-        let mut existing = (*self.base_params).clone();
-        existing.extend_from_slice(params);
-        self.base_params = Arc::new(existing);
+    pub fn with_params(mut self, params: Vec<(String, String)>) -> Self {
+        let mut existing_params = (*self.base_params).clone();
+        existing_params.extend(params);
+        self.base_params = Arc::new(existing_params);
         self
     }
 
@@ -940,15 +1026,18 @@ impl PaginatedIter {
         self
     }
 
-    async fn fetch_page(&self, page: usize) -> MewResult<Vec<Value>> {
+    /// 获取指定页数据
+    fn fetch_page(&self, page: usize) -> Result<Vec<Value>> {
         let mut builder = self
             .client
             .build_request(self.method, &self.endpoint, self.base_key);
 
+        // 添加所有基础参数（从 Arc 中读取，不克隆整个 Vec）
         for (k, v) in self.base_params.iter() {
             builder = builder.with_param(k.clone(), v.clone());
         }
 
+        // 添加分页相关参数
         if let Some(amount_key) = &self.config.amount_key {
             builder = builder.with_param(amount_key.clone(), self.items_per_page.to_string());
         }
@@ -960,8 +1049,8 @@ impl PaginatedIter {
             builder = builder.with_param(offset_key.clone(), offset);
         }
 
-        let response = builder.send().await?;
-        let json = response.json::<Value>().await?;
+        let response = builder.send()?;
+        let json = self.client.response_to_json(response)?;
         let data = json
             .pointer(&format!("/{}", self.data_key.replace('.', "/")))
             .and_then(|v| v.as_array())
@@ -970,11 +1059,13 @@ impl PaginatedIter {
         Ok(data)
     }
 
-    async fn initialize(&mut self) -> MewResult<()> {
+    /// 初始化：获取总数和每页大小
+    fn initialize(&mut self) -> Result<()> {
         if self.initialized {
             return Ok(());
         }
 
+        // 构建第一页请求的参数
         let mut first_page_params: Vec<(String, String)> = (*self.base_params).clone();
         if let Some(amount_key) = &self.config.amount_key {
             first_page_params.push((amount_key.clone(), Self::DEFAULT_PAGE_SIZE.to_string()));
@@ -990,19 +1081,21 @@ impl PaginatedIter {
         let response = self
             .client
             .build_request(self.method, &self.endpoint, self.base_key)
-            .with_params(&first_page_params)
-            .send()
-            .await?;
-        let json = response.json().await?;
+            .with_params(first_page_params)
+            .send()?;
+        let json = self.client.response_to_json(response)?;
 
+        // 提取总数
         self.total_items = Self::extract_total(&json, &self.total_key)?;
 
-        if let Some(response_amount_key) = &self.config.response_amount_key
-            && let Some(amount) = Self::extract_nested_u64(&json, response_amount_key)
-        {
-            self.items_per_page = amount as usize;
+        // 尝试从响应中获取实际每页大小
+        if let Some(response_amount_key) = &self.config.response_amount_key {
+            if let Some(amount) = Self::extract_nested_u64(&json, response_amount_key) {
+                self.items_per_page = amount as usize;
+            }
         }
 
+        // 提取第一页数据
         if let Some(items) = json
             .pointer(&format!("/{}", self.data_key.replace('.', "/")))
             .and_then(|v| v.as_array())
@@ -1010,16 +1103,15 @@ impl PaginatedIter {
             self.current_page_data = items.clone();
             self.current_page = 0;
         } else {
-            return Err(MewError::Pagination(
-                "No data array found in response".into(),
-            ));
+            return Err(Error::Pagination("No data array found in response".into()));
         }
 
         self.initialized = true;
         Ok(())
     }
 
-    fn extract_total(json: &Value, total_key: &str) -> MewResult<usize> {
+    /// 从 JSON 中提取总数
+    fn extract_total(json: &Value, total_key: &str) -> Result<usize> {
         let total = json
             .pointer(&format!("/{}", total_key.replace('.', "/")))
             .and_then(|v| {
@@ -1027,7 +1119,7 @@ impl PaginatedIter {
                     .or_else(|| v.as_i64().map(|i| i as u64))
                     .or_else(|| v.as_f64().map(|f| f as u64))
             })
-            .ok_or_else(|| MewError::Pagination(format!("Total key '{}' not found", total_key)))?;
+            .ok_or_else(|| Error::Pagination(format!("Total key '{}' not found", total_key)))?;
         Ok(total as usize)
     }
 
@@ -1040,17 +1132,19 @@ impl PaginatedIter {
             })
     }
 
+    /// 检查是否达到限制
     fn reached_limit(&self) -> bool {
         self.limit
             .map(|lim| self.yielded_count >= lim)
             .unwrap_or(false)
     }
 
-    pub async fn next_item(&mut self) -> Option<MewResult<Value>> {
-        if !self.initialized
-            && let Err(e) = self.initialize().await
-        {
-            return Some(Err(e));
+    /// 获取下一个项目
+    pub fn next(&mut self) -> Option<Result<Value>> {
+        if !self.initialized {
+            if let Err(e) = self.initialize() {
+                return Some(Err(e));
+            }
         }
         if self.finished || self.reached_limit() {
             return None;
@@ -1062,7 +1156,7 @@ impl PaginatedIter {
                 self.finished = true;
                 return None;
             }
-            match self.fetch_page(next_page).await {
+            match self.fetch_page(next_page) {
                 Ok(data) => {
                     self.current_page_data = data;
                     self.current_page = next_page;
@@ -1078,152 +1172,21 @@ impl PaginatedIter {
         Some(Ok(item))
     }
 
-    pub async fn collect(mut self) -> MewResult<Vec<Value>> {
+    /// 一次性收集所有数据
+    pub fn collect(mut self) -> Result<Vec<Value>> {
         let mut items = Vec::new();
-        while let Some(item) = self.next_item().await {
+        while let Some(item) = self.next() {
             items.push(item?);
         }
         Ok(items)
     }
-    /// 并发拉取所有分页数据，通过 `mpsc::Receiver` 流式逐条产出。
-    ///
-    /// * `prefetch_pages` – 预取页数（同时发起的页面请求数），控制并发度。
-    ///
-    /// 返回的 `Receiver` 每项为 `MewResult<Value>`。
-    /// 消费方用 `while let Some(item) = receiver.recv().await` 逐条处理，
-    /// 可实现背压（接收方慢时，后台任务会自动等待）。
-    pub async fn concurrent_receiver(
-        mut self,
-        prefetch_pages: usize,
-    ) -> tokio::sync::mpsc::Receiver<MewResult<Value>> {
-        // 1. 确保初始化，获取 total_items / items_per_page
-        if let Err(e) = self.initialize().await {
-            // 初始化失败：创建只包含错误的通道
-            let (tx, rx) = mpsc::channel(1);
-            let _ = tx.send(Err(e)).await;
-            return rx;
-        }
+}
 
-        // 2. 提取所有需要的字段（move 到任务中）
-        let total_items = self.total_items;
-        let items_per_page = self.items_per_page;
-        let client = self.client.clone();
-        let endpoint = self.endpoint.clone();
-        let base_params = Arc::clone(&self.base_params);
-        let config = self.config.clone();
-        let pagination_method = self.pagination_method;
-        let base_key = self.base_key;
-        let data_key = self.data_key.clone();
-        let limit = self.limit;
+impl Iterator for PaginatedIter {
+    type Item = Result<Value>;
 
-        let (tx, rx) = mpsc::channel(prefetch_pages * items_per_page);
-
-        // 3. 后台任务：并发拉取所有页面
-        tokio::spawn(async move {
-            let total_pages = total_items.div_ceil(items_per_page);
-            let mut join_set = JoinSet::new();
-            let mut next_page = 0;
-            let mut active_requests = 0;
-            let mut yielded = 0;
-
-            // 辅助函数：构建单页请求
-            let fetch_page = |page: usize| {
-                let client = client.clone();
-                let endpoint = endpoint.clone();
-                let base_params = Arc::clone(&base_params);
-                let config = config.clone();
-                let data_key = data_key.clone();
-                async move {
-                    let mut builder = client.build_request(HttpMethod::GET, &endpoint, base_key);
-                    for (k, v) in base_params.iter() {
-                        builder = builder.with_param(k.clone(), v.clone());
-                    }
-                    if let Some(amount_key) = &config.amount_key {
-                        builder =
-                            builder.with_param(amount_key.clone(), items_per_page.to_string());
-                    }
-                    if let Some(offset_key) = &config.offset_key {
-                        let offset = match pagination_method {
-                            PaginationMethod::Offset => (page * items_per_page).to_string(),
-                            PaginationMethod::Page => (page + 1).to_string(),
-                        };
-                        builder = builder.with_param(offset_key.clone(), offset);
-                    }
-                    let response = builder.send().await?;
-                    let json = response.json::<Value>().await?;
-                    let items = json
-                        .pointer(&format!("/{}", data_key.replace('.', "/")))
-                        .and_then(|v| v.as_array())
-                        .cloned()
-                        .unwrap_or_default();
-                    Ok(items)
-                }
-            };
-
-            // 初始填充 prefetch_pages 个请求
-            while next_page < total_pages && active_requests < prefetch_pages {
-                join_set.spawn(fetch_page(next_page));
-                next_page += 1;
-                active_requests += 1;
-            }
-
-            // 处理完成的任务并补充新任务
-            while let Some(result) = join_set.join_next().await {
-                active_requests -= 1;
-
-                // 提前退出：达到 limit
-                if let Some(lim) = limit
-                    && yielded >= lim
-                {
-                    join_set.abort_all();
-                    return;
-                }
-
-                match result {
-                    Ok(Ok(items)) => {
-                        for item in items {
-                            // 控制 limit
-                            if let Some(lim) = limit
-                                && yielded >= lim
-                            {
-                                break;
-                            }
-                            if tx.send(Ok(item)).await.is_err() {
-                                // 接收端已关闭
-                                join_set.abort_all();
-                                return;
-                            }
-                            yielded += 1;
-                        }
-                    }
-                    Ok(Err(e)) => {
-                        let _ = tx.send(Err(e)).await;
-                        join_set.abort_all();
-                        return;
-                    }
-                    Err(join_err) => {
-                        let _ = tx
-                            .send(Err(MewError::Other(format!(
-                                "page task panicked: {}",
-                                join_err
-                            ))))
-                            .await;
-                        join_set.abort_all();
-                        return;
-                    }
-                }
-
-                // 补充新请求
-                if next_page < total_pages {
-                    join_set.spawn(fetch_page(next_page));
-                    next_page += 1;
-                    active_requests += 1;
-                }
-            }
-            // 所有页已拉完，通道自然关闭（tx drop）
-        });
-
-        rx
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next()
     }
 }
 
@@ -1237,68 +1200,58 @@ impl FileUploader {
         Self { client }
     }
 
-    pub async fn upload(
-        &self,
-        file_path: &Path,
-        method: &str,
-        save_path: &str,
-    ) -> MewResult<String> {
+    /// 统一上传入口
+    pub fn upload(&self, file_path: &Path, method: &str, save_path: &str) -> Result<String> {
         match method {
-            "pgaot" => self.upload_pgaot(file_path, save_path).await,
-            "codegame" => self.upload_codegame(file_path, save_path).await,
-            "codemao" => self.upload_codemao(file_path, save_path).await,
-            _ => Err(MewError::Other(format!(
+            "pgaot" => self.upload_pgaot(file_path, save_path),
+            "codegame" => self.upload_codegame(file_path, save_path),
+            "codemao" => self.upload_codemao(file_path, save_path),
+            _ => Err(Error::Other(format!(
                 "Unsupported upload method: {}",
                 method
             ))),
         }
     }
 
-    async fn upload_pgaot(&self, file_path: &Path, save_path: &str) -> MewResult<String> {
-        let form = multipart::Form::new()
-            .text("path", save_path.to_string())
-            .file("file", file_path)
-            .await?;
+    fn upload_pgaot(&self, file_path: &Path, save_path: &str) -> Result<String> {
+        let form = Form::new()
+            .text("path", save_path)
+            .file("file", file_path)?;
 
         let response = self
             .client
-            .build_request(
-                HttpMethod::POST,
-                "https://api.pgaot.com/user/up_cat_file",
-                None,
-            )
-            .send_multipart(form)
-            .await?;
+            .agent()
+            .post("https://api.pgaot.com/user/up_cat_file")
+            .send(form)?;
 
-        let json: Value = response.json().await?;
+        let json: Value = response.into_body().read_json()?;
         Ok(json["url"].as_str().unwrap_or("").to_string())
     }
 
-    async fn upload_codegame(&self, file_path: &Path, save_path: &str) -> MewResult<String> {
-        let token_info = self.get_codegame_token(save_path, file_path).await?;
+    fn upload_codegame(&self, file_path: &Path, save_path: &str) -> Result<String> {
+        let token_info = self.get_codegame_token(save_path, file_path)?;
 
-        let form = multipart::Form::new()
-            .text("token", token_info.token)
-            .text("key", token_info.file_path)
-            .text("fname", "avatar".to_string())
-            .file("file", file_path)
-            .await?;
+        let form = Form::new()
+            .text("token", &token_info.token)
+            .text("key", &token_info.file_path)
+            .text("fname", "avatar")
+            .file("file", file_path)?;
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, &token_info.upload_url, None)
-            .send_multipart(form)
-            .await?;
+            .agent()
+            .post(&token_info.upload_url)
+            .send(form)?;
 
-        let json: Value = response.json().await?;
+        let json: Value = response.into_body().read_json()?;
         let key = json["key"].as_str().unwrap_or("");
         Ok(format!("{}/{}", token_info.pic_host, key))
     }
 
-    async fn upload_codemao(&self, file_path: &Path, save_path: &str) -> MewResult<String> {
+    fn upload_codemao(&self, file_path: &Path, save_path: &str) -> Result<String> {
         let unique_filename = format!(
             "{}{}",
-            generate_meow_id(4),
+            generate_id(4),
             file_path
                 .extension()
                 .map(|ext| format!(".{}", ext.to_string_lossy()))
@@ -1306,27 +1259,26 @@ impl FileUploader {
         );
         let unique_name = format!("{}/{}", save_path, unique_filename);
 
-        let token_info = self.get_codemao_token(&unique_name).await?;
+        let token_info = self.get_codemao_token(&unique_name)?;
 
-        let form = multipart::Form::new()
-            .text("token", token_info.token)
-            .text("key", token_info.file_path)
-            .text("fname", unique_filename)
-            .file("file", file_path)
-            .await?;
+        let form = Form::new()
+            .text("token", &token_info.token)
+            .text("key", &token_info.file_path)
+            .text("fname", &unique_filename)
+            .file("file", file_path)?;
 
         let response = self
             .client
-            .build_request(HttpMethod::POST, &token_info.upload_url, None)
-            .send_multipart(form)
-            .await?;
+            .agent()
+            .post(&token_info.upload_url)
+            .send(form)?;
 
-        let json: Value = response.json().await?;
+        let json: Value = response.into_body().read_json()?;
         let key = json["key"].as_str().unwrap_or("");
         Ok(format!("{}{}", token_info.bucket_url, key))
     }
 
-    async fn get_codemao_token(&self, file_path: &str) -> MewResult<CodeMaoTokenInfo> {
+    fn get_codemao_token(&self, file_path: &str) -> Result<CodeMaoTokenInfo> {
         let response = self
             .client
             .build_request(
@@ -1340,16 +1292,15 @@ impl FileUploader {
             .with_param("tokensCount", "1")
             .with_param("fileSign", "p1")
             .with_param("cdnName", "qiniu")
-            .send()
-            .await?;
+            .send()?;
 
-        let json: Value = response.json().await?;
+        let json = self.client.response_to_json(response)?;
         let tokens = json["tokens"]
             .as_array()
-            .ok_or_else(|| MewError::Other("No tokens array".into()))?;
+            .ok_or_else(|| Error::Other("No tokens array".into()))?;
         let token_info = tokens
-            .first()
-            .ok_or_else(|| MewError::Other("No token".into()))?;
+            .get(0)
+            .ok_or_else(|| Error::Other("No token".into()))?;
 
         Ok(CodeMaoTokenInfo {
             token: token_info["token"].as_str().unwrap_or("").to_string(),
@@ -1359,11 +1310,7 @@ impl FileUploader {
         })
     }
 
-    async fn get_codegame_token(
-        &self,
-        prefix: &str,
-        file_path: &Path,
-    ) -> MewResult<CodeGameTokenInfo> {
+    fn get_codegame_token(&self, prefix: &str, file_path: &Path) -> Result<CodeGameTokenInfo> {
         let extension = file_path
             .extension()
             .map(|ext| format!(".{}", ext.to_string_lossy()))
@@ -1379,16 +1326,15 @@ impl FileUploader {
             .with_param("prefix", prefix)
             .with_param("bucket", "static")
             .with_param("type", extension)
-            .send()
-            .await?;
+            .send()?;
 
-        let json: Value = response.json().await?;
+        let json = self.client.response_to_json(response)?;
         let data = json["data"]
             .as_array()
-            .ok_or_else(|| MewError::Other("No data array".into()))?;
+            .ok_or_else(|| Error::Other("No data array".into()))?;
         let token_data = data
-            .first()
-            .ok_or_else(|| MewError::Other("No token data".into()))?;
+            .get(0)
+            .ok_or_else(|| Error::Other("No token data".into()))?;
 
         Ok(CodeGameTokenInfo {
             token: token_data["token"].as_str().unwrap_or("").to_string(),
@@ -1415,7 +1361,7 @@ struct CodeGameTokenInfo {
 }
 
 // ==================== 辅助函数 ====================
-fn generate_meow_id(length: usize) -> String {
+fn generate_id(length: usize) -> String {
     const CHARSET: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
     let mut rng = rand::rng();
     let mut bytes = vec![0u8; length];
@@ -1426,12 +1372,15 @@ fn generate_meow_id(length: usize) -> String {
     String::from_utf8(bytes).unwrap_or_default()
 }
 
-// ==================== HTTP 状态码枚举 ====================
+// 定义HTTP状态码枚举
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HTTPStatus {
+    // 1xx Informational
     Continue = 100,
     SwitchingProtocols = 101,
     Processing = 102,
+
+    // 2xx Success
     Ok = 200,
     Created = 201,
     Accepted = 202,
@@ -1439,6 +1388,8 @@ pub enum HTTPStatus {
     NoContent = 204,
     ResetContent = 205,
     PartialContent = 206,
+
+    // 3xx Redirection
     MultipleChoices = 300,
     MovedPermanently = 301,
     Found = 302,
@@ -1446,6 +1397,8 @@ pub enum HTTPStatus {
     NotModified = 304,
     TemporaryRedirect = 307,
     PermanentRedirect = 308,
+
+    // 4xx Client Error
     BadRequest = 400,
     Unauthorized = 401,
     PaymentRequired = 402,
@@ -1455,6 +1408,8 @@ pub enum HTTPStatus {
     NotAcceptable = 406,
     Conflict = 409,
     Gone = 410,
+
+    // 5xx Server Error
     InternalServerError = 500,
     NotImplemented = 501,
     BadGateway = 502,
@@ -1463,6 +1418,7 @@ pub enum HTTPStatus {
 }
 
 impl HTTPStatus {
+    // 从u16创建HTTPStatus
     pub fn from_code(code: u16) -> Option<Self> {
         match code {
             100 => Some(HTTPStatus::Continue),
@@ -1500,6 +1456,7 @@ impl HTTPStatus {
         }
     }
 
+    // 获取状态码对应的原因短语
     pub fn reason_phrase(&self) -> &'static str {
         match self {
             HTTPStatus::Continue => "Continue",
@@ -1537,29 +1494,31 @@ impl HTTPStatus {
     }
 }
 
+// 实现从HTTPStatus到u16的转换
 impl From<HTTPStatus> for u16 {
     fn from(status: HTTPStatus) -> Self {
         status as u16
     }
 }
 
-impl std::fmt::Display for HTTPStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+// 实现Display trait
+impl fmt::Display for HTTPStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} {}", *self as u16, self.reason_phrase())
     }
 }
 
-// ==================== 简化的工厂（萌化名：KittyFactory） ====================
-pub struct KittyFactory;
+// ==================== 简化的工厂 ====================
+pub struct ClientFactory;
 
-impl KittyFactory {
+impl ClientFactory {
     /// 创建使用全局身份管理器的 HTTP 客户端
-    pub fn create_global_client(config: Option<KittyConfig>) -> CodeMaoClient {
+    pub fn create_global_client(config: Option<ClientConfig>) -> CodeMaoClient {
         CodeMaoClient::new_with_global_auth(config.unwrap_or_default())
     }
 
     /// 创建使用独立身份管理器的 HTTP 客户端
-    pub fn create_independent_client(config: Option<KittyConfig>) -> CodeMaoClient {
+    pub fn create_independent_client(config: Option<ClientConfig>) -> CodeMaoClient {
         CodeMaoClient::new_independent(config.unwrap_or_default())
     }
 
@@ -1569,7 +1528,7 @@ impl KittyFactory {
     }
 
     /// 初始化全局客户端实例
-    pub fn init_global_client(config: Option<KittyConfig>) -> &'static CodeMaoClient {
+    pub fn init_global_client(config: Option<ClientConfig>) -> &'static CodeMaoClient {
         CodeMaoClient::init_global(config.unwrap_or_default())
     }
 
@@ -1579,7 +1538,7 @@ impl KittyFactory {
     }
 
     /// 获取全局身份管理器
-    pub fn global_identity_manager() -> &'static KittyIdentityManager {
+    pub fn global_identity_manager() -> &'static GlobalIdentityManager {
         get_global_identity_manager()
     }
 }
