@@ -9,8 +9,8 @@ mod utils;
 
 fn main() {
     auth::LoginBuilder::new()
-        .identity("")
-        .password("")
+        .identity("awa")
+        .password("awa")
         .execute();
 
     let comments = retrieve::DataQuery::new()
