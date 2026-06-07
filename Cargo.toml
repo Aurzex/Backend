@@ -7,6 +7,12 @@ edition = "2024"
 name = "backend"
 crate-type = ["cdylib"]
 
+[profile.release]
+strip = true
+opt-level = "z"
+lto = true
+panic = "abort"
+
 [lints.rust]
 unused = "allow"
 
