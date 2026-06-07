@@ -227,62 +227,62 @@ impl Default for DecompilerConfig {
 // ============ 作品类型枚举 ============
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WorkType {
-    KITTEN2,
-    KITTEN3,
-    KITTEN4,
-    COCO,
-    NEKO,
-    NEMO,
-    WOOD,
+    Kitten2,
+    Kitten3,
+    Kitten4,
+    Coco,
+    Neko,
+    Nemo,
+    Wood,
 }
 
 impl WorkType {
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
-            "KITTEN2" => Some(WorkType::KITTEN2),
-            "KITTEN3" => Some(WorkType::KITTEN3),
-            "KITTEN4" => Some(WorkType::KITTEN4),
-            "COCO" => Some(WorkType::COCO),
-            "NEKO" => Some(WorkType::NEKO),
-            "NEMO" => Some(WorkType::NEMO),
-            "WOOD" => Some(WorkType::WOOD),
+            "KITTEN2" => Some(WorkType::Kitten2),
+            "KITTEN3" => Some(WorkType::Kitten3),
+            "KITTEN4" => Some(WorkType::Kitten4),
+            "COCO" => Some(WorkType::Coco),
+            "NEKO" => Some(WorkType::Neko),
+            "NEMO" => Some(WorkType::Nemo),
+            "WOOD" => Some(WorkType::Wood),
             _ => None,
         }
     }
 
     pub fn as_str(&self) -> &'static str {
         match self {
-            WorkType::KITTEN2 => "KITTEN2",
-            WorkType::KITTEN3 => "KITTEN3",
-            WorkType::KITTEN4 => "KITTEN4",
-            WorkType::COCO => "COCO",
-            WorkType::NEKO => "NEKO",
-            WorkType::NEMO => "NEMO",
-            WorkType::WOOD => "WOOD",
+            WorkType::Kitten2 => "KITTEN2",
+            WorkType::Kitten3 => "KITTEN3",
+            WorkType::Kitten4 => "KITTEN4",
+            WorkType::Coco => "COCO",
+            WorkType::Neko => "NEKO",
+            WorkType::Nemo => "NEMO",
+            WorkType::Wood => "WOOD",
         }
     }
 
     pub fn is_kitten(&self) -> bool {
         matches!(
             self,
-            WorkType::KITTEN2 | WorkType::KITTEN3 | WorkType::KITTEN4
+            WorkType::Kitten2 | WorkType::Kitten3 | WorkType::Kitten4
         )
     }
 
     pub fn is_nemo(&self) -> bool {
-        matches!(self, WorkType::NEMO)
+        matches!(self, WorkType::Nemo)
     }
 
     pub fn is_neko(&self) -> bool {
-        matches!(self, WorkType::NEKO)
+        matches!(self, WorkType::Neko)
     }
 
     pub fn is_coco(&self) -> bool {
-        matches!(self, WorkType::COCO)
+        matches!(self, WorkType::Coco)
     }
 
     pub fn is_wood(&self) -> bool {
-        matches!(self, WorkType::WOOD)
+        matches!(self, WorkType::Wood)
     }
 }
 
@@ -300,7 +300,7 @@ pub struct WorkInfo {
 impl WorkInfo {
     pub fn from_api_response(data: &Value) -> Result<Self> {
         let work_type_str = data.get("type").and_then(|v| v.as_str()).unwrap_or("NEMO");
-        let work_type = WorkType::from_str(work_type_str).unwrap_or(WorkType::NEMO);
+        let work_type = WorkType::from_str(work_type_str).unwrap_or(WorkType::Nemo);
         Ok(Self {
             id: data.get("id").and_then(|v| v.as_i64()).unwrap_or(0),
             name: data
@@ -2458,13 +2458,13 @@ impl DecompilerFactory {
         context: DecompilerContext,
     ) -> Result<Box<dyn BaseDecompiler>> {
         match work_info.work_type {
-            WorkType::NEKO => Ok(Box::new(NekoDecompiler::new(context))),
-            WorkType::NEMO => Ok(Box::new(NemoDecompiler::new(context))),
-            WorkType::WOOD => Ok(Box::new(WoodDecompiler::new(context))),
-            WorkType::KITTEN2 | WorkType::KITTEN3 | WorkType::KITTEN4 => {
+            WorkType::Neko => Ok(Box::new(NekoDecompiler::new(context))),
+            WorkType::Nemo => Ok(Box::new(NemoDecompiler::new(context))),
+            WorkType::Wood => Ok(Box::new(WoodDecompiler::new(context))),
+            WorkType::Kitten2 | WorkType::Kitten3 | WorkType::Kitten4 => {
                 Ok(Box::new(KittenDecompiler::new(context)))
             }
-            WorkType::COCO => Ok(Box::new(CocoDecompiler::new(context))),
+            WorkType::Coco => Ok(Box::new(CocoDecompiler::new(context))),
         }
     }
 }
