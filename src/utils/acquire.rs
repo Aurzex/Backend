@@ -27,6 +27,9 @@ pub enum MewError {
     Pagination(String),
     #[error("Other error: {0}")]
     Other(String),
+    /// 携带状态码的其他错误
+    #[error("Other error: {0} (status: {1})")]
+    OtherWithCode(String, u16),
 }
 
 pub type MewResult<T> = std::result::Result<T, MewError>;
@@ -105,7 +108,7 @@ pub enum Catsona {
     Fluffy,  // 普通用户（原 Average）
     Scholar, // 教育（原 Edu）
     Judge,   // 评审（原 Judgement）
-    Blanky,  // 空白（原 Blank）
+    Blanky,  // 空白（原 Blank）- 此身份不应持有令牌
 }
 
 impl Catsona {
@@ -170,15 +173,22 @@ impl KittyIdentityManager {
     }
 
     /// 设置指定身份的令牌
-    fn set_token(&self, identity: Catsona, token: String) {
+    /// 注意：Blanky 身份不应持有令牌，尝试设置将返回错误
+    fn set_token(&self, identity: Catsona, token: String) -> MewResult<()> {
+        // Blanky 身份不允许设置令牌
+        if identity == Catsona::Blanky {
+            return Err(MewError::Auth("Blanky identity cannot hold a token".into()));
+        }
         let mut bowl = self.token_bowl.write().unwrap();
         if !token.is_empty() {
             bowl[identity.index()] = Some(Arc::from(token));
         }
+        Ok(())
     }
 
     /// 切换到指定身份
     fn switch_identity(&self, identity: Catsona) -> MewResult<()> {
+        // Blanky 可以切换（不需要令牌），其他身份需要有令牌
         if identity == Catsona::Blanky
             || self.token_bowl.read().unwrap()[identity.index()].is_some()
         {
@@ -213,6 +223,7 @@ impl KittyIdentityManager {
 }
 
 /// 全局身份管理器单例
+/// 使用 OnceLock 确保线程安全的懒加载初始化
 static GLOBAL_IDENTITY_MANAGER: OnceLock<KittyIdentityManager> = OnceLock::new();
 
 fn get_global_identity_manager() -> &'static KittyIdentityManager {
@@ -329,8 +340,8 @@ impl KittyAuth for GlobalKittyAuth {
     }
 
     fn set_token(&self, identity: Catsona, token: String) -> MewResult<()> {
-        get_global_identity_manager().set_token(identity, token);
-        Ok(())
+        // 委托给全局管理器，会检查 Blanky 限制
+        get_global_identity_manager().set_token(identity, token)
     }
 
     fn switch_identity(&self, identity: Catsona) -> MewResult<()> {
@@ -362,8 +373,8 @@ impl KittyAuth for LocalKittyAuth {
     }
 
     fn set_token(&self, identity: Catsona, token: String) -> MewResult<()> {
-        self.inner.set_token(identity, token);
-        Ok(())
+        // 委托给本地管理器，会检查 Blanky 限制
+        self.inner.set_token(identity, token)
     }
 
     fn switch_identity(&self, identity: Catsona) -> MewResult<()> {
@@ -776,14 +787,19 @@ impl KittyCore {
 }
 
 // ==================== 公开的 CodeMaoClient ====================
-/// 主客户端，支持全局单例和独立实例两种模式
+/// 主客户端，支持全局单例和独立实例两种模式。
+///
+/// # 全局单例
+/// 通过 `CodeMaoClient::global()` 获取全局共享实例，该实例使用默认配置。
+/// 如需自定义配置（如超时、日志、独立身份管理），请使用 `new` / `new_with_global_auth` / `new_independent` 创建独立实例。
 #[derive(Clone)]
 pub struct CodeMaoClient {
     inner: Arc<KittyCore>,
 }
 
 impl CodeMaoClient {
-    /// 获取全局单例实例（使用全局身份管理器）
+    /// 获取全局单例实例（使用全局身份管理器，默认配置）
+    /// 首次调用时自动初始化，后续调用返回同一实例
     pub fn global() -> &'static Self {
         static INSTANCE: OnceLock<CodeMaoClient> = OnceLock::new();
         INSTANCE.get_or_init(|| {
@@ -791,14 +807,7 @@ impl CodeMaoClient {
         })
     }
 
-    /// 初始化全局实例（如果尚未初始化）
-    pub fn init_global(config: KittyConfig) -> &'static Self {
-        static INSTANCE: OnceLock<CodeMaoClient> = OnceLock::new();
-        INSTANCE
-            .get_or_init(|| CodeMaoClient::new_with_auth(config, Arc::new(GlobalKittyAuth::new())))
-    }
-
-    /// 创建使用全局身份管理器的客户端
+    /// 创建使用全局身份管理器的客户端（可自定义配置）
     pub fn new_with_global_auth(config: KittyConfig) -> Self {
         Self::new_with_auth(config, Arc::new(GlobalKittyAuth::new()))
     }
@@ -815,7 +824,7 @@ impl CodeMaoClient {
         }
     }
 
-    /// 创建新实例（向后兼容，使用全局身份管理器）
+    /// 创建新实例（向后兼容，根据配置决定使用全局或独立身份管理器）
     pub fn new(config: KittyConfig) -> Self {
         if config.use_global_auth {
             Self::new_with_global_auth(config)
@@ -830,6 +839,7 @@ impl CodeMaoClient {
     }
 
     /// 设置指定身份的令牌
+    /// 注意：Blanky 身份不允许设置令牌
     pub fn set_token(&self, identity: Catsona, token: impl Into<String>) -> MewResult<()> {
         self.inner.auth.set_token(identity, token.into())
     }
@@ -905,7 +915,7 @@ pub struct PaginatedIter {
     client: CodeMaoClient,
     method: HttpMethod,
     endpoint: String,
-    base_params: Vec<(String, String)>, // 不再使用 Arc
+    base_params: Vec<(String, String)>, // 不再使用 Arc，直接使用 Vec
     payload: Option<Value>,
     limit: Option<usize>,
     total_pointer: String, // 缓存的总数字段 pointer 路径
@@ -1162,7 +1172,7 @@ impl PaginatedIter {
             return None;
         }
 
-        // 当前页还有数据，直接返回
+        // 当前页还有数据，直接返回（快速路径）
         if self.current_index < self.current_page_data.len() {
             let item = self.current_page_data[self.current_index].clone();
             self.current_index += 1;
@@ -1218,6 +1228,7 @@ impl Iterator for PaginatedIter {
         self.next_item()
     }
 }
+
 // ==================== 文件上传器 ====================
 pub struct FileUploader {
     client: CodeMaoClient,
@@ -1540,12 +1551,7 @@ impl KittyFactory {
         FileUploader::new(client)
     }
 
-    /// 初始化全局客户端实例
-    pub fn init_global_client(config: Option<KittyConfig>) -> &'static CodeMaoClient {
-        CodeMaoClient::init_global(config.unwrap_or_default())
-    }
-
-    /// 获取全局客户端实例
+    /// 获取全局客户端实例（使用默认配置）
     pub fn global_client() -> &'static CodeMaoClient {
         CodeMaoClient::global()
     }

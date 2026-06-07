@@ -9,10 +9,8 @@ mod utils;
 
 fn main() {
     auth::LoginBuilder::new()
-        .identity("identity")
-        .password("password")
-        .role(auth::UserRole::Admin)
-        .method(auth::LoginMethod::AdminPassword)
+        .identity("Aurzex")
+        .password("CODExhr1106.mao")
         .execute();
 
     let comments = retrieve::DataQuery::new()
@@ -21,9 +19,7 @@ fn main() {
         .limit(Some(50))
         .mode(retrieve::CommentQueryMode::Comments)
         .target_id(130866720)
-        .execute();
+        .execute()
+        .unwrap();
     dbg!(comments);
-
-    let result = retrieve::DataQuery::new().compute_admin_report_stats();
-    dbg!(result);
 }
