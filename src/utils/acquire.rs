@@ -900,16 +900,16 @@ pub struct PaginationConfig {
     pub response_offset_key: Option<String>,
 }
 
-// ==================== 分页迭代器（使用 Arc<Vec> 共享参数） ====================
+// ==================== 分页迭代器 ====================
 pub struct PaginatedIter {
     client: CodeMaoClient,
     method: HttpMethod,
     endpoint: String,
-    base_params: Arc<Vec<(String, String)>>,
+    base_params: Vec<(String, String)>, // 不再使用 Arc
     payload: Option<Value>,
     limit: Option<usize>,
-    total_key: String,
-    data_key: String,
+    total_pointer: String, // 缓存的总数字段 pointer 路径
+    data_pointer: String,  // 缓存的数据数组 pointer 路径
     pagination_method: PaginationMethod,
     config: PaginationConfig,
     base_key: Option<BaseKey>,
@@ -929,15 +929,18 @@ impl PaginatedIter {
     const DEFAULT_PAGE_SIZE: usize = 15;
 
     pub fn new(client: CodeMaoClient, endpoint: impl Into<String>) -> Self {
+        let endpoint = endpoint.into();
+        let total_key = "total".to_string();
+        let data_key = "items".to_string();
         Self {
             client,
             method: HttpMethod::Get,
-            endpoint: endpoint.into(),
-            base_params: Arc::new(Vec::new()),
+            endpoint,
+            base_params: Vec::new(),
             payload: None,
             limit: None,
-            total_key: "total".to_string(),
-            data_key: "items".to_string(),
+            total_pointer: Self::key_to_pointer(&total_key),
+            data_pointer: Self::key_to_pointer(&data_key),
             pagination_method: PaginationMethod::Offset,
             config: PaginationConfig::default(),
             base_key: None,
@@ -952,23 +955,24 @@ impl PaginatedIter {
         }
     }
 
-    // 链式构建方法
+    // 将点分隔的 key 转换为 JSON Pointer 路径
+    fn key_to_pointer(key: &str) -> String {
+        format!("/{}", key.replace('.', "/"))
+    }
+
+    // 链式构建方法 ---------------------------------------------
     pub fn with_method(mut self, method: HttpMethod) -> Self {
         self.method = method;
         self
     }
 
     pub fn with_param(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        let mut params = (*self.base_params).clone();
-        params.push((key.into(), value.into()));
-        self.base_params = Arc::new(params);
+        self.base_params.push((key.into(), value.into()));
         self
     }
 
     pub fn with_params(mut self, params: Vec<(String, String)>) -> Self {
-        let mut existing = (*self.base_params).clone();
-        existing.extend(params);
-        self.base_params = Arc::new(existing);
+        self.base_params.extend(params);
         self
     }
 
@@ -983,12 +987,12 @@ impl PaginatedIter {
     }
 
     pub fn with_total_key(mut self, key: impl Into<String>) -> Self {
-        self.total_key = key.into();
+        self.total_pointer = Self::key_to_pointer(&key.into());
         self
     }
 
     pub fn with_data_key(mut self, key: impl Into<String>) -> Self {
-        self.data_key = key.into();
+        self.data_pointer = Self::key_to_pointer(&key.into());
         self
     }
 
@@ -1027,74 +1031,81 @@ impl PaginatedIter {
         self
     }
 
+    // 核心方法 -------------------------------------------------
     /// 获取指定页数据
     fn fetch_page(&self, page: usize) -> MewResult<Vec<Value>> {
-        let mut builder = self
-            .client
-            .build_request(self.method, &self.endpoint, self.base_key);
-
-        for (k, v) in self.base_params.iter() {
-            builder = builder.with_param(k.clone(), v.clone());
+        let mut params = self.base_params.clone();
+        if let Some(ref key) = self.config.amount_key {
+            params.push((key.clone(), self.items_per_page.to_string()));
         }
-
-        if let Some(amount_key) = &self.config.amount_key {
-            builder = builder.with_param(amount_key.clone(), self.items_per_page.to_string());
-        }
-        if let Some(offset_key) = &self.config.offset_key {
+        if let Some(ref key) = self.config.offset_key {
             let offset = match self.pagination_method {
                 PaginationMethod::Offset => (page * self.items_per_page).to_string(),
                 PaginationMethod::Page => (page + 1).to_string(),
             };
-            builder = builder.with_param(offset_key.clone(), offset);
+            params.push((key.clone(), offset));
         }
 
+        let mut builder = self
+            .client
+            .build_request(self.method, &self.endpoint, self.base_key);
+        builder = builder.with_params(params);
+        if let Some(ref payload) = self.payload {
+            // 这里克隆一份 payload 以支持多次请求
+            builder = builder.with_payload(payload.clone());
+        }
         let response = builder.send()?;
         let json = self.client.response_to_json(response)?;
+
         let data = json
-            .pointer(&format!("/{}", self.data_key.replace('.', "/")))
+            .pointer(&self.data_pointer)
             .and_then(|v| v.as_array())
             .cloned()
             .unwrap_or_default();
         Ok(data)
     }
 
-    /// 初始化：获取总数和每页大小
+    /// 初始化：发送第一页请求，获取总数、每页大小和首页数据
     fn initialize(&mut self) -> MewResult<()> {
         if self.initialized {
             return Ok(());
         }
 
-        let mut first_page_params: Vec<(String, String)> = (*self.base_params).clone();
-        if let Some(amount_key) = &self.config.amount_key {
-            first_page_params.push((amount_key.clone(), Self::DEFAULT_PAGE_SIZE.to_string()));
+        let mut first_page_params = self.base_params.clone();
+        if let Some(ref key) = self.config.amount_key {
+            first_page_params.push((key.clone(), Self::DEFAULT_PAGE_SIZE.to_string()));
         }
-        if let Some(offset_key) = &self.config.offset_key {
+        if let Some(ref key) = self.config.offset_key {
             let offset = match self.pagination_method {
                 PaginationMethod::Offset => "0".to_string(),
                 PaginationMethod::Page => "1".to_string(),
             };
-            first_page_params.push((offset_key.clone(), offset));
+            first_page_params.push((key.clone(), offset));
         }
 
-        let response = self
+        let mut builder = self
             .client
-            .build_request(self.method, &self.endpoint, self.base_key)
-            .with_params(first_page_params)
-            .send()?;
+            .build_request(self.method, &self.endpoint, self.base_key);
+        builder = builder.with_params(first_page_params);
+        if let Some(ref payload) = self.payload {
+            builder = builder.with_payload(payload.clone());
+        }
+        let response = builder.send()?;
         let json = self.client.response_to_json(response)?;
 
-        self.total_items = Self::extract_total(&json, &self.total_key)?;
+        // 提取总条数
+        self.total_items = Self::extract_total(&json, &self.total_pointer)?;
 
-        if let Some(response_amount_key) = &self.config.response_amount_key
-            && let Some(amount) = Self::extract_nested_u64(&json, response_amount_key)
-        {
-            self.items_per_page = amount as usize;
+        // 提取实际每页大小（如果响应中有该字段）
+        if let Some(ref key) = self.config.response_amount_key {
+            let pointer = Self::key_to_pointer(key);
+            if let Some(amount) = Self::extract_nested_u64(&json, &pointer) {
+                self.items_per_page = amount as usize;
+            }
         }
 
-        if let Some(items) = json
-            .pointer(&format!("/{}", self.data_key.replace('.', "/")))
-            .and_then(|v| v.as_array())
-        {
+        // 缓存第一页数据
+        if let Some(items) = json.pointer(&self.data_pointer).and_then(|v| v.as_array()) {
             self.current_page_data = items.clone();
             self.current_page = 0;
         } else {
@@ -1107,25 +1118,28 @@ impl PaginatedIter {
         Ok(())
     }
 
-    fn extract_total(json: &Value, total_key: &str) -> MewResult<usize> {
+    /// 从 JSON 中提取总条数
+    fn extract_total(json: &Value, total_pointer: &str) -> MewResult<usize> {
         let total = json
-            .pointer(&format!("/{}", total_key.replace('.', "/")))
+            .pointer(total_pointer)
             .and_then(|v| {
                 v.as_u64()
                     .or_else(|| v.as_i64().map(|i| i as u64))
                     .or_else(|| v.as_f64().map(|f| f as u64))
             })
-            .ok_or_else(|| MewError::Pagination(format!("Total key '{}' not found", total_key)))?;
+            .ok_or_else(|| {
+                MewError::Pagination(format!("Total key '{}' not found", total_pointer))
+            })?;
         Ok(total as usize)
     }
 
-    fn extract_nested_u64(json: &Value, path: &str) -> Option<u64> {
-        json.pointer(&format!("/{}", path.replace('.', "/")))
-            .and_then(|v| {
-                v.as_u64()
-                    .or_else(|| v.as_i64().map(|i| i as u64))
-                    .or_else(|| v.as_f64().map(|f| f as u64))
-            })
+    /// 从 JSON 指定路径提取 u64 值
+    fn extract_nested_u64(json: &Value, pointer: &str) -> Option<u64> {
+        json.pointer(pointer).and_then(|v| {
+            v.as_u64()
+                .or_else(|| v.as_i64().map(|i| i as u64))
+                .or_else(|| v.as_f64().map(|f| f as u64))
+        })
     }
 
     fn reached_limit(&self) -> bool {
@@ -1136,35 +1150,55 @@ impl PaginatedIter {
 
     /// 获取下一个项目（同步迭代）
     pub fn next_item(&mut self) -> Option<MewResult<Value>> {
+        // 初始化
         if !self.initialized
             && let Err(e) = self.initialize()
         {
             return Some(Err(e));
         }
+
+        // 检查终止条件
         if self.finished || self.reached_limit() {
             return None;
         }
 
-        while self.current_index >= self.current_page_data.len() {
-            let next_page = self.current_page + 1;
-            if next_page * self.items_per_page >= self.total_items {
-                self.finished = true;
-                return None;
-            }
-            match self.fetch_page(next_page) {
-                Ok(data) => {
-                    self.current_page_data = data;
-                    self.current_page = next_page;
-                    self.current_index = 0;
-                }
-                Err(e) => return Some(Err(e)),
-            }
+        // 当前页还有数据，直接返回
+        if self.current_index < self.current_page_data.len() {
+            let item = self.current_page_data[self.current_index].clone();
+            self.current_index += 1;
+            self.yielded_count += 1;
+            return Some(Ok(item));
         }
 
-        let item = self.current_page_data[self.current_index].clone();
-        self.current_index += 1;
-        self.yielded_count += 1;
-        Some(Ok(item))
+        // 请求下一页
+        let next_page = self.current_page + 1;
+
+        // 如果 total 可靠且已超出范围，提前终止
+        if self.total_items > 0 && next_page * self.items_per_page >= self.total_items {
+            self.finished = true;
+            return None;
+        }
+
+        match self.fetch_page(next_page) {
+            Ok(data) => {
+                if data.is_empty() {
+                    self.finished = true; // 空数据视为结束
+                    return None;
+                }
+                self.current_page_data = data;
+                self.current_page = next_page;
+                self.current_index = 0;
+                // 从新页取出第一条
+                let item = self.current_page_data[self.current_index].clone();
+                self.current_index += 1;
+                self.yielded_count += 1;
+                Some(Ok(item))
+            }
+            Err(e) => {
+                self.finished = true; // 发生错误也终止迭代
+                Some(Err(e))
+            }
+        }
     }
 
     /// 一次性收集所有数据
@@ -1177,13 +1211,13 @@ impl PaginatedIter {
     }
 }
 
+// 实现标准库 Iterator trait，使其可用于 for 循环等
 impl Iterator for PaginatedIter {
     type Item = MewResult<Value>;
     fn next(&mut self) -> Option<Self::Item> {
         self.next_item()
     }
 }
-
 // ==================== 文件上传器 ====================
 pub struct FileUploader {
     client: CodeMaoClient,
