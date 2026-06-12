@@ -969,7 +969,7 @@ impl AuthManager {
     ) -> MewResult<LoginResult> {
         let method = self.get_admin_login_method(credentials, prefer_method)?;
 
-        match method {
+        let mut result = match method {
             LoginMethod::AdminToken => self.handler.handle_admin_token(Some(&credentials.token)),
             LoginMethod::AdminPassword => self
                 .handler
@@ -978,7 +978,24 @@ impl AuthManager {
                 "不支持的管理员登录方式: {}",
                 method.as_str()
             ))),
+        }?;
+
+        if result.success {
+            match self.fetch_admin_dashboard_data() {
+                Ok(dashboard) => {
+                    // 只取 "admin" 对象
+                    if let Some(admin_data) = dashboard.get("admin").cloned() {
+                        result = result.with_auth_details(admin_data);
+                    } else {
+                        eprintln!("仪表盘数据中缺少 'admin' 字段");
+                    }
+                }
+                Err(e) => {
+                    eprintln!("获取管理员仪表盘数据失败: {}", e);
+                }
+            }
         }
+        Ok(result)
     }
 
     pub fn execute_logout_v0(&self) -> MewResult<bool> {
