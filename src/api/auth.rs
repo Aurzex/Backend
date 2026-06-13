@@ -227,10 +227,6 @@ pub fn global_auth_manager() -> Arc<AuthManager> {
         .clone()
 }
 
-pub fn init_global_auth_manager() -> Arc<AuthManager> {
-    global_auth_manager()
-}
-
 // ==================== 辅助函数 ====================
 
 pub fn fetch_current_timestamp_with_provider(provider: &dyn ClientProvider) -> MewResult<i64> {
@@ -279,16 +275,12 @@ fn determine_admin_login_method(
 #[derive(Clone, Debug)]
 pub struct AuthProcessor {
     client_provider: Box<dyn ClientProvider>,
-    client_secret: &'static str,
 }
 
 impl AuthProcessor {
-    const CLIENT_SECRET: &'static str = "pBlYqXbJDu";
-
     pub fn new_with_provider(provider: Box<dyn ClientProvider>) -> Self {
         Self {
             client_provider: provider,
-            client_secret: Self::CLIENT_SECRET,
         }
     }
 
@@ -303,7 +295,6 @@ impl AuthProcessor {
     pub fn fetch_auth_details(&self, token: &str) -> MewResult<Value> {
         let client = self.client();
         let cookie_str = format!("authorization={}", token);
-
         let response = client
             .build_request(
                 HttpMethod::Get,
@@ -312,18 +303,14 @@ impl AuthProcessor {
             )
             .with_header("Cookie", cookie_str)
             .send()?;
+        client.response_to_json(response)
+    }
 
-        // 仍然可以读取 set-cookie 用于调试
-        let headers = response.headers();
-        let set_cookie_headers = headers.get_all("set-cookie");
-        let cookies: Vec<String> = set_cookie_headers
-            .iter()
-            .map(|header| header.to_str().unwrap_or("").to_string())
-            .collect();
-        for cookie in &cookies {
-            println!("Received cookie: {}", cookie);
-        }
-
+    pub fn fetch_admin_details(&self) -> MewResult<Value> {
+        let client = self.client();
+        let response = client
+            .build_request(HttpMethod::Get, "/admins/info", Some(BaseKey::Whale))
+            .send()?;
         client.response_to_json(response)
     }
 
@@ -334,7 +321,6 @@ impl AuthProcessor {
             "pid": pid,
             "timestamp": timestamp,
         });
-
         let response = client
             .build_request(
                 HttpMethod::Post,
@@ -360,7 +346,6 @@ impl AuthProcessor {
             "pid": pid,
             "agreement_ids": [-1],
         });
-
         let response = client
             .build_request(
                 HttpMethod::Post,
@@ -370,7 +355,6 @@ impl AuthProcessor {
             .with_header("x-captcha-ticket", ticket)
             .with_payload(payload)
             .send()?;
-
         let status = response.status();
         if status != 200 {
             let body = response.into_body().read_to_string().unwrap_or_default();
@@ -379,7 +363,6 @@ impl AuthProcessor {
                 status, body
             )));
         }
-
         let body = response.into_body().read_to_string()?;
         Ok(serde_json::from_str(&body)?)
     }
@@ -398,7 +381,6 @@ impl AuthProcessor {
             "key": key,
             "code": code,
         });
-
         let response = client
             .build_request(HttpMethod::Post, "/admins/login", Some(BaseKey::Whale))
             .with_payload(payload)
@@ -409,11 +391,9 @@ impl AuthProcessor {
     pub fn fetch_admin_captcha(&self, timestamp: i64) -> MewResult<Vec<u8>> {
         let client = self.client();
         let endpoint = format!("/admins/captcha/{}", timestamp);
-
         let response = client
             .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Whale))
             .send()?;
-
         if response.status() == 200 {
             let bytes = response.into_body().read_to_vec()?;
             CodeMaoFile::file_write(
@@ -422,14 +402,12 @@ impl AuthProcessor {
                 "b",
             )
             .unwrap();
-            println!(
-                "验证码已保存至: {:?}",
-                &PathConfig::captcha_file_path().to_str()
-            );
             Ok(bytes)
         } else {
-            println!("获取验证码失败, 错误代码: {}", response.status());
-            Ok(Vec::new())
+            Err(MewError::Auth(format!(
+                "获取验证码失败, 状态码: {}",
+                response.status()
+            )))
         }
     }
 
@@ -445,7 +423,6 @@ impl AuthProcessor {
             "password": password,
             "pid": pid,
         });
-
         let response = client
             .build_request(HttpMethod::Post, "/tiger/accounts/login", None)
             .with_payload(payload)
@@ -465,7 +442,6 @@ impl AuthProcessor {
             "password": password,
             "pid": pid,
         });
-
         let response = client
             .build_request(HttpMethod::Post, "/tiger/v3/web/accounts/login", None)
             .with_payload(payload)
@@ -481,19 +457,10 @@ impl AuthProcessor {
     ) -> MewResult<Value> {
         let timestamp = self.fetch_current_timestamp()?;
         let ticket_response = self.get_login_ticket(identity, timestamp, pid)?;
-        println!("Ticket response: {:?}", ticket_response);
-
         let ticket = ticket_response["ticket"]
             .as_str()
             .ok_or_else(|| MewError::Auth("无法获取ticket".into()))?;
-
-        let security_response = self.get_login_security_info(identity, password, ticket, pid)?;
-        println!(
-            "Security API response: {}",
-            serde_json::to_string_pretty(&security_response)?
-        );
-
-        Ok(security_response)
+        self.get_login_security_info(identity, password, ticket, pid)
     }
 
     fn fetch_current_timestamp(&self) -> MewResult<i64> {
@@ -508,6 +475,7 @@ impl Default for AuthProcessor {
 }
 
 // ==================== 登录处理器 ====================
+
 #[derive(Debug)]
 pub struct LoginHandler {
     processor: AuthProcessor,
@@ -528,6 +496,12 @@ impl LoginHandler {
         self.processor.client()
     }
 
+    fn set_token_and_identity(&self, token: &str, identity: Catsona) -> MewResult<()> {
+        self.client().set_token(identity, token)?;
+        self.client().switch_identity(identity)?;
+        Ok(())
+    }
+
     pub fn handle_password_v0(
         &self,
         identity: &str,
@@ -536,14 +510,12 @@ impl LoginHandler {
         status: AccountStatus,
     ) -> MewResult<LoginResult> {
         let client = self.client();
-        let _ = client.switch_identity(Catsona::Blanky);
+        client.switch_identity(Catsona::Blanky)?;
 
         match self.processor.handle_password_v0(identity, password, pid) {
             Ok(data) => {
                 if let Some(token) = data.get("token").and_then(|t| t.as_str()) {
-                    client.set_token(status.to_identity(), token)?;
-                    let _ = client.switch_identity(status.to_identity());
-
+                    self.set_token_and_identity(token, status.to_identity())?;
                     Ok(
                         LoginResult::new(true, LoginMethod::PasswordV0, "v0 密码登录成功")
                             .with_token(token)
@@ -572,7 +544,7 @@ impl LoginHandler {
         status: AccountStatus,
     ) -> MewResult<LoginResult> {
         let client = self.client();
-        let _ = client.switch_identity(Catsona::Blanky);
+        client.switch_identity(Catsona::Blanky)?;
 
         match self.processor.handle_password_v1(identity, password, pid) {
             Ok(data) => {
@@ -581,9 +553,7 @@ impl LoginHandler {
                     .and_then(|a| a.get("token"))
                     .and_then(|t| t.as_str())
                 {
-                    client.set_token(status.to_identity(), token)?;
-                    let _ = client.switch_identity(status.to_identity());
-
+                    self.set_token_and_identity(token, status.to_identity())?;
                     Ok(
                         LoginResult::new(true, LoginMethod::PasswordV1, "v1 密码登录成功")
                             .with_token(token)
@@ -612,7 +582,7 @@ impl LoginHandler {
         status: AccountStatus,
     ) -> MewResult<LoginResult> {
         let client = self.client();
-        let _ = client.switch_identity(Catsona::Blanky);
+        client.switch_identity(Catsona::Blanky)?;
 
         match self.processor.handle_password_v2(identity, password, pid) {
             Ok(data) => {
@@ -621,9 +591,7 @@ impl LoginHandler {
                     .and_then(|a| a.get("token"))
                     .and_then(|t| t.as_str())
                 {
-                    client.set_token(status.to_identity(), token)?;
-                    let _ = client.switch_identity(status.to_identity());
-
+                    self.set_token_and_identity(token, status.to_identity())?;
                     Ok(
                         LoginResult::new(true, LoginMethod::PasswordV2, "v2 密码登录成功")
                             .with_token(token)
@@ -636,42 +604,53 @@ impl LoginHandler {
                     )
                 }
             }
-            Err(e) => Err(MewError::Auth(format!("password_v2 登录失败: {}", e))),
+            Err(e) => Ok(LoginResult::new(
+                false,
+                LoginMethod::PasswordV2,
+                &format!("登录失败: {}", e),
+            )),
         }
     }
 
     pub fn handle_token(&self, token: &str, status: AccountStatus) -> MewResult<LoginResult> {
-        let client = self.client();
         let auth_details = self.processor.fetch_auth_details(token)?;
-
-        client.set_token(status.to_identity(), token)?;
-        let _ = client.switch_identity(status.to_identity());
-
+        self.set_token_and_identity(token, status.to_identity())?;
         Ok(LoginResult::new(true, LoginMethod::Token, "Token 登录成功")
             .with_token(token)
             .with_auth_details(auth_details))
     }
 
     pub fn handle_admin_token(&self, token: Option<&str>) -> MewResult<LoginResult> {
-        let client = self.client();
-
-        let token = match token {
-            Some(t) => t.to_string(),
-            None => {
-                println!("请输入 Authorization Token:");
+        let token_str = match token {
+            Some(t) if !t.trim().is_empty() => t.to_string(),
+            _ => {
                 let mut input = String::new();
                 std::io::stdin().read_line(&mut input)?;
                 input.trim().to_string()
             }
         };
 
-        client.set_token(Catsona::Judge, &token)?;
-        let _ = client.switch_identity(Catsona::Judge);
+        self.client().set_token(Catsona::Judge, &token_str)?;
+        self.client().switch_identity(Catsona::Judge)?;
 
-        Ok(
-            LoginResult::new(true, LoginMethod::AdminToken, "管理员 Token 登录成功")
-                .with_token(&token),
-        )
+        match self.processor.fetch_admin_details() {
+            Ok(data) => {
+                if data.get("admin").is_some() {
+                    Ok(
+                        LoginResult::new(true, LoginMethod::AdminToken, "管理员 Token 登录成功")
+                            .with_token(&token_str)
+                            .with_auth_details(data),
+                    )
+                } else {
+                    let _ = self.client().set_token(Catsona::Judge, "");
+                    Err(MewError::Auth("管理员 Token 无效或已过期".into()))
+                }
+            }
+            Err(e) => {
+                let _ = self.client().set_token(Catsona::Judge, "");
+                Err(MewError::Auth(format!("管理员 Token 验证失败: {}", e)))
+            }
+        }
     }
 
     pub fn handle_admin_password(
@@ -679,12 +658,9 @@ impl LoginHandler {
         username: Option<&str>,
         password: Option<&str>,
     ) -> MewResult<LoginResult> {
-        let client = self.client();
-
         let mut username = match username {
-            Some(u) => u.to_string(),
-            None => {
-                println!("请输入用户名:");
+            Some(u) if !u.trim().is_empty() => u.to_string(),
+            _ => {
                 let mut input = String::new();
                 std::io::stdin().read_line(&mut input)?;
                 input.trim().to_string()
@@ -692,9 +668,8 @@ impl LoginHandler {
         };
 
         let mut password = match password {
-            Some(p) => p.to_string(),
-            None => {
-                println!("请输入密码:");
+            Some(p) if !p.trim().is_empty() => p.to_string(),
+            _ => {
                 let mut input = String::new();
                 std::io::stdin().read_line(&mut input)?;
                 input.trim().to_string()
@@ -721,9 +696,8 @@ impl LoginHandler {
             {
                 Ok(response) => {
                     if let Some(token) = response.get("token").and_then(|t| t.as_str()) {
-                        client.set_token(Catsona::Judge, token)?;
-                        let _ = client.switch_identity(Catsona::Judge);
-
+                        self.client().set_token(Catsona::Judge, token)?;
+                        self.client().switch_identity(Catsona::Judge)?;
                         return Ok(LoginResult::new(
                             true,
                             LoginMethod::AdminPassword,
@@ -732,29 +706,32 @@ impl LoginHandler {
                         .with_token(token));
                     }
 
+                    let error_code = response
+                        .get("error_code")
+                        .and_then(|e| e.as_str())
+                        .unwrap_or("");
                     let error_msg = response
                         .get("error_msg")
                         .and_then(|e| e.as_str())
                         .unwrap_or("未知错误");
-                    println!("登录失败: {}", error_msg);
 
-                    if let Some(error_code) = response.get("error_code").and_then(|e| e.as_str())
-                        && (error_code == "Admin-Password-Error@Community-Admin"
-                            || error_code == "Param-Invalid@Common")
+                    if error_code == "Admin-Password-Error@Community-Admin"
+                        || error_code == "Param-Invalid@Common"
                     {
                         println!("请输入用户名:");
                         let mut input = String::new();
                         std::io::stdin().read_line(&mut input)?;
                         username = input.trim().to_string();
-
                         println!("请输入密码:");
-                        let mut input = String::new();
                         std::io::stdin().read_line(&mut input)?;
                         password = input.trim().to_string();
+                        continue;
+                    } else {
+                        return Err(MewError::Auth(format!("管理员登录失败: {}", error_msg)));
                     }
                 }
                 Err(e) => {
-                    println!("认证请求失败: {}", e);
+                    return Err(MewError::Auth(format!("认证请求失败: {}", e)));
                 }
             }
         }
@@ -768,6 +745,7 @@ impl Default for LoginHandler {
 }
 
 // ==================== 认证管理器 ====================
+
 #[derive(Debug)]
 pub struct AuthManager {
     client_provider: Box<dyn ClientProvider>,
@@ -780,7 +758,6 @@ impl AuthManager {
     pub fn new_with_provider(provider: Box<dyn ClientProvider>) -> Self {
         let processor = AuthProcessor::new_with_provider(provider.clone_box());
         let handler = LoginHandler::new_with_provider(provider.clone_box());
-
         Self {
             client_provider: provider,
             processor,
@@ -797,7 +774,6 @@ impl AuthManager {
         self.client_provider.client()
     }
 
-    /// 核心登录方法，现在接收 `Option<LoginMethod>` 枚举
     pub fn login(
         &mut self,
         credentials: &LoginCredentials,
@@ -872,7 +848,6 @@ impl AuthManager {
                 method.as_str()
             )));
         }
-
         determine_user_login_method(
             if credentials.token.is_empty() {
                 None
@@ -906,7 +881,6 @@ impl AuthManager {
                 method.as_str()
             )));
         }
-
         determine_admin_login_method(
             if credentials.token.is_empty() {
                 None
@@ -932,7 +906,6 @@ impl AuthManager {
         prefer_method: Option<LoginMethod>,
     ) -> MewResult<LoginResult> {
         let method = self.get_user_login_method(credentials, prefer_method)?;
-
         match method {
             LoginMethod::PasswordV0 => self.handler.handle_password_v0(
                 &credentials.identity,
@@ -968,31 +941,28 @@ impl AuthManager {
         prefer_method: Option<LoginMethod>,
     ) -> MewResult<LoginResult> {
         let method = self.get_admin_login_method(credentials, prefer_method)?;
-
         let mut result = match method {
-            LoginMethod::AdminToken => self.handler.handle_admin_token(Some(&credentials.token)),
+            LoginMethod::AdminToken => self.handler.handle_admin_token(Some(&credentials.token))?,
             LoginMethod::AdminPassword => self
                 .handler
-                .handle_admin_password(Some(&credentials.identity), Some(&credentials.password)),
-            _ => Err(MewError::Auth(format!(
-                "不支持的管理员登录方式: {}",
-                method.as_str()
-            ))),
-        }?;
+                .handle_admin_password(Some(&credentials.identity), Some(&credentials.password))?,
+            _ => {
+                return Err(MewError::Auth(format!(
+                    "不支持的管理员登录方式: {}",
+                    method.as_str()
+                )));
+            }
+        };
 
-        if result.success {
-            match self.fetch_admin_dashboard_data() {
+        if result.success && result.auth_details.is_none() {
+            // 仅在尚未获取管理员详情时才请求
+            match self.processor.fetch_admin_details() {
                 Ok(dashboard) => {
-                    // 只取 "admin" 对象
                     if let Some(admin_data) = dashboard.get("admin").cloned() {
                         result = result.with_auth_details(admin_data);
-                    } else {
-                        eprintln!("仪表盘数据中缺少 'admin' 字段");
                     }
                 }
-                Err(e) => {
-                    eprintln!("获取管理员仪表盘数据失败: {}", e);
-                }
+                Err(_) => { /* 获取详情失败不影响登录结果 */ }
             }
         }
         Ok(result)
@@ -1025,14 +995,6 @@ impl AuthManager {
         Ok(response.status() == 204)
     }
 
-    pub fn fetch_admin_dashboard_data(&self) -> MewResult<Value> {
-        let client = self.client();
-        let response = client
-            .build_request(HttpMethod::Get, "/admins/info", Some(BaseKey::Whale))
-            .send()?;
-        client.response_to_json(response)
-    }
-
     pub fn configure_authentication_token(
         &self,
         token: &str,
@@ -1040,7 +1002,7 @@ impl AuthManager {
     ) -> MewResult<()> {
         let client = self.client();
         client.set_token(status.to_identity(), token)?;
-        let _ = client.switch_identity(status.to_identity());
+        client.switch_identity(status.to_identity())?;
         Ok(())
     }
 
@@ -1062,7 +1024,6 @@ pub struct CloudAuthenticator {
     authorization_token: Option<String>,
     client_id: String,
     time_difference: i64,
-    client_secret: &'static str,
 }
 
 impl CloudAuthenticator {
@@ -1078,7 +1039,6 @@ impl CloudAuthenticator {
             authorization_token,
             client_id,
             time_difference: 0,
-            client_secret: Self::CLIENT_SECRET,
         }
     }
 
@@ -1116,10 +1076,9 @@ impl CloudAuthenticator {
         Ok(now - self.time_difference)
     }
 
-    /// 生成设备认证（返回 JSON 字符串）
     pub fn generate_x_device_auth(&mut self) -> MewResult<String> {
         let timestamp = self.get_calibrated_timestamp()?;
-        let sign_str = format!("{}{}{}", self.client_secret, timestamp, self.client_id);
+        let sign_str = format!("{}{}{}", Self::CLIENT_SECRET, timestamp, self.client_id);
         let mut hasher = Sha256::new();
         hasher.update(sign_str.as_bytes());
         let result = hasher.finalize();
@@ -1130,11 +1089,9 @@ impl CloudAuthenticator {
             "timestamp": timestamp,
             "client_id": self.client_id,
         });
-
         Ok(serde_json::to_string(&auth_json)?)
     }
 
-    /// 获取授权 token
     pub fn authorization_token(&self) -> Option<String> {
         if let Some(ref token) = self.authorization_token
             && !token.is_empty()
@@ -1144,7 +1101,6 @@ impl CloudAuthenticator {
         self.client().current_token()
     }
 
-    /// 设置授权 token
     pub fn set_authorization_token(&mut self, token: Option<String>) {
         self.authorization_token = token;
     }
@@ -1222,7 +1178,6 @@ impl LoginBuilder {
             status: self.status,
             role: self.role,
         };
-
         self.auth_manager.login(&credentials, self.prefer_method)
     }
 }

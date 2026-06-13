@@ -163,7 +163,7 @@ impl WhaleReportFetcher {
 
     fn add_timestamp_to_paginated(paginated: PaginatedIter) -> PaginatedIter {
         let timestamp = current_timestamp_13();
-        paginated.with_param("TIME", timestamp.to_string())
+        paginated.with_iter_param("TIME", timestamp.to_string())
     }
 
     // 作品举报（分页）
@@ -179,10 +179,10 @@ impl WhaleReportFetcher {
             .client
             .paginated("/reports/works")
             .with_base_key(BaseKey::Whale)
-            .with_param("type", source_type.as_str())
-            .with_param("status", status.as_str())
-            .with_param("offset", "0")
-            .with_param("limit", "15")
+            .with_iter_param("type", source_type.as_str())
+            .with_iter_param("status", status.as_str())
+            
+            .with_page_size(15)
             .with_pagination_method(PaginationMethod::Offset)
             .with_offset_key("offset")
             .with_amount_key("limit");
@@ -190,7 +190,7 @@ impl WhaleReportFetcher {
         paginated = Self::add_timestamp_to_paginated(paginated);
 
         if let (Some(filter), Some(id)) = (filter_type, target_id) {
-            paginated = paginated.with_param(filter.as_str(), id.to_string());
+            paginated = paginated.with_iter_param(filter.as_str(), id.to_string());
         }
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -265,10 +265,10 @@ impl WhaleReportFetcher {
             .client
             .paginated("/reports/comments/search")
             .with_base_key(BaseKey::Whale)
-            .with_param("source", source_type.as_str())
-            .with_param("status", status.as_str())
-            .with_param("offset", "0")
-            .with_param("limit", "15")
+            .with_iter_param("source", source_type.as_str())
+            .with_iter_param("status", status.as_str())
+            
+            .with_page_size(15)
             .with_pagination_method(PaginationMethod::Offset)
             .with_offset_key("offset")
             .with_amount_key("limit");
@@ -276,7 +276,7 @@ impl WhaleReportFetcher {
         paginated = Self::add_timestamp_to_paginated(paginated);
 
         if let (Some(filter), Some(id)) = (filter_type, target_id) {
-            paginated = paginated.with_param(filter.as_str(), id.to_string());
+            paginated = paginated.with_iter_param(filter.as_str(), id.to_string());
         }
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -325,9 +325,9 @@ impl WhaleReportFetcher {
             .client
             .paginated("/reports/posts")
             .with_base_key(BaseKey::Whale)
-            .with_param("status", status.as_str())
-            .with_param("offset", "0")
-            .with_param("limit", "15")
+            .with_iter_param("status", status.as_str())
+            
+            .with_page_size(15)
             .with_pagination_method(PaginationMethod::Offset)
             .with_offset_key("offset")
             .with_amount_key("limit");
@@ -335,10 +335,10 @@ impl WhaleReportFetcher {
         paginated = Self::add_timestamp_to_paginated(paginated);
 
         if let Some(board) = board_id {
-            paginated = paginated.with_param("board_id", board.to_string());
+            paginated = paginated.with_iter_param("board_id", board.to_string());
         }
         if let (Some(filter), Some(id)) = (filter_type, target_id) {
-            paginated = paginated.with_param(filter.as_str(), id.to_string());
+            paginated = paginated.with_iter_param(filter.as_str(), id.to_string());
         }
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -389,9 +389,9 @@ impl WhaleReportFetcher {
             .client
             .paginated("/reports/posts/discussions")
             .with_base_key(BaseKey::Whale)
-            .with_param("status", status.as_str())
-            .with_param("offset", "0")
-            .with_param("limit", "15")
+            .with_iter_param("status", status.as_str())
+            
+            .with_page_size(15)
             .with_pagination_method(PaginationMethod::Offset)
             .with_offset_key("offset")
             .with_amount_key("limit");
@@ -399,10 +399,10 @@ impl WhaleReportFetcher {
         paginated = Self::add_timestamp_to_paginated(paginated);
 
         if let Some(board) = board_id {
-            paginated = paginated.with_param("board_id", board.to_string());
+            paginated = paginated.with_iter_param("board_id", board.to_string());
         }
         if let (Some(filter), Some(id)) = (filter_type, target_id) {
-            paginated = paginated.with_param(filter.as_str(), id.to_string());
+            paginated = paginated.with_iter_param(filter.as_str(), id.to_string());
         }
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);

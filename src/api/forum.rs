@@ -161,9 +161,9 @@ impl ForumDataFetcher {
         let mut paginated = self
             .client
             .paginated(&endpoint)
-            .with_param("page", "1")
-            .with_param("limit", "10")
-            .with_param("sort", sort.unwrap_or_else(|| "-created_at".to_string()))
+            .with_iter_param("page", "1")
+            .with_page_size(10)
+            .with_iter_param("sort", sort.unwrap_or_else(|| "-created_at".to_string()))
             .with_pagination_method(PaginationMethod::Page)
             .with_total_key("total")
             .with_amount_key("limit")
@@ -185,8 +185,8 @@ impl ForumDataFetcher {
         let mut paginated = self
             .client
             .paginated(&endpoint)
-            .with_param("page", "1")
-            .with_param("limit", "10")
+            .with_iter_param("page", "1")
+            .with_page_size(10)
             .with_pagination_method(PaginationMethod::Page)
             .with_amount_key("limit")
             .with_offset_key("page");
@@ -207,8 +207,8 @@ impl ForumDataFetcher {
         let mut paginated = self
             .client
             .paginated(&endpoint)
-            .with_param("page", "1")
-            .with_param("limit", "10")
+            .with_iter_param("page", "1")
+            .with_page_size(10)
             .with_pagination_method(PaginationMethod::Page)
             .with_amount_key("limit")
             .with_offset_key("page");
@@ -309,9 +309,9 @@ impl ForumDataFetcher {
         let mut paginated = self
             .client
             .paginated("/web/forums/posts/search")
-            .with_param("title", title)
-            .with_param("page", "1")
-            .with_param("limit", "20")
+            .with_iter_param("title", title)
+            .with_iter_param("page", "1")
+            .with_page_size(20)
             .with_pagination_method(PaginationMethod::Page)
             .with_amount_key("limit")
             .with_offset_key("page");
@@ -339,8 +339,8 @@ impl ForumDataFetcher {
         let mut paginated = self
             .client
             .paginated(&endpoint)
-            .with_param("page", "1")
-            .with_param("limit", "10")
+            .with_iter_param("page", "1")
+            .with_page_size(10)
             .with_pagination_method(PaginationMethod::Page)
             .with_total_key("total")
             .with_amount_key("limit")
@@ -360,8 +360,8 @@ impl ForumDataFetcher {
         let mut paginated = self
             .client
             .paginated("/web/forums/boards/posts/ask-help")
-            .with_param("page", "1")
-            .with_param("limit", "10")
+            .with_iter_param("page", "1")
+            .with_page_size(10)
             .with_pagination_method(PaginationMethod::Page)
             .with_amount_key("limit")
             .with_offset_key("page");

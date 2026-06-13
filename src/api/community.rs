@@ -178,8 +178,8 @@ impl CommunityDataFetcher {
         let mut paginated = self
             .client
             .paginated("/web/message-record")
-            .with_param("query_type", types.as_str())
-            .with_method(HttpMethod::Get)
+            .with_iter_param("query_type", types.as_str())
+            .with_iter_method(HttpMethod::Get)
             .with_pagination_method(PaginationMethod::Offset)
             .with_total_key("total")
             .with_data_key("items");
@@ -511,8 +511,7 @@ impl CommunityDataFetcher {
         let mut paginated = self
             .client
             .paginated("/neko/course/publish/list")
-            .with_param("limit", "10")
-            .with_param("offset", "0")
+            .with_page_size(10)
             .with_total_key("total_course")
             .with_data_key("course_page.items")
             .with_base_key(BaseKey::Creation);
@@ -572,9 +571,8 @@ impl CommunityDataFetcher {
         let mut paginated = self
             .client
             .paginated("/creation-tools/v1/course/package/list")
-            .with_param("limit", "50")
-            .with_param("offset", "0")
-            .with_param("platform", platform.to_string());
+            .with_page_size(50)
+            .with_iter_param("platform", platform.to_string());
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -594,9 +592,8 @@ impl CommunityDataFetcher {
         let mut paginated = self
             .client
             .paginated("/creation-tools/v1/course/list/search")
-            .with_param("course_package_id", course_package_id.to_string())
-            .with_param("limit", "50")
-            .with_param("offset", "0")
+            .with_iter_param("course_package_id", course_package_id.to_string())
+            .with_page_size(50)
             .with_data_key("course_page.items");
 
         if let Some(limit_val) = limit {
@@ -612,8 +609,6 @@ impl CommunityDataFetcher {
     pub fn fetch_teaching_plans_gen(&self, limit: usize) -> PaginatedIter {
         self.client
             .paginated("/neko/teaching-plan/list/team")
-            .with_param("limit", limit.to_string())
-            .with_param("offset", "0")
             .with_limit(limit)
             .with_base_key(BaseKey::Creation)
     }
@@ -645,10 +640,9 @@ impl CommunityDataFetcher {
         let mut paginated = self
             .client
             .paginated("/web/forums/posts")
-            .with_param("limit", "50")
-            .with_param("offset", "0")
-            .with_param("studio_id", studio_id.to_string())
-            .with_param("sort", "-created_at");
+            .with_page_size(50)
+            .with_iter_param("studio_id", studio_id.to_string())
+            .with_iter_param("sort", "-created_at");
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -663,11 +657,7 @@ impl CommunityDataFetcher {
     pub fn fetch_studio_courses_gen(&self, studio_id: i32, limit: Option<usize>) -> PaginatedIter {
         let endpoint = format!("/web/studios/{}/courses", studio_id);
 
-        let mut paginated = self
-            .client
-            .paginated(&endpoint)
-            .with_param("limit", "50")
-            .with_param("offset", "0");
+        let mut paginated = self.client.paginated(&endpoint).with_page_size(50);
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -685,9 +675,8 @@ impl CommunityDataFetcher {
         let mut paginated = self
             .client
             .paginated(&endpoint)
-            .with_param("limit", "50")
-            .with_param("offset", "0")
-            .with_param("sort", "-n_likes");
+            .with_page_size(50)
+            .with_iter_param("sort", "-n_likes");
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -706,11 +695,7 @@ impl CommunityDataFetcher {
     ) -> PaginatedIter {
         let endpoint = format!("/web/studios/{}/participators", studio_id);
 
-        let mut paginated = self
-            .client
-            .paginated(&endpoint)
-            .with_param("limit", "50")
-            .with_param("offset", "0");
+        let mut paginated = self.client.paginated(&endpoint).with_page_size(50);
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -887,10 +872,9 @@ impl UserAction {
         let mut paginated = self
             .client
             .paginated("/web/message-record/broadcast")
-            .with_param("limit", "1")
-            .with_param("offset", "0")
-            .with_param("read_status", read_status.as_str())
-            .with_param("sort", "-created_at");
+            .with_page_size(1)
+            .with_iter_param("read_status", read_status.as_str())
+            .with_iter_param("sort", "-created_at");
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);

@@ -114,8 +114,8 @@ impl WorkshopDataFetcher {
         let mut paginated = self
             .client
             .paginated(&endpoint)
-            .with_param("limit", "40")
-            .with_param("offset", "0")
+            .with_page_size(40)
+            
             .with_total_key("total");
 
         if let Some(limit_val) = limit {
@@ -173,10 +173,10 @@ impl WorkshopDataFetcher {
         let mut paginated = self
             .client
             .paginated(&endpoint)
-            .with_param("source", source.unwrap_or(Source::WorkShop).as_str())
-            .with_param("sort", sort.unwrap_or_else(|| "-created_at".to_string()))
-            .with_param("limit", "20")
-            .with_param("offset", "0");
+            .with_iter_param("source", source.unwrap_or(Source::WorkShop).as_str())
+            .with_iter_param("sort", sort.unwrap_or_else(|| "-created_at".to_string()))
+            .with_page_size(20)
+            ;
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -200,14 +200,14 @@ impl WorkshopDataFetcher {
         let mut paginated = self
             .client
             .paginated(&endpoint)
-            .with_param("limit", "20")
-            .with_param("offset", "0")
-            .with_param(
+            .with_page_size(20)
+            
+            .with_iter_param(
                 "sort",
                 sort.unwrap_or_else(|| "-created_at,-id".to_string()),
             )
-            .with_param("user_id", user_id.to_string())
-            .with_param("work_subject_id", workshop_id.to_string());
+            .with_iter_param("user_id", user_id.to_string())
+            .with_iter_param("work_subject_id", workshop_id.to_string());
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -235,8 +235,8 @@ impl WorkshopDataFetcher {
         let mut paginated = self
             .client
             .paginated(&endpoint)
-            .with_param("limit", "20")
-            .with_param("offset", "0");
+            .with_page_size(20)
+            ;
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);

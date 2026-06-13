@@ -412,8 +412,8 @@ impl EduDataFetcher {
         let mut paginated = self
             .client
             .paginated("https://eduzone.codemao.cn/edu/zone/system/message/list")
-            .with_param("page", "1")
-            .with_param("limit", "10")
+            .with_iter_param("page", "1")
+            .with_page_size(10)
             .with_pagination_method(PaginationMethod::Page)
             .with_offset_key("page")
             .with_amount_key("limit");
@@ -430,15 +430,15 @@ impl EduDataFetcher {
 
     fn add_timestamp_to_paginated(paginated: PaginatedIter) -> PaginatedIter {
         let timestamp = current_timestamp_13();
-        paginated.with_param("TIME", timestamp.to_string())
+        paginated.with_iter_param("TIME", timestamp.to_string())
     }
 
     pub fn fetch_reminders_gen(&self, limit: Option<usize>) -> PaginatedIter {
         let mut paginated = self
             .client
             .paginated("https://eduzone.codemao.cn/edu/zone/invite/teacher/messages")
-            .with_param("page", "1")
-            .with_param("limit", "10")
+            .with_iter_param("page", "1")
+            .with_page_size(10)
             .with_pagination_method(PaginationMethod::Page)
             .with_offset_key("page")
             .with_amount_key("limit");
@@ -479,7 +479,7 @@ impl EduDataFetcher {
             let _paginated = self
                 .client
                 .paginated("https://eduzone.codemao.cn/edu/zone/classes/")
-                .with_param("page", "1")
+                .with_iter_param("page", "1")
                 .with_pagination_method(PaginationMethod::Page)
                 .with_offset_key("page")
                 .with_response_amount_key("limit")
@@ -495,8 +495,8 @@ impl EduDataFetcher {
         let mut paginated = self
             .client
             .paginated("https://eduzone.codemao.cn/edu/zone/student/remove/record")
-            .with_param("page", "1")
-            .with_param("limit", "10")
+            .with_iter_param("page", "1")
+            .with_page_size(10)
             .with_pagination_method(PaginationMethod::Page)
             .with_offset_key("page")
             .with_amount_key("limit");
@@ -517,10 +517,10 @@ impl EduDataFetcher {
         let mut paginated = self
             .client
             .paginated("https://eduzone.codemao.cn/edu/zone/students")
-            .with_param("page", "1")
-            .with_param("limit", "100")
-            .with_payload(data)
-            .with_method(HttpMethod::Post)
+            .with_iter_param("page", "1")
+            .with_page_size(100)
+            .with_iter_payload(data)
+            .with_iter_method(HttpMethod::Post)
             .with_pagination_method(PaginationMethod::Page)
             .with_offset_key("page")
             .with_amount_key("limit");
@@ -653,7 +653,7 @@ impl EduDataFetcher {
         let mut paginated = self
             .client
             .paginated("https://eduzone.codemao.cn/edu/zone/work/manager/student/works")
-            .with_param("page", "1")
+            .with_iter_param("page", "1")
             .with_pagination_method(PaginationMethod::Page)
             .with_offset_key("page")
             .with_response_amount_key("limit");
@@ -672,7 +672,7 @@ impl EduDataFetcher {
         let mut paginated = self
             .client
             .paginated("https://eduzone.codemao.cn/edu/zone/work/manager/works")
-            .with_param("page", "1")
+            .with_iter_param("page", "1")
             .with_pagination_method(PaginationMethod::Page)
             .with_offset_key("page")
             .with_response_amount_key("limit");
@@ -691,7 +691,7 @@ impl EduDataFetcher {
         let mut paginated = self
             .client
             .paginated("https://eduzone.codemao.cn/edu/zone/work/manager/self/works")
-            .with_param("page", "1")
+            .with_iter_param("page", "1")
             .with_pagination_method(PaginationMethod::Page)
             .with_offset_key("page")
             .with_response_amount_key("limit");
@@ -735,8 +735,8 @@ impl EduDataFetcher {
         let mut paginated = self
             .client
             .paginated("https://eduzone.codemao.cn/edu/zone/teaching/record/list")
-            .with_param("page", "1")
-            .with_param("limit", "10")
+            .with_iter_param("page", "1")
+            .with_page_size(10)
             .with_pagination_method(PaginationMethod::Page)
             .with_offset_key("page")
             .with_amount_key("limit");
@@ -780,12 +780,12 @@ impl EduDataFetcher {
         let mut paginated = self
             .client
             .paginated("https://eduzone.codemao.cn/edu/zone/lesson/offical/packages")
-            .with_param("pacakgeEntryType", "0")
-            .with_param("topicType", "all")
-            .with_param("topicId", "all")
-            .with_param("tagId", "all")
-            .with_param("page", "1")
-            .with_param("limit", "150")
+            .with_iter_param("pacakgeEntryType", "0")
+            .with_iter_param("topicType", "all")
+            .with_iter_param("topicId", "all")
+            .with_iter_param("tagId", "all")
+            .with_iter_param("page", "1")
+            .with_page_size(150)
             .with_pagination_method(PaginationMethod::Page)
             .with_offset_key("page")
             .with_amount_key("limit");
@@ -834,8 +834,8 @@ impl EduDataFetcher {
         let mut paginated = self
             .client
             .paginated("https://eduzone.codemao.cn/edu/zone/lesson/offical/packages")
-            .with_param("page", "1")
-            .with_param("limit", "100")
+            .with_iter_param("page", "1")
+            .with_page_size(100)
             .with_pagination_method(PaginationMethod::Page)
             .with_offset_key("page")
             .with_amount_key("limit");

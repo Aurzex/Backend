@@ -645,7 +645,6 @@ pub struct ActionSelectionProcessor {
 impl ActionSelectionProcessor {
     fn check_violation(&self, context: &mut ProcessingContext) -> Result<(), ProcessorError> {
         println!("=== 开始检查违规 ===");
-
         let config = match &context.config {
             Some(c) => c.clone(),
             None => return Ok(()),
@@ -654,33 +653,27 @@ impl ActionSelectionProcessor {
         let source_id = context
             .item
             .get(&config.source_id_field)
-            .and_then(value_to_i64) // 使用工具函数
+            .and_then(value_to_i64)
             .unwrap_or(0);
-
         let board_name = config
             .board_name_field
             .as_ref()
             .and_then(|field| context.item.get(field))
             .and_then(|v| v.as_str())
             .unwrap_or("");
-
         let source_type_map: HashMap<&str, &str> = HashMap::from([
             ("shop_comment", "shop"),
             ("forum_post", "forum"),
             ("forum_discussion", "forum"),
         ]);
-
         let source_type = source_type_map
             .get(context.report_type.as_str())
             .copied()
             .unwrap_or("work");
-
         let user_id = context
             .item
             .get(&config.user_id_field)
             .and_then(value_to_i64);
-
-        // 获取帖子标题用于刷屏检测
         let title = config
             .title_field
             .as_ref()
@@ -689,7 +682,8 @@ impl ActionSelectionProcessor {
             .unwrap_or("");
 
         let checker = violation_checker();
-        checker.check_violation(source_id, source_type, board_name, user_id, title)?;
+        // 传入 config
+        checker.check_violation(source_id, source_type, board_name, user_id, title, &config)?;
 
         println!("=== 检查结束 ===");
         Ok(())
@@ -870,6 +864,7 @@ impl ViolationChecker {
         board_name: &str,
         user_id: Option<i64>,
         title: &str,
+        config: &SourceConfig, // 新增参数
     ) -> Result<(), ProcessorError> {
         println!(
             "检查违规: source_id={}, type={}, board={}, user={:?}",
@@ -882,26 +877,26 @@ impl ViolationChecker {
         let limit_str = prompt_input("输入要获取的评论数: ");
         let limit: usize = limit_str.parse().unwrap_or(DEFAULT_COMMENT_FETCH_LIMIT);
 
-        // 获取迭代器（不收集）
         let mut iter = self.fetch_comments(source_id, source_type, limit);
 
-        // 广告关键词
         let ad_keywords: HashSet<String> = DEFAULT_ADS_KEYWORDS
             .iter()
             .map(|s| s.to_lowercase())
             .collect();
-
         let spam_threshold = DEFAULT_SPAM_THRESHOLD as usize;
 
-        // 流式处理状态
+        // 从配置获取正确的字段名
+        let content_field = &config.content_field;
+        let user_id_field = &config.user_id_field;
+        let content_id_field = &config.content_id_field;
+        let parent_id_field = &config.parent_id_field;
+
         let mut ads_violations: Vec<String> = Vec::new();
-        // 刷屏统计：(user_id, content) -> 出现次数及对应的 identifiers
         let mut duplicates_counter: HashMap<(String, String), (usize, Vec<String>)> =
             HashMap::new();
         let mut comment_count = 0;
 
         while let Some(item_result) = iter.next_item() {
-            // 处理错误
             let value = match item_result {
                 Ok(v) => v,
                 Err(e) => {
@@ -909,27 +904,50 @@ impl ViolationChecker {
                     break;
                 }
             };
-
-            // 检查是否达到用户设定的 limit
             if comment_count >= limit {
                 break;
             }
             comment_count += 1;
 
-            // 提取通用字段
+            // 使用配置字段获取内容/用户ID/ID
             let content = value
-                .get("content")
+                .get(content_field)
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_lowercase();
             let user_id_str = value
-                .get("user_id")
+                .get(user_id_field)
                 .map(value_to_string)
                 .unwrap_or_default();
-            let is_reply = value.get("parent_id").is_some(); // 简单判断是否为回复
-            let identifier = build_identifier(source_type, source_id, &value, is_reply);
+            let is_reply = value
+                .get(parent_id_field)
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0)
+                > 0;
 
-            // 广告检测（即时）
+            // 构建唯一标识符
+            let content_id = value
+                .get(content_id_field)
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
+            let parent_id = if is_reply {
+                value
+                    .get(parent_id_field)
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0)
+            } else {
+                0
+            };
+            let identifier = format!(
+                "{}:{}:{}:{}:{}",
+                source_type,
+                source_id,
+                if is_reply { "reply" } else { "comment" },
+                parent_id,
+                content_id
+            );
+
+            // 广告检测
             if !content.is_empty() && ad_keywords.iter().any(|kw| content.contains(kw)) {
                 let log_type = if is_reply { "回复" } else { "评论" };
                 println!(
@@ -942,7 +960,7 @@ impl ViolationChecker {
                 ads_violations.push(identifier.clone());
             }
 
-            // 刷屏统计（累积计数）
+            // 刷屏统计
             if !user_id_str.is_empty() && !content.is_empty() {
                 let entry = duplicates_counter
                     .entry((user_id_str.clone(), content.clone()))
@@ -952,13 +970,13 @@ impl ViolationChecker {
             }
         }
 
-        // 刷屏判定
+        // 刷屏判定（不变）
         let mut duplicates_violations = Vec::new();
-        for ((user_id, content), (count, identifiers)) in &duplicates_counter {
+        for ((uid, content), (count, identifiers)) in &duplicates_counter {
             if *count >= spam_threshold {
                 println!(
                     "用户 {} 刷屏评论: {}... - 出现 {} 次",
-                    user_id,
+                    uid,
                     truncate_chars(content, 50),
                     count
                 );
@@ -970,13 +988,14 @@ impl ViolationChecker {
         violations.extend(ads_violations);
         violations.extend(duplicates_violations);
 
-        // 论坛刷帖检测（同原）
+        // 论坛刷帖检测（不变，但也可考虑使用 config.title_field）
         if source_type == "forum"
             && let Some(uid) = user_id
         {
             let spam_violations = self.check_spam_posts(uid, title)?;
             violations.extend(spam_violations);
         }
+
         let violations: HashSet<String> = violations.into_iter().collect();
         if violations.is_empty() {
             println!("未检测到违规内容");

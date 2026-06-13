@@ -997,9 +997,9 @@ impl CocoWorkManager {
         let mut paginated = self
             .client
             .paginated("/coconut/web/widget/list")
-            .with_param("TIME", timestamp.to_string())
-            .with_param("current_page", "1")
-            .with_param("page_size", "100")
+            .with_iter_param("TIME", timestamp.to_string())
+            .with_iter_param("current_page", "1")
+            .with_iter_param("page_size", "100")
             .with_total_key("data.total")
             .with_data_key("data.items")
             .with_pagination_method(PaginationMethod::Page)
@@ -1199,9 +1199,9 @@ impl CollaborationManager {
         let mut paginated = self
             .client
             .paginated(&endpoint)
-            .with_param("TIME", timestamp.to_string())
-            .with_param("current_page", "1")
-            .with_param("page_size", "100")
+            .with_iter_param("TIME", timestamp.to_string())
+            .with_iter_param("current_page", "1")
+            .with_iter_param("page_size", "100")
             .with_total_key("data.total")
             .with_data_key("data.items")
             .with_pagination_method(PaginationMethod::Page)
@@ -1269,9 +1269,9 @@ impl CollaborationManager {
         let mut paginated = self
             .client
             .paginated("https://socketcoll.codemao.cn/coll/coco/coll_works")
-            .with_param("TIME", timestamp.to_string())
-            .with_param("current_page", "1")
-            .with_param("page_size", "40")
+            .with_iter_param("TIME", timestamp.to_string())
+            .with_iter_param("current_page", "1")
+            .with_iter_param("page_size", "40")
             .with_total_key("data.total")
             .with_data_key("data.items")
             .with_pagination_method(PaginationMethod::Page)
@@ -1939,9 +1939,9 @@ impl WorkDataFetcher {
         let mut paginated = self
             .client
             .paginated(&endpoint)
-            .with_param("TIME", timestamp.to_string())
-            .with_param("limit", "15")
-            .with_param("offset", "0")
+            .with_iter_param("TIME", timestamp.to_string())
+            .with_page_size(15)
+            
             .with_total_key("page_total");
 
         if let Some(limit_val) = limit {
@@ -2292,11 +2292,11 @@ impl WorkDataFetcher {
         let mut paginated = self
             .client
             .paginated("/tiger/work/recycle/list")
-            .with_param("TIME", timestamp.to_string())
-            .with_param("limit", "30")
-            .with_param("offset", "0")
-            .with_param("version_no", version.as_str())
-            .with_param("work_status", work_status.unwrap_or("CYCLED"))
+            .with_iter_param("TIME", timestamp.to_string())
+            .with_page_size(30)
+            
+            .with_iter_param("version_no", version.as_str())
+            .with_iter_param("work_status", work_status.unwrap_or("CYCLED"))
             .with_base_key(BaseKey::Creation);
 
         if let Some(limit_val) = limit {
@@ -2321,12 +2321,12 @@ impl WorkDataFetcher {
         let mut paginated = self
             .client
             .paginated("/wood/comm/work/list")
-            .with_param("TIME", timestamp.to_string())
-            .with_param("limit", "30")
-            .with_param("offset", "0")
-            .with_param("language_type", language_type.unwrap_or(0).to_string())
-            .with_param("work_status", work_status.unwrap_or("CYCLED"))
-            .with_param("published_status", published_status.unwrap_or("undefined"))
+            .with_iter_param("TIME", timestamp.to_string())
+            .with_page_size(30)
+            
+            .with_iter_param("language_type", language_type.unwrap_or(0).to_string())
+            .with_iter_param("work_status", work_status.unwrap_or("CYCLED"))
+            .with_iter_param("published_status", published_status.unwrap_or("undefined"))
             .with_base_key(BaseKey::Creation);
 
         if let Some(limit_val) = limit {
@@ -2349,10 +2349,10 @@ impl WorkDataFetcher {
         let mut paginated = self
             .client
             .paginated("/box/v2/work/list")
-            .with_param("TIME", timestamp.to_string())
-            .with_param("limit", "30")
-            .with_param("offset", "0")
-            .with_param("work_status", work_status.unwrap_or("CYCLED"))
+            .with_iter_param("TIME", timestamp.to_string())
+            .with_page_size(30)
+            
+            .with_iter_param("work_status", work_status.unwrap_or("CYCLED"))
             .with_base_key(BaseKey::Creation);
 
         if let Some(limit_val) = limit {
@@ -2375,10 +2375,10 @@ impl WorkDataFetcher {
         let mut paginated = self
             .client
             .paginated("/web/fanfic/my/new")
-            .with_param("TIME", timestamp.to_string())
-            .with_param("limit", "30")
-            .with_param("offset", "0")
-            .with_param("fiction_status", fiction_status.unwrap_or("CYCLED"));
+            .with_iter_param("TIME", timestamp.to_string())
+            .with_page_size(30)
+            
+            .with_iter_param("fiction_status", fiction_status.unwrap_or("CYCLED"));
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -2401,12 +2401,12 @@ impl WorkDataFetcher {
         let mut paginated = self
             .client
             .paginated("/neko/works/v2/list/user")
-            .with_param("TIME", timestamp.to_string())
-            .with_param("name", name.unwrap_or(""))
-            .with_param("limit", "24")
-            .with_param("offset", "0")
-            .with_param("status", "-99")
-            .with_param(
+            .with_iter_param("TIME", timestamp.to_string())
+            .with_iter_param("name", name.unwrap_or(""))
+            .with_page_size(24)
+            
+            .with_iter_param("status", "-99")
+            .with_iter_param(
                 "work_business_classify",
                 work_business_classify.unwrap_or(1).to_string(),
             )
@@ -2436,12 +2436,12 @@ impl WorkDataFetcher {
         let mut paginated = self
             .client
             .paginated("/neko/works/v2/list/user")
-            .with_param("TIME", timestamp.to_string())
-            .with_param("name", name)
-            .with_param("limit", "24")
-            .with_param("offset", "0")
-            .with_param("status", status.unwrap_or(1).to_string())
-            .with_param(
+            .with_iter_param("TIME", timestamp.to_string())
+            .with_iter_param("name", name)
+            .with_page_size(24)
+            
+            .with_iter_param("status", status.unwrap_or(1).to_string())
+            .with_iter_param(
                 "work_business_classify",
                 work_business_classify.unwrap_or(1).to_string(),
             )
@@ -2468,11 +2468,11 @@ impl WorkDataFetcher {
         let mut paginated = self
             .client
             .paginated("/neko/works/list/user/published")
-            .with_param("TIME", timestamp.to_string())
-            .with_param("name", name)
-            .with_param("limit", "24")
-            .with_param("offset", "0")
-            .with_param(
+            .with_iter_param("TIME", timestamp.to_string())
+            .with_iter_param("name", name)
+            .with_page_size(24)
+            
+            .with_iter_param(
                 "work_business_classify",
                 work_business_classify.unwrap_or(1).to_string(),
             )

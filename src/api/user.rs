@@ -344,10 +344,9 @@ impl UserDataFetcher {
         let mut paginated = self
             .client
             .paginated("/creation-tools/v2/user/center/work-list")
-            .with_param("type", types.unwrap_or(WorksListType::Newest).as_str())
-            .with_param("user_id", user_id.to_string())
-            .with_param("offset", "0")
-            .with_param("limit", "5")
+            .with_iter_param("type", types.unwrap_or(WorksListType::Newest).as_str())
+            .with_iter_param("user_id", user_id.to_string())
+            .with_page_size(5)
             .with_total_key("total");
 
         if let Some(limit_val) = limit {
@@ -414,8 +413,7 @@ impl UserDataFetcher {
         let mut paginated = self
             .client
             .paginated("/nemo/v2/works/list/user/published")
-            .with_param("limit", "15")
-            .with_param("offset", "0");
+            .with_page_size(15);
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -441,13 +439,12 @@ impl UserDataFetcher {
         let mut paginated = self
             .client
             .paginated(url)
-            .with_param("offset", "0")
-            .with_param("limit", "15")
+            .with_page_size(15)
             .with_base_key(BaseKey::Creation);
 
         if let Some(extra) = extra_params {
             for (key, value) in extra {
-                paginated = paginated.with_param(key, value);
+                paginated = paginated.with_iter_param(key, value);
             }
         }
 
@@ -471,14 +468,13 @@ impl UserDataFetcher {
         let mut paginated = self
             .client
             .paginated("/kitten/common/work/list2")
-            .with_param("offset", "0")
-            .with_param("limit", "30")
-            .with_param("version_no", version.as_str())
-            .with_param(
+            .with_page_size(30)
+            .with_iter_param("version_no", version.as_str())
+            .with_iter_param(
                 "work_status",
                 work_status.unwrap_or(WorkShowStatus::Show).as_str(),
             )
-            .with_param("published_status", status.as_str())
+            .with_iter_param("published_status", status.as_str())
             .with_base_key(BaseKey::Creation);
 
         if let Some(limit_val) = limit {
@@ -499,9 +495,8 @@ impl UserDataFetcher {
         let mut paginated = self
             .client
             .paginated("/creation-tools/v1/works/list")
-            .with_param("offset", "0")
-            .with_param("limit", "30")
-            .with_param("published_status", status.as_str());
+            .with_page_size(30)
+            .with_iter_param("published_status", status.as_str());
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -523,14 +518,13 @@ impl UserDataFetcher {
         let mut paginated = self
             .client
             .paginated("/wood/comm/work/list")
-            .with_param("offset", "0")
-            .with_param("limit", "30")
-            .with_param("language_type", language_type.unwrap_or(0).to_string())
-            .with_param(
+            .with_page_size(30)
+            .with_iter_param("language_type", language_type.unwrap_or(0).to_string())
+            .with_iter_param(
                 "work_status",
                 work_status.unwrap_or(WorkShowStatus::Show).as_str(),
             )
-            .with_param("published_status", status.as_str())
+            .with_iter_param("published_status", status.as_str())
             .with_base_key(BaseKey::Creation);
 
         if let Some(limit_val) = limit {
@@ -552,13 +546,12 @@ impl UserDataFetcher {
         let mut paginated = self
             .client
             .paginated("/box/v2/work/list")
-            .with_param("offset", "0")
-            .with_param("limit", "30")
-            .with_param(
+            .with_page_size(30)
+            .with_iter_param(
                 "work_status",
                 work_status.unwrap_or(WorkShowStatus::Show).as_str(),
             )
-            .with_param("published_status", status.as_str())
+            .with_iter_param("published_status", status.as_str())
             .with_base_key(BaseKey::Creation);
 
         if let Some(limit_val) = limit {
@@ -579,9 +572,8 @@ impl UserDataFetcher {
         let mut paginated = self
             .client
             .paginated("/web/fanfic/my/new")
-            .with_param("offset", "0")
-            .with_param("limit", "30")
-            .with_param(
+            .with_page_size(30)
+            .with_iter_param(
                 "fiction_status",
                 fiction_status.unwrap_or(WorkShowStatus::Show).as_str(),
             );
@@ -605,15 +597,14 @@ impl UserDataFetcher {
         let mut paginated = self
             .client
             .paginated("/coconut/web/work/list")
-            .with_param("offset", "0")
-            .with_param("limit", "30")
-            .with_param("status", status.unwrap_or(1).to_string())
+            .with_page_size(30)
+            .with_iter_param("status", status.unwrap_or(1).to_string())
             .with_data_key("data.items")
             .with_total_key("data.total")
             .with_base_key(BaseKey::Creation);
 
         if let Some(pub_val) = published {
-            paginated = paginated.with_param("published", pub_val.to_string());
+            paginated = paginated.with_iter_param("published", pub_val.to_string());
         }
 
         if let Some(limit_val) = limit {
@@ -644,9 +635,8 @@ impl UserDataFetcher {
         let mut paginated = self
             .client
             .paginated("/creation-tools/v1/user/fans")
-            .with_param("user_id", user_id.to_string())
-            .with_param("offset", "0")
-            .with_param("limit", "15")
+            .with_iter_param("user_id", user_id.to_string())
+            .with_page_size(15)
             .with_total_key("total");
 
         if let Some(limit_val) = limit {
@@ -663,9 +653,8 @@ impl UserDataFetcher {
         let mut paginated = self
             .client
             .paginated("/creation-tools/v1/user/followers")
-            .with_param("user_id", user_id.to_string())
-            .with_param("offset", "0")
-            .with_param("limit", "15")
+            .with_iter_param("user_id", user_id.to_string())
+            .with_page_size(15)
             .with_total_key("total");
 
         if let Some(limit_val) = limit {
@@ -740,9 +729,8 @@ impl UserDataFetcher {
         let mut paginated = self
             .client
             .paginated("/creation-tools/v2/user/center/collect/list")
-            .with_param("user_id", user_id.to_string())
-            .with_param("offset", "0")
-            .with_param("limit", "5")
+            .with_iter_param("user_id", user_id.to_string())
+            .with_page_size(5)
             .with_total_key("total");
 
         if let Some(limit_val) = limit {
