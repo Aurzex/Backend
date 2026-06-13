@@ -4,174 +4,21 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use fastrand;
-use serde_json::{Map, Value};
-
-use crate::api::forum::{
-    ForumActionHandler, ForumDataFetcher, ForumReportReasonId, ItemType, PostReportReasonId,
-};
-use crate::api::shop::{WorkShopReportReasonId, WorkshopActionHandler, WorkshopDataFetcher};
-use crate::api::whale::{ReportHandler, ReportStatus, Resolution};
-use crate::api::work::{BaseWorkOperations, CommentOperations, WorkDataFetcher};
-use crate::core::pipeline::BatchGroup;
-use crate::core::pipeline::ReportIdExt;
-use crate::core::types::CommentConfig;
-use crate::utils::acquire::{BaseKey, Catsona, FileUploader, HttpMethod, KittyFactory};
-use crate::utils::data::{DataManager, PathConfig, SettingManager};
+use serde_json::Value;
 
 use super::pipeline::{
-    BatchActionManager, ProcessingContext, ProcessingPipeline, ViolationChecker,
-    apply_action_by_method, parse_resolution,
+    BatchActionManager, ProcessingContext, ProcessingPipeline, apply_action_by_method,
 };
 use super::types::{
-    ProcessorError, ReportFetcher, ReportTypeRegistry, SourceConfig, bytes_to_human,
-    get_valid_input, html_to_text, prompt_input, timestamp_to_string, value_to_i64,
+    ProcessorError, ReportFetcher, ReportTypeRegistry, bytes_to_human, get_valid_input,
     value_to_string,
 };
-
-// ==================== 自动回复处理器 ====================
-pub struct ReplyProcessor;
-
-impl ReplyProcessor {
-    pub fn parse_content_field(reply: &Value) -> Option<Map<String, Value>> {
-        match reply.get("content") {
-            Some(Value::String(s)) => serde_json::from_str(s).ok(),
-            Some(Value::Object(obj)) => Some(obj.clone()),
-            _ => None,
-        }
-    }
-
-    pub fn extract_comment_text(reply_type: &str, message_info: &Map<String, Value>) -> String {
-        if reply_type.ends_with("_COMMENT") {
-            message_info
-                .get("comment")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string()
-        } else {
-            message_info
-                .get("reply")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string()
-        }
-    }
-
-    pub fn extract_target_and_parent_ids(
-        reply_type: &str,
-        reply: &Value,
-        message_info: &Map<String, Value>,
-        _business_id: i64,
-        _source_type: &str,
-    ) -> (i32, i32) {
-        let is_comment = reply_type.ends_with("_COMMENT");
-        let target_id = if is_comment {
-            reply
-                .get("reference_id")
-                .and_then(|v| v.as_i64())
-                .unwrap_or(0) as i32
-        } else {
-            message_info
-                .get("reply_id")
-                .and_then(|v| v.as_str())
-                .and_then(|s| s.parse::<i32>().ok())
-                .unwrap_or(0)
-        };
-
-        let parent_id = if !is_comment {
-            reply
-                .get("reference_id")
-                .and_then(|v| v.as_i64())
-                .unwrap_or(0) as i32
-        } else {
-            0
-        };
-
-        (target_id, parent_id)
-    }
-
-    pub fn match_keyword(
-        comment_text: &str,
-        formatted_answers: &HashMap<String, Value>,
-        formatted_replies: &[String],
-    ) -> (String, Option<String>) {
-        for (keyword, resp) in formatted_answers {
-            if comment_text.contains(keyword) {
-                let chosen = match resp {
-                    Value::Array(arr) => {
-                        if arr.is_empty() {
-                            String::new()
-                        } else {
-                            let idx = fastrand::usize(0..arr.len());
-                            arr.get(idx)
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("")
-                                .to_string()
-                        }
-                    }
-                    Value::String(s) => s.clone(),
-                    _ => String::new(),
-                };
-                return (chosen, Some(keyword.clone()));
-            }
-        }
-
-        let chosen = if formatted_replies.is_empty() {
-            String::new()
-        } else {
-            let idx = fastrand::usize(0..formatted_replies.len());
-            formatted_replies.get(idx).cloned().unwrap_or_default()
-        };
-
-        (chosen, None)
-    }
-
-    pub fn protect_cdn_link(link: &str) -> String {
-        let mut protected = String::new();
-        for ch in link.chars() {
-            protected.push(ch);
-            protected.push('\u{200b}');
-            protected.push('\u{200d}');
-        }
-        protected
-    }
-
-    pub fn log_reply_info(
-        reply_id: i64,
-        reply_type: &str,
-        source_type: &str,
-        sender_nickname: &str,
-        sender_id: i64,
-        business_name: &str,
-        comment_text: &str,
-        matched_keyword: Option<&str>,
-        chosen: &str,
-    ) {
-        println!("\n{}", "=".repeat(40));
-        println!("处理新通知 [ID: {}]", reply_id);
-        println!(
-            "类型: {} ({})",
-            reply_type,
-            if source_type == "work" {
-                "作品"
-            } else {
-                "帖子"
-            }
-        );
-        println!("发送者: {} (ID: {})", sender_nickname, sender_id);
-        println!("来源: {}", business_name);
-        println!("内容: {}", comment_text);
-        if let Some(kw) = matched_keyword {
-            println!("匹配到关键词: 「{}」", kw);
-        } else {
-            println!("未匹配关键词, 使用随机回复");
-        }
-        println!("选择回复: 【{}】", chosen);
-    }
-}
+use crate::api::whale::{ReportHandler, ReportStatus, Resolution};
+use crate::core::pipeline::BatchGroup;
+use crate::core::pipeline::ReportIdExt;
+use crate::utils::acquire::{FileUploader, KittyFactory};
 
 // ==================== 文件处理器 ====================
 const MAX_SIZE_BYTES: u64 = 15 * 1024 * 1024;

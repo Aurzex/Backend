@@ -1,29 +1,80 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use fastrand;
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 use crate::api::forum::{
     ForumActionHandler, ForumDataFetcher, ForumReportReasonId, ItemType, PostReportReasonId,
 };
 use crate::api::shop::{WorkShopReportReasonId, WorkshopActionHandler, WorkshopDataFetcher};
-use crate::api::whale::{ReportHandler, ReportStatus, Resolution};
+use crate::api::whale::{ReportHandler, Resolution};
 use crate::api::work::{BaseWorkOperations, CommentOperations, WorkDataFetcher};
 use crate::core::types::CommentConfig;
-use crate::utils::acquire::{BaseKey, Catsona, FileUploader, HttpMethod, KittyFactory};
-use crate::utils::data::{DataManager, PathConfig, SettingManager};
+use crate::utils::acquire::{BaseKey, Catsona, HttpMethod, KittyFactory};
+use crate::utils::data::PathConfig;
 
 use super::types::{
-    ProcessorError, ReportFetcher, ReportTypeRegistry, SourceConfig, bytes_to_human,
-    get_valid_input, html_to_text, prompt_input, timestamp_to_string, value_to_i64,
-    value_to_string,
+    ProcessorError, ReportTypeRegistry, SourceConfig, get_valid_input, html_to_text, prompt_input,
+    timestamp_to_string, value_to_i64, value_to_string,
 };
+
+// ==================== 硬编码配置数据 ====================
+
+/// 官方账号 ID 列表
+const OFFICIAL_IDS: [i64; 9] = [
+    128963, 629055, 203577, 859722, 148883, 2191000, 7492052, 387963, 3649031,
+];
+
+/// 广告关键词列表（默认值，原 data.user_data.ads）
+const DEFAULT_ADS_KEYWORDS: &[&str] = &[
+    "codemao.cn/work",
+    "cpdd",
+    "scp",
+    "不喜可删",
+    "互关",
+    "互赞",
+    "交友",
+    "光头强",
+    "关注",
+    "再创作",
+    "冲传说",
+    "冲大佬",
+    "冲高手",
+    "协作项目",
+    "基金会",
+    "处cp",
+    "家族招人",
+    "我的作品",
+    "戴雨默",
+    "所有作品",
+    "扫厕所",
+    "找徒弟",
+    "找闺",
+    "招人",
+    "有赞必回",
+    "点个",
+    "爬虫",
+    "看一下我的",
+    "看我的",
+    "看看我的",
+    "粘贴到别人作品",
+    "赞我",
+    "转发",
+];
+
+/// 刷屏阈值（原 setting.parameter.spam_del_max 默认值）
+const DEFAULT_SPAM_THRESHOLD: i64 = 3;
+
+/// 违规检查时请求评论的默认数量
+const DEFAULT_COMMENT_FETCH_LIMIT: usize = 100;
+
+/// 学生账号单次登录最大举报次数
+const MAX_REPORTS_PER_ACCOUNT: usize = 25;
 
 // ==================== 公共工具函数 ====================
 
@@ -91,10 +142,6 @@ pub(crate) fn parse_resolution(resolution: &str) -> Result<Resolution, Processor
         ))),
     }
 }
-
-const OFFICIAL_IDS: [i64; 9] = [
-    128963, 629055, 203577, 859722, 148883, 2191000, 7492052, 387963, 3649031,
-];
 
 pub trait ReportIdExt {
     fn get_report_id(&self, item: &Value) -> i32;
@@ -174,53 +221,6 @@ impl CommentProcessStrategy for AdsStrategy {
     }
 }
 
-struct BlacklistStrategy;
-impl CommentProcessStrategy for BlacklistStrategy {
-    fn process(
-        &self,
-        comments: &[Value],
-        item_id: i64,
-        title: &str,
-        params: &HashMap<String, Value>,
-        target_lists: &mut HashMap<String, Vec<String>>,
-        source_type: &str,
-    ) {
-        let blacklist: HashSet<String> = params
-            .get("blacklist")
-            .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().map(value_to_string).collect())
-            .unwrap_or_default();
-
-        if blacklist.is_empty() {
-            return;
-        }
-
-        for_each_comment_reply(comments, |data, is_reply| {
-            let user_id = data.get("user_id").map(value_to_string).unwrap_or_default();
-            if blacklist.contains(&user_id) {
-                let identifier = build_identifier(source_type, item_id, data, is_reply);
-                let log_type = if is_reply { "回复" } else { "评论" };
-                let nickname = data
-                    .get("nickname")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("未知用户");
-                let title_part = title_preview_str(title);
-                println!(
-                    "黑名单 {} [{}]{} : {}",
-                    log_type,
-                    source_type.to_uppercase(),
-                    title_part,
-                    nickname
-                );
-                target_lists
-                    .entry("blacklist".to_string())
-                    .or_default()
-                    .push(identifier);
-            }
-        });
-    }
-}
-
 struct DuplicatesStrategy;
 impl CommentProcessStrategy for DuplicatesStrategy {
     fn process(
@@ -235,7 +235,7 @@ impl CommentProcessStrategy for DuplicatesStrategy {
         let threshold = params
             .get("duplicates")
             .and_then(|v| v.as_i64())
-            .unwrap_or(3) as usize;
+            .unwrap_or(DEFAULT_SPAM_THRESHOLD) as usize;
 
         let mut content_map: HashMap<(String, String), Vec<String>> = HashMap::new();
 
@@ -283,8 +283,8 @@ impl StrategyFactory {
         let mut factory = StrategyFactory {
             strategies: HashMap::new(),
         };
+        // 注册广告和刷屏策略（不再注册黑名单）
         factory.register("ads", Box::new(AdsStrategy));
-        factory.register("blacklist", Box::new(BlacklistStrategy));
         factory.register("duplicates", Box::new(DuplicatesStrategy));
         factory
     }
@@ -327,7 +327,7 @@ impl CommentProcessor {
         if let Some(strategy) = self.factory.get(action_type)
             && let Some(comments) = config.get_comments(item_id)
         {
-            strategy.process(&comments, item_id, title, params, target_lists, source_type);
+            strategy.process(comments, item_id, title, params, target_lists, source_type);
         }
     }
 
@@ -474,12 +474,13 @@ impl Processor for OfficialCheckProcessor {
 
                 if let Some(resolution) = status_map.get("P") {
                     let report_id = config.get_report_id(&context.item);
-                    let _ = apply_action_by_method(
+                    // 传播错误，不再静默忽略
+                    apply_action_by_method(
                         &config.handle_method,
                         report_id,
                         context.admin_id,
                         resolution,
-                    );
+                    )?;
                     context.messages.push("已自动通过官方内容".into());
                     println!("自动通过官方举报ID: {}", context.record_id);
                 }
@@ -490,236 +491,134 @@ impl Processor for OfficialCheckProcessor {
     }
 }
 
-// ==================== 详情显示处理器（按类型定制） ====================
+// ==================== 详情显示处理器（重构为统一模板） ====================
 pub struct DetailDisplayProcessor;
 
 impl DetailDisplayProcessor {
-    fn display_work_report(item: &Value, config: &SourceConfig) {
-        println!("=== 作品举报详情 ===");
+    fn display_report(item: &Value, config: &SourceConfig, report_type: &str) {
         let base_url = "https://shequ.codemao.cn";
-
-        let author_nickname = item
-            .get(&config.user_nickname_field)
-            .and_then(|v| v.as_str())
-            .unwrap_or("未知");
-        let author_id = item
-            .get(&config.user_id_field)
-            .map(value_to_string)
-            .unwrap_or_default();
-        println!("作者昵称: {}", author_nickname);
-        println!("作者链接: {}/user/{}", base_url, author_id);
-
-        let work_id = item
-            .get(&config.source_id_field)
-            .map(value_to_string)
-            .unwrap_or_default();
-        println!("作品链接: {}/work/{}", base_url, work_id);
-
-        if let Some(type_field) = &config.work_type_field
-            && let Some(work_type) = item.get(type_field).and_then(|v| v.as_str())
-        {
-            println!("作品类型: {}", work_type);
-        }
-
-        let reason = item
-            .get(&config.reason_field)
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        println!("举报原因: {}", reason);
-
-        let description = item
-            .get(&config.description_field)
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        println!("举报线索: {}", description);
-
-        let created_at = item
-            .get(&config.created_at_field)
-            .map(timestamp_to_string)
-            .unwrap_or_default();
-        println!("举报时间: {}", created_at);
-    }
-
-    fn display_comment_report(item: &Value, config: &SourceConfig) {
-        println!("=== 评论举报详情 ===");
-        let base_url = "https://shequ.codemao.cn";
-
-        let content = item
-            .get(&config.content_field)
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let content_text = html_to_text(content);
-        println!("举报内容: {}", content_text);
-
-        let user_nickname = item
-            .get(&config.user_nickname_field)
-            .and_then(|v| v.as_str())
-            .unwrap_or("未知");
-        let user_id = item
-            .get(&config.user_id_field)
-            .map(value_to_string)
-            .unwrap_or_default();
-        println!("被举报人昵称: {}", user_nickname);
-        println!("被举报人链接: {}/user/{}", base_url, user_id);
-
-        let studio_name = item
-            .get(&config.source_name_field)
-            .and_then(|v| v.as_str())
-            .unwrap_or("未知");
-        let studio_id = item
-            .get(&config.source_id_field)
-            .map(value_to_string)
-            .unwrap_or_default();
-        println!("工作室名称: {}", studio_name);
-        println!("工作室链接: {}/work_shop/{}", base_url, studio_id);
-
-        let reason = item
-            .get(&config.reason_field)
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        println!("举报原因: {}", reason);
-
-        let created_at = item
-            .get(&config.created_at_field)
-            .map(timestamp_to_string)
-            .unwrap_or_default();
-        println!("举报时间: {}", created_at);
-    }
-
-    fn display_forum_report(item: &Value, config: &SourceConfig) {
-        println!("=== 帖子举报详情 ===");
-        let base_url = "https://shequ.codemao.cn";
-
-        let author_nickname = item
-            .get(&config.user_nickname_field)
-            .and_then(|v| v.as_str())
-            .unwrap_or("未知");
-        let author_id = item
-            .get(&config.user_id_field)
-            .map(value_to_string)
-            .unwrap_or_default();
-        println!("帖子作者: {}", author_nickname);
-        println!("作者链接: {}/user/{}", base_url, author_id);
-
-        let post_id_value = item
-            .get(&config.source_id_field)
-            .map(value_to_string)
-            .unwrap_or_default();
-        println!("帖子链接: {}/community/{}", base_url, post_id_value);
-
-        if let Ok(post_id) = post_id_value.parse::<i32>()
-            && let Ok(details) = ForumDataFetcher::new().fetch_single_post_details(post_id)
-            && let Some(content) = details.get("content").and_then(|v| v.as_str())
-        {
-            let content_text = html_to_text(content);
-            println!("内容: {}", truncate_chars(&content_text, 200));
-        }
-
-        if let Some(title_field) = &config.title_field
-            && let Some(title) = item.get(title_field).and_then(|v| v.as_str())
-        {
-            println!("标题: {}", title);
-        }
-
-        let reason = item
-            .get(&config.reason_field)
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        println!("举报原因: {}", reason);
-
-        let description = item
-            .get(&config.description_field)
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        println!("举报线索: {}", description);
-
-        let created_at = item
-            .get(&config.created_at_field)
-            .map(timestamp_to_string)
-            .unwrap_or_default();
-        println!("举报时间: {}", created_at);
-    }
-
-    fn display_discussion_report(item: &Value, config: &SourceConfig) {
-        println!("=== 讨论举报详情 ===");
-        let base_url = "https://shequ.codemao.cn";
-
-        let content = item
-            .get(&config.content_field)
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let content_text = html_to_text(content);
-        println!("被举报内容: {}", content_text);
-
-        let user_nickname = item
-            .get(&config.user_nickname_field)
-            .and_then(|v| v.as_str())
-            .unwrap_or("未知");
-        let user_id = item
-            .get(&config.user_id_field)
-            .map(value_to_string)
-            .unwrap_or_default();
-        println!("被举报人昵称: {}", user_nickname);
-        println!("被举报人链接: {}/user/{}", base_url, user_id);
-
-        let post_id = item
-            .get(&config.source_id_field)
-            .map(value_to_string)
-            .unwrap_or_default();
-        println!("帖子链接: {}/community/{}", base_url, post_id);
-
-        if let Some(title_field) = &config.title_field
-            && let Some(title) = item.get(title_field).and_then(|v| v.as_str())
-        {
-            println!("帖子标题: {}", title);
-        }
-
-        if let Some(board_field) = &config.board_name_field
-            && let Some(board) = item.get(board_field).and_then(|v| v.as_str())
-        {
-            println!("分区: {}", board);
-        }
-
-        let reason = item
-            .get(&config.reason_field)
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        println!("举报原因: {}", reason);
-
-        let created_at = item
-            .get(&config.created_at_field)
-            .map(timestamp_to_string)
-            .unwrap_or_default();
-        println!("举报时间: {}", created_at);
-    }
-
-    fn display_generic_report(item: &Value, config: &SourceConfig) {
         println!("=== {} 详情 ===", config.name);
 
-        if let Some(content) = item.get(&config.content_field).and_then(|v| v.as_str()) {
-            println!("内容: {}", content);
+        // 通过宏简化字段打印
+        macro_rules! print_if {
+            ($label:expr, $field:expr, $transform:expr) => {
+                if let Some(val) = item.get($field) {
+                    println!("{}: {}", $label, $transform(val));
+                }
+            };
+            ($label:expr, $field:expr) => {
+                if let Some(val) = item.get($field).and_then(|v| v.as_str()) {
+                    println!("{}: {}", $label, val);
+                }
+            };
         }
 
-        if let Some(reason) = item.get(&config.reason_field).and_then(|v| v.as_str()) {
-            println!("举报原因: {}", reason);
+        match report_type {
+            "work_work" => {
+                print_if!("作者昵称", &config.user_nickname_field);
+                print_if!("作者链接", &config.user_id_field, |v: &Value| format!(
+                    "{}/user/{}",
+                    base_url,
+                    value_to_string(v)
+                ));
+                print_if!("作品链接", &config.source_id_field, |v: &Value| format!(
+                    "{}/work/{}",
+                    base_url,
+                    value_to_string(v)
+                ));
+                if let Some(type_field) = &config.work_type_field {
+                    print_if!("作品类型", type_field);
+                }
+                print_if!("举报原因", &config.reason_field);
+                print_if!("举报线索", &config.description_field);
+                print_if!("举报时间", &config.created_at_field, |v: &Value| {
+                    timestamp_to_string(v)
+                });
+            }
+            "shop_comment" => {
+                print_if!("举报内容", &config.content_field, |v: &Value| {
+                    html_to_text(v.as_str().unwrap_or(""))
+                });
+                print_if!("被举报人昵称", &config.user_nickname_field);
+                print_if!("被举报人链接", &config.user_id_field, |v: &Value| format!(
+                    "{}/user/{}",
+                    base_url,
+                    value_to_string(v)
+                ));
+                print_if!("工作室名称", &config.source_name_field);
+                print_if!("工作室链接", &config.source_id_field, |v: &Value| format!(
+                    "{}/work_shop/{}",
+                    base_url,
+                    value_to_string(v)
+                ));
+                print_if!("举报原因", &config.reason_field);
+                print_if!("举报时间", &config.created_at_field, |v: &Value| {
+                    timestamp_to_string(v)
+                });
+            }
+            "forum_post" => {
+                print_if!("帖子作者", &config.user_nickname_field);
+                print_if!("作者链接", &config.user_id_field, |v: &Value| format!(
+                    "{}/user/{}",
+                    base_url,
+                    value_to_string(v)
+                ));
+                if let Ok(post_id) = item
+                    .get(&config.source_id_field)
+                    .map(value_to_string)
+                    .unwrap_or_default()
+                    .parse::<i32>()
+                    && let Ok(details) = ForumDataFetcher::new().fetch_single_post_details(post_id)
+                    && let Some(content) = details.get("content").and_then(|v| v.as_str())
+                {
+                    println!("内容: {}", truncate_chars(&html_to_text(content), 200));
+                }
+                if let Some(title_field) = &config.title_field {
+                    print_if!("标题", title_field);
+                }
+                print_if!("举报原因", &config.reason_field);
+                print_if!("举报线索", &config.description_field);
+                print_if!("举报时间", &config.created_at_field, |v: &Value| {
+                    timestamp_to_string(v)
+                });
+            }
+            "forum_discussion" => {
+                print_if!("被举报内容", &config.content_field, |v: &Value| {
+                    html_to_text(v.as_str().unwrap_or(""))
+                });
+                print_if!("被举报人昵称", &config.user_nickname_field);
+                print_if!("被举报人链接", &config.user_id_field, |v: &Value| format!(
+                    "{}/user/{}",
+                    base_url,
+                    value_to_string(v)
+                ));
+                print_if!("帖子链接", &config.source_id_field, |v: &Value| format!(
+                    "{}/community/{}",
+                    base_url,
+                    value_to_string(v)
+                ));
+                if let Some(title_field) = &config.title_field {
+                    print_if!("帖子标题", title_field);
+                }
+                if let Some(board_field) = &config.board_name_field {
+                    print_if!("分区", board_field);
+                }
+                print_if!("举报原因", &config.reason_field);
+                print_if!("举报时间", &config.created_at_field, |v: &Value| {
+                    timestamp_to_string(v)
+                });
+            }
+            _ => {
+                // 通用显示
+                print_if!("内容", &config.content_field);
+                print_if!("举报原因", &config.reason_field);
+                print_if!("举报描述", &config.description_field);
+                print_if!("用户昵称", &config.user_nickname_field);
+                print_if!("举报时间", &config.created_at_field, |v: &Value| {
+                    timestamp_to_string(v)
+                });
+            }
         }
-
-        if let Some(desc) = item.get(&config.description_field).and_then(|v| v.as_str()) {
-            println!("举报描述: {}", desc);
-        }
-
-        if let Some(user_nickname) = item
-            .get(&config.user_nickname_field)
-            .and_then(|v| v.as_str())
-        {
-            println!("用户昵称: {}", user_nickname);
-        }
-
-        let created_at = item
-            .get(&config.created_at_field)
-            .map(timestamp_to_string)
-            .unwrap_or_default();
-        println!("举报时间: {}", created_at);
     }
 }
 
@@ -730,16 +629,7 @@ impl Processor for DetailDisplayProcessor {
             None => return Ok(()),
         };
 
-        let item = &context.item;
-
-        match context.report_type.as_str() {
-            "work_work" => Self::display_work_report(item, config),
-            "shop_comment" => Self::display_comment_report(item, config),
-            "forum_post" => Self::display_forum_report(item, config),
-            "forum_discussion" => Self::display_discussion_report(item, config),
-            _ => Self::display_generic_report(item, config),
-        }
-
+        Self::display_report(&context.item, config, &context.report_type);
         Ok(())
     }
 }
@@ -821,7 +711,7 @@ impl Processor for ActionSelectionProcessor {
                                 report_id,
                                 context.admin_id,
                                 resolution,
-                            )?;
+                            )?; // 传播错误
                             println!("已应用操作: {} -> {}", choice, resolution);
                         }
                     }
@@ -918,7 +808,7 @@ pub(crate) fn apply_action_by_method(
     }
 }
 
-// ==================== 违规检查器 ====================
+// ==================== 违规检查器（优化：使用引用代替克隆，改进错误处理） ====================
 pub struct ViolationChecker {
     pub comment_processor: CommentProcessor,
 }
@@ -946,63 +836,37 @@ impl ViolationChecker {
         println!("该内容共有 {} 条评论", total);
 
         let limit_str = prompt_input("输入要获取的评论数: ");
-        let limit: usize = limit_str.parse().unwrap_or(100);
+        let limit: usize = limit_str.parse().unwrap_or(DEFAULT_COMMENT_FETCH_LIMIT);
 
         let comments = self.fetch_comments(source_id, source_type, limit)?;
 
-        let data = DataManager::global()
-            .data()
-            .map_err(|e| ProcessorError::External(e.into()))?;
-        let setting = SettingManager::global()
-            .data()
-            .map_err(|e| ProcessorError::External(e.into()))?;
-        let spam_max = setting.parameter.spam_del_max;
-
+        // 使用硬编码配置构建参数
         let mut params: HashMap<String, Value> = HashMap::new();
         params.insert(
             "ads".into(),
             Value::Array(
-                data.user_data
-                    .ads
+                DEFAULT_ADS_KEYWORDS
                     .iter()
-                    .map(|s| Value::String(s.clone()))
-                    .collect(),
-            ),
-        );
-        params.insert(
-            "blacklist".into(),
-            Value::Array(
-                data.user_data
-                    .black_room
-                    .iter()
-                    .map(|s| Value::String(s.clone()))
+                    .map(|s| Value::String(s.to_string()))
                     .collect(),
             ),
         );
         params.insert(
             "duplicates".into(),
-            Value::Number(serde_json::Number::from(spam_max)),
+            Value::Number(serde_json::Number::from(DEFAULT_SPAM_THRESHOLD)),
         );
 
         let mut target_lists: HashMap<String, Vec<String>> = HashMap::new();
 
-        struct SimpleCommentConfig {
-            comments: Vec<Value>,
-        }
-        impl CommentConfig for SimpleCommentConfig {
-            fn get_comments(&self, _item_id: i64) -> Option<Vec<Value>> {
-                Some(self.comments.clone())
-            }
-        }
-        let config = SimpleCommentConfig {
-            comments: comments.clone(),
-        };
+        // 利用对 Vec<Value> 的引用实现 CommentConfig，避免克隆
+        let config = &comments; // &Vec<Value> 实现 CommentConfig（通过 blanket impl）
 
-        for check_type in &["ads", "blacklist", "duplicates"] {
+        // 仅检查广告和刷屏
+        for check_type in &["ads", "duplicates"] {
             self.comment_processor.process_item(
                 source_id,
                 board_name,
-                &config,
+                config,
                 check_type,
                 &params,
                 &mut target_lists,
@@ -1014,13 +878,11 @@ impl ViolationChecker {
         if let Some(ads) = target_lists.get("ads") {
             violations.extend(ads.clone());
         }
-        if let Some(bl) = target_lists.get("blacklist") {
-            violations.extend(bl.clone());
-        }
         if let Some(dup) = target_lists.get("duplicates") {
             violations.extend(dup.clone());
         }
 
+        // 论坛刷帖检测
         if source_type == "forum"
             && let Some(uid) = user_id
         {
@@ -1043,6 +905,7 @@ impl ViolationChecker {
         let fetcher = ForumDataFetcher::new();
         let mut posts = Vec::new();
 
+        // 提示：如果 ForumDataFetcher 支持按用户过滤，应直接传递参数以减少请求量
         for result in fetcher.search_posts_gen(title, None) {
             match result {
                 Ok(post) => posts.push(post),
@@ -1063,10 +926,7 @@ impl ViolationChecker {
             })
             .collect();
 
-        let setting = SettingManager::global()
-            .data()
-            .map_err(|e| ProcessorError::External(e.into()))?;
-        let threshold = setting.parameter.spam_del_max as usize;
+        let threshold = DEFAULT_SPAM_THRESHOLD as usize;
 
         if user_posts.len() >= threshold {
             println!(
@@ -1230,10 +1090,15 @@ impl ViolationChecker {
         let mut success = 0;
         let mut account_usage: HashMap<usize, usize> = HashMap::new();
         let mut account_index = 0;
-        let violations_vec: Vec<String> = violations.into_iter().collect();
 
-        for (idx, violation) in violations_vec.iter().enumerate() {
-            if account_usage.get(&account_index).copied().unwrap_or(0) >= 25 {
+        for (idx, violation) in violations.iter().enumerate() {
+            // 防止所有账号失效后死循环
+            if accounts.is_empty() {
+                println!("所有账号已失效，停止自动举报");
+                break;
+            }
+
+            if account_usage.get(&account_index).copied().unwrap_or(0) >= MAX_REPORTS_PER_ACCOUNT {
                 account_index = (account_index + 1) % accounts.len();
             }
 
@@ -1245,6 +1110,7 @@ impl ViolationChecker {
                     if accounts.is_empty() {
                         break;
                     }
+                    // 删除后，当前索引可能已越界，重置为0
                     account_index = 0;
                     continue;
                 }
@@ -1255,18 +1121,13 @@ impl ViolationChecker {
                     success += 1;
                     let usage = account_usage.entry(account_index).or_insert(0);
                     *usage += 1;
-                    println!(
-                        "[{}/{}] 举报成功: {}",
-                        idx + 1,
-                        violations_vec.len(),
-                        violation
-                    );
+                    println!("[{}/{}] 举报成功: {}", idx + 1, violations.len(), violation);
                 }
                 Err(e) => {
                     println!(
                         "[{}/{}] 举报失败: {} - {}",
                         idx + 1,
-                        violations_vec.len(),
+                        violations.len(),
                         violation,
                         e
                     );
@@ -1277,7 +1138,7 @@ impl ViolationChecker {
         KittyFactory::global_client()
             .switch_identity(Catsona::Judge)
             .ok();
-        println!("自动举报完成，成功 {}/{}", success, violations_vec.len());
+        println!("自动举报完成，成功 {}/{}", success, violations.len());
         Ok(())
     }
 
@@ -1404,7 +1265,7 @@ impl ViolationChecker {
     }
 }
 
-// ==================== 多账号管理器（原属 handling，因 ViolationChecker 依赖故保留在此） ====================
+// ==================== 多账号管理器 ====================
 pub struct MultiAccount {
     pub accounts: Vec<(String, String)>,
     identity_type: Catsona,
@@ -1463,4 +1324,11 @@ pub fn comment_processor() -> &'static CommentProcessor {
 
 pub fn violation_checker() -> &'static ViolationChecker {
     VIOLATION_CHECKER.get_or_init(ViolationChecker::new)
+}
+
+// ==================== 为 Vec<Value> 实现 CommentConfig，以便传递引用 ====================
+impl CommentConfig for Vec<Value> {
+    fn get_comments(&self, _item_id: i64) -> Option<&[Value]> {
+        Some(self.as_slice())
+    }
 }

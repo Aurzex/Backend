@@ -2,13 +2,13 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::io::{self, Write};
 use std::num::ParseIntError;
-
 use std::time::{Duration, UNIX_EPOCH};
 
 use crate::api::whale::{CommentSourceType, ReportStatus, WhaleReportFetcher, WorkSourceType};
-use crate::utils::acquire::{self};
+use crate::utils::acquire;
 
 use serde_json::Value;
+
 // ==================== 自定义错误类型 ====================
 #[derive(Debug)]
 pub enum ProcessorError {
@@ -59,9 +59,12 @@ impl From<Box<dyn std::error::Error>> for ProcessorError {
     }
 }
 
+// ==================== 评论配置 trait（优化：返回引用，避免克隆） ====================
 pub trait CommentConfig {
-    fn get_comments(&self, item_id: i64) -> Option<Vec<Value>>;
+    /// 获取指定作品的评论列表引用，None 表示无评论
+    fn get_comments(&self, item_id: i64) -> Option<&[Value]>;
 }
+
 // ==================== 交互工具 ====================
 pub fn prompt_input(prompt: &str) -> String {
     print!("{}", prompt);
@@ -98,6 +101,7 @@ pub fn value_to_i64(v: &serde_json::Value) -> Option<i64> {
     }
 }
 
+/// 将 UNIX 时间戳转换为 UTC 格式 "YYYY-MM-DD HH:MM:SS"
 pub fn timestamp_to_string(ts: &serde_json::Value) -> String {
     if let Some(secs) = ts.as_i64()
         && secs > 0
@@ -704,6 +708,7 @@ impl ReportFetcher {
         ReportFetcher { registry }
     }
 
+    /// 修复后的分块迭代器：正确处理类型切换与剩余数据
     pub fn fetch_chunked(
         &self,
         status: ReportStatus,
@@ -711,12 +716,16 @@ impl ReportFetcher {
         let report_types = self.registry.get_all_types();
         let total_types = report_types.len();
         let mut type_index = 0;
-        let mut carry_over = Vec::<serde_json::Value>::new();
+        // 用于保存每个类型已获取但未填充到当前块的项目
+        let mut pending_items: Vec<serde_json::Value> = Vec::new();
 
         std::iter::from_fn(move || {
             let mut chunk = Vec::new();
-            std::mem::swap(&mut chunk, &mut carry_over);
 
+            // 1. 先把上次余留的数据放入 chunk
+            std::mem::swap(&mut chunk, &mut pending_items);
+
+            // 2. 继续从当前类型获取数据，填满 chunk
             while type_index < total_types {
                 let report_type = &report_types[type_index];
                 let config = match self.registry.get_config(report_type) {
@@ -728,54 +737,44 @@ impl ReportFetcher {
                 };
 
                 let generator = (config.fetch_generator)(status);
-                let mut type_items = Vec::new();
 
                 for result in generator {
-                    match result {
-                        Ok(mut item) => {
-                            if status == ReportStatus::ToBeDone
-                                && let Some(state) =
-                                    item.get(&config.status_field).and_then(|v| v.as_str())
-                                && state != "TOBEDONE"
-                            {
-                                continue;
-                            }
-                            // ★ 注入类型标记
-                            if let Value::Object(ref mut map) = item {
-                                map.insert(
-                                    "_report_type".into(),
-                                    Value::String(report_type.clone()),
-                                );
-                            }
-                            type_items.push(item);
-                            if type_items.len() >= config.chunk_size {
-                                carry_over = type_items.clone();
-                                break;
-                            }
-                        }
-                        Err(error) => {
-                            eprintln!("Error fetching report data: {}", error);
+                    let mut item = match result {
+                        Ok(item) => item,
+                        Err(e) => {
+                            eprintln!("Error fetching report data: {}", e);
                             break;
                         }
+                    };
+
+                    // 过滤状态
+                    if status == ReportStatus::ToBeDone
+                        && let Some(state) = item.get(&config.status_field).and_then(|v| v.as_str())
+                        && state != "TOBEDONE"
+                    {
+                        continue;
+                    }
+
+                    // 注入类型标记
+                    if let Value::Object(ref mut map) = item {
+                        map.insert("_report_type".into(), Value::String(report_type.clone()));
+                    }
+
+                    chunk.push(item);
+                    if chunk.len() >= config.chunk_size {
+                        // 将超出部分保存到 pending_items，留待下一次
+                        let remaining = chunk.split_off(config.chunk_size);
+                        pending_items = remaining;
+                        // 注意：type_index 不变，因为当前类型还有数据未取完
+                        return Some(chunk);
                     }
                 }
-
-                chunk.extend(type_items);
-
-                if chunk.len() < 100 {
-                    type_index += 1;
-                } else {
-                    break;
-                }
+                // 当前类型的迭代器耗尽，切换到下一个类型
+                type_index += 1;
             }
 
-            if chunk.is_empty() && type_index >= total_types {
-                None
-            } else if !chunk.is_empty() {
-                Some(chunk)
-            } else {
-                None
-            }
+            // 所有类型都处理完毕
+            if chunk.is_empty() { None } else { Some(chunk) }
         })
     }
 
