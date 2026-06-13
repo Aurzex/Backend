@@ -1,4 +1,5 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -15,7 +16,7 @@ use crate::api::shop::{WorkShopReportReasonId, WorkshopActionHandler, WorkshopDa
 use crate::api::whale::{ReportHandler, Resolution};
 use crate::api::work::{BaseWorkOperations, CommentOperations, WorkDataFetcher};
 use crate::core::types::CommentConfig;
-use crate::utils::acquire::{BaseKey, Catsona, HttpMethod, KittyFactory};
+use crate::utils::acquire::{BaseKey, Catsona, HttpMethod, KittyFactory, PaginatedIter};
 use crate::utils::data::PathConfig;
 
 use super::types::{
@@ -144,15 +145,20 @@ pub(crate) fn parse_resolution(resolution: &str) -> Result<Resolution, Processor
 }
 
 pub trait ReportIdExt {
-    fn get_report_id(&self, item: &Value) -> i32;
+    fn get_report_id(&self, item: &Value) -> Result<i32, ProcessorError>;
 }
 
 impl ReportIdExt for SourceConfig {
-    fn get_report_id(&self, item: &Value) -> i32 {
+    fn get_report_id(&self, item: &Value) -> Result<i32, ProcessorError> {
         item.get(&self.report_id_field)
             .and_then(|v| v.as_str())
             .and_then(|s| s.parse().ok())
-            .unwrap_or(0)
+            .ok_or_else(|| {
+                ProcessorError::Processing(format!(
+                    "无法解析 report_id 字段: {}",
+                    self.report_id_field
+                ))
+            })
     }
 }
 
@@ -473,7 +479,7 @@ impl Processor for OfficialCheckProcessor {
                 ]);
 
                 if let Some(resolution) = status_map.get("P") {
-                    let report_id = config.get_report_id(&context.item);
+                    let report_id = config.get_report_id(&context.item)?;
                     apply_action_by_method(
                         &config.handle_method,
                         report_id,
@@ -648,7 +654,7 @@ impl ActionSelectionProcessor {
         let source_id = context
             .item
             .get(&config.source_id_field)
-            .and_then(|v| v.as_i64())
+            .and_then(value_to_i64) // 使用工具函数
             .unwrap_or(0);
 
         let board_name = config
@@ -674,8 +680,16 @@ impl ActionSelectionProcessor {
             .get(&config.user_id_field)
             .and_then(value_to_i64);
 
-        let checker = ViolationChecker::new();
-        checker.check_violation(source_id, source_type, board_name, user_id)?;
+        // 获取帖子标题用于刷屏检测
+        let title = config
+            .title_field
+            .as_ref()
+            .and_then(|field| context.item.get(field))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let checker = violation_checker();
+        checker.check_violation(source_id, source_type, board_name, user_id, title)?;
 
         println!("=== 检查结束 ===");
         Ok(())
@@ -702,7 +716,7 @@ impl Processor for ActionSelectionProcessor {
                 // 执行动作
                 let status_map = self.registry.get_status_mapping();
                 if let Some(resolution) = status_map.get(&action) {
-                    let report_id = config.get_report_id(&context.item);
+                    let report_id = config.get_report_id(&context.item)?;
                     apply_action_by_method(
                         &config.handle_method,
                         report_id,
@@ -733,7 +747,7 @@ impl Processor for ActionSelectionProcessor {
                     if let Some(config) = &context.config {
                         let status_map = self.registry.get_status_mapping();
                         if let Some(resolution) = status_map.get(&choice) {
-                            let report_id = config.get_report_id(&context.item);
+                            let report_id = config.get_report_id(&context.item)?;
                             apply_action_by_method(
                                 &config.handle_method,
                                 report_id,
@@ -855,6 +869,7 @@ impl ViolationChecker {
         source_type: &str,
         board_name: &str,
         user_id: Option<i64>,
+        title: &str,
     ) -> Result<(), ProcessorError> {
         println!(
             "检查违规: source_id={}, type={}, board={}, user={:?}",
@@ -867,60 +882,102 @@ impl ViolationChecker {
         let limit_str = prompt_input("输入要获取的评论数: ");
         let limit: usize = limit_str.parse().unwrap_or(DEFAULT_COMMENT_FETCH_LIMIT);
 
-        // 利用 PaginatedIter 直接收集到 Vec，但控制数量
-        let comments = self.fetch_comments(source_id, source_type, limit)?;
+        // 获取迭代器（不收集）
+        let mut iter = self.fetch_comments(source_id, source_type, limit);
 
-        // 构建参数
-        let mut params: HashMap<String, Value> = HashMap::new();
-        params.insert(
-            "ads".into(),
-            Value::Array(
-                DEFAULT_ADS_KEYWORDS
-                    .iter()
-                    .map(|s| Value::String(s.to_string()))
-                    .collect(),
-            ),
-        );
-        params.insert(
-            "duplicates".into(),
-            Value::Number(serde_json::Number::from(DEFAULT_SPAM_THRESHOLD)),
-        );
+        // 广告关键词
+        let ad_keywords: HashSet<String> = DEFAULT_ADS_KEYWORDS
+            .iter()
+            .map(|s| s.to_lowercase())
+            .collect();
 
-        let mut target_lists: HashMap<String, Vec<String>> = HashMap::new();
+        let spam_threshold = DEFAULT_SPAM_THRESHOLD as usize;
 
-        // 使用 Vec<Value> 作为 CommentConfig 的引用
-        let config: &dyn CommentConfig = &comments;
+        // 流式处理状态
+        let mut ads_violations: Vec<String> = Vec::new();
+        // 刷屏统计：(user_id, content) -> 出现次数及对应的 identifiers
+        let mut duplicates_counter: HashMap<(String, String), (usize, Vec<String>)> =
+            HashMap::new();
+        let mut comment_count = 0;
 
-        for check_type in &["ads", "duplicates"] {
-            self.comment_processor.process_item(
-                source_id,
-                board_name,
-                config,
-                check_type,
-                &params,
-                &mut target_lists,
-                source_type,
-            );
+        while let Some(item_result) = iter.next_item() {
+            // 处理错误
+            let value = match item_result {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("获取评论出错: {}", e);
+                    break;
+                }
+            };
+
+            // 检查是否达到用户设定的 limit
+            if comment_count >= limit {
+                break;
+            }
+            comment_count += 1;
+
+            // 提取通用字段
+            let content = value
+                .get("content")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_lowercase();
+            let user_id_str = value
+                .get("user_id")
+                .map(value_to_string)
+                .unwrap_or_default();
+            let is_reply = value.get("parent_id").is_some(); // 简单判断是否为回复
+            let identifier = build_identifier(source_type, source_id, &value, is_reply);
+
+            // 广告检测（即时）
+            if !content.is_empty() && ad_keywords.iter().any(|kw| content.contains(kw)) {
+                let log_type = if is_reply { "回复" } else { "评论" };
+                println!(
+                    "广告 {} [{}]{} : {}",
+                    log_type,
+                    source_type.to_uppercase(),
+                    title_preview_str(title),
+                    truncate_chars(&content, 50)
+                );
+                ads_violations.push(identifier.clone());
+            }
+
+            // 刷屏统计（累积计数）
+            if !user_id_str.is_empty() && !content.is_empty() {
+                let entry = duplicates_counter
+                    .entry((user_id_str.clone(), content.clone()))
+                    .or_insert((0, Vec::new()));
+                entry.0 += 1;
+                entry.1.push(identifier);
+            }
+        }
+
+        // 刷屏判定
+        let mut duplicates_violations = Vec::new();
+        for ((user_id, content), (count, identifiers)) in &duplicates_counter {
+            if *count >= spam_threshold {
+                println!(
+                    "用户 {} 刷屏评论: {}... - 出现 {} 次",
+                    user_id,
+                    truncate_chars(content, 50),
+                    count
+                );
+                duplicates_violations.extend(identifiers.iter().cloned());
+            }
         }
 
         let mut violations: Vec<String> = Vec::new();
-        if let Some(ads) = target_lists.get("ads") {
-            violations.extend(ads.clone());
-        }
-        if let Some(dup) = target_lists.get("duplicates") {
-            violations.extend(dup.clone());
-        }
+        violations.extend(ads_violations);
+        violations.extend(duplicates_violations);
 
-        // 论坛刷帖检测
+        // 论坛刷帖检测（同原）
         if source_type == "forum"
             && let Some(uid) = user_id
         {
-            let spam_violations = self.check_spam_posts(uid, board_name)?;
+            let spam_violations = self.check_spam_posts(uid, title)?;
             violations.extend(spam_violations);
         }
-
         let violations: HashSet<String> = violations.into_iter().collect();
-
         if violations.is_empty() {
             println!("未检测到违规内容");
             return Ok(());
@@ -987,7 +1044,7 @@ impl ViolationChecker {
                         Some(BaseKey::Default),
                     )
                     .with_param("offset", "0")
-                    .with_param("limit", "1")
+                    .with_param("limit", "15")
                     .send()?;
                 let json = KittyFactory::global_client().response_to_json(resp)?;
                 Ok(json.get("total").and_then(|v| v.as_i64()).unwrap_or(0))
@@ -1000,7 +1057,7 @@ impl ViolationChecker {
                         Some(BaseKey::Default),
                     )
                     .with_param("source", "WORK_SHOP")
-                    .with_param("limit", "1")
+                    .with_param("limit", "15")
                     .send()?;
                 let json = KittyFactory::global_client().response_to_json(resp)?;
                 let total = json.get("total").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -1028,52 +1085,20 @@ impl ViolationChecker {
     }
 
     /// 获取评论，利用迭代器特性控制数量
-    fn fetch_comments(
-        &self,
-        source_id: i64,
-        source_type: &str,
-        limit: usize,
-    ) -> Result<Vec<Value>, ProcessorError> {
-        let iter: Box<dyn Iterator<Item = Result<Value, ProcessorError>>> = match source_type {
-            "work" => {
-                let work_iter =
-                    WorkDataFetcher::new().fetch_work_comments_gen(source_id as i32, Some(limit));
-                Box::new(work_iter.map(|r| r.map_err(|e| ProcessorError::External(e.into()))))
-            }
+    fn fetch_comments(&self, source_id: i64, source_type: &str, limit: usize) -> PaginatedIter {
+        match source_type {
+            "work" => WorkDataFetcher::new().fetch_work_comments_gen(source_id as i32, Some(limit)),
             "forum" => {
-                let forum_iter = ForumDataFetcher::new().fetch_post_replies_gen(
-                    source_id as i32,
-                    None,
-                    Some(limit),
-                );
-                Box::new(forum_iter.map(|r| r.map_err(|e| ProcessorError::External(e.into()))))
+                ForumDataFetcher::new().fetch_post_replies_gen(source_id as i32, None, Some(limit))
             }
-            "shop" => {
-                let shop_iter = WorkshopDataFetcher::new().fetch_workshop_discussions_gen(
-                    source_id as i32,
-                    None,
-                    None,
-                    Some(limit),
-                );
-                Box::new(shop_iter.map(|r| r.map_err(|e| ProcessorError::External(e.into()))))
-            }
-            _ => {
-                return Err(ProcessorError::Processing(format!(
-                    "不支持的来源类型: {}",
-                    source_type
-                )));
-            }
-        };
-
-        let mut comments = Vec::with_capacity(limit.min(1000));
-        for item in iter {
-            let val = item?;
-            comments.push(val);
-            if comments.len() >= limit {
-                break;
-            }
+            "shop" => WorkshopDataFetcher::new().fetch_workshop_discussions_gen(
+                source_id as i32,
+                None,
+                None,
+                Some(limit),
+            ),
+            _ => panic!("不支持的来源类型: {}", source_type), // 调用方应保证 source_type 合法
         }
-        Ok(comments)
     }
 
     fn process_auto_report(&self, violations: HashSet<String>) -> Result<(), ProcessorError> {

@@ -9,15 +9,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde_json::Value;
 
 use super::pipeline::{
-    BatchActionManager, ProcessingContext, ProcessingPipeline, apply_action_by_method,
+    BatchActionManager, BatchGroup, ProcessingContext, ProcessingPipeline, ReportIdExt,
+    apply_action_by_method,
 };
 use super::types::{
     ProcessorError, ReportFetcher, ReportTypeRegistry, bytes_to_human, get_valid_input,
     value_to_string,
 };
 use crate::api::whale::{ReportHandler, ReportStatus, Resolution};
-use crate::core::pipeline::BatchGroup;
-use crate::core::pipeline::ReportIdExt;
 use crate::utils::acquire::{FileUploader, KittyFactory};
 
 // ==================== 文件处理器 ====================
@@ -76,7 +75,7 @@ impl FileProcessor {
         method: &str,
     ) -> Result<HashMap<PathBuf, String>, ProcessorError> {
         let mut results = HashMap::new();
-        visit_dir(dir_path, &mut |entry| {
+        let mut cb = |entry: fs::DirEntry| {
             if entry.file_type().is_ok_and(|ft| ft.is_file()) {
                 let path = entry.path();
                 match Self::handle_file_upload(path.as_path(), save_path, method) {
@@ -89,7 +88,8 @@ impl FileProcessor {
                 }
             }
             Ok(())
-        })?;
+        };
+        visit_dir(dir_path, &mut cb)?;
         Ok(results)
     }
 }
@@ -117,6 +117,8 @@ pub struct ReportProcessor {
     pub fetcher: ReportFetcher,
     pub pipeline_factory: Arc<ReportTypeRegistry>,
     pub batch_manager: Arc<Mutex<BatchActionManager>>,
+    // 跨 chunk 批量组等待池
+    pending_groups: Mutex<HashMap<(String, String), Vec<String>>>,
 }
 
 impl ReportProcessor {
@@ -128,12 +130,14 @@ impl ReportProcessor {
             fetcher,
             pipeline_factory: registry,
             batch_manager,
+            pending_groups: Mutex::new(HashMap::new()),
         }
     }
 
     pub fn process_all_reports(&self, admin_id: i32) -> Result<i64, ProcessorError> {
         println!("=== 开始处理所有举报 ===");
         self.batch_manager.lock().unwrap().clear_processed_records();
+        self.pending_groups.lock().unwrap().clear();
 
         let total = self.fetcher.get_total_reports(ReportStatus::ToBeDone);
         println!("当前待处理举报总数: {}", total);
@@ -162,22 +166,33 @@ impl ReportProcessor {
                 chunk.len()
             );
 
-            if total >= 15 {
-                let batch_groups = self.identify_batch_groups(&chunk);
-                if let Err(e) = self.handle_batch_groups(&batch_groups, &chunk, admin_id) {
-                    eprintln!("批量组处理出错: {}，继续处理剩余记录", e);
-                }
-            }
+            // 跨 chunk 批量组识别与处理
+            self.update_and_handle_pending_groups(&chunk, admin_id)?;
 
-            match self.process_chunk_with_pipeline(&chunk, admin_id) {
-                Ok(processed) => total_processed += processed,
-                Err(e) => eprintln!("块处理出错: {}，跳过该块", e),
-            }
+            // 单独处理未被批量组包含的项
+            let processed_in_chunk = self.process_non_group_items(&chunk, admin_id)?;
+            total_processed += processed_in_chunk;
 
             println!(
-                "第 {} 块处理完成, 处理了 {} 条举报",
+                "第 {} 块处理完成, 累计处理 {} 条举报",
                 chunk_count + 1,
                 total_processed
+            );
+        }
+
+        // 流结束：处理所有剩余未达阈值的组（记录警告，将在下一个周期处理）
+        let remaining = self
+            .pending_groups
+            .lock()
+            .unwrap()
+            .drain()
+            .collect::<Vec<_>>();
+        for ((group_type, group_key), record_ids) in remaining {
+            eprintln!(
+                "警告: 跨 chunk 组 ({}, {}) 未达到处理阈值，包含 {} 个记录，将在下一个周期处理",
+                group_type,
+                group_key,
+                record_ids.len()
             );
         }
 
@@ -185,170 +200,160 @@ impl ReportProcessor {
         Ok(total_processed)
     }
 
-    fn identify_batch_groups(&self, chunk: &[Value]) -> Vec<BatchGroup> {
-        let mut item_id_groups: HashMap<String, Vec<String>> = HashMap::new();
-        let mut content_groups: HashMap<String, Vec<String>> = HashMap::new();
-
-        for item in chunk {
-            if let Some(report_type) = self.infer_report_type(item)
-                && let Some(config) = self.fetcher.registry.get_config(&report_type)
-            {
-                let record_id = item
-                    .get(&config.report_id_field)
-                    .map(value_to_string)
-                    .unwrap_or_else(|| "0".to_string());
-
-                let item_id = item
-                    .get(&config.item_id_field)
-                    .map(value_to_string)
-                    .unwrap_or_default();
-
-                item_id_groups
-                    .entry(item_id.clone())
-                    .or_default()
-                    .push(record_id.clone());
-
-                let content_key = format!(
-                    "{}:{}:{}",
-                    item.get(&config.content_field)
-                        .map(value_to_string)
-                        .unwrap_or_default(),
-                    report_type,
-                    item.get(&config.source_id_field)
-                        .map(value_to_string)
-                        .unwrap_or_default()
-                );
-                content_groups
-                    .entry(content_key)
-                    .or_default()
-                    .push(record_id);
-            }
-        }
-
-        let mut batch_groups = Vec::new();
-        let mut processed_ids = HashSet::new();
-
-        for (item_id, record_ids) in &item_id_groups {
-            if record_ids.len() >= 5 {
-                batch_groups.push(BatchGroup::new("item_id", item_id, record_ids.clone()));
-                processed_ids.extend(record_ids.clone());
-            }
-        }
-
-        for (content_key, record_ids) in &content_groups {
-            let filtered: Vec<String> = record_ids
-                .iter()
-                .filter(|id| !processed_ids.contains(*id))
-                .cloned()
-                .collect();
-            if filtered.len() >= 3 {
-                batch_groups.push(BatchGroup::new("content", content_key, filtered));
-            }
-        }
-
-        batch_groups
-    }
-
-    fn handle_batch_groups(
+    // 分块更新并处理已达阈值的组
+    fn update_and_handle_pending_groups(
         &self,
-        batch_groups: &[BatchGroup],
         chunk: &[Value],
         admin_id: i32,
     ) -> Result<(), ProcessorError> {
-        for group in batch_groups {
-            println!(
-                "处理批量组 [{}] {} (共 {} 条举报)",
-                group.group_type,
-                group.group_key,
-                group.record_ids.len()
+        let mut pending = self.pending_groups.lock().unwrap();
+        let mut ready_groups = Vec::new();
+
+        for item in chunk {
+            if let Some((key, record_id)) = self.extract_group_key(item) {
+                let entry = pending.entry(key.clone()).or_default();
+                entry.push(record_id);
+                // 阈值：item_id 组 >=5，content 组 >=3
+                let threshold = if key.0 == "item_id" { 5 } else { 3 };
+                if entry.len() >= threshold {
+                    ready_groups.push(BatchGroup::new(&key.0, &key.1, entry.clone()));
+                    pending.remove(&key);
+                }
+            }
+        }
+        drop(pending); // 释放锁
+
+        // 处理已达阈值的组
+        for group in ready_groups {
+            self.handle_single_batch_group(&group, chunk, admin_id)?;
+        }
+        Ok(())
+    }
+
+    fn extract_group_key(&self, item: &Value) -> Option<((String, String), String)> {
+        let rt = self.infer_report_type(item)?;
+        let config = self.fetcher.registry.get_config(&rt)?;
+        let record_id = item.get(&config.report_id_field).map(value_to_string)?;
+        let item_id = item
+            .get(&config.item_id_field)
+            .map(value_to_string)
+            .unwrap_or_default();
+        if !item_id.is_empty() {
+            Some((("item_id".into(), item_id), record_id))
+        } else {
+            let content_key = format!(
+                "{}:{}:{}",
+                item.get(&config.content_field)
+                    .map(value_to_string)
+                    .unwrap_or_default(),
+                rt,
+                item.get(&config.source_id_field)
+                    .map(value_to_string)
+                    .unwrap_or_default()
             );
+            Some((("content".into(), content_key), record_id))
+        }
+    }
 
-            let saved_action = {
-                let bm = self.batch_manager.lock().unwrap();
-                bm.get_batch_action(&group.group_type, &group.group_key)
-            };
+    fn handle_single_batch_group(
+        &self,
+        group: &BatchGroup,
+        chunk: &[Value],
+        admin_id: i32,
+    ) -> Result<(), ProcessorError> {
+        println!(
+            "处理批量组 [{}] {} (共 {} 条举报)",
+            group.group_type,
+            group.group_key,
+            group.record_ids.len()
+        );
 
-            if let Some(action) = saved_action {
-                println!("应用保存的批量动作: {}", action);
-                for record_id in &group.record_ids {
-                    if let Some(item) = chunk.iter().find(|v| self.record_id_matches(v, record_id))
-                        && let Some(report_type) = self.infer_report_type(item)
-                        && self
-                            .fetcher
-                            .registry
-                            .is_action_available(&report_type, &action)
-                    {
-                        let _ = self.apply_simple_action(item, &report_type, &action, admin_id);
-                        self.batch_manager
-                            .lock()
-                            .unwrap()
-                            .mark_record_processed(record_id);
+        let saved_action = {
+            let bm = self.batch_manager.lock().unwrap();
+            bm.get_batch_action(&group.group_type, &group.group_key)
+        };
+
+        if let Some(action) = saved_action {
+            println!("应用保存的批量动作: {}", action);
+            for record_id in &group.record_ids {
+                if let Some(item) = chunk.iter().find(|v| self.record_id_matches(v, record_id))
+                    && let Some(report_type) = self.infer_report_type(item)
+                    && self
+                        .fetcher
+                        .registry
+                        .is_action_available(&report_type, &action)
+                {
+                    // 仅成功时标记已处理
+                    match self.apply_simple_action(item, &report_type, &action, admin_id) {
+                        Ok(()) => {
+                            self.batch_manager
+                                .lock()
+                                .unwrap()
+                                .mark_record_processed(record_id);
+                        }
+                        Err(e) => {
+                            eprintln!("批量应用失败 (id={}): {}", record_id, e);
+                        }
                     }
                 }
-            } else {
-                if let Some(first_record_id) = group.record_ids.first()
-                    && let Some(first_item) = chunk
-                        .iter()
-                        .find(|v| self.record_id_matches(v, first_record_id))
-                    && let Some(report_type) = self.infer_report_type(first_item)
-                {
-                    let config = self.fetcher.registry.get_config(&report_type).cloned();
-                    let mut context = ProcessingContext::new(
-                        first_record_id.clone(),
-                        report_type.clone(),
-                        first_item.clone(),
-                        admin_id,
+            }
+        } else {
+            // 无保存动作，交互询问第一条
+            if let Some(first_record_id) = group.record_ids.first()
+                && let Some(first_item) = chunk
+                    .iter()
+                    .find(|v| self.record_id_matches(v, first_record_id))
+                && let Some(report_type) = self.infer_report_type(first_item)
+            {
+                let config = self.fetcher.registry.get_config(&report_type).cloned();
+                let mut context = ProcessingContext::new(
+                    first_record_id.clone(),
+                    report_type.clone(),
+                    first_item.clone(),
+                    admin_id,
+                );
+                context.is_batch_mode = false;
+                context.config = config;
+
+                let pipeline = ProcessingPipeline::create_default(
+                    self.pipeline_factory.clone(),
+                    self.batch_manager.clone(),
+                );
+                pipeline.execute(&mut context)?;
+
+                if let Some(action) = context.action {
+                    self.batch_manager.lock().unwrap().save_batch_action(
+                        &group.group_type,
+                        &group.group_key,
+                        &action,
                     );
-                    context.is_batch_mode = false;
-                    context.config = config;
 
-                    let pipeline = ProcessingPipeline::create_default(
-                        self.pipeline_factory.clone(),
-                        self.batch_manager.clone(),
-                    );
-                    pipeline.execute(&mut context)?;
-
-                    if let Some(action) = context.action {
-                        self.batch_manager.lock().unwrap().save_batch_action(
-                            &group.group_type,
-                            &group.group_key,
-                            &action,
-                        );
-
-                        for record_id in &group.record_ids[1..] {
-                            if let Some(item) =
-                                chunk.iter().find(|v| self.record_id_matches(v, record_id))
-                                && let Some(rt) = self.infer_report_type(item)
-                            {
-                                self.apply_simple_action(item, &rt, &action, admin_id)?;
-                                self.batch_manager
-                                    .lock()
-                                    .unwrap()
-                                    .mark_record_processed(record_id);
+                    for record_id in &group.record_ids[1..] {
+                        if let Some(item) =
+                            chunk.iter().find(|v| self.record_id_matches(v, record_id))
+                            && let Some(rt) = self.infer_report_type(item)
+                        {
+                            // 仅成功时标记已处理
+                            match self.apply_simple_action(item, &rt, &action, admin_id) {
+                                Ok(()) => {
+                                    self.batch_manager
+                                        .lock()
+                                        .unwrap()
+                                        .mark_record_processed(record_id);
+                                }
+                                Err(e) => {
+                                    eprintln!("批量应用失败 (id={}): {}", record_id, e);
+                                }
                             }
                         }
                     }
                 }
             }
         }
-
         Ok(())
     }
 
-    fn record_id_matches(&self, item: &Value, target_id: &str) -> bool {
-        if let Some(rt) = self.infer_report_type(item)
-            && let Some(cfg) = self.fetcher.registry.get_config(&rt)
-        {
-            return item
-                .get(&cfg.report_id_field)
-                .map(value_to_string)
-                .map(|s| s == target_id)
-                .unwrap_or(false);
-        }
-        false
-    }
-
-    fn process_chunk_with_pipeline(
+    fn process_non_group_items(
         &self,
         chunk: &[Value],
         admin_id: i32,
@@ -405,6 +410,19 @@ impl ReportProcessor {
         Ok(processed)
     }
 
+    fn record_id_matches(&self, item: &Value, target_id: &str) -> bool {
+        if let Some(rt) = self.infer_report_type(item)
+            && let Some(cfg) = self.fetcher.registry.get_config(&rt)
+        {
+            return item
+                .get(&cfg.report_id_field)
+                .map(value_to_string)
+                .map(|s| s == target_id)
+                .unwrap_or(false);
+        }
+        false
+    }
+
     fn apply_simple_action(
         &self,
         item: &Value,
@@ -415,7 +433,7 @@ impl ReportProcessor {
         if let Some(config) = self.fetcher.registry.get_config(report_type) {
             let status_map = self.fetcher.registry.get_status_mapping();
             if let Some(resolution) = status_map.get(action) {
-                let report_id = config.get_report_id(item);
+                let report_id = config.get_report_id(item)?;
                 apply_action_by_method(&config.handle_method, report_id, admin_id, resolution)?;
             }
         }
@@ -428,50 +446,44 @@ impl ReportProcessor {
 
         for chunk in self.fetcher.fetch_reports_chunked(ReportStatus::ToBeDone) {
             for item in chunk {
-                if let Some(report_type) = self.infer_report_type(&item) {
-                    let config = self.fetcher.registry.get_config(&report_type);
-                    let report_id = config.map(|cfg| cfg.get_report_id(&item)).unwrap_or(0);
-                    if let Some(cfg) = config {
-                        match cfg.handle_method.as_str() {
-                            "execute_process_comment_report" => {
-                                ReportHandler::new()
-                                    .execute_process_comment_report(
-                                        report_id,
-                                        admin_id,
-                                        Resolution::Pass,
-                                    )
-                                    .ok();
-                            }
-                            "execute_process_work_report" => {
-                                ReportHandler::new()
-                                    .execute_process_work_report(
-                                        report_id,
-                                        admin_id,
-                                        Resolution::Pass,
-                                    )
-                                    .ok();
-                            }
-                            "execute_process_post_report" => {
-                                ReportHandler::new()
-                                    .execute_process_post_report(
-                                        report_id,
-                                        admin_id,
-                                        Resolution::Pass,
-                                    )
-                                    .ok();
-                            }
-                            "execute_process_discussion_report" => {
-                                ReportHandler::new()
-                                    .execute_process_discussion_report(
-                                        report_id,
-                                        admin_id,
-                                        Resolution::Pass,
-                                    )
-                                    .ok();
-                            }
-                            _ => {}
+                if let Some(report_type) = self.infer_report_type(&item)
+                    && let Some(cfg) = self.fetcher.registry.get_config(&report_type)
+                {
+                    let report_id = match cfg.get_report_id(&item) {
+                        Ok(id) => id,
+                        Err(e) => {
+                            eprintln!("解析 report_id 失败: {}", e);
+                            continue;
                         }
-                        count += 1;
+                    };
+                    let handler = ReportHandler::new();
+                    let result = match cfg.handle_method.as_str() {
+                        "execute_process_comment_report" => handler.execute_process_comment_report(
+                            report_id,
+                            admin_id,
+                            Resolution::Pass,
+                        ),
+                        "execute_process_work_report" => handler.execute_process_work_report(
+                            report_id,
+                            admin_id,
+                            Resolution::Pass,
+                        ),
+                        "execute_process_post_report" => handler.execute_process_post_report(
+                            report_id,
+                            admin_id,
+                            Resolution::Pass,
+                        ),
+                        "execute_process_discussion_report" => handler
+                            .execute_process_discussion_report(
+                                report_id,
+                                admin_id,
+                                Resolution::Pass,
+                            ),
+                        _ => Ok(false),
+                    };
+                    match result {
+                        Ok(_) => count += 1,
+                        Err(e) => eprintln!("一键通过失败 (id={}): {}", report_id, e),
                     }
                 }
             }

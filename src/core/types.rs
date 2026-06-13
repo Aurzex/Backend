@@ -148,7 +148,7 @@ pub struct ActionConfig {
     pub status: String,
     pub enabled: bool,
 }
-
+type FetchGeneratorResult = Box<dyn Iterator<Item = Result<serde_json::Value, ProcessorError>>>;
 #[derive(Clone, Debug)]
 pub struct SourceConfig {
     pub admin_id_field: String,
@@ -162,8 +162,7 @@ pub struct SourceConfig {
     pub content_type_field: String,
     pub created_at_field: String,
     pub description_field: String,
-    pub fetch_generator:
-        fn(ReportStatus) -> Box<dyn Iterator<Item = Result<serde_json::Value, ProcessorError>>>,
+    pub fetch_generator: fn(ReportStatus) -> FetchGeneratorResult,
     pub fetch_total: fn(ReportStatus) -> Result<serde_json::Value, ProcessorError>,
     pub handle_method: String,
     pub item_id_field: String,

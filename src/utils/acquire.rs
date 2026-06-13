@@ -240,6 +240,17 @@ pub struct KittyConfig {
     use_global_auth: bool,
 }
 
+impl Default for KittyConfig {
+    fn default() -> Self {
+        Self {
+            default_base_key: BaseKey::Default,
+            timeout: Duration::from_secs(30),
+            log_requests: true,
+            use_global_auth: true,
+        }
+    }
+}
+
 impl KittyConfig {
     pub fn new() -> Self {
         Self::default()
@@ -269,17 +280,6 @@ impl KittyConfig {
     pub fn with_independent_auth(mut self) -> Self {
         self.use_global_auth = false;
         self
-    }
-}
-
-impl Default for KittyConfig {
-    fn default() -> Self {
-        Self {
-            default_base_key: BaseKey::Default,
-            timeout: Duration::from_secs(30),
-            log_requests: false,
-            use_global_auth: true,
-        }
     }
 }
 
