@@ -30,7 +30,7 @@ const OFFICIAL_IDS: [i64; 9] = [
     128963, 629055, 203577, 859722, 148883, 2191000, 7492052, 387963, 3649031,
 ];
 
-/// 广告关键词列表（默认值，原 data.user_data.ads）
+/// 广告关键词列表（默认值）
 const DEFAULT_ADS_KEYWORDS: &[&str] = &[
     "codemao.cn/work",
     "cpdd",
@@ -67,7 +67,7 @@ const DEFAULT_ADS_KEYWORDS: &[&str] = &[
     "转发",
 ];
 
-/// 刷屏阈值（原 setting.parameter.spam_del_max 默认值）
+/// 刷屏阈值
 const DEFAULT_SPAM_THRESHOLD: i64 = 3;
 
 /// 违规检查时请求评论的默认数量
@@ -283,7 +283,6 @@ impl StrategyFactory {
         let mut factory = StrategyFactory {
             strategies: HashMap::new(),
         };
-        // 注册广告和刷屏策略（不再注册黑名单）
         factory.register("ads", Box::new(AdsStrategy));
         factory.register("duplicates", Box::new(DuplicatesStrategy));
         factory
@@ -465,6 +464,7 @@ impl Processor for OfficialCheckProcessor {
                 context.action = Some("P".into());
                 context.processed = true;
 
+                // 复用注册表的状态映射（这里无法获取注册表，直接使用局部常量）
                 let status_map = HashMap::from([
                     ("D".to_string(), "DELETE".to_string()),
                     ("S".to_string(), "MUTE_SEVEN_DAYS".to_string()),
@@ -474,7 +474,6 @@ impl Processor for OfficialCheckProcessor {
 
                 if let Some(resolution) = status_map.get("P") {
                     let report_id = config.get_report_id(&context.item);
-                    // 传播错误，不再静默忽略
                     apply_action_by_method(
                         &config.handle_method,
                         report_id,
@@ -491,7 +490,7 @@ impl Processor for OfficialCheckProcessor {
     }
 }
 
-// ==================== 详情显示处理器（重构为统一模板） ====================
+// ==================== 详情显示处理器 ====================
 pub struct DetailDisplayProcessor;
 
 impl DetailDisplayProcessor {
@@ -499,7 +498,6 @@ impl DetailDisplayProcessor {
         let base_url = "https://shequ.codemao.cn";
         println!("=== {} 详情 ===", config.name);
 
-        // 通过宏简化字段打印
         macro_rules! print_if {
             ($label:expr, $field:expr, $transform:expr) => {
                 if let Some(val) = item.get($field) {
@@ -609,7 +607,6 @@ impl DetailDisplayProcessor {
                 });
             }
             _ => {
-                // 通用显示
                 print_if!("内容", &config.content_field);
                 print_if!("举报原因", &config.reason_field);
                 print_if!("举报描述", &config.description_field);
@@ -628,7 +625,6 @@ impl Processor for DetailDisplayProcessor {
             Some(c) => c,
             None => return Ok(()),
         };
-
         Self::display_report(&context.item, config, &context.report_type);
         Ok(())
     }
@@ -688,15 +684,47 @@ impl ActionSelectionProcessor {
 
 impl Processor for ActionSelectionProcessor {
     fn process(&self, context: &mut ProcessingContext) -> Result<(), ProcessorError> {
+        // 批量模式：从 batch_manager 获取预先设定的动作
+        if context.is_batch_mode {
+            let config = context
+                .config
+                .as_ref()
+                .ok_or_else(|| ProcessorError::Processing("批量模式缺少配置".into()))?;
+            let group_type = &context.report_type;
+            let group_key = &context.record_id; // 简化示例，实际可根据需要调整
+            if let Some(action) = self
+                .batch_manager
+                .lock()
+                .unwrap()
+                .get_batch_action(group_type, group_key)
+            {
+                context.action = Some(action.clone());
+                // 执行动作
+                let status_map = self.registry.get_status_mapping();
+                if let Some(resolution) = status_map.get(&action) {
+                    let report_id = config.get_report_id(&context.item);
+                    apply_action_by_method(
+                        &config.handle_method,
+                        report_id,
+                        context.admin_id,
+                        resolution,
+                    )?;
+                    println!("批量应用操作: {} -> {}", action, resolution);
+                }
+                context.processed = true;
+            } else {
+                context.skip_reason = Some("批量模式未找到预设动作".into());
+                context.processed = true;
+            }
+            return Ok(());
+        }
+
+        // 交互式模式
         let actions = self.registry.get_available_actions(&context.report_type);
         let valid_keys: HashSet<String> = actions.iter().map(|a| a.key.clone()).collect();
         let prompt = self.registry.get_action_prompt(&context.report_type);
 
         loop {
-            if context.is_batch_mode {
-                break;
-            }
-
             let choice = get_valid_input(&prompt, &valid_keys);
 
             match choice.as_str() {
@@ -711,7 +739,7 @@ impl Processor for ActionSelectionProcessor {
                                 report_id,
                                 context.admin_id,
                                 resolution,
-                            )?; // 传播错误
+                            )?;
                             println!("已应用操作: {} -> {}", choice, resolution);
                         }
                     }
@@ -787,18 +815,19 @@ pub(crate) fn apply_action_by_method(
     resolution: &str,
 ) -> Result<bool, ProcessorError> {
     let resolution_enum = parse_resolution(resolution)?;
+    let handler = ReportHandler::new();
 
     match method {
-        "execute_process_comment_report" => ReportHandler::new()
+        "execute_process_comment_report" => handler
             .execute_process_comment_report(report_id, admin_id, resolution_enum)
             .map_err(|e| ProcessorError::External(e.into())),
-        "execute_process_work_report" => ReportHandler::new()
+        "execute_process_work_report" => handler
             .execute_process_work_report(report_id, admin_id, resolution_enum)
             .map_err(|e| ProcessorError::External(e.into())),
-        "execute_process_post_report" => ReportHandler::new()
+        "execute_process_post_report" => handler
             .execute_process_post_report(report_id, admin_id, resolution_enum)
             .map_err(|e| ProcessorError::External(e.into())),
-        "execute_process_discussion_report" => ReportHandler::new()
+        "execute_process_discussion_report" => handler
             .execute_process_discussion_report(report_id, admin_id, resolution_enum)
             .map_err(|e| ProcessorError::External(e.into())),
         _ => Err(ProcessorError::Processing(format!(
@@ -808,7 +837,7 @@ pub(crate) fn apply_action_by_method(
     }
 }
 
-// ==================== 违规检查器（优化：使用引用代替克隆，改进错误处理） ====================
+// ==================== 违规检查器（优化：避免一次性全量加载，利用迭代器） ====================
 pub struct ViolationChecker {
     pub comment_processor: CommentProcessor,
 }
@@ -838,9 +867,10 @@ impl ViolationChecker {
         let limit_str = prompt_input("输入要获取的评论数: ");
         let limit: usize = limit_str.parse().unwrap_or(DEFAULT_COMMENT_FETCH_LIMIT);
 
+        // 利用 PaginatedIter 直接收集到 Vec，但控制数量
         let comments = self.fetch_comments(source_id, source_type, limit)?;
 
-        // 使用硬编码配置构建参数
+        // 构建参数
         let mut params: HashMap<String, Value> = HashMap::new();
         params.insert(
             "ads".into(),
@@ -858,10 +888,9 @@ impl ViolationChecker {
 
         let mut target_lists: HashMap<String, Vec<String>> = HashMap::new();
 
-        // 利用对 Vec<Value> 的引用实现 CommentConfig，避免克隆
-        let config = &comments; // &Vec<Value> 实现 CommentConfig（通过 blanket impl）
+        // 使用 Vec<Value> 作为 CommentConfig 的引用
+        let config: &dyn CommentConfig = &comments;
 
-        // 仅检查广告和刷屏
         for check_type in &["ads", "duplicates"] {
             self.comment_processor.process_item(
                 source_id,
@@ -905,7 +934,7 @@ impl ViolationChecker {
         let fetcher = ForumDataFetcher::new();
         let mut posts = Vec::new();
 
-        // 提示：如果 ForumDataFetcher 支持按用户过滤，应直接传递参数以减少请求量
+        // 注意：如果 API 支持按 user_id 过滤，应优先使用
         for result in fetcher.search_posts_gen(title, None) {
             match result {
                 Ok(post) => posts.push(post),
@@ -998,65 +1027,57 @@ impl ViolationChecker {
         }
     }
 
+    /// 获取评论，利用迭代器特性控制数量
     fn fetch_comments(
         &self,
         source_id: i64,
         source_type: &str,
         limit: usize,
     ) -> Result<Vec<Value>, ProcessorError> {
-        match source_type {
+        let iter: Box<dyn Iterator<Item = Result<Value, ProcessorError>>> = match source_type {
             "work" => {
-                let iter =
+                let work_iter =
                     WorkDataFetcher::new().fetch_work_comments_gen(source_id as i32, Some(limit));
-                let comments: Result<Vec<Value>, _> = iter.collect();
-                comments.map_err(|e| ProcessorError::External(e.into()))
+                Box::new(work_iter.map(|r| r.map_err(|e| ProcessorError::External(e.into()))))
             }
             "forum" => {
-                let iter = ForumDataFetcher::new().fetch_post_replies_gen(
+                let forum_iter = ForumDataFetcher::new().fetch_post_replies_gen(
                     source_id as i32,
                     None,
                     Some(limit),
                 );
-                let mut comments = Vec::new();
-                for item in iter {
-                    match item {
-                        Ok(v) => comments.push(v),
-                        Err(e) => {
-                            eprintln!("获取评论出错: {}", e);
-                            break;
-                        }
-                    }
-                }
-                Ok(comments)
+                Box::new(forum_iter.map(|r| r.map_err(|e| ProcessorError::External(e.into()))))
             }
             "shop" => {
-                let iter = WorkshopDataFetcher::new().fetch_workshop_discussions_gen(
+                let shop_iter = WorkshopDataFetcher::new().fetch_workshop_discussions_gen(
                     source_id as i32,
                     None,
                     None,
                     Some(limit),
                 );
-                let mut comments = Vec::new();
-                for item in iter {
-                    match item {
-                        Ok(v) => comments.push(v),
-                        Err(e) => {
-                            eprintln!("获取评论出错: {}", e);
-                            break;
-                        }
-                    }
-                }
-                Ok(comments)
+                Box::new(shop_iter.map(|r| r.map_err(|e| ProcessorError::External(e.into()))))
             }
-            _ => Err(ProcessorError::Processing(format!(
-                "不支持的来源类型: {}",
-                source_type
-            ))),
+            _ => {
+                return Err(ProcessorError::Processing(format!(
+                    "不支持的来源类型: {}",
+                    source_type
+                )));
+            }
+        };
+
+        let mut comments = Vec::with_capacity(limit.min(1000));
+        for item in iter {
+            let val = item?;
+            comments.push(val);
+            if comments.len() >= limit {
+                break;
+            }
         }
+        Ok(comments)
     }
 
     fn process_auto_report(&self, violations: HashSet<String>) -> Result<(), ProcessorError> {
-        let mut multi_account = MultiAccount::new(Catsona::Scholar);
+        let mut multi_account = MultiAccount::new();
         let password_path = PathConfig::password_file_path();
         if password_path.exists() {
             multi_account.load_from_file(&password_path)?;
@@ -1080,7 +1101,6 @@ impl ViolationChecker {
         }
 
         let reason_content = "违规内容";
-
         let mut accounts = multi_account.accounts.clone();
         if accounts.is_empty() {
             println!("没有可用账号");
@@ -1089,56 +1109,98 @@ impl ViolationChecker {
 
         let mut success = 0;
         let mut account_usage: HashMap<usize, usize> = HashMap::new();
-        let mut account_index = 0;
+        let violations_vec: Vec<_> = violations.into_iter().collect();
+        let mut current_idx = 0usize;
 
-        for (idx, violation) in violations.iter().enumerate() {
-            // 防止所有账号失效后死循环
-            if accounts.is_empty() {
-                println!("所有账号已失效，停止自动举报");
-                break;
-            }
-
-            if account_usage.get(&account_index).copied().unwrap_or(0) >= MAX_REPORTS_PER_ACCOUNT {
-                account_index = (account_index + 1) % accounts.len();
-            }
-
-            if account_usage.get(&account_index).copied().unwrap_or(0) == 0 {
-                let (user, pass) = &accounts[account_index];
-                if let Err(e) = self.login_student(user, pass) {
-                    println!("账号 {} 登录失败: {}", user, e);
-                    accounts.remove(account_index);
-                    if accounts.is_empty() {
-                        break;
+        for (idx, violation) in violations_vec.iter().enumerate() {
+            // 1. 寻找一个可用的账号（未达上限）
+            let chosen_idx = loop {
+                if accounts.is_empty() {
+                    println!("所有账号已失效或达到上限，停止举报");
+                    break None;
+                }
+                // 确保索引在合法范围内
+                current_idx %= accounts.len();
+                let usage = account_usage.get(&current_idx).copied().unwrap_or(0);
+                if usage < MAX_REPORTS_PER_ACCOUNT {
+                    break Some(current_idx);
+                }
+                // 当前账号已满，尝试下一个
+                current_idx = (current_idx + 1) % accounts.len();
+                // 若轮完一圈仍无可用账号，则终止
+                if current_idx == 0 {
+                    // 检查是否所有账号都满了
+                    if accounts.iter().enumerate().all(|(i, _)| {
+                        account_usage.get(&i).copied().unwrap_or(0) >= MAX_REPORTS_PER_ACCOUNT
+                    }) {
+                        break None;
                     }
-                    // 删除后，当前索引可能已越界，重置为0
-                    account_index = 0;
-                    continue;
+                }
+            };
+
+            let chosen_idx = match chosen_idx {
+                Some(i) => i,
+                None => {
+                    println!("所有账号均已达到举报上限，停止");
+                    break;
+                }
+            };
+
+            let (user, pass) = &accounts[chosen_idx];
+
+            // 2. 登录（仅当首次使用该账号时）
+            let usage = account_usage.get(&chosen_idx).copied().unwrap_or(0);
+            if usage == 0 {
+                match self.login_student(user, pass) {
+                    Ok(()) => { /* 登录成功 */ }
+                    Err(e) => {
+                        println!("账号 {} 登录失败: {}，移除", user, e);
+                        accounts.remove(chosen_idx);
+                        // 清理对应的计数记录
+                        account_usage.remove(&chosen_idx);
+                        // 调整 current_idx，防止越界
+                        if chosen_idx < current_idx && current_idx > 0 {
+                            current_idx -= 1;
+                        }
+                        current_idx %= accounts.len().max(1);
+                        continue; // 跳过当前违规，重新选择账号
+                    }
                 }
             }
 
+            // 3. 执行举报
             match self.execute_single_report(violation, reason_content) {
                 Ok(_) => {
                     success += 1;
-                    let usage = account_usage.entry(account_index).or_insert(0);
-                    *usage += 1;
-                    println!("[{}/{}] 举报成功: {}", idx + 1, violations.len(), violation);
+                    // 安全地增加使用计数
+                    let entry = account_usage.entry(chosen_idx).or_insert(0);
+                    *entry += 1;
+                    println!(
+                        "[{}/{}] 举报成功: {}",
+                        idx + 1,
+                        violations_vec.len(),
+                        violation
+                    );
                 }
                 Err(e) => {
                     println!(
                         "[{}/{}] 举报失败: {} - {}",
                         idx + 1,
-                        violations.len(),
+                        violations_vec.len(),
                         violation,
                         e
                     );
                 }
             }
+
+            // 4. 移动到下一个账号（轮转）
+            current_idx = (chosen_idx + 1) % accounts.len();
         }
 
         KittyFactory::global_client()
             .switch_identity(Catsona::Judge)
             .ok();
-        println!("自动举报完成，成功 {}/{}", success, violations.len());
+        println!("自动举报完成，成功 {}/{}", success, violations_vec.len());
         Ok(())
     }
 
@@ -1265,17 +1327,15 @@ impl ViolationChecker {
     }
 }
 
-// ==================== 多账号管理器 ====================
+// ==================== 多账号管理器（移除未使用的字段） ====================
 pub struct MultiAccount {
     pub accounts: Vec<(String, String)>,
-    identity_type: Catsona,
 }
 
 impl MultiAccount {
-    pub fn new(identity_type: Catsona) -> Self {
+    pub fn new() -> Self {
         MultiAccount {
             accounts: Vec::new(),
-            identity_type,
         }
     }
 

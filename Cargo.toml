@@ -13,8 +13,8 @@ opt-level = "z"
 lto = true
 panic = "abort"
 
-# [lints.rust]
-# unused = "allow"
+[lints.rust]
+unused = "allow"
 
 [dependencies]
 aes-gcm = "0"
