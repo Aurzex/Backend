@@ -9,20 +9,22 @@ use std::time::Duration;
 use fastrand;
 use serde_json::Value;
 
+use super::types::{
+    ProcessorError, ReportTypeRegistry, SourceConfig, get_valid_input, html_to_text, prompt_input,
+    timestamp_to_string, value_to_i64, value_to_string,
+};
 use crate::api::forum::{
     ForumActionHandler, ForumDataFetcher, ForumReportReasonId, ItemType, PostReportReasonId,
 };
 use crate::api::shop::{WorkShopReportReasonId, WorkshopActionHandler, WorkshopDataFetcher};
 use crate::api::whale::{ReportHandler, Resolution};
 use crate::api::work::{BaseWorkOperations, CommentOperations, WorkDataFetcher};
+use crate::core::retrieve::{
+    CommentQueryMode, CommentSource, CommentsResult, DataQuery, JsonObject,
+};
 use crate::core::types::CommentConfig;
 use crate::utils::acquire::{BaseKey, Catsona, HttpMethod, KittyFactory, PaginatedIter};
 use crate::utils::data::PathConfig;
-
-use super::types::{
-    ProcessorError, ReportTypeRegistry, SourceConfig, get_valid_input, html_to_text, prompt_input,
-    timestamp_to_string, value_to_i64, value_to_string,
-};
 
 // ==================== 硬编码配置数据 ====================
 
@@ -682,7 +684,6 @@ impl ActionSelectionProcessor {
             .unwrap_or("");
 
         let checker = violation_checker();
-        // 传入 config
         checker.check_violation(source_id, source_type, board_name, user_id, title, &config)?;
 
         println!("=== 检查结束 ===");
@@ -692,14 +693,13 @@ impl ActionSelectionProcessor {
 
 impl Processor for ActionSelectionProcessor {
     fn process(&self, context: &mut ProcessingContext) -> Result<(), ProcessorError> {
-        // 批量模式：从 batch_manager 获取预先设定的动作
         if context.is_batch_mode {
             let config = context
                 .config
                 .as_ref()
                 .ok_or_else(|| ProcessorError::Processing("批量模式缺少配置".into()))?;
             let group_type = &context.report_type;
-            let group_key = &context.record_id; // 简化示例，实际可根据需要调整
+            let group_key = &context.record_id;
             if let Some(action) = self
                 .batch_manager
                 .lock()
@@ -707,7 +707,6 @@ impl Processor for ActionSelectionProcessor {
                 .get_batch_action(group_type, group_key)
             {
                 context.action = Some(action.clone());
-                // 执行动作
                 let status_map = self.registry.get_status_mapping();
                 if let Some(resolution) = status_map.get(&action) {
                     let report_id = config.get_report_id(&context.item)?;
@@ -727,7 +726,6 @@ impl Processor for ActionSelectionProcessor {
             return Ok(());
         }
 
-        // 交互式模式
         let actions = self.registry.get_available_actions(&context.report_type);
         let valid_keys: HashSet<String> = actions.iter().map(|a| a.key.clone()).collect();
         let prompt = self.registry.get_action_prompt(&context.report_type);
@@ -845,7 +843,7 @@ pub(crate) fn apply_action_by_method(
     }
 }
 
-// ==================== 违规检查器（优化：避免一次性全量加载，利用迭代器） ====================
+// ==================== 违规检查器 ====================
 pub struct ViolationChecker {
     pub comment_processor: CommentProcessor,
 }
@@ -857,6 +855,60 @@ impl ViolationChecker {
         }
     }
 
+    /// 处理单条评论或回复（提取内容、构建标识符、统计）
+    fn process_single_comment(
+        item: &JsonObject,
+        source_type: &str,
+        source_id: i64,
+        parent_comment_id: i64,
+        is_reply: bool,
+        title: &str,
+        ad_keywords: &HashSet<String>,
+        ads_violations: &mut Vec<String>,
+        duplicates_counter: &mut HashMap<(String, String), (usize, Vec<String>)>,
+    ) {
+        let content = item
+            .get("content")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_lowercase();
+        let user_id_str = item
+            .get("user_id")
+            .and_then(|v| v.as_i64())
+            .map(|id| id.to_string())
+            .unwrap_or_default();
+        let item_id = item.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
+
+        let identifier = format!(
+            "{}:{}:{}:{}:{}",
+            source_type,
+            source_id,
+            if is_reply { "reply" } else { "comment" },
+            parent_comment_id,
+            item_id
+        );
+
+        if !content.is_empty() && ad_keywords.iter().any(|kw| content.contains(kw)) {
+            let log_type = if is_reply { "回复" } else { "评论" };
+            println!(
+                "广告 {} [{}]{} : {}",
+                log_type,
+                source_type.to_uppercase(),
+                title_preview_str(title),
+                truncate_chars(&content, 50)
+            );
+            ads_violations.push(identifier.clone());
+        }
+
+        if !user_id_str.is_empty() && !content.is_empty() {
+            let entry = duplicates_counter
+                .entry((user_id_str, content))
+                .or_insert((0, Vec::new()));
+            entry.0 += 1;
+            entry.1.push(identifier);
+        }
+    }
+
     pub fn check_violation(
         &self,
         source_id: i64,
@@ -864,20 +916,37 @@ impl ViolationChecker {
         board_name: &str,
         user_id: Option<i64>,
         title: &str,
-        config: &SourceConfig, // 新增参数
+        _config: &SourceConfig,
     ) -> Result<(), ProcessorError> {
         println!(
             "检查违规: source_id={}, type={}, board={}, user={:?}",
             source_id, source_type, board_name, user_id
         );
 
-        let total = self.get_comment_total(source_id, source_type)?;
+        let comment_source: CommentSource = source_type
+            .parse()
+            .map_err(|_| ProcessorError::Processing(format!("未知来源类型: {}", source_type)))?;
+
+        let total = DataQuery::new()
+            .count_comments(comment_source, source_id as i32)
+            .unwrap_or(0);
         println!("该内容共有 {} 条评论", total);
 
         let limit_str = prompt_input("输入要获取的评论数: ");
         let limit: usize = limit_str.parse().unwrap_or(DEFAULT_COMMENT_FETCH_LIMIT);
 
-        let mut iter = self.fetch_comments(source_id, source_type, limit);
+        let detailed_comments = match DataQuery::new()
+            .fetch_comments(
+                comment_source,
+                source_id as i32,
+                CommentQueryMode::Comments,
+                Some(limit),
+            )
+            .unwrap()
+        {
+            CommentsResult::DetailedComments(list) => list,
+            _ => return Ok(()),
+        };
 
         let ad_keywords: HashSet<String> = DEFAULT_ADS_KEYWORDS
             .iter()
@@ -885,92 +954,51 @@ impl ViolationChecker {
             .collect();
         let spam_threshold = DEFAULT_SPAM_THRESHOLD as usize;
 
-        // 从配置获取正确的字段名
-        let content_field = &config.content_field;
-        let user_id_field = &config.user_id_field;
-        let content_id_field = &config.content_id_field;
-        let parent_id_field = &config.parent_id_field;
-
         let mut ads_violations: Vec<String> = Vec::new();
         let mut duplicates_counter: HashMap<(String, String), (usize, Vec<String>)> =
             HashMap::new();
-        let mut comment_count = 0;
 
-        while let Some(item_result) = iter.next_item() {
-            let value = match item_result {
-                Ok(v) => v,
-                Err(e) => {
-                    eprintln!("获取评论出错: {}", e);
-                    break;
-                }
-            };
-            if comment_count >= limit {
-                break;
+        for comment in &detailed_comments {
+            if comment
+                .get("is_top")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            {
+                continue;
             }
-            comment_count += 1;
 
-            // 使用配置字段获取内容/用户ID/ID
-            let content = value
-                .get(content_field)
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_lowercase();
-            let user_id_str = value
-                .get(user_id_field)
-                .map(value_to_string)
-                .unwrap_or_default();
-            let is_reply = value
-                .get(parent_id_field)
-                .and_then(|v| v.as_i64())
-                .unwrap_or(0)
-                > 0;
-
-            // 构建唯一标识符
-            let content_id = value
-                .get(content_id_field)
-                .and_then(|v| v.as_i64())
-                .unwrap_or(0);
-            let parent_id = if is_reply {
-                value
-                    .get(parent_id_field)
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(0)
-            } else {
-                0
-            };
-            let identifier = format!(
-                "{}:{}:{}:{}:{}",
+            Self::process_single_comment(
+                comment,
                 source_type,
                 source_id,
-                if is_reply { "reply" } else { "comment" },
-                parent_id,
-                content_id
+                0,
+                false,
+                title,
+                &ad_keywords,
+                &mut ads_violations,
+                &mut duplicates_counter,
             );
 
-            // 广告检测
-            if !content.is_empty() && ad_keywords.iter().any(|kw| content.contains(kw)) {
-                let log_type = if is_reply { "回复" } else { "评论" };
-                println!(
-                    "广告 {} [{}]{} : {}",
-                    log_type,
-                    source_type.to_uppercase(),
-                    title_preview_str(title),
-                    truncate_chars(&content, 50)
-                );
-                ads_violations.push(identifier.clone());
-            }
-
-            // 刷屏统计
-            if !user_id_str.is_empty() && !content.is_empty() {
-                let entry = duplicates_counter
-                    .entry((user_id_str.clone(), content.clone()))
-                    .or_insert((0, Vec::new()));
-                entry.0 += 1;
-                entry.1.push(identifier);
+            if let Some(replies) = comment.get("replies").and_then(|v| v.as_array()) {
+                let parent_comment_id = comment.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
+                for reply_value in replies {
+                    if let Some(reply) = reply_value.as_object() {
+                        Self::process_single_comment(
+                            reply,
+                            source_type,
+                            source_id,
+                            parent_comment_id,
+                            true,
+                            title,
+                            &ad_keywords,
+                            &mut ads_violations,
+                            &mut duplicates_counter,
+                        );
+                    }
+                }
             }
         }
 
-        // 刷屏判定（不变）
         let mut duplicates_violations = Vec::new();
         for ((uid, content), (count, identifiers)) in &duplicates_counter {
             if *count >= spam_threshold {
@@ -988,7 +1016,6 @@ impl ViolationChecker {
         violations.extend(ads_violations);
         violations.extend(duplicates_violations);
 
-        // 论坛刷帖检测（不变，但也可考虑使用 config.title_field）
         if source_type == "forum"
             && let Some(uid) = user_id
         {
@@ -1010,7 +1037,6 @@ impl ViolationChecker {
         let fetcher = ForumDataFetcher::new();
         let mut posts = Vec::new();
 
-        // 注意：如果 API 支持按 user_id 过滤，应优先使用
         for result in fetcher.search_posts_gen(title, None) {
             match result {
                 Ok(post) => posts.push(post),
@@ -1053,73 +1079,6 @@ impl ViolationChecker {
         Ok(Vec::new())
     }
 
-    fn get_comment_total(&self, source_id: i64, source_type: &str) -> Result<i64, ProcessorError> {
-        match source_type {
-            "work" => {
-                let resp = KittyFactory::global_client()
-                    .build_request(
-                        HttpMethod::Get,
-                        &format!("/creation-tools/v1/works/{}/comments", source_id),
-                        Some(BaseKey::Default),
-                    )
-                    .with_param("offset", "0")
-                    .with_param("limit", "15")
-                    .send()?;
-                let json = KittyFactory::global_client().response_to_json(resp)?;
-                Ok(json.get("total").and_then(|v| v.as_i64()).unwrap_or(0))
-            }
-            "shop" => {
-                let resp = KittyFactory::global_client()
-                    .build_request(
-                        HttpMethod::Get,
-                        &format!("/web/discussions/{}/comments", source_id),
-                        Some(BaseKey::Default),
-                    )
-                    .with_param("source", "WORK_SHOP")
-                    .with_param("limit", "15")
-                    .send()?;
-                let json = KittyFactory::global_client().response_to_json(resp)?;
-                let total = json.get("total").and_then(|v| v.as_i64()).unwrap_or(0);
-                let total_reply = json.get("totalReply").and_then(|v| v.as_i64()).unwrap_or(0);
-                Ok(total + total_reply)
-            }
-            "forum" => {
-                let resp = KittyFactory::global_client()
-                    .build_request(
-                        HttpMethod::Get,
-                        &format!("/web/forums/posts/{}/details", source_id),
-                        Some(BaseKey::Default),
-                    )
-                    .send()?;
-                let json = KittyFactory::global_client().response_to_json(resp)?;
-                let n_replies = json.get("n_replies").and_then(|v| v.as_i64()).unwrap_or(0);
-                let n_comments = json.get("n_comments").and_then(|v| v.as_i64()).unwrap_or(0);
-                Ok(n_replies + n_comments)
-            }
-            _ => Err(ProcessorError::Processing(format!(
-                "不支持的来源类型: {}",
-                source_type
-            ))),
-        }
-    }
-
-    /// 获取评论，利用迭代器特性控制数量
-    fn fetch_comments(&self, source_id: i64, source_type: &str, limit: usize) -> PaginatedIter {
-        match source_type {
-            "work" => WorkDataFetcher::new().fetch_work_comments_gen(source_id as i32, Some(limit)),
-            "forum" => {
-                ForumDataFetcher::new().fetch_post_replies_gen(source_id as i32, None, Some(limit))
-            }
-            "shop" => WorkshopDataFetcher::new().fetch_workshop_discussions_gen(
-                source_id as i32,
-                None,
-                None,
-                Some(limit),
-            ),
-            _ => panic!("不支持的来源类型: {}", source_type), // 调用方应保证 source_type 合法
-        }
-    }
-
     fn process_auto_report(&self, violations: HashSet<String>) -> Result<(), ProcessorError> {
         let mut multi_account = MultiAccount::new();
         let password_path = PathConfig::password_file_path();
@@ -1157,28 +1116,23 @@ impl ViolationChecker {
         let mut current_idx = 0usize;
 
         for (idx, violation) in violations_vec.iter().enumerate() {
-            // 1. 寻找一个可用的账号（未达上限）
             let chosen_idx = loop {
                 if accounts.is_empty() {
                     println!("所有账号已失效或达到上限，停止举报");
                     break None;
                 }
-                // 确保索引在合法范围内
                 current_idx %= accounts.len();
                 let usage = account_usage.get(&current_idx).copied().unwrap_or(0);
                 if usage < MAX_REPORTS_PER_ACCOUNT {
                     break Some(current_idx);
                 }
-                // 当前账号已满，尝试下一个
                 current_idx = (current_idx + 1) % accounts.len();
-                // 若轮完一圈仍无可用账号，则终止
-                if current_idx == 0 {
-                    // 检查是否所有账号都满了
-                    if accounts.iter().enumerate().all(|(i, _)| {
+                if current_idx == 0
+                    && accounts.iter().enumerate().all(|(i, _)| {
                         account_usage.get(&i).copied().unwrap_or(0) >= MAX_REPORTS_PER_ACCOUNT
-                    }) {
-                        break None;
-                    }
+                    })
+                {
+                    break None;
                 }
             };
 
@@ -1192,31 +1146,26 @@ impl ViolationChecker {
 
             let (user, pass) = &accounts[chosen_idx];
 
-            // 2. 登录（仅当首次使用该账号时）
             let usage = account_usage.get(&chosen_idx).copied().unwrap_or(0);
             if usage == 0 {
                 match self.login_student(user, pass) {
-                    Ok(()) => { /* 登录成功 */ }
+                    Ok(()) => {}
                     Err(e) => {
                         println!("账号 {} 登录失败: {}，移除", user, e);
                         accounts.remove(chosen_idx);
-                        // 清理对应的计数记录
                         account_usage.remove(&chosen_idx);
-                        // 调整 current_idx，防止越界
                         if chosen_idx < current_idx && current_idx > 0 {
                             current_idx -= 1;
                         }
                         current_idx %= accounts.len().max(1);
-                        continue; // 跳过当前违规，重新选择账号
+                        continue;
                     }
                 }
             }
 
-            // 3. 执行举报
             match self.execute_single_report(violation, reason_content) {
                 Ok(_) => {
                     success += 1;
-                    // 安全地增加使用计数
                     let entry = account_usage.entry(chosen_idx).or_insert(0);
                     *entry += 1;
                     println!(
@@ -1237,7 +1186,6 @@ impl ViolationChecker {
                 }
             }
 
-            // 4. 移动到下一个账号（轮转）
             current_idx = (chosen_idx + 1) % accounts.len();
         }
 
@@ -1371,7 +1319,7 @@ impl ViolationChecker {
     }
 }
 
-// ==================== 多账号管理器（移除未使用的字段） ====================
+// ==================== 多账号管理器 ====================
 pub struct MultiAccount {
     pub accounts: Vec<(String, String)>,
 }
@@ -1430,7 +1378,7 @@ pub fn violation_checker() -> &'static ViolationChecker {
     VIOLATION_CHECKER.get_or_init(ViolationChecker::new)
 }
 
-// ==================== 为 Vec<Value> 实现 CommentConfig，以便传递引用 ====================
+// ==================== 为 Vec<Value> 实现 CommentConfig ====================
 impl CommentConfig for Vec<Value> {
     fn get_comments(&self, _item_id: i64) -> Option<&[Value]> {
         Some(self.as_slice())
