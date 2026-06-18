@@ -1078,8 +1078,9 @@ impl PaginatedIter {
         self
     }
 
-    // 核心方法 -------------------------------------------------
-    /// 构造指定页的请求参数
+    // ---------- 核心优化部分 ----------
+
+    /// 构造指定页的请求参数（保持不变）
     fn build_params(&self, page: usize) -> Vec<(String, String)> {
         let mut params: Vec<(String, String)> = (*self.base_params).clone();
         if let Some(ref key) = self.config.amount_key {
@@ -1094,8 +1095,8 @@ impl PaginatedIter {
         params
     }
 
-    /// 发送一页请求，返回数据数组
-    fn fetch_page(&self, page: usize) -> MewResult<Vec<Value>> {
+    /// 统一的页面请求：发送请求并返回完整响应 JSON
+    fn request_page(&self, page: usize) -> MewResult<Value> {
         let params = self.build_params(page);
         let mut builder = self
             .client
@@ -1105,17 +1106,10 @@ impl PaginatedIter {
             builder = builder.with_payload((**payload).clone());
         }
         let response = builder.send()?;
-        let json = self.client.response_to_json(response)?;
-
-        let data = json
-            .pointer(&self.data_pointer)
-            .and_then(|v| v.as_array())
-            .cloned()
-            .unwrap_or_default();
-        Ok(data)
+        self.client.response_to_json(response)
     }
 
-    /// 尝试从响应 JSON 中提取总数，失败返回 None
+    /// 从 JSON 响应中提取 total（可失败，返回 None）
     fn try_extract_total(&self, json: &Value) -> Option<usize> {
         json.pointer(&self.total_pointer)
             .and_then(|v| {
@@ -1126,26 +1120,12 @@ impl PaginatedIter {
             .map(|n| n as usize)
     }
 
-    /// 延迟初始化：发送第一页，缓存数据和元信息
-    fn init(&mut self) -> MewResult<()> {
-        if !matches!(self.state, IterState::Uninit) {
-            return Ok(());
-        }
-
-        let params = self.build_params(0);
-        let mut builder = self
-            .client
-            .build_request(self.method, &self.endpoint, self.base_key)
-            .with_params(params);
-        if let Some(ref payload) = self.payload {
-            builder = builder.with_payload((**payload).clone());
-        }
-        let response = builder.send()?;
-        let json = self.client.response_to_json(response)?;
-
+    /// 惰性初始化（仅在状态为 Uninit 时调用）
+    fn initialize(&mut self) -> MewResult<()> {
+        let json = self.request_page(0)?;
         let total = self.try_extract_total(&json);
 
-        // 如果配置了响应中的实际页大小键，尝试更新
+        // 若配置了响应中的实际页大小键，尝试更新
         if let Some(ref key) = self.config.response_amount_key {
             let pointer = Self::key_to_pointer(key);
             if let Some(n) = json.pointer(&pointer).and_then(|v| v.as_u64()) {
@@ -1165,86 +1145,99 @@ impl PaginatedIter {
             current_index: 0,
             total,
         };
-
         Ok(())
     }
 
-    /// 是否已达到用户设置的获取上限
+    /// 检查是否已达到用户设置的获取上限
     fn reached_limit(&self) -> bool {
         self.limit.is_some_and(|lim| self.yielded >= lim)
     }
 
-    /// 获取下一个项目（同步迭代）
+    /// 获取下一个元素（优化版，内部惰性初始化）
     pub fn next_item(&mut self) -> Option<MewResult<Value>> {
-        // 惰性初始化
+        // 首次调用时进行初始化
         if matches!(self.state, IterState::Uninit)
-            && let Err(e) = self.init()
+            && let Err(e) = self.initialize()
         {
             self.state = IterState::Finished;
             return Some(Err(e));
         }
 
         loop {
-            // 将状态暂时取出，避免借用冲突
+            // 取出当前状态，用 Finished 占位
             let state = std::mem::replace(&mut self.state, IterState::Finished);
             match state {
                 IterState::Finished => return None,
-                IterState::Uninit => unreachable!(), // 已在循环前初始化
+                IterState::Uninit => {
+                    // 逻辑上初始化后不会出现，但为完整性保留处理
+                    self.state = IterState::Finished;
+                    return None;
+                }
                 IterState::Ready {
                     current_page,
                     current_page_data,
                     current_index,
                     total,
                 } => {
-                    // 检查 yield 上限
+                    // 已到达用户限制
                     if self.reached_limit() {
-                        // self.state 已是 Finished，直接返回
+                        // 状态已设置为 Finished，直接返回
                         return None;
                     }
 
-                    // 当前页还有数据，直接返回
+                    // 当前页仍有数据
                     if current_index < current_page_data.len() {
                         let item = current_page_data[current_index].clone();
                         let new_index = current_index + 1;
-                        let new_yielded = self.yielded + 1;
-                        // 更新状态并放回
                         self.state = IterState::Ready {
                             current_page,
                             current_page_data,
                             current_index: new_index,
                             total,
                         };
-                        self.yielded = new_yielded;
+                        self.yielded += 1;
                         return Some(Ok(item));
                     }
 
-                    // 如果有总数且已全部取出，结束
-                    if let Some(t) = total
-                        && (current_page + 1) * self.config.page_size >= t
-                    {
-                        // self.state 已是 Finished
+                    // 判断是否需要加载下一页
+                    let should_fetch = if let Some(t) = total {
+                        // 有总数时：已取完则不再请求
+                        (current_page + 1) * self.config.page_size < t
+                    } else {
+                        // 无总数时：必须尝试下一页
+                        true
+                    };
+
+                    if !should_fetch {
+                        // 状态已为 Finished，结束
                         return None;
                     }
 
                     // 请求下一页
                     let next_page = current_page + 1;
-                    match self.fetch_page(next_page) {
-                        Ok(data) if !data.is_empty() => {
+                    match self.request_page(next_page) {
+                        Ok(json) => {
+                            let data = json
+                                .pointer(&self.data_pointer)
+                                .and_then(|v| v.as_array())
+                                .cloned()
+                                .unwrap_or_default();
+
+                            if data.is_empty() {
+                                // 空页，终止
+                                return None; // state 已是 Finished
+                            }
+
                             self.state = IterState::Ready {
                                 current_page: next_page,
                                 current_page_data: data.into(),
                                 current_index: 0,
                                 total,
                             };
-                            // 继续循环，下一次迭代会返回新页第一条
-                        }
-                        Ok(_) => {
-                            // 数据为空，没有更多内容
-                            // self.state 已是 Finished
-                            return None;
+                            // 继续循环，下一次迭代会从新页第一条开始产出
                         }
                         Err(e) => {
-                            // self.state 已是 Finished
+                            // 请求失败，终止并返回错误
                             return Some(Err(e));
                         }
                     }
@@ -1263,7 +1256,7 @@ impl PaginatedIter {
     }
 }
 
-// 实现标准库 Iterator trait，使其可用于 for 循环等
+// 实现标准库 Iterator trait
 impl Iterator for PaginatedIter {
     type Item = MewResult<Value>;
     fn next(&mut self) -> Option<Self::Item> {
