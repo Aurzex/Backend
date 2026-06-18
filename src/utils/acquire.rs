@@ -1260,7 +1260,13 @@ impl PaginatedIter {
         }
         Ok(items)
     }
-
+    /// 仅获取元数据（总数、页数等），不迭代数据
+    pub fn fetch_metadata(&mut self) -> MewResult<()> {
+        if matches!(self.state, IterState::Uninit) {
+            self.initialize()?;
+        }
+        Ok(())
+    }
     // ========== 新增页面元数据查询方法（&self，不触发网络请求） ==========
 
     /// 获取当前页码（从 1 开始），仅在已成功请求至少一页时返回 Some

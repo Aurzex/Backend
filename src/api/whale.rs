@@ -181,7 +181,6 @@ impl WhaleReportFetcher {
             .with_base_key(BaseKey::Whale)
             .with_iter_param("type", source_type.as_str())
             .with_iter_param("status", status.as_str())
-            
             .with_page_size(15)
             .with_pagination_method(PaginationMethod::Offset)
             .with_offset_key("offset")
@@ -198,58 +197,6 @@ impl WhaleReportFetcher {
             paginated = paginated.with_limit(15);
         }
         paginated
-    }
-
-    // 作品举报总数
-    pub fn fetch_work_reports_total(
-        &self,
-        source_type: WorkSourceType,
-        status: ReportStatus,
-        filter_type: Option<WorkReportFilterType>,
-        target_id: Option<i32>,
-    ) -> MewResult<Value> {
-        let mut builder = self
-            .client
-            .build_request(HttpMethod::Get, "/reports/works", Some(BaseKey::Whale))
-            .with_param("type", source_type.as_str())
-            .with_param("status", status.as_str())
-            .with_param("offset", "0")
-            .with_param("limit", "15");
-
-        builder = Self::add_timestamp_to_builder(builder);
-
-        if let (Some(filter), Some(id)) = (filter_type, target_id) {
-            builder = builder.with_param(filter.as_str(), id.to_string());
-        }
-
-        let response = builder.send()?;
-        self.client.response_to_json(response)
-    }
-
-    // 作品举报总数（额外端点）
-    pub fn fetch_work_reports_total_extra(
-        &self,
-        source_type: WorkSourceType,
-        status: ReportStatus,
-        filter_type: Option<WorkReportFilterType>,
-        target_id: Option<i32>,
-    ) -> MewResult<Value> {
-        let mut builder = self
-            .client
-            .build_request(HttpMethod::Get, "/reports/works", Some(BaseKey::Whale))
-            .with_param("type", source_type.as_str())
-            .with_param("status", status.as_str())
-            .with_param("offset", "0")
-            .with_param("limit", "15");
-
-        builder = Self::add_timestamp_to_builder(builder);
-
-        if let (Some(filter), Some(id)) = (filter_type, target_id) {
-            builder = builder.with_param(filter.as_str(), id.to_string());
-        }
-
-        let response = builder.send()?;
-        self.client.response_to_json(response)
     }
 
     // 评论举报（分页）
@@ -267,7 +214,6 @@ impl WhaleReportFetcher {
             .with_base_key(BaseKey::Whale)
             .with_iter_param("source", source_type.as_str())
             .with_iter_param("status", status.as_str())
-            
             .with_page_size(15)
             .with_pagination_method(PaginationMethod::Offset)
             .with_offset_key("offset")
@@ -284,32 +230,6 @@ impl WhaleReportFetcher {
             paginated = paginated.with_limit(15);
         }
         paginated
-    }
-
-    // 评论举报总数
-    pub fn fetch_comment_reports_total(
-        &self,
-        source_type: CommentSourceType,
-        status: ReportStatus,
-        filter_type: Option<CommentReportFilterType>,
-        target_id: Option<i32>,
-    ) -> MewResult<Value> {
-        let mut builder = self
-            .client
-            .build_request(HttpMethod::Get, "/reports/comments", Some(BaseKey::Whale))
-            .with_param("source", source_type.as_str())
-            .with_param("status", status.as_str())
-            .with_param("offset", "0")
-            .with_param("limit", "15");
-
-        builder = Self::add_timestamp_to_builder(builder);
-
-        if let (Some(filter), Some(id)) = (filter_type, target_id) {
-            builder = builder.with_param(filter.as_str(), id.to_string());
-        }
-
-        let response = builder.send()?;
-        self.client.response_to_json(response)
     }
 
     // 帖子举报（分页）
@@ -326,7 +246,6 @@ impl WhaleReportFetcher {
             .paginated("/reports/posts")
             .with_base_key(BaseKey::Whale)
             .with_iter_param("status", status.as_str())
-            
             .with_page_size(15)
             .with_pagination_method(PaginationMethod::Offset)
             .with_offset_key("offset")
@@ -346,34 +265,6 @@ impl WhaleReportFetcher {
             paginated = paginated.with_limit(15);
         }
         paginated
-    }
-
-    // 帖子举报总数
-    pub fn fetch_post_reports_total(
-        &self,
-        status: ReportStatus,
-        board_id: Option<i32>,
-        filter_type: Option<PostReportFilterType>,
-        target_id: Option<i32>,
-    ) -> MewResult<Value> {
-        let mut builder = self
-            .client
-            .build_request(HttpMethod::Get, "/reports/posts", Some(BaseKey::Whale))
-            .with_param("status", status.as_str())
-            .with_param("offset", "0")
-            .with_param("limit", "15");
-
-        builder = Self::add_timestamp_to_builder(builder);
-
-        if let Some(board) = board_id {
-            builder = builder.with_param("board_id", board.to_string());
-        }
-        if let (Some(filter), Some(id)) = (filter_type, target_id) {
-            builder = builder.with_param(filter.as_str(), id.to_string());
-        }
-
-        let response = builder.send()?;
-        self.client.response_to_json(response)
     }
 
     // 讨论区举报（分页）
@@ -390,7 +281,6 @@ impl WhaleReportFetcher {
             .paginated("/reports/posts/discussions")
             .with_base_key(BaseKey::Whale)
             .with_iter_param("status", status.as_str())
-            
             .with_page_size(15)
             .with_pagination_method(PaginationMethod::Offset)
             .with_offset_key("offset")
@@ -410,38 +300,6 @@ impl WhaleReportFetcher {
             paginated = paginated.with_limit(15);
         }
         paginated
-    }
-
-    // 讨论区举报总数
-    pub fn fetch_discussion_reports_total(
-        &self,
-        status: ReportStatus,
-        board_id: Option<i32>,
-        filter_type: Option<PostReportFilterType>,
-        target_id: Option<i32>,
-    ) -> MewResult<Value> {
-        let mut builder = self
-            .client
-            .build_request(
-                HttpMethod::Get,
-                "/reports/posts/discussions",
-                Some(BaseKey::Whale),
-            )
-            .with_param("status", status.as_str())
-            .with_param("offset", "0")
-            .with_param("limit", "15");
-
-        builder = Self::add_timestamp_to_builder(builder);
-
-        if let Some(board) = board_id {
-            builder = builder.with_param("board_id", board.to_string());
-        }
-        if let (Some(filter), Some(id)) = (filter_type, target_id) {
-            builder = builder.with_param(filter.as_str(), id.to_string());
-        }
-
-        let response = builder.send()?;
-        self.client.response_to_json(response)
     }
 }
 

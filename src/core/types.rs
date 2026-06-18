@@ -7,7 +7,7 @@ use std::time::{Duration, UNIX_EPOCH};
 use crate::api::whale::{CommentSourceType, ReportStatus, WhaleReportFetcher, WorkSourceType};
 use crate::utils::acquire;
 
-use serde_json::Value;
+use serde_json::{Value, json};
 
 // ==================== 自定义错误类型 ====================
 #[derive(Debug)]
@@ -338,9 +338,17 @@ impl ReportFetcher {
             SourceConfig {
                 name: "工作室评论举报".into(),
                 fetch_total: |status| {
-                    WhaleReportFetcher::new()
-                        .fetch_comment_reports_total(CommentSourceType::All, status, None, None)
-                        .map_err(|e| ProcessorError::External(e.into()))
+                    let mut paginated = WhaleReportFetcher::new().fetch_comment_reports_gen(
+                        CommentSourceType::All,
+                        status,
+                        None,
+                        None,
+                        None,
+                    );
+                    paginated
+                        .fetch_metadata()
+                        .map_err(|e| ProcessorError::External(e.into()))?;
+                    Ok(json!(paginated.total_items().unwrap_or(0) as i32))
                 },
                 fetch_generator: |status| {
                     let iter = WhaleReportFetcher::new().fetch_comment_reports_gen(
@@ -438,9 +446,18 @@ impl ReportFetcher {
             SourceConfig {
                 name: "作品举报".into(),
                 fetch_total: |status| {
-                    WhaleReportFetcher::new()
-                        .fetch_work_reports_total(WorkSourceType::All, status, None, None)
-                        .map_err(|e| ProcessorError::External(e.into()))
+                    let mut paginated = WhaleReportFetcher::new().fetch_work_reports_gen(
+                        WorkSourceType::All,
+                        status,
+                        None,
+                        None,
+                        None,
+                    );
+                    paginated
+                        .fetch_metadata()
+                        .map_err(|e| ProcessorError::External(e.into()));
+
+                    Ok(json!(paginated.total_items().unwrap_or(0) as i32))
                 },
                 fetch_generator: |status| {
                     let iter = WhaleReportFetcher::new().fetch_work_reports_gen(
@@ -519,9 +536,13 @@ impl ReportFetcher {
             SourceConfig {
                 name: "帖子举报".into(),
                 fetch_total: |status| {
-                    WhaleReportFetcher::new()
-                        .fetch_post_reports_total(status, None, None, None)
-                        .map_err(|e| ProcessorError::External(e.into()))
+                    let mut paginated = WhaleReportFetcher::new()
+                        .fetch_post_reports_gen(status, None, None, None, None);
+                    paginated
+                        .fetch_metadata()
+                        .map_err(|e| ProcessorError::External(e.into()));
+
+                    Ok(json!(paginated.total_items().unwrap_or(0) as i32))
                 },
                 fetch_generator: |status| {
                     let iter = WhaleReportFetcher::new().fetch_post_reports_gen(
@@ -614,9 +635,13 @@ impl ReportFetcher {
             SourceConfig {
                 name: "讨论举报".into(),
                 fetch_total: |status| {
-                    WhaleReportFetcher::new()
-                        .fetch_discussion_reports_total(status, None, None, None)
-                        .map_err(|e| ProcessorError::External(e.into()))
+                    let mut paginated = WhaleReportFetcher::new()
+                        .fetch_discussion_reports_gen(status, None, None, None, None);
+                    paginated
+                        .fetch_metadata()
+                        .map_err(|e| ProcessorError::External(e.into()));
+
+                    Ok(json!(paginated.total_items().unwrap_or(0) as i32))
                 },
                 fetch_generator: |status| {
                     let iter = WhaleReportFetcher::new().fetch_discussion_reports_gen(

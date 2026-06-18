@@ -13,7 +13,9 @@ use crate::api::whale::{
     WorkReportFilterType, WorkSourceType,
 };
 use crate::api::work::{NemoWorkType, WorkDataFetcher};
-use crate::utils::acquire::{BaseKey, Catsona, CodeMaoClient, HttpMethod, MewError};
+use crate::utils::acquire::{
+    BaseKey, Catsona, CodeMaoClient, HttpMethod, MewError, PaginationMethod,
+};
 
 // ==================== 错误类型 ====================
 
@@ -515,83 +517,81 @@ impl DataQuery {
         let client = CodeMaoClient::global();
         match source {
             CommentSource::Work => {
-                let response = client
-                    .build_request(
-                        HttpMethod::Get,
-                        &format!("/creation-tools/v1/works/{}/comments", target_id),
-                        Some(BaseKey::Default),
-                    )
-                    .with_param("offset", "0")
-                    .with_param("limit", "15")
-                    .send()
-                    .map_err(DataQueryError::from)?;
+                let mut paginated = client
+                    .paginated(format!("/creation-tools/v1/works/{}/comments", target_id))
+                    .with_base_key(BaseKey::Default)
+                    .with_page_size(15)
+                    .with_pagination_method(PaginationMethod::Offset)
+                    .with_offset_key("offset")
+                    .with_amount_key("limit")
+                    .with_total_key("total");
 
-                let json = client
-                    .response_to_json(response)
-                    .map_err(DataQueryError::from)?;
+                paginated.fetch_metadata().map_err(DataQueryError::from)?;
 
-                if let Some(total) = json.get("total").and_then(|t| t.as_i64()) {
-                    return Ok(total as i32);
-                }
-
-                let work_response = client
-                    .build_request(
-                        HttpMethod::Get,
-                        &format!("/creation-tools/v1/works/{}", target_id),
-                        Some(BaseKey::Default),
-                    )
-                    .send()
-                    .map_err(DataQueryError::from)?;
-
-                let work_json = client
-                    .response_to_json(work_response)
-                    .map_err(DataQueryError::from)?;
-
-                Ok(work_json
-                    .get("comment_times")
-                    .and_then(|t| t.as_i64())
-                    .unwrap_or(0) as i32)
+                Ok(paginated.total_items().unwrap_or(0) as i32)
             }
             CommentSource::Shop => {
-                let response = client
-                    .build_request(
-                        HttpMethod::Get,
-                        &format!("/web/discussions/{}/comments", target_id),
-                        Some(BaseKey::Default),
-                    )
-                    .with_param("source", "WORK_SHOP")
-                    .with_param("sort", "-created_at")
-                    .with_param("limit", "15")
-                    .with_param("offset", "0")
-                    .send()
+                let mut paginated = client
+                    .paginated(format!("/web/discussions/{}/comments", target_id))
+                    .with_base_key(BaseKey::Default)
+                    .with_iter_param("source", "WORK_SHOP")
+                    .with_iter_param("sort", "-created_at")
+                    .with_page_size(15)
+                    .with_pagination_method(PaginationMethod::Offset)
+                    .with_offset_key("offset")
+                    .with_amount_key("limit")
+                    .with_total_key("total");
+
+                paginated.fetch_metadata().map_err(DataQueryError::from)?;
+
+                let total = paginated.total_items().unwrap_or(0) as i32;
+
+                let mut reply_paginated = client
+                    .paginated(format!("/web/discussions/{}/comments", target_id))
+                    .with_base_key(BaseKey::Default)
+                    .with_iter_param("source", "WORK_SHOP")
+                    .with_iter_param("sort", "-created_at")
+                    .with_page_size(15)
+                    .with_pagination_method(PaginationMethod::Offset)
+                    .with_offset_key("offset")
+                    .with_amount_key("limit")
+                    .with_total_key("totalReply");
+
+                reply_paginated
+                    .fetch_metadata()
                     .map_err(DataQueryError::from)?;
 
-                let json = client
-                    .response_to_json(response)
-                    .map_err(DataQueryError::from)?;
-
-                let total = json.get("total").and_then(|t| t.as_i64()).unwrap_or(0) as i32;
-                let total_reply =
-                    json.get("totalReply").and_then(|t| t.as_i64()).unwrap_or(0) as i32;
+                let total_reply = reply_paginated.total_items().unwrap_or(0) as i32;
                 Ok(total + total_reply)
             }
             CommentSource::Forum => {
-                let response = client
-                    .build_request(
-                        HttpMethod::Get,
-                        &format!("/web/forums/posts/{}/details", target_id),
-                        Some(BaseKey::Default),
-                    )
-                    .send()
+                let mut paginated = client
+                    .paginated(format!("/web/forums/posts/{}/details", target_id))
+                    .with_base_key(BaseKey::Default)
+                    .with_page_size(15)
+                    .with_pagination_method(PaginationMethod::Offset)
+                    .with_offset_key("offset")
+                    .with_amount_key("limit")
+                    .with_total_key("n_replies");
+
+                paginated.fetch_metadata().map_err(DataQueryError::from)?;
+
+                let n_replies = paginated.total_items().unwrap_or(0) as i32;
+
+                let mut comment_paginated = client
+                    .paginated(format!("/web/forums/posts/{}/details", target_id))
+                    .with_base_key(BaseKey::Default)
+                    .with_page_size(15)
+                    .with_pagination_method(PaginationMethod::Offset)
+                    .with_offset_key("offset")
+                    .with_amount_key("limit")
+                    .with_total_key("n_comments");
+
+                comment_paginated
+                    .fetch_metadata()
                     .map_err(DataQueryError::from)?;
 
-                let json = client
-                    .response_to_json(response)
-                    .map_err(DataQueryError::from)?;
-
-                let n_replies = json.get("n_replies").and_then(|r| r.as_i64()).unwrap_or(0) as i32;
-                let n_comments =
-                    json.get("n_comments").and_then(|c| c.as_i64()).unwrap_or(0) as i32;
+                let n_comments = comment_paginated.total_items().unwrap_or(0) as i32;
                 Ok(n_replies + n_comments)
             }
         }
@@ -761,29 +761,37 @@ impl DataQuery {
         let mut total_work_reports = 0;
 
         for &(admin_id, admin_name) in &admins {
-            let comment_count = WhaleReportFetcher::new()
-                .fetch_comment_reports_total(
-                    CommentSourceType::All,
-                    ReportStatus::All,
-                    Some(CommentReportFilterType::AdminId),
-                    Some(admin_id),
-                )
-                .map_err(DataQueryError::from)?
-                .get("total")
-                .and_then(|t| t.as_i64())
-                .unwrap_or(0) as i32;
+            // 获取评论举报总数
+            let mut comment_paginated = WhaleReportFetcher::new().fetch_comment_reports_gen(
+                CommentSourceType::All,
+                ReportStatus::All,
+                Some(CommentReportFilterType::AdminId),
+                Some(admin_id),
+                None, // 不设置limit，使用默认值
+            );
 
-            let work_count = WhaleReportFetcher::new()
-                .fetch_work_reports_total(
-                    WorkSourceType::All,
-                    ReportStatus::All,
-                    Some(WorkReportFilterType::AdminId),
-                    Some(admin_id),
-                )
-                .map_err(DataQueryError::from)?
-                .get("total")
-                .and_then(|t| t.as_i64())
-                .unwrap_or(0) as i32;
+            // 初始化分页迭代器以获取元数据
+            comment_paginated
+                .fetch_metadata()
+                .map_err(DataQueryError::from)?;
+
+            let comment_count = comment_paginated.total_items().unwrap_or(0) as i32;
+
+            // 获取作品举报总数
+            let mut work_paginated = WhaleReportFetcher::new().fetch_work_reports_gen(
+                WorkSourceType::All,
+                ReportStatus::All,
+                Some(WorkReportFilterType::AdminId),
+                Some(admin_id),
+                None, // 不设置limit，使用默认值
+            );
+
+            // 初始化分页迭代器以获取元数据
+            work_paginated
+                .fetch_metadata()
+                .map_err(DataQueryError::from)?;
+
+            let work_count = work_paginated.total_items().unwrap_or(0) as i32;
 
             let total = comment_count + work_count;
 
