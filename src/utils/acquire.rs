@@ -895,11 +895,13 @@ impl CodeMaoClient {
         FileUploader::new(self.clone())
     }
 }
+// ==================== 分页配置（保持不变） ====================
 
-// ==================== 分页配置 ====================
 #[derive(Debug, Clone, Copy)]
 pub enum PaginationMethod {
+    /// 偏移量分页：offset = page * page_size
     Offset,
+    /// 页码分页：page = page + 1
     Page,
 }
 
@@ -939,14 +941,19 @@ impl Default for PaginationConfig {
     }
 }
 
-// ==================== 分页迭代器（优化版） ====================
+// ==================== 分页迭代器状态（三态枚举，保留） ====================
+
+/// 分页迭代器的内部状态机
 enum IterState {
     /// 还未发送任何请求
     Uninit,
     /// 已初始化，缓存了当前页数据及元信息
     Ready {
+        /// 当前页码（从 0 开始）
         current_page: usize,
+        /// 当前页的所有数据，使用 Arc 共享
         current_page_data: Arc<[Value]>,
+        /// 当前页内的消费指针
         current_index: usize,
         /// 总数（若响应未提供则为 None）
         total: Option<usize>,
@@ -955,28 +962,41 @@ enum IterState {
     Finished,
 }
 
+// ==================== PaginatedIter 完整优化版 ====================
+
 pub struct PaginatedIter {
     client: CodeMaoClient,
     method: HttpMethod,
     endpoint: String,
+    /// 基础查询参数，所有分页请求都会携带
     base_params: Arc<Vec<(String, String)>>,
+    /// POST/PUT 等请求的 JSON 负载（可选）
     payload: Option<Arc<Value>>,
+    /// 用户设定的获取上限（最多产出多少条）
     limit: Option<usize>,
+    /// 可选的基础 URL 键
     base_key: Option<BaseKey>,
 
-    // JSON Pointer 路径
+    /// 响应中总数的 JSON Pointer 路径
     total_pointer: String,
+    /// 响应中数据数组的 JSON Pointer 路径
     data_pointer: String,
 
+    /// 分页计算方式（偏移量 / 页码）
     pagination_method: PaginationMethod,
+    /// 分页配置详情
     config: PaginationConfig,
 
-    // 内部状态
+    /// 迭代器内部状态
     state: IterState,
+    /// 已经通过 next() 产出的元素总数
     yielded: usize,
 }
 
 impl PaginatedIter {
+    // ---- 构造与基础配置 ----
+
+    /// 创建一个新的分页迭代器，默认 GET 请求，endpoint 可拼接完整 URL 或相对路径
     pub fn new(client: CodeMaoClient, endpoint: impl Into<String>) -> Self {
         let total_key = "total".to_string();
         let data_key = "items".to_string();
@@ -997,90 +1017,78 @@ impl PaginatedIter {
         }
     }
 
-    // 将点分隔的 key 转换为 JSON Pointer 路径
+    /// 将点分隔的 key 转换为 JSON Pointer 路径
+    /// 例如 "data.items" -> "/data/items"
     fn key_to_pointer(key: &str) -> String {
         format!("/{}", key.replace('.', "/"))
     }
 
-    // 链式构建方法 ---------------------------------------------
+    // ---- 链式配置方法（萌化命名，保持原样） ----
+
     pub fn with_iter_method(mut self, method: HttpMethod) -> Self {
         self.method = method;
         self
     }
-
     pub fn with_iter_param(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         Arc::make_mut(&mut self.base_params).push((key.into(), value.into()));
         self
     }
-
     pub fn with_iter_params(mut self, params: Vec<(String, String)>) -> Self {
         Arc::make_mut(&mut self.base_params).extend(params);
         self
     }
-
     pub fn with_iter_payload(mut self, payload: Value) -> Self {
         self.payload = Some(Arc::new(payload));
         self
     }
-
     pub fn with_limit(mut self, limit: usize) -> Self {
         self.limit = Some(limit);
         self
     }
-
     pub fn with_total_key(mut self, key: impl Into<String>) -> Self {
         self.total_pointer = Self::key_to_pointer(&key.into());
         self
     }
-
     pub fn with_data_key(mut self, key: impl Into<String>) -> Self {
         self.data_pointer = Self::key_to_pointer(&key.into());
         self
     }
-
     pub fn with_pagination_method(mut self, method: PaginationMethod) -> Self {
         self.pagination_method = method;
         self
     }
-
     pub fn with_config(mut self, config: PaginationConfig) -> Self {
         self.config = config;
         self
     }
-
     pub fn with_amount_key(mut self, key: impl Into<String>) -> Self {
         self.config.amount_key = Some(key.into());
         self
     }
-
     pub fn with_offset_key(mut self, key: impl Into<String>) -> Self {
         self.config.offset_key = Some(key.into());
         self
     }
-
     pub fn with_response_amount_key(mut self, key: impl Into<String>) -> Self {
         self.config.response_amount_key = Some(key.into());
         self
     }
-
     pub fn with_response_offset_key(mut self, key: impl Into<String>) -> Self {
         self.config.response_offset_key = Some(key.into());
         self
     }
-
     pub fn with_base_key(mut self, key: BaseKey) -> Self {
         self.base_key = Some(key);
         self
     }
-
     pub fn with_page_size(mut self, size: usize) -> Self {
         self.config.page_size = size;
         self
     }
 
-    // ---------- 核心优化部分 ----------
+    // ---- 内部请求逻辑 ----
 
-    /// 构造指定页的请求参数（保持不变）
+    /// 构造指定页的请求参数：基础参数 + 分页参数
     fn build_params(&self, page: usize) -> Vec<(String, String)> {
         let mut params: Vec<(String, String)> = (*self.base_params).clone();
         if let Some(ref key) = self.config.amount_key {
@@ -1095,7 +1103,8 @@ impl PaginatedIter {
         params
     }
 
-    /// 统一的页面请求：发送请求并返回完整响应 JSON
+    /// 统一发送一页请求，返回完整的响应 JSON
+    /// 封装了参数构建、负载附加、发送与 JSON 解析
     fn request_page(&self, page: usize) -> MewResult<Value> {
         let params = self.build_params(page);
         let mut builder = self
@@ -1109,7 +1118,7 @@ impl PaginatedIter {
         self.client.response_to_json(response)
     }
 
-    /// 从 JSON 响应中提取 total（可失败，返回 None）
+    /// 从响应 JSON 中尝试提取总数（total），支持多种数字类型
     fn try_extract_total(&self, json: &Value) -> Option<usize> {
         json.pointer(&self.total_pointer)
             .and_then(|v| {
@@ -1120,12 +1129,12 @@ impl PaginatedIter {
             .map(|n| n as usize)
     }
 
-    /// 惰性初始化（仅在状态为 Uninit 时调用）
+    /// 惰性初始化：发送第一页请求，解析元数据并设置为 Ready 状态
     fn initialize(&mut self) -> MewResult<()> {
         let json = self.request_page(0)?;
         let total = self.try_extract_total(&json);
 
-        // 若配置了响应中的实际页大小键，尝试更新
+        // 若配置了响应中的实际每页大小键，则用服务器返回值覆盖 page_size
         if let Some(ref key) = self.config.response_amount_key {
             let pointer = Self::key_to_pointer(key);
             if let Some(n) = json.pointer(&pointer).and_then(|v| v.as_u64()) {
@@ -1148,14 +1157,16 @@ impl PaginatedIter {
         Ok(())
     }
 
-    /// 检查是否已达到用户设置的获取上限
+    /// 是否已达到用户设置的获取上限
     fn reached_limit(&self) -> bool {
         self.limit.is_some_and(|lim| self.yielded >= lim)
     }
 
-    /// 获取下一个元素（优化版，内部惰性初始化）
+    // ---- 迭代器核心：next_item ----
+
+    /// 获取下一个元素，内部惰性初始化并自动翻页
     pub fn next_item(&mut self) -> Option<MewResult<Value>> {
-        // 首次调用时进行初始化
+        // 首次调用时自动初始化
         if matches!(self.state, IterState::Uninit)
             && let Err(e) = self.initialize()
         {
@@ -1164,12 +1175,12 @@ impl PaginatedIter {
         }
 
         loop {
-            // 取出当前状态，用 Finished 占位
+            // 取出状态，用 Finished 占位，避免复杂借用
             let state = std::mem::replace(&mut self.state, IterState::Finished);
             match state {
                 IterState::Finished => return None,
+                // 理论上初始化后不会再进入 Uninit，但为完整性保留
                 IterState::Uninit => {
-                    // 逻辑上初始化后不会出现，但为完整性保留处理
                     self.state = IterState::Finished;
                     return None;
                 }
@@ -1179,37 +1190,34 @@ impl PaginatedIter {
                     current_index,
                     total,
                 } => {
-                    // 已到达用户限制
+                    // 检查是否达到 limit
                     if self.reached_limit() {
-                        // 状态已设置为 Finished，直接返回
                         return None;
                     }
 
-                    // 当前页仍有数据
+                    // 当前页还有数据，直接返回
                     if current_index < current_page_data.len() {
                         let item = current_page_data[current_index].clone();
-                        let new_index = current_index + 1;
                         self.state = IterState::Ready {
                             current_page,
                             current_page_data,
-                            current_index: new_index,
+                            current_index: current_index + 1,
                             total,
                         };
                         self.yielded += 1;
                         return Some(Ok(item));
                     }
 
-                    // 判断是否需要加载下一页
+                    // 判断是否需要翻页
                     let should_fetch = if let Some(t) = total {
-                        // 有总数时：已取完则不再请求
+                        // 已知总数：已取完则不再请求
                         (current_page + 1) * self.config.page_size < t
                     } else {
-                        // 无总数时：必须尝试下一页
+                        // 未知总数：必须尝试下一页
                         true
                     };
 
                     if !should_fetch {
-                        // 状态已为 Finished，结束
                         return None;
                     }
 
@@ -1224,8 +1232,7 @@ impl PaginatedIter {
                                 .unwrap_or_default();
 
                             if data.is_empty() {
-                                // 空页，终止
-                                return None; // state 已是 Finished
+                                return None; // 空数据表示结束
                             }
 
                             self.state = IterState::Ready {
@@ -1234,11 +1241,10 @@ impl PaginatedIter {
                                 current_index: 0,
                                 total,
                             };
-                            // 继续循环，下一次迭代会从新页第一条开始产出
+                            // 循环继续，下一次将返回新页第一条
                         }
                         Err(e) => {
-                            // 请求失败，终止并返回错误
-                            return Some(Err(e));
+                            return Some(Err(e)); // 请求失败，终止迭代并传递错误
                         }
                     }
                 }
@@ -1246,7 +1252,7 @@ impl PaginatedIter {
         }
     }
 
-    /// 一次性收集所有数据
+    /// 一次性收集所有剩余元素
     pub fn collect(mut self) -> MewResult<Vec<Value>> {
         let mut items = Vec::new();
         while let Some(item) = self.next_item() {
@@ -1254,13 +1260,102 @@ impl PaginatedIter {
         }
         Ok(items)
     }
+
+    // ========== 新增页面元数据查询方法（&self，不触发网络请求） ==========
+
+    /// 获取当前页码（从 1 开始），仅在已成功请求至少一页时返回 Some
+    pub fn current_page_number(&self) -> Option<usize> {
+        match &self.state {
+            IterState::Ready { current_page, .. } => Some(current_page + 1),
+            _ => None,
+        }
+    }
+
+    /// 获取服务器返回的总条目数，仅在成功解析后返回 Some
+    pub fn total_items(&self) -> Option<usize> {
+        match &self.state {
+            IterState::Ready { total, .. } => *total,
+            _ => None,
+        }
+    }
+
+    /// 获取已通过迭代器产出的元素个数
+    pub fn yielded_count(&self) -> usize {
+        self.yielded
+    }
+
+    /// 计算总页数（基于 total / page_size），仅在 total 已知时返回 Some
+    pub fn total_pages(&self) -> Option<usize> {
+        if let Some(t) = self.total_items() {
+            let ps = self.config.page_size;
+            if ps == 0 {
+                return None;
+            }
+            Some(t.div_ceil(ps)) // 向上取整
+        } else {
+            None
+        }
+    }
+
+    /// 获取当前使用的每页大小（可能因响应调整而变化）
+    pub fn page_size(&self) -> usize {
+        self.config.page_size
+    }
+
+    /// 获取预估的剩余元素数量，与 size_hint().1 一致
+    pub fn remaining_items(&self) -> Option<usize> {
+        self.size_hint().1
+    }
 }
 
-// 实现标准库 Iterator trait
+// ==================== 实现 Iterator trait（含 size_hint） ====================
+
 impl Iterator for PaginatedIter {
     type Item = MewResult<Value>;
+
     fn next(&mut self) -> Option<Self::Item> {
         self.next_item()
+    }
+
+    /// 提供剩余元素数量的上下界，供标准库适配器预分配容量
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match &self.state {
+            IterState::Finished => (0, Some(0)),
+            IterState::Uninit => {
+                // 未初始化时，上限由 limit 决定（若无则为 None）
+                let upper = self.limit;
+                (0, upper)
+            }
+            IterState::Ready {
+                current_page_data,
+                current_index,
+                total,
+                ..
+            } => {
+                // 当前页未消费的元素数
+                let remaining_in_page = current_page_data.len().saturating_sub(*current_index);
+
+                // 根据 total 和 limit 计算精确剩余上限
+                let known_remaining = total.map(|t| t.saturating_sub(self.yielded));
+                let limit_remaining = self.limit.map(|lim| lim.saturating_sub(self.yielded));
+
+                let exact_upper = match (known_remaining, limit_remaining) {
+                    (Some(k), Some(l)) => Some(k.min(l)),
+                    (Some(k), None) => Some(k),
+                    (None, Some(l)) => Some(l),
+                    (None, None) => None,
+                };
+
+                // 下限：至少是当前页剩余，但不超过已知上限
+                let lower = if let Some(upper) = exact_upper {
+                    remaining_in_page.min(upper)
+                } else {
+                    remaining_in_page
+                };
+
+                (lower, exact_upper)
+            }
+        }
     }
 }
 
