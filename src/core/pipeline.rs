@@ -16,14 +16,12 @@ use super::types::{
 use crate::api::forum::{
     ForumActionHandler, ForumDataFetcher, ForumReportReasonId, ItemType, PostReportReasonId,
 };
-use crate::api::shop::{WorkShopReportReasonId, WorkshopActionHandler, WorkshopDataFetcher};
+use crate::api::shop::{WorkShopReportReasonId, WorkshopActionHandler};
 use crate::api::whale::{ReportHandler, Resolution};
-use crate::api::work::{BaseWorkOperations, CommentOperations, WorkDataFetcher};
-use crate::core::retrieve::{
-    CommentQueryMode, CommentSource, CommentsResult, DataQuery, JsonObject,
-};
+use crate::api::work::{BaseWorkOperations, CommentOperations};
+use crate::core::retrieve::{CommentSource, DataQuery, JsonObject};
 use crate::core::types::CommentConfig;
-use crate::utils::acquire::{BaseKey, Catsona, HttpMethod, KittyFactory, PaginatedIter};
+use crate::utils::acquire::{Catsona, KittyFactory};
 use crate::utils::data::PathConfig;
 
 // ==================== 硬编码配置数据 ====================
@@ -935,18 +933,21 @@ impl ViolationChecker {
         let limit_str = prompt_input("输入要获取的评论数: ");
         let limit: usize = limit_str.parse().unwrap_or(DEFAULT_COMMENT_FETCH_LIMIT);
 
-        let detailed_comments = match DataQuery::new()
-            .fetch_comments(
-                comment_source,
-                source_id as i32,
-                CommentQueryMode::Comments,
-                Some(limit),
-            )
-            .unwrap()
-        {
-            CommentsResult::DetailedComments(list) => list,
-            _ => return Ok(()),
-        };
+        // 惰性获取详细评论流，并在收集时处理单条错误（跳过损坏的评论）
+        let comment_stream = DataQuery::new()
+            .stream_detailed_comments(comment_source, source_id as i32, Some(limit))
+            .map_err(|e| ProcessorError::Processing(format!("获取评论流失败: {}", e)))?;
+
+        let mut detailed_comments = Vec::new();
+        for comment_result in comment_stream {
+            match comment_result {
+                Ok(comment) => detailed_comments.push(comment),
+                Err(e) => {
+                    eprintln!("获取评论失败: {}，跳过", e);
+                    // 继续处理后续评论，不因单条错误中断整个检查
+                }
+            }
+        }
 
         let ad_keywords: HashSet<String> = DEFAULT_ADS_KEYWORDS
             .iter()

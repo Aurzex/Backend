@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use serde_json::{Map, Value};
 use thiserror::Error;
@@ -13,9 +13,7 @@ use crate::api::whale::{
     WorkReportFilterType, WorkSourceType,
 };
 use crate::api::work::{NemoWorkType, WorkDataFetcher};
-use crate::utils::acquire::{
-    BaseKey, Catsona, CodeMaoClient, HttpMethod, MewError, PaginationMethod,
-};
+use crate::utils::acquire::{BaseKey, Catsona, CodeMaoClient, MewError, PaginationMethod};
 
 // ==================== 错误类型 ====================
 
@@ -81,36 +79,6 @@ impl std::str::FromStr for CommentSource {
     }
 }
 
-/// 评论查询模式
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum CommentQueryMode {
-    UserId,    // 提取用户ID列表
-    CommentId, // 提取评论ID列表
-    Comments,  // 获取详细评论数据
-}
-
-impl CommentQueryMode {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            CommentQueryMode::UserId => "user_id",
-            CommentQueryMode::CommentId => "comment_id",
-            CommentQueryMode::Comments => "comments",
-        }
-    }
-}
-
-impl std::str::FromStr for CommentQueryMode {
-    type Err = DataQueryError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "user_id" => Ok(CommentQueryMode::UserId),
-            "comment_id" => Ok(CommentQueryMode::CommentId),
-            "comments" => Ok(CommentQueryMode::Comments),
-            _ => Err(DataQueryError::InvalidMethod(s.to_string())),
-        }
-    }
-}
-
 /// 通知类型分类
 #[derive(Debug, Clone, Copy)]
 pub enum NotificationCategory {
@@ -134,286 +102,36 @@ impl NotificationCategory {
 pub type JsonValue = Value;
 pub type JsonObject = Map<String, Value>;
 
-// ==================== 结果类型 ====================
+// ==================== 惰性去重迭代器 ====================
 
-/// 评论查询结果枚举
-#[derive(Debug, Clone)]
-pub enum CommentsResult {
-    UserIdList(Vec<String>),           // 用户ID列表
-    CommentIdList(Vec<String>),        // 评论ID列表
-    DetailedComments(Vec<JsonObject>), // 详细评论数据
+/// 惰性去重迭代器，仅保留第一次出现的元素（基于 `HashSet` 记录）。
+/// 遇到 `Err` 直接返回并停止去重状态，但后续 `Ok` 仍会继续去重。
+pub struct UniqueIter<I: Iterator> {
+    iter: I,
+    seen: HashSet<String>,
 }
 
-// ==================== 查询构建器 ====================
+impl<I: Iterator<Item = Result<String, DataQueryError>>> Iterator for UniqueIter<I> {
+    type Item = Result<String, DataQueryError>;
 
-/// 评论查询构建器
-pub struct CommentQueryBuilder {
-    source: Option<CommentSource>,
-    target_id: Option<i32>,
-    mode: CommentQueryMode,
-    limit: Option<usize>,
-}
-
-impl CommentQueryBuilder {
-    fn new() -> Self {
-        Self {
-            source: None,
-            target_id: None,
-            mode: CommentQueryMode::UserId,
-            limit: Some(500),
-        }
-    }
-
-    pub fn source(mut self, source: CommentSource) -> Self {
-        self.source = Some(source);
-        self
-    }
-
-    pub fn target_id(mut self, id: i32) -> Self {
-        self.target_id = Some(id);
-        self
-    }
-
-    pub fn mode(mut self, mode: CommentQueryMode) -> Self {
-        self.mode = mode;
-        self
-    }
-
-    pub fn limit(mut self, limit: Option<usize>) -> Self {
-        self.limit = limit;
-        self
-    }
-
-    /// 根据来源获取评论数据的惰性迭代器（已统一为 MewError）
-    fn build_comment_stream(
-        &self,
-    ) -> Result<Box<dyn Iterator<Item = Result<JsonValue, DataQueryError>>>, DataQueryError> {
-        let source = self
-            .source
-            .ok_or_else(|| DataQueryError::InvalidSource("未设置来源".into()))?;
-        let target_id = self
-            .target_id
-            .ok_or_else(|| DataQueryError::InvalidSource("未设置源ID".into()))?;
-        let limit = self.limit;
-
-        match source {
-            CommentSource::Work => {
-                let iter = WorkDataFetcher::new()
-                    .fetch_work_comments_gen(target_id, limit)
-                    .map(|item| item.map_err(DataQueryError::from));
-                Ok(Box::new(iter))
-            }
-            CommentSource::Forum => {
-                let iter = ForumDataFetcher::new()
-                    .fetch_post_replies_gen(target_id, None, limit)
-                    .map(|item| item.map_err(DataQueryError::from));
-                Ok(Box::new(iter))
-            }
-            CommentSource::Shop => {
-                let iter = WorkshopDataFetcher::new()
-                    .fetch_workshop_discussions_gen(target_id, None, None, limit)
-                    .map(|item| item.map_err(DataQueryError::from));
-                Ok(Box::new(iter))
+    fn next(&mut self) -> Option<Self::Item> {
+        for item in &mut self.iter {
+            match item {
+                Ok(val) => {
+                    if self.seen.insert(val.clone()) {
+                        return Some(Ok(val));
+                    }
+                    // 重复值，跳过，继续循环
+                }
+                Err(e) => return Some(Err(e)),
             }
         }
-    }
-
-    /// 执行评论查询
-    pub fn execute(mut self) -> Result<CommentsResult, DataQueryError> {
-        let source = self
-            .source
-            .ok_or_else(|| DataQueryError::InvalidSource("未设置来源".into()))?;
-        let mode = self.mode;
-
-        // 安全上限：防止一次加载过多评论
-        const MAX_COMMENTS: usize = 1000;
-        let safe_limit = self.limit.unwrap_or(500).min(MAX_COMMENTS);
-        self.limit = Some(safe_limit);
-
-        let comment_stream = self.build_comment_stream()?;
-        let comments: Vec<JsonValue> = comment_stream
-            .take(safe_limit)
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let user_field = match source {
-            CommentSource::Work | CommentSource::Shop => "reply_user",
-            CommentSource::Forum => "user",
-        };
-
-        let extract_reply_user_id = |reply: &JsonObject| -> Option<i64> {
-            reply
-                .get(user_field)
-                .and_then(|u| u.as_object())
-                .and_then(|u| u.get("id"))
-                .and_then(|id| id.as_i64())
-        };
-
-        match mode {
-            CommentQueryMode::UserId => {
-                let mut user_ids = Vec::new();
-                for comment in &comments {
-                    // 主评论用户
-                    if let Some(id) = comment
-                        .get("user")
-                        .and_then(|u| u.as_object())
-                        .and_then(|u| u.get("id"))
-                        .and_then(|id| id.as_i64())
-                    {
-                        user_ids.push(id.to_string());
-                    }
-
-                    let comment_id = comment.get("id").and_then(|id| id.as_i64()).unwrap_or(0);
-
-                    // 回复中的用户
-                    if source == CommentSource::Forum {
-                        let reply_stream = ForumDataFetcher::new()
-                            .fetch_reply_comments_gen(comment_id as i32, None);
-                        for reply_result in reply_stream {
-                            if let Ok(reply_val) = reply_result
-                                && let Some(reply_obj) = reply_val.as_object()
-                                && let Some(uid) = extract_reply_user_id(reply_obj)
-                            {
-                                user_ids.push(uid.to_string());
-                            }
-                        }
-                    } else {
-                        if let Some(replies) = comment
-                            .get("replies")
-                            .and_then(|r| r.as_object())
-                            .and_then(|r| r.get("items"))
-                            .and_then(|items| items.as_array())
-                        {
-                            for reply_val in replies {
-                                if let Some(reply_obj) = reply_val.as_object()
-                                    && let Some(uid) = extract_reply_user_id(reply_obj)
-                                {
-                                    user_ids.push(uid.to_string());
-                                }
-                            }
-                        }
-                    }
-                }
-                Ok(CommentsResult::UserIdList(deduplicate(&user_ids)))
-            }
-            CommentQueryMode::CommentId => {
-                let mut comment_ids = Vec::new();
-                for comment in &comments {
-                    if let Some(id) = comment.get("id").and_then(|id| id.as_i64()) {
-                        comment_ids.push(id.to_string());
-                    }
-                    let comment_id = comment.get("id").and_then(|id| id.as_i64()).unwrap_or(0);
-
-                    if source == CommentSource::Forum {
-                        let reply_stream = ForumDataFetcher::new()
-                            .fetch_reply_comments_gen(comment_id as i32, None);
-                        for reply_result in reply_stream {
-                            if let Ok(reply_val) = reply_result
-                                && let Some(reply_obj) = reply_val.as_object()
-                                && let Some(rid) = reply_obj.get("id").and_then(|id| id.as_i64())
-                            {
-                                comment_ids.push(format!("{}.{}", comment_id, rid));
-                            }
-                        }
-                    } else {
-                        if let Some(replies) = comment
-                            .get("replies")
-                            .and_then(|r| r.as_object())
-                            .and_then(|r| r.get("items"))
-                            .and_then(|items| items.as_array())
-                        {
-                            for reply_val in replies {
-                                if let Some(reply_obj) = reply_val.as_object()
-                                    && let Some(rid) =
-                                        reply_obj.get("id").and_then(|id| id.as_i64())
-                                {
-                                    comment_ids.push(format!("{}.{}", comment_id, rid));
-                                }
-                            }
-                        }
-                    }
-                }
-                Ok(CommentsResult::CommentIdList(deduplicate(&comment_ids)))
-            }
-            CommentQueryMode::Comments => {
-                let mut detailed = Vec::new();
-                for comment in &comments {
-                    let comment_id = comment.get("id").and_then(|id| id.as_i64()).unwrap_or(0);
-
-                    let replies: Vec<JsonObject> = if source == CommentSource::Forum {
-                        let reply_stream = ForumDataFetcher::new()
-                            .fetch_reply_comments_gen(comment_id as i32, None);
-                        reply_stream
-                            .filter_map(|r| r.ok())
-                            .filter_map(|v| v.as_object().cloned())
-                            .filter_map(|reply| {
-                                build_compact_reply(&reply, user_field, &extract_reply_user_id)
-                            })
-                            .collect()
-                    } else {
-                        comment
-                            .get("replies")
-                            .and_then(|r| r.as_object())
-                            .and_then(|r| r.get("items"))
-                            .and_then(|items| items.as_array())
-                            .map(|arr| {
-                                arr.iter()
-                                    .filter_map(|v| v.as_object())
-                                    .filter_map(|reply| {
-                                        build_compact_reply(
-                                            reply,
-                                            user_field,
-                                            &extract_reply_user_id,
-                                        )
-                                    })
-                                    .collect()
-                            })
-                            .unwrap_or_default()
-                    };
-
-                    let mut comment_data = JsonObject::new();
-                    if let Some(user) = comment.get("user").and_then(|u| u.as_object()) {
-                        if let Some(id) = user.get("id") {
-                            comment_data.insert("user_id".into(), id.clone());
-                        }
-                        if let Some(nick) = user.get("nickname") {
-                            comment_data.insert("nickname".into(), nick.clone());
-                        }
-                    }
-                    if let Some(id) = comment.get("id") {
-                        comment_data.insert("id".into(), id.clone());
-                    }
-                    if let Some(content) = comment.get("content") {
-                        comment_data.insert("content".into(), content.clone());
-                    }
-                    if let Some(content) = comment.get("emoji_content") {
-                        comment_data.insert("emoji_content".into(), content.clone());
-                    }
-                    if let Some(created_at) = comment.get("created_at") {
-                        comment_data.insert("created_at".into(), created_at.clone());
-                    }
-                    comment_data.insert(
-                        "is_top".into(),
-                        Value::Bool(
-                            comment
-                                .get("is_top")
-                                .and_then(|v| v.as_bool())
-                                .unwrap_or(false),
-                        ),
-                    );
-                    comment_data.insert(
-                        "replies".into(),
-                        Value::Array(replies.into_iter().map(Value::Object).collect()),
-                    );
-
-                    detailed.push(comment_data);
-                }
-                Ok(CommentsResult::DetailedComments(detailed))
-            }
-        }
+        None
     }
 }
 
-/// 辅助函数：从原始回复对象构建精简的 JsonObject
+// ==================== 辅助函数 ====================
+
 fn build_compact_reply(
     reply: &JsonObject,
     user_field: &str,
@@ -453,6 +171,329 @@ fn build_compact_reply(
     Some(obj)
 }
 
+// ==================== 评论查询构建器 ====================
+
+/// 评论查询构建器（纯惰性流式）
+pub struct CommentQueryBuilder {
+    source: Option<CommentSource>,
+    target_id: Option<i32>,
+    limit: Option<usize>,
+}
+
+impl CommentQueryBuilder {
+    pub fn new() -> Self {
+        Self {
+            source: None,
+            target_id: None,
+            limit: Some(500),
+        }
+    }
+
+    pub fn source(mut self, source: CommentSource) -> Self {
+        self.source = Some(source);
+        self
+    }
+
+    pub fn target_id(mut self, id: i32) -> Self {
+        self.target_id = Some(id);
+        self
+    }
+
+    pub fn limit(mut self, limit: Option<usize>) -> Self {
+        self.limit = limit;
+        self
+    }
+
+    /// 构建基础评论流（原始 `JsonValue`）
+    fn build_raw_stream(
+        &self,
+    ) -> Result<Box<dyn Iterator<Item = Result<JsonValue, DataQueryError>>>, DataQueryError> {
+        let source = self
+            .source
+            .ok_or_else(|| DataQueryError::InvalidSource("未设置来源".into()))?;
+        let target_id = self
+            .target_id
+            .ok_or_else(|| DataQueryError::InvalidSource("未设置源ID".into()))?;
+        const MAX_COMMENTS: usize = 1000;
+        let safe_limit = self.limit.unwrap_or(500).min(MAX_COMMENTS);
+
+        match source {
+            CommentSource::Work => {
+                let iter = WorkDataFetcher::new()
+                    .fetch_work_comments_gen(target_id, Some(safe_limit))
+                    .map(|item| item.map_err(DataQueryError::from));
+                Ok(Box::new(iter))
+            }
+            CommentSource::Forum => {
+                let iter = ForumDataFetcher::new()
+                    .fetch_post_replies_gen(target_id, None, Some(safe_limit))
+                    .map(|item| item.map_err(DataQueryError::from));
+                Ok(Box::new(iter))
+            }
+            CommentSource::Shop => {
+                let iter = WorkshopDataFetcher::new()
+                    .fetch_workshop_discussions_gen(target_id, None, None, Some(safe_limit))
+                    .map(|item| item.map_err(DataQueryError::from));
+                Ok(Box::new(iter))
+            }
+        }
+    }
+
+    /// 惰性获取评论原始数据流
+    pub fn stream_raw_comments(
+        self,
+    ) -> Result<Box<dyn Iterator<Item = Result<JsonValue, DataQueryError>>>, DataQueryError> {
+        self.build_raw_stream()
+    }
+
+    /// 惰性获取去重后的用户ID流
+    pub fn stream_user_ids(
+        self,
+    ) -> Result<Box<dyn Iterator<Item = Result<String, DataQueryError>>>, DataQueryError> {
+        let source = self
+            .source
+            .ok_or_else(|| DataQueryError::InvalidSource("未设置来源".into()))?;
+        let raw_stream = self.build_raw_stream()?;
+
+        let user_field = match source {
+            CommentSource::Work | CommentSource::Shop => "reply_user",
+            CommentSource::Forum => "user",
+        };
+
+        let extract_reply_user_id = move |reply: &JsonObject| -> Option<i64> {
+            reply
+                .get(user_field)
+                .and_then(|u| u.as_object())
+                .and_then(|u| u.get("id"))
+                .and_then(|id| id.as_i64())
+        };
+
+        let mapped = raw_stream.flat_map(move |comment_result| {
+            // 处理错误：直接返回包含单个 Err 的迭代器
+            let comment = match comment_result {
+                Ok(v) => v,
+                Err(e) => return vec![Err(e)].into_iter(),
+            };
+            let mut ids = Vec::new();
+
+            // 主评论用户
+            if let Some(obj) = comment.as_object()
+                && let Some(uid) = obj
+                    .get("user")
+                    .and_then(|u| u.as_object())
+                    .and_then(|u| u.get("id"))
+                    .and_then(|id| id.as_i64())
+            {
+                ids.push(Ok(uid.to_string()));
+            }
+
+            let comment_id = comment.get("id").and_then(|id| id.as_i64()).unwrap_or(0);
+
+            if source == CommentSource::Forum {
+                let reply_stream =
+                    ForumDataFetcher::new().fetch_reply_comments_gen(comment_id as i32, None);
+                for reply_result in reply_stream {
+                    match reply_result {
+                        Ok(reply_val) => {
+                            if let Some(reply_obj) = reply_val.as_object()
+                                && let Some(uid) = extract_reply_user_id(reply_obj)
+                            {
+                                ids.push(Ok(uid.to_string()));
+                            }
+                        }
+                        Err(e) => ids.push(Err(DataQueryError::from(e))),
+                    }
+                }
+            } else {
+                if let Some(replies) = comment
+                    .get("replies")
+                    .and_then(|r| r.as_object())
+                    .and_then(|r| r.get("items"))
+                    .and_then(|items| items.as_array())
+                {
+                    for reply_val in replies {
+                        if let Some(reply_obj) = reply_val.as_object()
+                            && let Some(uid) = extract_reply_user_id(reply_obj)
+                        {
+                            ids.push(Ok(uid.to_string()));
+                        }
+                    }
+                }
+            }
+            ids.into_iter()
+        });
+
+        Ok(Box::new(UniqueIter {
+            iter: mapped,
+            seen: HashSet::new(),
+        }))
+    }
+
+    /// 惰性获取去重后的评论ID流（格式："主评论ID" 或 "主评论ID.回复ID"）
+    pub fn stream_comment_ids(
+        self,
+    ) -> Result<Box<dyn Iterator<Item = Result<String, DataQueryError>>>, DataQueryError> {
+        let source = self
+            .source
+            .ok_or_else(|| DataQueryError::InvalidSource("未设置来源".into()))?;
+        let raw_stream = self.build_raw_stream()?;
+
+        let mapped = raw_stream.flat_map(move |comment_result| {
+            let comment = match comment_result {
+                Ok(v) => v,
+                Err(e) => return vec![Err(e)].into_iter(), // 修正：直接返回迭代器
+            };
+            let mut ids = Vec::new();
+            let main_id = comment.get("id").and_then(|id| id.as_i64());
+
+            if let Some(mid) = main_id {
+                ids.push(Ok(mid.to_string()));
+            }
+
+            let comment_id = main_id.unwrap_or(0);
+
+            if source == CommentSource::Forum {
+                let reply_stream =
+                    ForumDataFetcher::new().fetch_reply_comments_gen(comment_id as i32, None);
+                for reply_result in reply_stream {
+                    match reply_result {
+                        Ok(reply_val) => {
+                            if let Some(reply_obj) = reply_val.as_object()
+                                && let Some(rid) = reply_obj.get("id").and_then(|id| id.as_i64())
+                            {
+                                ids.push(Ok(format!("{}.{}", comment_id, rid)));
+                            }
+                        }
+                        Err(e) => ids.push(Err(DataQueryError::from(e))),
+                    }
+                }
+            } else {
+                if let Some(replies) = comment
+                    .get("replies")
+                    .and_then(|r| r.as_object())
+                    .and_then(|r| r.get("items"))
+                    .and_then(|items| items.as_array())
+                {
+                    for reply_val in replies {
+                        if let Some(reply_obj) = reply_val.as_object()
+                            && let Some(rid) = reply_obj.get("id").and_then(|id| id.as_i64())
+                        {
+                            ids.push(Ok(format!("{}.{}", comment_id, rid)));
+                        }
+                    }
+                }
+            }
+            ids.into_iter()
+        });
+
+        Ok(Box::new(UniqueIter {
+            iter: mapped,
+            seen: HashSet::new(),
+        }))
+    }
+
+    /// 惰性获取详细评论数据流（每个元素为一个精简的 `JsonObject`，包含其下所有回复）
+    pub fn stream_detailed_comments(
+        self,
+    ) -> Result<Box<dyn Iterator<Item = Result<JsonObject, DataQueryError>>>, DataQueryError> {
+        let source = self
+            .source
+            .ok_or_else(|| DataQueryError::InvalidSource("未设置来源".into()))?;
+        let raw_stream = self.build_raw_stream()?;
+
+        let user_field = match source {
+            CommentSource::Work | CommentSource::Shop => "reply_user",
+            CommentSource::Forum => "user",
+        };
+
+        let extract_reply_user_id = move |reply: &JsonObject| -> Option<i64> {
+            reply
+                .get(user_field)
+                .and_then(|u| u.as_object())
+                .and_then(|u| u.get("id"))
+                .and_then(|id| id.as_i64())
+        };
+
+        let mapped = raw_stream.map(move |comment_result| {
+            let comment = comment_result?;
+            let comment_obj = comment
+                .as_object()
+                .ok_or_else(|| DataQueryError::ParseError("评论不是对象".into()))?;
+            let comment_id = comment_obj
+                .get("id")
+                .and_then(|id| id.as_i64())
+                .unwrap_or(0);
+
+            // 收集该评论的所有回复（此处回复数量通常较少，收集为 Vec 可以接受）
+            let replies: Vec<JsonObject> = if source == CommentSource::Forum {
+                let reply_stream =
+                    ForumDataFetcher::new().fetch_reply_comments_gen(comment_id as i32, None);
+                reply_stream
+                    .filter_map(|r| r.ok())
+                    .filter_map(|v| v.as_object().cloned())
+                    .filter_map(|reply| {
+                        build_compact_reply(&reply, user_field, &extract_reply_user_id)
+                    })
+                    .collect()
+            } else {
+                comment_obj
+                    .get("replies")
+                    .and_then(|r| r.as_object())
+                    .and_then(|r| r.get("items"))
+                    .and_then(|items| items.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_object())
+                            .filter_map(|reply| {
+                                build_compact_reply(reply, user_field, &extract_reply_user_id)
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            };
+
+            let mut comment_data = JsonObject::new();
+            if let Some(user) = comment_obj.get("user").and_then(|u| u.as_object()) {
+                if let Some(id) = user.get("id") {
+                    comment_data.insert("user_id".into(), id.clone());
+                }
+                if let Some(nick) = user.get("nickname") {
+                    comment_data.insert("nickname".into(), nick.clone());
+                }
+            }
+            if let Some(id) = comment_obj.get("id") {
+                comment_data.insert("id".into(), id.clone());
+            }
+            if let Some(content) = comment_obj.get("content") {
+                comment_data.insert("content".into(), content.clone());
+            }
+            if let Some(content) = comment_obj.get("emoji_content") {
+                comment_data.insert("emoji_content".into(), content.clone());
+            }
+            if let Some(created_at) = comment_obj.get("created_at") {
+                comment_data.insert("created_at".into(), created_at.clone());
+            }
+            comment_data.insert(
+                "is_top".into(),
+                Value::Bool(
+                    comment_obj
+                        .get("is_top")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false),
+                ),
+            );
+            comment_data.insert(
+                "replies".into(),
+                Value::Array(replies.into_iter().map(Value::Object).collect()),
+            );
+
+            Ok(comment_data)
+        });
+
+        Ok(Box::new(mapped))
+    }
+}
+
 // ==================== 数据查询主结构体 ====================
 
 /// 数据查询与统计入口
@@ -468,44 +509,60 @@ impl DataQuery {
         CommentQueryBuilder::new()
     }
 
-    /// 获取评论数据（快捷方法）
-    pub fn fetch_comments(
+    /// 惰性原始评论流
+    pub fn stream_comments_raw(
         &self,
         source: CommentSource,
         target_id: i32,
-        mode: CommentQueryMode,
         limit: Option<usize>,
-    ) -> Result<CommentsResult, DataQueryError> {
+    ) -> Result<Box<dyn Iterator<Item = Result<JsonValue, DataQueryError>>>, DataQueryError> {
         self.query_comments()
             .source(source)
             .target_id(target_id)
-            .mode(mode)
             .limit(limit)
-            .execute()
+            .stream_raw_comments()
     }
 
-    /// 获取社区新回复流（惰性迭代器）
-    pub fn stream_new_replies(
+    /// 惰性用户ID流（已去重）
+    pub fn stream_user_ids(
         &self,
-        reply_type: ReplyTypes,
-        limit: i32,
-    ) -> Box<dyn Iterator<Item = Result<JsonObject, DataQueryError>> + 'static> {
-        let total = match CommunityDataFetcher::new()
-            .fetch_message_count(MessageMethod::Web)
-            .map_err(DataQueryError::from)
-        {
-            Ok(data) => data.get("count").and_then(|c| c.as_i64()).unwrap_or(0) as i32,
-            Err(e) => return Box::new(std::iter::once(Err(e))),
-        };
+        source: CommentSource,
+        target_id: i32,
+        limit: Option<usize>,
+    ) -> Result<Box<dyn Iterator<Item = Result<String, DataQueryError>>>, DataQueryError> {
+        self.query_comments()
+            .source(source)
+            .target_id(target_id)
+            .limit(limit)
+            .stream_user_ids()
+    }
 
-        let remaining = if limit == 0 { total } else { limit.min(total) };
+    /// 惰性评论ID流（已去重，格式 "主ID" 或 "主ID.回复ID"）
+    pub fn stream_comment_ids(
+        &self,
+        source: CommentSource,
+        target_id: i32,
+        limit: Option<usize>,
+    ) -> Result<Box<dyn Iterator<Item = Result<String, DataQueryError>>>, DataQueryError> {
+        self.query_comments()
+            .source(source)
+            .target_id(target_id)
+            .limit(limit)
+            .stream_comment_ids()
+    }
 
-        Box::new(CommunityReplyStream {
-            reply_type,
-            remaining,
-            offset: 0,
-            buffer: VecDeque::new(),
-        })
+    /// 惰性详细评论流
+    pub fn stream_detailed_comments(
+        &self,
+        source: CommentSource,
+        target_id: i32,
+        limit: Option<usize>,
+    ) -> Result<Box<dyn Iterator<Item = Result<JsonObject, DataQueryError>>>, DataQueryError> {
+        self.query_comments()
+            .source(source)
+            .target_id(target_id)
+            .limit(limit)
+            .stream_detailed_comments()
     }
 
     /// 获取评论总数
@@ -668,54 +725,45 @@ impl DataQuery {
         Box::new(nemo_stream.chain(web_stream))
     }
 
-    /// 从作品中收集用户评论并聚合统计
+    /// 流式聚合：从新作品中收集用户评论并统计（无预先收集所有作品）
     pub fn aggregate_user_comments_from_works(
         &self,
         work_limit: i32,
     ) -> Result<Vec<JsonObject>, DataQueryError> {
-        let works: Vec<JsonObject> = self
-            .stream_works_from_both_sources(work_limit)
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let mut all_comments = Vec::new();
-        for work in &works {
-            if let Some(work_id) = work.get("work_id").and_then(|id| id.as_i64())
-                && let Ok(CommentsResult::DetailedComments(comments)) = self.fetch_comments(
-                    CommentSource::Work,
-                    work_id as i32,
-                    CommentQueryMode::Comments,
-                    Some(20),
-                )
-            {
-                all_comments.extend(comments);
-            }
-        }
-
         let mut user_comment_map: HashMap<String, (String, String, Vec<String>, i32)> =
             HashMap::new();
-        for comment in &all_comments {
-            let user_id = comment.get("user_id").and_then(|v| {
-                if v.is_number() {
-                    Some(v.to_string())
-                } else {
-                    v.as_str().map(|s| s.to_string())
-                }
-            });
-            let content = comment
-                .get("content")
-                .and_then(|c| c.as_str())
-                .map(|s| s.to_string());
-            let nickname = comment
-                .get("nickname")
-                .and_then(|n| n.as_str())
-                .map(|s| s.to_string());
 
-            if let (Some(uid), Some(cont), Some(nick)) = (user_id, content, nickname) {
-                let entry = user_comment_map
-                    .entry(uid.clone())
-                    .or_insert_with(|| (uid, nick, Vec::new(), 0));
-                entry.2.push(cont);
-                entry.3 += 1;
+        for work_result in self.stream_works_from_both_sources(work_limit) {
+            let work = work_result?;
+            if let Some(work_id) = work.get("work_id").and_then(|id| id.as_i64()) {
+                let comment_stream =
+                    self.stream_detailed_comments(CommentSource::Work, work_id as i32, Some(20))?;
+                for comment_result in comment_stream {
+                    let comment = comment_result?;
+                    let user_id = comment.get("user_id").and_then(|v| {
+                        if v.is_number() {
+                            Some(v.to_string())
+                        } else {
+                            v.as_str().map(|s| s.to_string())
+                        }
+                    });
+                    let content = comment
+                        .get("content")
+                        .and_then(|c| c.as_str())
+                        .map(|s| s.to_string());
+                    let nickname = comment
+                        .get("nickname")
+                        .and_then(|n| n.as_str())
+                        .map(|s| s.to_string());
+
+                    if let (Some(uid), Some(cont), Some(nick)) = (user_id, content, nickname) {
+                        let entry = user_comment_map
+                            .entry(uid.clone())
+                            .or_insert_with(|| (uid, nick, Vec::new(), 0));
+                        entry.2.push(cont);
+                        entry.3 += 1;
+                    }
+                }
             }
         }
 
@@ -950,6 +998,30 @@ impl DataQuery {
 
         Box::new(stream)
     }
+
+    /// 获取社区新回复流（惰性迭代器）
+    pub fn stream_new_replies(
+        &self,
+        reply_type: ReplyTypes,
+        limit: i32,
+    ) -> Box<dyn Iterator<Item = Result<JsonObject, DataQueryError>> + 'static> {
+        let total = match CommunityDataFetcher::new()
+            .fetch_message_count(MessageMethod::Web)
+            .map_err(DataQueryError::from)
+        {
+            Ok(data) => data.get("count").and_then(|c| c.as_i64()).unwrap_or(0) as i32,
+            Err(e) => return Box::new(std::iter::once(Err(e))),
+        };
+
+        let remaining = if limit == 0 { total } else { limit.min(total) };
+
+        Box::new(CommunityReplyStream {
+            reply_type,
+            remaining,
+            offset: 0,
+            buffer: VecDeque::new(),
+        })
+    }
 }
 
 impl Default for DataQuery {
@@ -1036,18 +1108,4 @@ impl Iterator for CommunityReplyStream {
             Err(e) => Some(Err(DataQueryError::from(e))),
         }
     }
-}
-
-// ==================== 工具函数 ====================
-
-/// 字符串数组去重（保留原始顺序）
-fn deduplicate(items: &[String]) -> Vec<String> {
-    let mut seen = std::collections::HashSet::new();
-    let mut result = Vec::new();
-    for item in items {
-        if seen.insert(item.clone()) {
-            result.push(item.clone());
-        }
-    }
-    result
 }
