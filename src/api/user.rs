@@ -6,7 +6,6 @@ use serde_json::{Value, json};
 // ==================== 用户相关枚举 ====================
 
 // 作品类型枚举
-#[repr(i32)]
 pub enum WorkType {
     Kitten = 1,
     Nemo = 3,
@@ -114,14 +113,14 @@ impl WorkShowStatus {
 }
 
 // 性别枚举
-#[repr(i32)]
+
 pub enum Gender {
     Female = 0,
     Male = 1,
 }
 
 // 头像框ID枚举
-#[repr(i32)]
+
 pub enum AvatarFrameId {
     Lv2 = 2,
     Lv3 = 3,

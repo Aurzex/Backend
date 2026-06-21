@@ -66,7 +66,6 @@ impl TargetType {
 }
 
 // 举报原因ID枚举
-#[repr(i32)]
 pub enum ForumReportReasonId {
     Custom = 0,
     Reason1 = 1,
@@ -80,7 +79,6 @@ pub enum ForumReportReasonId {
 }
 
 // 帖子举报原因ID枚举
-#[repr(i32)]
 pub enum PostReportReasonId {
     Reason1 = 1,
     Reason2 = 2,
@@ -93,7 +91,6 @@ pub enum PostReportReasonId {
 }
 
 // 板块ID枚举
-#[repr(i32)]
 pub enum BoardId {
     Board17 = 17,
     Board2 = 2,

@@ -32,7 +32,6 @@ impl AuditStatus {
 }
 
 // 举报原因ID枚举
-#[repr(i32)]
 pub enum WorkShopReportReasonId {
     Custom = 0,
     Reason1 = 1,
@@ -115,7 +114,6 @@ impl WorkshopDataFetcher {
             .client
             .paginated(&endpoint)
             .with_page_size(40)
-            
             .with_total_key("total");
 
         if let Some(limit_val) = limit {
@@ -175,8 +173,7 @@ impl WorkshopDataFetcher {
             .paginated(&endpoint)
             .with_iter_param("source", source.unwrap_or(Source::WorkShop).as_str())
             .with_iter_param("sort", sort.unwrap_or_else(|| "-created_at".to_string()))
-            .with_page_size(20)
-            ;
+            .with_page_size(20);
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);
@@ -201,7 +198,6 @@ impl WorkshopDataFetcher {
             .client
             .paginated(&endpoint)
             .with_page_size(20)
-            
             .with_iter_param(
                 "sort",
                 sort.unwrap_or_else(|| "-created_at,-id".to_string()),
@@ -232,11 +228,7 @@ impl WorkshopDataFetcher {
     pub fn fetch_workshop_posts_gen(&self, label_id: i32, limit: Option<usize>) -> PaginatedIter {
         let endpoint = format!("/web/works/subjects/labels/{}/posts", label_id);
 
-        let mut paginated = self
-            .client
-            .paginated(&endpoint)
-            .with_page_size(20)
-            ;
+        let mut paginated = self.client.paginated(&endpoint).with_page_size(20);
 
         if let Some(limit_val) = limit {
             paginated = paginated.with_limit(limit_val);

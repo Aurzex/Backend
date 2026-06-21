@@ -21,7 +21,6 @@ impl NovelListType {
 }
 
 // 小说排序方式枚举
-#[repr(i32)]
 pub enum NovelSortId {
     Default = 0,
     MostViewed = 1,
@@ -30,7 +29,6 @@ pub enum NovelSortId {
 }
 
 // 小说分类ID枚举
-#[repr(i32)]
 pub enum NovelCategoryId {
     All = 0,
     Magic = 1,
@@ -47,7 +45,6 @@ pub enum NovelCategoryId {
 }
 
 // 小说状态枚举
-#[repr(i32)]
 pub enum NovelStatus {
     All = 0,
     Ongoing = 1,
@@ -57,7 +54,6 @@ pub enum NovelStatus {
 // ==================== 图鉴相关枚举 ====================
 
 // 图鉴星级枚举
-#[repr(i32)]
 pub enum BookStar {
     One = 1,
     Two = 2,
@@ -68,7 +64,6 @@ pub enum BookStar {
 }
 
 // 图鉴属性ID枚举
-#[repr(i32)]
 pub enum BookAttributeId {
     Normal = 2,
     Grass = 3,
