@@ -1941,7 +1941,6 @@ impl WorkDataFetcher {
             .paginated(&endpoint)
             .with_iter_param("TIME", timestamp.to_string())
             .with_page_size(15)
-            
             .with_total_key("page_total");
 
         if let Some(limit_val) = limit {
@@ -2294,7 +2293,6 @@ impl WorkDataFetcher {
             .paginated("/tiger/work/recycle/list")
             .with_iter_param("TIME", timestamp.to_string())
             .with_page_size(30)
-            
             .with_iter_param("version_no", version.as_str())
             .with_iter_param("work_status", work_status.unwrap_or("CYCLED"))
             .with_base_key(BaseKey::Creation);
@@ -2323,7 +2321,6 @@ impl WorkDataFetcher {
             .paginated("/wood/comm/work/list")
             .with_iter_param("TIME", timestamp.to_string())
             .with_page_size(30)
-            
             .with_iter_param("language_type", language_type.unwrap_or(0).to_string())
             .with_iter_param("work_status", work_status.unwrap_or("CYCLED"))
             .with_iter_param("published_status", published_status.unwrap_or("undefined"))
@@ -2351,7 +2348,6 @@ impl WorkDataFetcher {
             .paginated("/box/v2/work/list")
             .with_iter_param("TIME", timestamp.to_string())
             .with_page_size(30)
-            
             .with_iter_param("work_status", work_status.unwrap_or("CYCLED"))
             .with_base_key(BaseKey::Creation);
 
@@ -2377,7 +2373,6 @@ impl WorkDataFetcher {
             .paginated("/web/fanfic/my/new")
             .with_iter_param("TIME", timestamp.to_string())
             .with_page_size(30)
-            
             .with_iter_param("fiction_status", fiction_status.unwrap_or("CYCLED"));
 
         if let Some(limit_val) = limit {
@@ -2404,7 +2399,6 @@ impl WorkDataFetcher {
             .with_iter_param("TIME", timestamp.to_string())
             .with_iter_param("name", name.unwrap_or(""))
             .with_page_size(24)
-            
             .with_iter_param("status", "-99")
             .with_iter_param(
                 "work_business_classify",
@@ -2439,7 +2433,6 @@ impl WorkDataFetcher {
             .with_iter_param("TIME", timestamp.to_string())
             .with_iter_param("name", name)
             .with_page_size(24)
-            
             .with_iter_param("status", status.unwrap_or(1).to_string())
             .with_iter_param(
                 "work_business_classify",
@@ -2471,7 +2464,6 @@ impl WorkDataFetcher {
             .with_iter_param("TIME", timestamp.to_string())
             .with_iter_param("name", name)
             .with_page_size(24)
-            
             .with_iter_param(
                 "work_business_classify",
                 work_business_classify.unwrap_or(1).to_string(),

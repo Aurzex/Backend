@@ -107,7 +107,7 @@ impl AccountStatus {
         }
     }
 
-    pub fn to_identity(&self) -> Catsona {
+    pub fn to_identity(self) -> Catsona {
         match self {
             AccountStatus::Judgement => Catsona::Judge,
             AccountStatus::Average => Catsona::Fluffy,
