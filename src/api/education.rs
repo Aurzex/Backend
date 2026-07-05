@@ -59,6 +59,21 @@ impl EduUserAction {
         self.client.response_to_json(response)
     }
 
+    pub fn rename_class(&self, class_id: i32, class_name: &str) -> MewResult<bool> {
+        let timestamp = current_timestamp_13();
+        let data = json!({ "name" : class_name });
+        let endpoint = format!("https://eduzone.codemao.cn/edu/zone/class/{}", class_id);
+
+        let response = self
+            .client
+            .build_request(HttpMethod::Patch, &endpoint, None)
+            .with_param("TIME", timestamp.to_string())
+            .with_payload(data)
+            .send()?;
+
+        Ok(response.status() == HTTPStatus::NoContent as u16)
+    }
+
     pub fn delete_class(&self, class_id: i32) -> MewResult<bool> {
         let timestamp = current_timestamp_13();
         let endpoint = format!("https://eduzone.codemao.cn/edu/zone/class/{}", class_id);
@@ -464,33 +479,41 @@ impl EduDataFetcher {
         self.client.response_to_json(response)
     }
 
-    pub fn fetch_classrooms(&self, method: &str, limit: Option<usize>) -> MewResult<Value> {
-        if method == "simple" {
-            let response = self
-                .client
-                .build_request(
-                    HttpMethod::Get,
-                    "https://eduzone.codemao.cn/edu/zone/classes/simple",
-                    None,
-                )
-                .send()?;
-            self.client.response_to_json(response)
-        } else if method == "detail" {
-            let _paginated = self
-                .client
-                .paginated("https://eduzone.codemao.cn/edu/zone/classes/")
-                .with_iter_param("page", "1")
-                .with_pagination_method(PaginationMethod::Page)
-                .with_offset_key("page")
-                .with_response_amount_key("limit")
-                .with_limit(limit.unwrap_or(20));
-
-            Ok(json!({ "paginated": "Use iterator to fetch data" }))
-        } else {
-            Ok(json!({}))
-        }
+    pub fn fetch_classrooms_simple(&self) -> MewResult<Value> {
+        let response = self
+            .client
+            .build_request(
+                HttpMethod::Get,
+                "https://eduzone.codemao.cn/edu/zone/classes/simple",
+                None,
+            )
+            .send()?;
+        self.client.response_to_json(response)
     }
 
+    pub fn fetch_classrooms_detail(
+        &self,
+        limit: Option<usize>,
+        class_name: Option<&str>,
+    ) -> PaginatedIter {
+        let mut paginated = self
+            .client
+            .paginated("https://eduzone.codemao.cn/edu/zone/classes/")
+            .with_iter_param("page", "1")
+            .with_pagination_method(PaginationMethod::Page)
+            .with_offset_key("page")
+            .with_response_amount_key("limit")
+            .with_limit(limit.unwrap_or(20));
+
+        // 如果提供了班级名称，添加到查询参数中
+        if let Some(name) = class_name {
+            paginated = paginated.with_iter_param("class_name", name);
+        }
+
+        paginated = Self::add_timestamp_to_paginated(paginated);
+
+        paginated
+    }
     pub fn fetch_student_removal_records_gen(&self, limit: Option<usize>) -> PaginatedIter {
         let mut paginated = self
             .client
