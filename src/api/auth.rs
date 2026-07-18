@@ -1,5 +1,6 @@
 use crate::utils::acquire::{BaseKey, Catsona, CodeMaoClient, HttpMethod, MewError, MewResult};
 use crate::utils::data::{CodeMaoFile, FileContent, PathConfig};
+use log::{debug, info, warn};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
@@ -8,6 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 // ==================== 枚举定义 ====================
 
+/// 登录方式枚举，涵盖用户与管理员的各种登录途径。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoginMethod {
     PasswordV0,
@@ -42,7 +44,7 @@ impl LoginMethod {
         }
     }
 
-    /// 判断该登录方法是否属于用户
+    /// 判断该登录方法是否属于普通用户
     pub fn is_user_method(&self) -> bool {
         matches!(
             self,
@@ -82,6 +84,7 @@ impl UserRole {
     }
 }
 
+/// 账号状态 / 类型（普通、评审、教育）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccountStatus {
     Judgement,
@@ -107,6 +110,7 @@ impl AccountStatus {
         }
     }
 
+    /// 映射为身份枚举 `Catsona`
     pub fn to_identity(self) -> Catsona {
         match self {
             AccountStatus::Judgement => Catsona::Judge,
@@ -118,6 +122,7 @@ impl AccountStatus {
 
 // ==================== 数据结构 ====================
 
+/// 登录凭据，聚合身份、密码、令牌、状态等信息。
 #[derive(Debug, Clone)]
 pub struct LoginCredentials {
     pub identity: String,
@@ -141,6 +146,7 @@ impl Default for LoginCredentials {
     }
 }
 
+/// 登录结果，包含成功标志、登录方式、令牌等信息。
 #[derive(Debug, Clone)]
 pub struct LoginResult {
     pub success: bool,
@@ -181,6 +187,7 @@ impl LoginResult {
 
 // ==================== 客户端提供者特质 ====================
 
+/// 抽象客户端提供者，便于依赖注入和测试。
 pub trait ClientProvider: Send + Sync + std::fmt::Debug {
     fn client(&self) -> &CodeMaoClient;
     fn clone_box(&self) -> Box<dyn ClientProvider>;
@@ -229,6 +236,7 @@ pub fn global_auth_manager() -> Arc<AuthManager> {
 
 // ==================== 辅助函数 ====================
 
+/// 通过任意 `ClientProvider` 获取服务器当前时间戳（毫秒）。
 pub fn fetch_current_timestamp_with_provider(provider: &dyn ClientProvider) -> MewResult<i64> {
     let client = provider.client();
     let response = client
@@ -238,10 +246,12 @@ pub fn fetch_current_timestamp_with_provider(provider: &dyn ClientProvider) -> M
     Ok(json["data"].as_i64().unwrap_or(0))
 }
 
+/// 使用全局客户端获取当前时间戳。
 pub fn fetch_current_timestamp() -> MewResult<i64> {
     fetch_current_timestamp_with_provider(&GlobalClientProvider::new())
 }
 
+/// 根据提供的令牌、身份、密码自动推断普通用户登录方式。
 fn determine_user_login_method(
     token: Option<&str>,
     identity: Option<&str>,
@@ -256,6 +266,7 @@ fn determine_user_login_method(
     Err(MewError::Auth("缺少必要的登录凭据".into()))
 }
 
+/// 根据提供的令牌、身份、密码自动推断管理员登录方式。
 fn determine_admin_login_method(
     token: Option<&str>,
     identity: Option<&str>,
@@ -272,6 +283,7 @@ fn determine_admin_login_method(
 
 // ==================== 认证处理器 ====================
 
+/// 处理原始 HTTP 认证请求，如获取 ticket、验证码、登录接口调用。
 #[derive(Clone, Debug)]
 pub struct AuthProcessor {
     client_provider: Box<dyn ClientProvider>,
@@ -292,6 +304,7 @@ impl AuthProcessor {
         self.client_provider.client()
     }
 
+    /// 根据令牌获取用户详细信息。
     pub fn fetch_auth_details(&self, token: &str) -> MewResult<Value> {
         let client = self.client();
         let cookie_str = format!("authorization={}", token);
@@ -306,6 +319,7 @@ impl AuthProcessor {
         client.response_to_json(response)
     }
 
+    /// 获取管理员后台信息（需已设置管理员令牌）。
     pub fn fetch_admin_details(&self) -> MewResult<Value> {
         let client = self.client();
         let response = client
@@ -314,6 +328,7 @@ impl AuthProcessor {
         client.response_to_json(response)
     }
 
+    /// 获取登录 ticket（用于新版登录流程）。
     pub fn get_login_ticket(&self, identity: &str, timestamp: i64, pid: &str) -> MewResult<Value> {
         let client = self.client();
         let payload = json!({
@@ -332,6 +347,7 @@ impl AuthProcessor {
         client.response_to_json(response)
     }
 
+    /// 发送安全登录请求（v2 密码登录）。
     pub fn get_login_security_info(
         &self,
         identity: &str,
@@ -367,6 +383,7 @@ impl AuthProcessor {
         Ok(serde_json::from_str(&body)?)
     }
 
+    /// 管理员用户名密码认证。
     pub fn authenticate_admin_user(
         &self,
         username: &str,
@@ -388,6 +405,7 @@ impl AuthProcessor {
         client.response_to_json(response)
     }
 
+    /// 获取管理员验证码图片，并保存到文件。
     pub fn fetch_admin_captcha(&self, timestamp: i64) -> MewResult<Vec<u8>> {
         let client = self.client();
         let endpoint = format!("/admins/captcha/{}", timestamp);
@@ -396,12 +414,10 @@ impl AuthProcessor {
             .send()?;
         if response.status() == 200 {
             let bytes = response.into_body().read_to_vec()?;
-            CodeMaoFile::file_write(
-                &PathConfig::captcha_file_path(),
-                &FileContent::Bytes(bytes.clone()),
-                "b",
-            )
-            .unwrap();
+            // 显式转换错误类型
+            CodeMaoFile::write_bytes(&PathConfig::global().captcha_file_path(), &bytes)
+                .map_err(|e| MewError::Other(format!("验证码文件写入失败: {}", e)))?;
+            debug!("管理员验证码已保存至文件");
             Ok(bytes)
         } else {
             Err(MewError::Auth(format!(
@@ -411,6 +427,7 @@ impl AuthProcessor {
         }
     }
 
+    /// v0 密码登录请求。
     pub fn handle_password_v0(
         &self,
         identity: &str,
@@ -430,6 +447,7 @@ impl AuthProcessor {
         client.response_to_json(response)
     }
 
+    /// v1 密码登录请求。
     pub fn handle_password_v1(
         &self,
         identity: &str,
@@ -449,6 +467,7 @@ impl AuthProcessor {
         client.response_to_json(response)
     }
 
+    /// v2 密码登录（带 ticket 的安全流程）。
     pub fn handle_password_v2(
         &self,
         identity: &str,
@@ -476,6 +495,7 @@ impl Default for AuthProcessor {
 
 // ==================== 登录处理器 ====================
 
+/// 负责编排具体登录流程，调用 `AuthProcessor` 完成请求并设置令牌。
 #[derive(Debug)]
 pub struct LoginHandler {
     processor: AuthProcessor,
@@ -496,12 +516,14 @@ impl LoginHandler {
         self.processor.client()
     }
 
+    /// 将令牌设置到客户端，并切换到对应身份。
     fn set_token_and_identity(&self, token: &str, identity: Catsona) -> MewResult<()> {
         self.client().set_token(identity, token)?;
         self.client().switch_identity(identity)?;
         Ok(())
     }
 
+    /// v0 密码登录处理。
     pub fn handle_password_v0(
         &self,
         identity: &str,
@@ -536,6 +558,7 @@ impl LoginHandler {
         }
     }
 
+    /// v1 密码登录处理。
     pub fn handle_password_v1(
         &self,
         identity: &str,
@@ -574,6 +597,7 @@ impl LoginHandler {
         }
     }
 
+    /// v2 密码登录处理。
     pub fn handle_password_v2(
         &self,
         identity: &str,
@@ -612,6 +636,7 @@ impl LoginHandler {
         }
     }
 
+    /// Token 登录处理（普通用户）。
     pub fn handle_token(&self, token: &str, status: AccountStatus) -> MewResult<LoginResult> {
         let auth_details = self.processor.fetch_auth_details(token)?;
         self.set_token_and_identity(token, status.to_identity())?;
@@ -620,12 +645,16 @@ impl LoginHandler {
             .with_auth_details(auth_details))
     }
 
+    /// 管理员 Token 登录（若未提供则从标准输入读取）。
     pub fn handle_admin_token(&self, token: Option<&str>) -> MewResult<LoginResult> {
         let token_str = match token {
             Some(t) if !t.trim().is_empty() => t.to_string(),
             _ => {
+                info!("请输入管理员 Token:");
                 let mut input = String::new();
-                std::io::stdin().read_line(&mut input)?;
+                std::io::stdin()
+                    .read_line(&mut input)
+                    .map_err(MewError::Io)?;
                 input.trim().to_string()
             }
         };
@@ -653,6 +682,9 @@ impl LoginHandler {
         }
     }
 
+    /// 管理员用户名密码登录（交互式验证码流程）。
+    ///
+    /// 若用户名或密码为空，则通过标准输入交互获取。验证码错误时会提示重新输入用户名密码。
     pub fn handle_admin_password(
         &self,
         username: Option<&str>,
@@ -661,8 +693,11 @@ impl LoginHandler {
         let mut username = match username {
             Some(u) if !u.trim().is_empty() => u.to_string(),
             _ => {
+                info!("请输入管理员用户名:");
                 let mut input = String::new();
-                std::io::stdin().read_line(&mut input)?;
+                std::io::stdin()
+                    .read_line(&mut input)
+                    .map_err(MewError::Io)?;
                 input.trim().to_string()
             }
         };
@@ -670,8 +705,11 @@ impl LoginHandler {
         let mut password = match password {
             Some(p) if !p.trim().is_empty() => p.to_string(),
             _ => {
+                info!("请输入管理员密码:");
                 let mut input = String::new();
-                std::io::stdin().read_line(&mut input)?;
+                std::io::stdin()
+                    .read_line(&mut input)
+                    .map_err(MewError::Io)?;
                 input.trim().to_string()
             }
         };
@@ -679,15 +717,20 @@ impl LoginHandler {
         loop {
             let timestamp = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .expect("系统时间错误")
                 .as_millis() as i64;
 
-            println!("正在获取验证码...");
+            info!("正在获取验证码...");
             self.processor.fetch_admin_captcha(timestamp)?;
 
-            println!("请输入验证码:");
+            info!(
+                "请输入验证码 (图片路径: {:?}):",
+                PathConfig::global().captcha_file_path()
+            );
             let mut captcha = String::new();
-            std::io::stdin().read_line(&mut captcha)?;
+            std::io::stdin()
+                .read_line(&mut captcha)
+                .map_err(MewError::Io)?;
             let captcha = captcha.trim();
 
             match self
@@ -718,12 +761,17 @@ impl LoginHandler {
                     if error_code == "Admin-Password-Error@Community-Admin"
                         || error_code == "Param-Invalid@Common"
                     {
-                        println!("请输入用户名:");
+                        warn!("用户名或密码错误，请重新输入");
+                        info!("请输入用户名:");
                         let mut input = String::new();
-                        std::io::stdin().read_line(&mut input)?;
+                        std::io::stdin()
+                            .read_line(&mut input)
+                            .map_err(MewError::Io)?;
                         username = input.trim().to_string();
-                        println!("请输入密码:");
-                        std::io::stdin().read_line(&mut input)?;
+                        info!("请输入密码:");
+                        std::io::stdin()
+                            .read_line(&mut input)
+                            .map_err(MewError::Io)?;
                         password = input.trim().to_string();
                         continue;
                     } else {
@@ -746,6 +794,9 @@ impl Default for LoginHandler {
 
 // ==================== 认证管理器 ====================
 
+/// 认证管理器，整合登录、登出、凭据管理等功能。
+///
+/// 可通过 `new()` 创建默认实例，或使用 `new_with_provider` 注入自定义客户端。
 #[derive(Debug)]
 pub struct AuthManager {
     client_provider: Box<dyn ClientProvider>,
@@ -774,6 +825,9 @@ impl AuthManager {
         self.client_provider.client()
     }
 
+    /// 执行登录，自动根据角色和凭据选择登录方式。
+    ///
+    /// `prefer_method` 可强制指定登录方式，但需与角色匹配。
     pub fn login(
         &mut self,
         credentials: &LoginCredentials,
@@ -788,6 +842,7 @@ impl AuthManager {
         }
     }
 
+    /// 验证登录参数是否与指定方式匹配。
     fn validate_login_parameters(
         &self,
         credentials: &LoginCredentials,
@@ -834,6 +889,7 @@ impl AuthManager {
         Ok(())
     }
 
+    /// 自动推断或确认普通用户的登录方法。
     fn get_user_login_method(
         &self,
         credentials: &LoginCredentials,
@@ -867,6 +923,7 @@ impl AuthManager {
         )
     }
 
+    /// 自动推断或确认管理员的登录方法。
     fn get_admin_login_method(
         &self,
         credentials: &LoginCredentials,
@@ -962,12 +1019,13 @@ impl AuthManager {
                         result = result.with_auth_details(admin_data);
                     }
                 }
-                Err(_) => { /* 获取详情失败不影响登录结果 */ }
+                Err(e) => warn!("获取管理员详情失败: {}", e),
             }
         }
         Ok(result)
     }
 
+    /// v0 登出。
     pub fn execute_logout_v0(&self) -> MewResult<bool> {
         let client = self.client();
         let response = client
@@ -977,6 +1035,7 @@ impl AuthManager {
         Ok(response.status() == 204)
     }
 
+    /// v1/v2 登出，`method` 为 "web" 或 "mobile"。
     pub fn execute_logout_v12(&self, method: &str) -> MewResult<bool> {
         let client = self.client();
         let endpoint = format!("/tiger/v3/{}/accounts/logout", method);
@@ -987,6 +1046,7 @@ impl AuthManager {
         Ok(response.status() == 204)
     }
 
+    /// 管理员登出。
     pub fn admin_logout(&self) -> MewResult<bool> {
         let client = self.client();
         let response = client
@@ -995,6 +1055,7 @@ impl AuthManager {
         Ok(response.status() == 204)
     }
 
+    /// 手动配置认证令牌（不经过登录流程）。
     pub fn configure_authentication_token(
         &self,
         token: &str,
@@ -1006,6 +1067,7 @@ impl AuthManager {
         Ok(())
     }
 
+    /// 获取当前缓存的凭据（成功登录后存在）。
     pub fn get_current_credentials(&self) -> Option<&LoginCredentials> {
         self.current_credentials.as_ref()
     }
@@ -1019,6 +1081,9 @@ impl Default for AuthManager {
 
 // ==================== 云服务认证器 ====================
 
+/// 用于生成云端请求所需的 `x-device-auth` 签名头。
+///
+/// 自动校准本地时间与服务器时间的差值。
 pub struct CloudAuthenticator {
     client_provider: Box<dyn ClientProvider>,
     authorization_token: Option<String>,
@@ -1060,22 +1125,24 @@ impl CloudAuthenticator {
             .collect()
     }
 
+    /// 获取校准后的时间戳（秒），首次调用会计算时差。
     pub fn get_calibrated_timestamp(&mut self) -> MewResult<i64> {
         if self.time_difference == 0 {
             let server_time = fetch_current_timestamp_with_provider(&*self.client_provider)?;
             let local_time = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .expect("系统时间错误")
                 .as_secs() as i64;
             self.time_difference = local_time - server_time;
         }
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("系统时间错误")
             .as_secs() as i64;
         Ok(now - self.time_difference)
     }
 
+    /// 生成 `x-device-auth` 头所需的 JSON 字符串。
     pub fn generate_x_device_auth(&mut self) -> MewResult<String> {
         let timestamp = self.get_calibrated_timestamp()?;
         let sign_str = format!("{}{}{}", Self::CLIENT_SECRET, timestamp, self.client_id);
@@ -1092,6 +1159,7 @@ impl CloudAuthenticator {
         Ok(serde_json::to_string(&auth_json)?)
     }
 
+    /// 获取当前的授权令牌（优先返回手动设置的，否则从客户端身份中获取）。
     pub fn authorization_token(&self) -> Option<String> {
         if let Some(ref token) = self.authorization_token
             && !token.is_empty()
@@ -1108,6 +1176,7 @@ impl CloudAuthenticator {
 
 // ==================== 链式调用构建器 ====================
 
+/// 登录构建器，支持链式设置参数后执行。
 #[derive(Debug)]
 pub struct LoginBuilder {
     auth_manager: AuthManager,

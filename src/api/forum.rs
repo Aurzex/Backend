@@ -1,9 +1,13 @@
 use crate::utils::acquire::{
     CodeMaoClient, HTTPStatus, HttpMethod, MewError, MewResult, PaginatedIter, PaginationMethod,
 };
+use log::debug;
 use serde_json::{Value, json};
 
-// 帖子类型枚举
+// ==================== 枚举定义 ====================
+
+/// 帖子类型（我创建的 / 我回复的）
+#[derive(Debug, Clone, Copy)]
 pub enum PostType {
     Created,
     Replied,
@@ -18,7 +22,8 @@ impl PostType {
     }
 }
 
-// 项目类型枚举（用于点赞）
+/// 点赞项目类型（回帖 / 评论）
+#[derive(Debug, Clone, Copy)]
 pub enum ItemType {
     Reply,
     Comment,
@@ -33,7 +38,8 @@ impl ItemType {
     }
 }
 
-// 删除项目类型枚举
+/// 删除项目类型（回帖 / 评论 / 帖子）
+#[derive(Debug, Clone, Copy)]
 pub enum DeleteItemType {
     Reply,
     Comment,
@@ -50,7 +56,8 @@ impl DeleteItemType {
     }
 }
 
-// 目标类型枚举（用于发布帖子）
+/// 发布帖子目标类型（板块 / 工作室）
+#[derive(Debug, Clone, Copy)]
 pub enum TargetType {
     Board,
     Workshop,
@@ -65,7 +72,8 @@ impl TargetType {
     }
 }
 
-// 举报原因ID枚举
+/// 回帖/评论举报原因 ID
+#[derive(Debug, Clone, Copy)]
 pub enum ForumReportReasonId {
     Custom = 0,
     Reason1 = 1,
@@ -78,7 +86,8 @@ pub enum ForumReportReasonId {
     Reason8 = 8,
 }
 
-// 帖子举报原因ID枚举
+/// 帖子举报原因 ID
+#[derive(Debug, Clone, Copy)]
 pub enum PostReportReasonId {
     Reason1 = 1,
     Reason2 = 2,
@@ -90,7 +99,8 @@ pub enum PostReportReasonId {
     Reason8 = 8,
 }
 
-// 板块ID枚举
+/// 论坛板块 ID
+#[derive(Debug, Clone, Copy)]
 pub enum BoardId {
     Board17 = 17,
     Board2 = 2,
@@ -107,7 +117,9 @@ pub enum BoardId {
     Board28 = 28,
 }
 
-// 论坛数据获取器
+// ==================== 论坛数据获取器 ====================
+
+/// 论坛数据查询接口。
 pub struct ForumDataFetcher {
     client: &'static CodeMaoClient,
 }
@@ -119,25 +131,54 @@ impl ForumDataFetcher {
         }
     }
 
-    // 获取多个帖子信息
+    // ---------- 私有辅助 ----------
+
+    /// 发送请求并将响应解析为 JSON。
+    fn send_and_parse(
+        &self,
+        builder: crate::utils::acquire::KittyRequestBuilder,
+    ) -> MewResult<Value> {
+        let response = builder.send()?;
+        self.client.response_to_json(response)
+    }
+
+    /// 构建基础分页迭代器，使用 Page 分页方式，初始页码 1。
+    fn build_paginated(
+        &self,
+        endpoint: &str,
+        page_size: usize,
+        default_limit: usize,
+    ) -> PaginatedIter {
+        self.client
+            .paginated(endpoint)
+            .with_iter_param("page", "1")
+            .with_page_size(page_size)
+            .with_pagination_method(PaginationMethod::Page)
+            .with_amount_key("limit")
+            .with_offset_key("page")
+            .with_limit(default_limit)
+    }
+
+    // ---------- 公共方法 ----------
+
+    /// 批量获取帖子详情（最多 19 个）
     pub fn fetch_posts_details(&self, post_ids: Vec<i32>) -> MewResult<Value> {
         if post_ids.len() >= 20 {
             return Err(MewError::Other("数据长度需小于 20".into()));
         }
-
+        debug!("批量获取帖子详情: count={}", post_ids.len());
         let ids_str: Vec<String> = post_ids.iter().map(|id| id.to_string()).collect();
-
         let response = self
             .client
             .build_request(HttpMethod::Get, "/web/forums/posts/all", None)
             .with_param("ids", ids_str.join(","))
             .send()?;
-
         self.client.response_to_json(response)
     }
 
-    // 获取单个帖子信息
+    /// 获取单个帖子详情
     pub fn fetch_single_post_details(&self, post_id: i32) -> MewResult<Value> {
+        debug!("获取帖子详情: post_id={}", post_id);
         let endpoint = format!("/web/forums/posts/{}/details", post_id);
         let response = self
             .client
@@ -146,7 +187,7 @@ impl ForumDataFetcher {
         self.client.response_to_json(response)
     }
 
-    // 获取帖子回帖生成器
+    /// 帖子回帖分页迭代器
     pub fn fetch_post_replies_gen(
         &self,
         post_id: i32,
@@ -154,73 +195,33 @@ impl ForumDataFetcher {
         limit: Option<usize>,
     ) -> PaginatedIter {
         let endpoint = format!("/web/forums/posts/{}/replies", post_id);
-
-        let mut paginated = self
-            .client
-            .paginated(&endpoint)
-            .with_iter_param("page", "1")
-            .with_page_size(10)
+        debug!("获取回帖迭代器: post_id={}, sort={:?}", post_id, sort);
+        
+        self
+            .build_paginated(&endpoint, 10, limit.unwrap_or(15))
             .with_iter_param("sort", sort.unwrap_or_else(|| "-created_at".to_string()))
-            .with_pagination_method(PaginationMethod::Page)
             .with_total_key("total")
-            .with_amount_key("limit")
-            .with_offset_key("page");
-
-        if let Some(limit_val) = limit {
-            paginated = paginated.with_limit(limit_val);
-        } else {
-            paginated = paginated.with_limit(15);
-        }
-
-        paginated
     }
 
-    // 获取回帖评论生成器
+    /// 回帖评论分页迭代器
     pub fn fetch_reply_comments_gen(&self, reply_id: i32, limit: Option<usize>) -> PaginatedIter {
         let endpoint = format!("/web/forums/replies/{}/comments", reply_id);
-
-        let mut paginated = self
-            .client
-            .paginated(&endpoint)
-            .with_iter_param("page", "1")
-            .with_page_size(10)
-            .with_pagination_method(PaginationMethod::Page)
-            .with_amount_key("limit")
-            .with_offset_key("page");
-
-        if let Some(limit_val) = limit {
-            paginated = paginated.with_limit(limit_val);
-        } else {
-            paginated = paginated.with_limit(10);
-        }
-
-        paginated
+        debug!("获取评论迭代器: reply_id={}", reply_id);
+        
+        self.build_paginated(&endpoint, 10, limit.unwrap_or(10))
     }
 
-    // 获取我的帖子或回复的帖子生成器
+    /// 我的帖子（创建/回复）分页迭代器
     pub fn fetch_my_posts_gen(&self, post_type: PostType, limit: Option<usize>) -> PaginatedIter {
         let endpoint = format!("/web/forums/posts/mine/{}", post_type.as_str());
-
-        let mut paginated = self
-            .client
-            .paginated(&endpoint)
-            .with_iter_param("page", "1")
-            .with_page_size(10)
-            .with_pagination_method(PaginationMethod::Page)
-            .with_amount_key("limit")
-            .with_offset_key("page");
-
-        if let Some(limit_val) = limit {
-            paginated = paginated.with_limit(limit_val);
-        } else {
-            paginated = paginated.with_limit(10);
-        }
-
-        paginated
+        debug!("获取我的帖子迭代器: type={:?}", post_type);
+        
+        self.build_paginated(&endpoint, 10, limit.unwrap_or(10))
     }
 
-    // 获取我的帖子或回复的帖子数目
+    /// 获取我的帖子/回复数量
     pub fn fetch_my_post_num(&self) -> MewResult<Value> {
+        debug!("获取我的帖子数量");
         let response = self
             .client
             .build_request(HttpMethod::Get, "/web/forums/posts/mine/count", None)
@@ -228,8 +229,9 @@ impl ForumDataFetcher {
         self.client.response_to_json(response)
     }
 
-    // 获取论坛帖子各个栏目
+    /// 获取所有板块简要信息
     pub fn fetch_post_boards(&self) -> MewResult<Value> {
+        debug!("获取所有板块信息");
         let response = self
             .client
             .build_request(HttpMethod::Get, "/web/forums/boards/simples/all", None)
@@ -237,8 +239,9 @@ impl ForumDataFetcher {
         self.client.response_to_json(response)
     }
 
-    // 获取论坛单个版块详细信息
+    /// 获取单个板块详细信息
     pub fn fetch_board_details(&self, board_id: i32) -> MewResult<Value> {
+        debug!("获取板块详情: board_id={}", board_id);
         let endpoint = format!("/web/forums/boards/{}", board_id);
         let response = self
             .client
@@ -247,8 +250,9 @@ impl ForumDataFetcher {
         self.client.response_to_json(response)
     }
 
-    // 获取社区所有热门帖子 ID
+    /// 获取所有热门帖子 ID
     pub fn fetch_hot_posts_ids(&self) -> MewResult<Value> {
+        debug!("获取热门帖子ID");
         let response = self
             .client
             .build_request(HttpMethod::Get, "/web/forums/posts/hots/all", None)
@@ -256,8 +260,9 @@ impl ForumDataFetcher {
         self.client.response_to_json(response)
     }
 
-    // 获取论坛顶部公告
+    /// 获取顶部公告（默认 4 条）
     pub fn fetch_top_notices(&self, limit: Option<i32>) -> MewResult<Value> {
+        debug!("获取顶部公告: limit={:?}", limit);
         let response = self
             .client
             .build_request(HttpMethod::Get, "/web/forums/notice-boards", None)
@@ -266,8 +271,9 @@ impl ForumDataFetcher {
         self.client.response_to_json(response)
     }
 
-    // 获取论坛本周精选帖子
+    /// 获取论坛精选内容
     pub fn fetch_key_content(&self, content_key: &str, limit: Option<i32>) -> MewResult<Value> {
+        debug!("获取精选内容: key={}, limit={:?}", content_key, limit);
         let response = self
             .client
             .build_request(HttpMethod::Get, "/web/contents/get-key", None)
@@ -277,12 +283,13 @@ impl ForumDataFetcher {
         self.client.response_to_json(response)
     }
 
-    // 获取社区精品合集帖子
+    /// 获取精品合集帖子
     pub fn fetch_selection_posts(
         &self,
         limit: Option<i32>,
         offset: Option<i32>,
     ) -> MewResult<Value> {
+        debug!("获取精品合集: limit={:?}, offset={:?}", limit, offset);
         let response = self
             .client
             .build_request(HttpMethod::Get, "/web/forums/posts/selections", None)
@@ -292,8 +299,9 @@ impl ForumDataFetcher {
         self.client.response_to_json(response)
     }
 
-    // 获取论坛举报原因
+    /// 获取帖子举报原因列表
     pub fn fetch_report_reasons(&self) -> MewResult<Value> {
+        debug!("获取举报原因列表");
         let response = self
             .client
             .build_request(HttpMethod::Get, "/web/reports/posts/reasons/all", None)
@@ -301,28 +309,16 @@ impl ForumDataFetcher {
         self.client.response_to_json(response)
     }
 
-    // 通过标题搜索帖子生成器
+    /// 按标题搜索帖子分页迭代器
     pub fn search_posts_gen(&self, title: &str, limit: Option<usize>) -> PaginatedIter {
-        let mut paginated = self
-            .client
-            .paginated("/web/forums/posts/search")
+        debug!("搜索帖子: title={}", title);
+        
+        self
+            .build_paginated("/web/forums/posts/search", 20, limit.unwrap_or(20))
             .with_iter_param("title", title)
-            .with_iter_param("page", "1")
-            .with_page_size(20)
-            .with_pagination_method(PaginationMethod::Page)
-            .with_amount_key("limit")
-            .with_offset_key("page");
-
-        if let Some(limit_val) = limit {
-            paginated = paginated.with_limit(limit_val);
-        } else {
-            paginated = paginated.with_limit(20);
-        }
-
-        paginated
     }
 
-    // 获取热门帖子 (7天内) 生成器
+    /// 7 天内热门帖子分页迭代器
     pub fn fetch_7day_hot_posts_gen(
         &self,
         board_id: Option<i32>,
@@ -332,44 +328,18 @@ impl ForumDataFetcher {
             Some(id) => format!("/web/forums/boards/posts/7dayHot?board_id={}", id),
             None => "/web/forums/boards/posts/7dayHot".to_string(),
         };
-
-        let mut paginated = self
-            .client
-            .paginated(&endpoint)
-            .with_iter_param("page", "1")
-            .with_page_size(10)
-            .with_pagination_method(PaginationMethod::Page)
+        debug!("获取7天热门: board_id={:?}", board_id);
+        
+        self
+            .build_paginated(&endpoint, 10, limit.unwrap_or(15))
             .with_total_key("total")
-            .with_amount_key("limit")
-            .with_offset_key("page");
-
-        if let Some(limit_val) = limit {
-            paginated = paginated.with_limit(limit_val);
-        } else {
-            paginated = paginated.with_limit(15);
-        }
-
-        paginated
     }
 
-    // 获取求助帖子生成器
+    /// 求助帖子分页迭代器
     pub fn fetch_ask_help_posts_gen(&self, limit: Option<usize>) -> PaginatedIter {
-        let mut paginated = self
-            .client
-            .paginated("/web/forums/boards/posts/ask-help")
-            .with_iter_param("page", "1")
-            .with_page_size(10)
-            .with_pagination_method(PaginationMethod::Page)
-            .with_amount_key("limit")
-            .with_offset_key("page");
-
-        if let Some(limit_val) = limit {
-            paginated = paginated.with_limit(limit_val);
-        } else {
-            paginated = paginated.with_limit(10);
-        }
-
-        paginated
+        debug!("获取求助帖子迭代器");
+        
+        self.build_paginated("/web/forums/boards/posts/ask-help", 10, limit.unwrap_or(10))
     }
 }
 
@@ -379,7 +349,9 @@ impl Default for ForumDataFetcher {
     }
 }
 
-// 论坛操作处理器
+// ==================== 论坛操作处理器 ====================
+
+/// 论坛操作接口（发帖、回复、点赞、举报等）。
 pub struct ForumActionHandler {
     client: &'static CodeMaoClient,
 }
@@ -391,32 +363,53 @@ impl ForumActionHandler {
         }
     }
 
-    // 对某个帖子回帖
+    // ---------- 私有辅助 ----------
+
+    /// 发送请求并返回 status == 预期状态码
+    fn check_status(
+        &self,
+        builder: crate::utils::acquire::KittyRequestBuilder,
+        expected: HTTPStatus,
+    ) -> MewResult<bool> {
+        let response = builder.send()?;
+        Ok(response.status() == expected as u16)
+    }
+
+    /// 发送请求并根据 `return_data` 决定返回 JSON 数据或成功标志
+    fn send_maybe_parse(
+        &self,
+        builder: crate::utils::acquire::KittyRequestBuilder,
+        return_data: bool,
+        expected: HTTPStatus,
+    ) -> MewResult<Value> {
+        let response = builder.send()?;
+        if return_data {
+            self.client.response_to_json(response)
+        } else {
+            Ok(json!({ "success": response.status() == expected as u16 }))
+        }
+    }
+
+    // ---------- 公共方法 ----------
+
+    /// 回复帖子
     pub fn create_post_reply(
         &self,
         post_id: i32,
         content: &str,
         return_data: bool,
     ) -> MewResult<Value> {
+        debug!("回复帖子: post_id={}", post_id);
         let endpoint = format!("/web/forums/posts/{}/replies", post_id);
-        let payload = json!({
-            "content": content
-        });
-
-        let response = self
+        let payload = json!({ "content": content });
+        let builder = self
             .client
             .build_request(HttpMethod::Post, &endpoint, None)
-            .with_payload(payload)
-            .send()?;
-
-        if return_data {
-            self.client.response_to_json(response)
-        } else {
-            Ok(json!({ "success": response.status() == HTTPStatus::Created as u16 }))
-        }
+            .with_payload(payload);
+        self.send_maybe_parse(builder, return_data, HTTPStatus::Created)
     }
 
-    // 对某个回帖评论进行回复
+    /// 回复评论（在回帖下评论）
     pub fn create_comment_reply(
         &self,
         reply_id: i32,
@@ -424,26 +417,20 @@ impl ForumActionHandler {
         content: &str,
         return_data: bool,
     ) -> MewResult<Value> {
+        debug!("回复评论: reply_id={}, parent_id={}", reply_id, parent_id);
         let endpoint = format!("/web/forums/replies/{}/comments", reply_id);
         let payload = json!({
             "content": content,
             "parent_id": parent_id
         });
-
-        let response = self
+        let builder = self
             .client
             .build_request(HttpMethod::Post, &endpoint, None)
-            .with_payload(payload)
-            .send()?;
-
-        if return_data {
-            self.client.response_to_json(response)
-        } else {
-            Ok(json!({ "success": response.status() == HTTPStatus::Created as u16 }))
-        }
+            .with_payload(payload);
+        self.send_maybe_parse(builder, return_data, HTTPStatus::Created)
     }
 
-    // 点赞或取消点赞某个回帖或评论
+    /// 点赞 / 取消点赞
     pub fn execute_toggle_like(
         &self,
         action: &str,
@@ -459,19 +446,19 @@ impl ForumActionHandler {
                 ));
             }
         };
-
+        debug!(
+            "点赞操作: action={}, item_id={}, type={:?}",
+            action, item_id, item_type
+        );
         let endpoint = format!("/web/forums/comments/{}/liked", item_id);
-
-        let response = self
+        let builder = self
             .client
             .build_request(method, &endpoint, None)
-            .with_param("source", item_type.as_str())
-            .send()?;
-
-        Ok(response.status() == HTTPStatus::NoContent as u16)
+            .with_param("source", item_type.as_str());
+        self.check_status(builder, HTTPStatus::NoContent)
     }
 
-    // 举报某个回帖或评论
+    /// 举报回帖或评论
     pub fn report_item(
         &self,
         item_id: i32,
@@ -480,27 +467,21 @@ impl ForumActionHandler {
         item_type: ItemType,
         return_data: bool,
     ) -> MewResult<Value> {
+        debug!("举报内容: item_id={}, type={:?}", item_id, item_type);
         let payload = json!({
             "reason_id": reason_id as i32,
             "description": description,
             "discussion_id": item_id,
             "source": item_type.as_str(),
         });
-
-        let response = self
+        let builder = self
             .client
             .build_request(HttpMethod::Post, "/web/reports/posts/discussions", None)
-            .with_payload(payload)
-            .send()?;
-
-        if return_data {
-            self.client.response_to_json(response)
-        } else {
-            Ok(json!({ "success": response.status() == HTTPStatus::Created as u16 }))
-        }
+            .with_payload(payload);
+        self.send_maybe_parse(builder, return_data, HTTPStatus::Created)
     }
 
-    // 举报某个帖子
+    /// 举报帖子
     pub fn report_post(
         &self,
         post_id: i32,
@@ -508,42 +489,34 @@ impl ForumActionHandler {
         description: &str,
         return_data: bool,
     ) -> MewResult<Value> {
+        debug!("举报帖子: post_id={}", post_id);
         let payload = json!({
             "reason_id": reason_id as i32,
             "description": description,
             "post_id": post_id,
         });
-
-        let response = self
+        let builder = self
             .client
             .build_request(HttpMethod::Post, "/web/reports/posts", None)
-            .with_payload(payload)
-            .send()?;
-
-        if return_data {
-            self.client.response_to_json(response)
-        } else {
-            Ok(json!({ "success": response.status() == HTTPStatus::Created as u16 }))
-        }
+            .with_payload(payload);
+        self.send_maybe_parse(builder, return_data, HTTPStatus::Created)
     }
 
-    // 删除某个回帖或评论或帖子
+    /// 删除回帖 / 评论 / 帖子
     pub fn delete_item(&self, item_id: i32, item_type: DeleteItemType) -> MewResult<bool> {
         let endpoint = match item_type {
             DeleteItemType::Reply => format!("/web/forums/replies/{}", item_id),
             DeleteItemType::Comment => format!("/web/forums/comments/{}", item_id),
             DeleteItemType::Post => format!("/web/forums/posts/{}", item_id),
         };
-
-        let response = self
+        debug!("删除项目: item_id={}, type={:?}", item_id, item_type);
+        let builder = self
             .client
-            .build_request(HttpMethod::Delete, &endpoint, None)
-            .send()?;
-
-        Ok(response.status() == HTTPStatus::NoContent as u16)
+            .build_request(HttpMethod::Delete, &endpoint, None);
+        self.check_status(builder, HTTPStatus::NoContent)
     }
 
-    // 置顶或取消置顶某个回帖
+    /// 置顶 / 取消置顶回帖
     pub fn execute_toggle_comment_top_status(
         &self,
         comment_id: i32,
@@ -554,14 +527,16 @@ impl ForumActionHandler {
         } else {
             HttpMethod::Delete
         };
+        debug!(
+            "置顶操作: comment_id={}, should_top={}",
+            comment_id, should_top
+        );
         let endpoint = format!("/web/forums/replies/{}/top", comment_id);
-
-        let response = self.client.build_request(method, &endpoint, None).send()?;
-
-        Ok(response.status() == HTTPStatus::NoContent as u16)
+        let builder = self.client.build_request(method, &endpoint, None);
+        self.check_status(builder, HTTPStatus::NoContent)
     }
 
-    // 发布帖子
+    /// 发布帖子
     pub fn create_post(
         &self,
         target_type: TargetType,
@@ -571,6 +546,7 @@ impl ForumActionHandler {
         workshop_id: Option<i32>,
         return_data: bool,
     ) -> MewResult<Value> {
+        debug!("发布帖子: target={:?}, title={}", target_type, title);
         let endpoint = match target_type {
             TargetType::Board => match board_id {
                 Some(id) => format!("/web/forums/boards/{}/posts", id as i32),
@@ -595,17 +571,11 @@ impl ForumActionHandler {
             "content": content
         });
 
-        let response = self
+        let builder = self
             .client
             .build_request(HttpMethod::Post, &endpoint, None)
-            .with_payload(payload)
-            .send()?;
-
-        if return_data {
-            self.client.response_to_json(response)
-        } else {
-            Ok(json!({ "success": response.status() == HTTPStatus::Created as u16 }))
-        }
+            .with_payload(payload);
+        self.send_maybe_parse(builder, return_data, HTTPStatus::Created)
     }
 }
 

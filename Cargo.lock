@@ -50,6 +50,7 @@ dependencies = [
  "aes-gcm",
  "base64",
  "fastrand",
+ "log",
  "serde",
  "serde_json",
  "sha2",

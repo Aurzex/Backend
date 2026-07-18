@@ -1082,7 +1082,7 @@ impl ViolationChecker {
 
     fn process_auto_report(&self, violations: HashSet<String>) -> Result<(), ProcessorError> {
         let mut multi_account = MultiAccount::new();
-        let password_path = PathConfig::password_file_path();
+        let password_path = PathConfig::global().password_file_path();
         if password_path.exists() {
             multi_account.load_from_file(&password_path)?;
         } else {

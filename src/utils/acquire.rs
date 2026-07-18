@@ -12,6 +12,9 @@ use ureq::http::Response;
 use ureq::unversioned::multipart::Form;
 use ureq::{Agent, Body, RequestBuilder};
 
+// 引入日志宏（库使用者需自行选择日志实现，如 env_logger）
+use log::{debug, info};
+
 // ==================== 错误定义（使用 thiserror） ====================
 #[derive(ThisError, Debug)]
 pub enum MewError {
@@ -156,8 +159,10 @@ impl AsRef<str> for Catsona {
 }
 
 // ==================== 身份管理器（核心单例 - 扁平化设计）====================
-/// 全局身份管理器，使用固定长度数组存储令牌
-/// 采用 RwLock + AtomicUsize 分离 token 存储和 current 索引
+/// 全局身份管理器，使用固定长度数组存储令牌。
+///
+/// 采用 `RwLock` + `AtomicUsize` 分离 token 存储和当前身份索引。
+/// `AtomicUsize` 使用 `Release/Acquire` 排序保证身份切换后令牌可见。
 #[derive(Debug)]
 pub struct KittyIdentityManager {
     token_bowl: RwLock<[Option<Arc<str>>; 4]>, // 令牌碗
@@ -172,27 +177,35 @@ impl KittyIdentityManager {
         }
     }
 
-    /// 设置指定身份的令牌
-    /// 注意：Blanky 身份不应持有令牌，尝试设置将返回错误
+    /// 设置指定身份的令牌。
+    ///
+    /// - 若 token 非空，则设置该身份的令牌。
+    /// - 若 token 为空字符串，则**清除**该身份的令牌（设为 None）。
+    /// - `Blanky` 身份不允许持有令牌，尝试设置将返回错误。
     fn set_token(&self, identity: Catsona, token: String) -> MewResult<()> {
         // Blanky 身份不允许设置令牌
         if identity == Catsona::Blanky {
             return Err(MewError::Auth("Blanky identity cannot hold a token".into()));
         }
         let mut bowl = self.token_bowl.write().unwrap();
-        if !token.is_empty() {
+        if token.is_empty() {
+            // 清空令牌
+            bowl[identity.index()] = None;
+        } else {
             bowl[identity.index()] = Some(Arc::from(token));
         }
         Ok(())
     }
 
-    /// 切换到指定身份
+    /// 切换到指定身份。
+    ///
+    /// 切换使用 `Release` 存储，确保之前的 token 写入对后续 `current_token` 可见。
     fn switch_identity(&self, identity: Catsona) -> MewResult<()> {
         // Blanky 可以切换（不需要令牌），其他身份需要有令牌
         if identity == Catsona::Blanky
             || self.token_bowl.read().unwrap()[identity.index()].is_some()
         {
-            self.current_cat.store(identity.index(), Ordering::Relaxed);
+            self.current_cat.store(identity.index(), Ordering::Release);
             Ok(())
         } else {
             Err(MewError::Auth(format!(
@@ -202,15 +215,15 @@ impl KittyIdentityManager {
         }
     }
 
-    /// 当前身份（无锁读取）
+    /// 当前身份（使用 `Acquire` 加载，与切换时的 `Release` 配对，保证可见性）
     fn current_identity(&self) -> Catsona {
-        let idx = self.current_cat.load(Ordering::Relaxed);
+        let idx = self.current_cat.load(Ordering::Acquire);
         Catsona::ALL[idx]
     }
 
     /// 当前身份对应的令牌
     fn current_token(&self) -> Option<Arc<str>> {
-        let idx = self.current_cat.load(Ordering::Relaxed);
+        let idx = self.current_cat.load(Ordering::Acquire);
         let bowl = self.token_bowl.read().unwrap();
         bowl[idx].clone()
     }
@@ -223,7 +236,7 @@ impl KittyIdentityManager {
 }
 
 /// 全局身份管理器单例
-/// 使用 OnceLock 确保线程安全的懒加载初始化
+/// 使用 `OnceLock` 确保线程安全的懒加载初始化
 static GLOBAL_IDENTITY_MANAGER: OnceLock<KittyIdentityManager> = OnceLock::new();
 
 fn get_global_identity_manager() -> &'static KittyIdentityManager {
@@ -340,7 +353,7 @@ impl KittyAuth for GlobalKittyAuth {
     }
 
     fn set_token(&self, identity: Catsona, token: String) -> MewResult<()> {
-        // 委托给全局管理器，会检查 Blanky 限制
+        // 委托给全局管理器，会检查 Blanky 限制和空字符串清除
         get_global_identity_manager().set_token(identity, token)
     }
 
@@ -373,7 +386,7 @@ impl KittyAuth for LocalKittyAuth {
     }
 
     fn set_token(&self, identity: Catsona, token: String) -> MewResult<()> {
-        // 委托给本地管理器，会检查 Blanky 限制
+        // 委托给本地管理器，会检查 Blanky 限制和空字符串清除
         self.inner.set_token(identity, token)
     }
 
@@ -515,31 +528,31 @@ impl KittyCore {
         if !self.config.log_requests {
             return;
         }
-        println!("\n========== 网络请求信息 ==========");
-        println!("方法: {}", Into::<&str>::into(method));
-        println!("URL: {}", url);
+        debug!("========== 网络请求信息 ==========");
+        debug!("方法: {}", Into::<&str>::into(method));
+        debug!("URL: {}", url);
 
-        println!("请求头:");
+        debug!("请求头:");
         for (k, v) in KITTY_HEADERS {
-            println!("  {}: {}", k, v);
+            debug!("  {}: {}", k, v);
         }
 
         if self.auth.auth_header().is_some() {
-            println!("  Authorization: Bearer [已隐藏]");
+            debug!("  Authorization: Bearer [已隐藏]");
         }
 
         if !params.is_empty() {
-            println!("查询参数:");
+            debug!("查询参数:");
             for (k, v) in params {
-                println!("  {}: {}", k, v);
+                debug!("  {}: {}", k, v);
             }
         }
 
         if let Some(payload) = payload {
-            println!("请求体:");
+            debug!("请求体:");
             if let Ok(pretty) = serde_json::to_string_pretty(payload) {
                 for line in pretty.lines() {
-                    println!("  {}", line);
+                    debug!("  {}", line);
                 }
             }
         }
@@ -550,22 +563,22 @@ impl KittyCore {
             return Ok(());
         }
 
-        println!("\n========== 响应信息 ==========");
-        println!("请求 URL: {}", url);
-        println!(
+        debug!("========== 响应信息 ==========");
+        debug!("请求 URL: {}", url);
+        debug!(
             "状态: {} {}",
             response.status(),
             response.status().canonical_reason().unwrap_or("")
         );
 
-        println!("\n响应头:");
+        debug!("响应头:");
         for (key, value) in response.headers() {
             if let Ok(value_str) = value.to_str() {
-                println!("  {}: {}", key, value_str);
+                debug!("  {}: {}", key, value_str);
             }
         }
 
-        println!("================================\n");
+        debug!("================================\n");
         Ok(())
     }
 
@@ -720,20 +733,20 @@ impl KittyCore {
         let bytes = body.read_to_vec()?;
         if bytes.is_empty() {
             if self.config.log_requests {
-                println!("响应体: (空)");
+                debug!("响应体: (空)");
             }
             return Ok(Value::Null);
         }
 
         let json: Value = serde_json::from_slice(&bytes)?;
         if self.config.log_requests {
-            println!("\n---------- 响应体 (JSON) ----------");
+            debug!("---------- 响应体 (JSON) ----------");
             if let Ok(pretty) = serde_json::to_string_pretty(&json) {
                 for line in pretty.lines() {
-                    println!("  {}", line);
+                    debug!("  {}", line);
                 }
             }
-            println!("------------------------------------\n");
+            debug!("------------------------------------");
         }
         Ok(json)
     }
@@ -743,15 +756,15 @@ impl KittyCore {
         let mut body = response.into_body();
         let text = body.read_to_string()?;
         if self.config.log_requests {
-            println!("\n---------- 响应体 (文本) ----------");
+            debug!("---------- 响应体 (文本) ----------");
             if text.len() > 1000 {
                 let preview: String = text.chars().take(1000).collect();
-                println!("  {}", preview);
-                println!("  ... (剩余 {} 字符被截断)", text.len() - 1000);
+                debug!("  {}", preview);
+                debug!("  ... (剩余 {} 字符被截断)", text.len() - 1000);
             } else {
-                println!("  {}", text);
+                debug!("  {}", text);
             }
-            println!("-------------------------------------\n");
+            debug!("-------------------------------------");
         }
         Ok(text)
     }
@@ -761,27 +774,27 @@ impl KittyCore {
         let mut body = response.into_body();
         let data = body.read_to_vec()?;
         if self.config.log_requests {
-            println!("\n---------- 响应体 (二进制) ----------");
-            println!("  大小: {} 字节", data.len());
+            debug!("---------- 响应体 (二进制) ----------");
+            debug!("  大小: {} 字节", data.len());
             if let Ok(text) = std::str::from_utf8(&data) {
-                println!("  内容预览:");
+                debug!("  内容预览:");
                 let preview: String = text.chars().take(200).collect();
-                println!("  {}", preview);
+                debug!("  {}", preview);
                 if text.len() > 200 {
-                    println!("  ... (截断)");
+                    debug!("  ... (截断)");
                 }
             } else {
                 let preview_len = std::cmp::min(data.len(), 64);
-                print!("  十六进制预览: ");
-                for byte in &data[..preview_len] {
-                    print!("{:02x} ", byte);
-                }
-                println!();
+                let hex: String = data[..preview_len]
+                    .iter()
+                    .map(|b| format!("{:02x} ", b))
+                    .collect();
+                debug!("  十六进制预览: {}", hex);
                 if data.len() > 64 {
-                    println!("  ... (截断)");
+                    debug!("  ... (截断)");
                 }
             }
-            println!("--------------------------------------\n");
+            debug!("--------------------------------------");
         }
         Ok(data)
     }
@@ -839,8 +852,11 @@ impl CodeMaoClient {
         self.inner.agent()
     }
 
-    /// 设置指定身份的令牌
-    /// 注意：Blanky 身份不允许设置令牌
+    /// 设置指定身份的令牌。
+    ///
+    /// - 非空 token：设置该身份的令牌。
+    /// - 空字符串：清除该身份的令牌（设为 None）。
+    /// - `Blanky` 身份不允许设置令牌。
     pub fn set_token(&self, identity: Catsona, token: impl Into<String>) -> MewResult<()> {
         self.inner.auth.set_token(identity, token.into())
     }
@@ -895,7 +911,8 @@ impl CodeMaoClient {
         FileUploader::new(self.clone())
     }
 }
-// ==================== 分页配置（保持不变） ====================
+
+// ==================== 分页配置 ====================
 
 #[derive(Debug, Clone, Copy)]
 pub enum PaginationMethod {
@@ -915,6 +932,7 @@ impl PaginationMethod {
     }
 }
 
+/// 分页详细配置，可通过 `with_config` 整体设置。
 #[derive(Debug, Clone)]
 pub struct PaginationConfig {
     /// 每页大小，默认 15
@@ -941,7 +959,7 @@ impl Default for PaginationConfig {
     }
 }
 
-// ==================== 分页迭代器状态（三态枚举，保留） ====================
+// ==================== 分页迭代器状态（三态枚举） ====================
 
 /// 分页迭代器的内部状态机
 enum IterState {
@@ -1023,40 +1041,57 @@ impl PaginatedIter {
         format!("/{}", key.replace('.', "/"))
     }
 
-    // ---- 链式配置方法（萌化命名，保持原样） ----
+    // ---- 链式配置方法（保留重要参数） ----
 
+    /// 设置 HTTP 方法（默认 GET）
     pub fn with_iter_method(mut self, method: HttpMethod) -> Self {
         self.method = method;
         self
     }
+
+    /// 添加单个基础查询参数
     pub fn with_iter_param(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         Arc::make_mut(&mut self.base_params).push((key.into(), value.into()));
         self
     }
+
+    /// 批量添加基础查询参数
     pub fn with_iter_params(mut self, params: Vec<(String, String)>) -> Self {
         Arc::make_mut(&mut self.base_params).extend(params);
         self
     }
+
+    /// 设置 POST/PUT 请求的 JSON 负载
     pub fn with_iter_payload(mut self, payload: Value) -> Self {
         self.payload = Some(Arc::new(payload));
         self
     }
+
+    /// 设置最多获取的元素数量
     pub fn with_limit(mut self, limit: usize) -> Self {
         self.limit = Some(limit);
         self
     }
+
+    /// 设置响应中总数的 JSON 键路径（点分隔，如 "data.total"）
     pub fn with_total_key(mut self, key: impl Into<String>) -> Self {
         self.total_pointer = Self::key_to_pointer(&key.into());
         self
     }
+
+    /// 设置响应中数据数组的 JSON 键路径（点分隔，如 "data.items"）
     pub fn with_data_key(mut self, key: impl Into<String>) -> Self {
         self.data_pointer = Self::key_to_pointer(&key.into());
         self
     }
+
+    /// 设置分页计算方式（偏移量或页码）
     pub fn with_pagination_method(mut self, method: PaginationMethod) -> Self {
         self.pagination_method = method;
         self
     }
+
+    /// 完整设置分页配置（可覆盖默认的每页大小、参数名等）
     pub fn with_config(mut self, config: PaginationConfig) -> Self {
         self.config = config;
         self
@@ -1077,12 +1112,15 @@ impl PaginatedIter {
         self.config.response_offset_key = Some(key.into());
         self
     }
-    pub fn with_base_key(mut self, key: BaseKey) -> Self {
-        self.base_key = Some(key);
-        self
-    }
+
     pub fn with_page_size(mut self, size: usize) -> Self {
         self.config.page_size = size;
+        self
+    }
+
+    /// 设置基础 URL 键
+    pub fn with_base_key(mut self, key: BaseKey) -> Self {
+        self.base_key = Some(key);
         self
     }
 
@@ -1118,13 +1156,23 @@ impl PaginatedIter {
         self.client.response_to_json(response)
     }
 
-    /// 从响应 JSON 中尝试提取总数（total），支持多种数字类型
+    /// 从响应 JSON 中尝试提取总数（total），支持多种数字类型，并对浮点数做范围检查。
     fn try_extract_total(&self, json: &Value) -> Option<usize> {
         json.pointer(&self.total_pointer)
             .and_then(|v| {
+                // 优先使用整数类型
                 v.as_u64()
                     .or_else(|| v.as_i64().map(|i| i as u64))
-                    .or_else(|| v.as_f64().map(|f| f as u64))
+                    // 浮点数需检查非负且在 usize 范围内
+                    .or_else(|| {
+                        v.as_f64().and_then(|f| {
+                            if f >= 0.0 && f <= usize::MAX as f64 {
+                                Some(f as u64)
+                            } else {
+                                None
+                            }
+                        })
+                    })
             })
             .map(|n| n as usize)
     }
@@ -1260,6 +1308,7 @@ impl PaginatedIter {
         }
         Ok(items)
     }
+
     /// 仅获取元数据（总数、页数等），不迭代数据
     pub fn fetch_metadata(&mut self) -> MewResult<()> {
         if matches!(self.state, IterState::Uninit) {
@@ -1267,6 +1316,7 @@ impl PaginatedIter {
         }
         Ok(())
     }
+
     // ========== 新增页面元数据查询方法（&self，不触发网络请求） ==========
 
     /// 获取当前页码（从 1 开始），仅在已成功请求至少一页时返回 Some

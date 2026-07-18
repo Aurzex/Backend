@@ -1,25 +1,16 @@
-use crate::{
-    api::auth,
-    core::retrieve::{self},
-};
+use crate::{api::auth, core::services};
 
 mod api;
 mod core;
 mod utils;
 
-fn main() {
-    auth::LoginBuilder::new()
-        .identity("awa")
-        .password("awa")
-        .execute();
 
-    let comments = retrieve::DataQuery::new()
-        .query_comments()
-        .source(retrieve::CommentSource::Work)
-        .limit(Some(50))
-        .mode(retrieve::CommentQueryMode::Comments)
-        .target_id(130866720)
-        .execute()
-        .unwrap();
-    dbg!(comments);
+
+fn main() {
+    let result = auth::LoginBuilder::new()
+        .identity("Aurzex")
+        .password("CODExhr1106.mao")
+        .method(auth::LoginMethod::PasswordV1)
+        .execute();
+    println!("{}", result.unwrap().token);
 }

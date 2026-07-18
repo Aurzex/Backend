@@ -187,7 +187,7 @@ impl Default for DecompilerConfig {
             creation_base_url: "https://api-creation.codemao.cn".to_string(),
             client_secret: "pBlYqXbJDu".to_string(),
             crypto_salt: (0..31).collect(),
-            default_output_dir: PathConfig::compile_file_path(),
+            default_output_dir: PathConfig::global().compile_file_path(),
             toolbox_categories: vec![
                 "action".to_string(),
                 "advanced".to_string(),
