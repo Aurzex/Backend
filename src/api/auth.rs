@@ -696,20 +696,32 @@ impl LoginHandler {
         if let Some(token) = response.get("token").and_then(|t| t.as_str()) {
             self.client().set_token(Catsona::Judge, token)?;
             self.client().switch_identity(Catsona::Judge)?;
-            return Ok(LoginResult::new(
-                true,
-                LoginMethod::AdminPassword,
-                "管理员账密登录成功",
-            )
-            .with_token(token));
+            return Ok(
+                LoginResult::new(true, LoginMethod::AdminPassword, "管理员账密登录成功")
+                    .with_token(token),
+            );
         }
 
-        // 提取错误信息，直接返回失败
+        // 提取错误信息
+        let error_code = response
+            .get("error_code")
+            .and_then(|e| e.as_str())
+            .unwrap_or("");
         let error_msg = response
             .get("error_msg")
             .and_then(|e| e.as_str())
             .unwrap_or("未知错误");
-        Err(MewError::Auth(format!("管理员登录失败: {}", error_msg)))
+
+        // 根据错误码返回具体的错误信息
+        match error_code {
+            "Admin-Password-Error@Community-Admin" | "Param-Invalid@Common" => {
+                Err(MewError::Auth("管理员用户名或密码错误".into()))
+            }
+            "Captcha-Error@Community-Admin" | "Captcha-Expired@Community-Admin" => {
+                Err(MewError::Auth(format!("验证码错误或已过期: {}", error_msg)))
+            }
+            _ => Err(MewError::Auth(format!("管理员登录失败: {}", error_msg))),
+        }
     }
 }
 
@@ -935,8 +947,12 @@ impl AuthManager {
                     .captcha
                     .as_deref()
                     .ok_or_else(|| MewError::Auth("管理员密码登录需要提供验证码".into()))?;
-                self.handler
-                    .handle_admin_password(&credentials.identity, &credentials.password, timestamp, captcha)?
+                self.handler.handle_admin_password(
+                    &credentials.identity,
+                    &credentials.password,
+                    timestamp,
+                    captcha,
+                )?
             }
             _ => {
                 return Err(MewError::Auth(format!(
