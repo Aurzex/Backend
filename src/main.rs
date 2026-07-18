@@ -4,12 +4,10 @@ mod api;
 mod core;
 mod utils;
 
-
-
 fn main() {
     let result = auth::LoginBuilder::new()
-        .identity("Aurzex")
-        .password("CODExhr1106.mao")
+        .identity("")
+        .password("")
         .method(auth::LoginMethod::PasswordV1)
         .execute();
     println!("{}", result.unwrap().token);

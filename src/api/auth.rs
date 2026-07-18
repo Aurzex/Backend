@@ -131,6 +131,8 @@ pub struct LoginCredentials {
     pub pid: String,
     pub status: AccountStatus,
     pub role: UserRole,
+    pub timestamp: Option<i64>,
+    pub captcha: Option<String>,
 }
 
 impl Default for LoginCredentials {
@@ -142,6 +144,8 @@ impl Default for LoginCredentials {
             pid: "65edCTyg".to_string(),
             status: AccountStatus::Average,
             role: UserRole::User,
+            timestamp: None,
+            captcha: None,
         }
     }
 }
@@ -406,19 +410,25 @@ impl AuthProcessor {
     }
 
     /// 获取管理员验证码图片，并保存到文件。
-    pub fn fetch_admin_captcha(&self, timestamp: i64) -> MewResult<Vec<u8>> {
+    /// 返回时间戳，供后续登录使用。
+    pub fn fetch_admin_captcha(&self) -> MewResult<i64> {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("系统时间错误")
+            .as_millis() as i64;
+
         let client = self.client();
         let endpoint = format!("/admins/captcha/{}", timestamp);
         let response = client
             .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Whale))
             .send()?;
+
         if response.status() == 200 {
             let bytes = response.into_body().read_to_vec()?;
-            // 显式转换错误类型
             CodeMaoFile::write_bytes(&PathConfig::global().captcha_file_path(), &bytes)
                 .map_err(|e| MewError::Other(format!("验证码文件写入失败: {}", e)))?;
             debug!("管理员验证码已保存至文件");
-            Ok(bytes)
+            Ok(timestamp)
         } else {
             Err(MewError::Auth(format!(
                 "获取验证码失败, 状态码: {}",
@@ -544,17 +554,10 @@ impl LoginHandler {
                             .with_data(data),
                     )
                 } else {
-                    Ok(
-                        LoginResult::new(false, LoginMethod::PasswordV0, "v0 密码登录失败")
-                            .with_data(data),
-                    )
+                    Err(MewError::Auth("v0 密码登录失败：未获取到token".into()))
                 }
             }
-            Err(e) => Ok(LoginResult::new(
-                false,
-                LoginMethod::PasswordV0,
-                &format!("登录失败: {}", e),
-            )),
+            Err(e) => Err(MewError::Auth(format!("v0 登录失败: {}", e))),
         }
     }
 
@@ -583,17 +586,10 @@ impl LoginHandler {
                             .with_data(data),
                     )
                 } else {
-                    Ok(
-                        LoginResult::new(false, LoginMethod::PasswordV1, "v1 密码登录失败")
-                            .with_data(data),
-                    )
+                    Err(MewError::Auth("v1 密码登录失败：未获取到token".into()))
                 }
             }
-            Err(e) => Ok(LoginResult::new(
-                false,
-                LoginMethod::PasswordV1,
-                &format!("登录失败: {}", e),
-            )),
+            Err(e) => Err(MewError::Auth(format!("v1 登录失败: {}", e))),
         }
     }
 
@@ -622,22 +618,19 @@ impl LoginHandler {
                             .with_data(data),
                     )
                 } else {
-                    Ok(
-                        LoginResult::new(false, LoginMethod::PasswordV2, "v2 密码登录失败")
-                            .with_data(data),
-                    )
+                    Err(MewError::Auth("v2 密码登录失败：未获取到token".into()))
                 }
             }
-            Err(e) => Ok(LoginResult::new(
-                false,
-                LoginMethod::PasswordV2,
-                &format!("登录失败: {}", e),
-            )),
+            Err(e) => Err(MewError::Auth(format!("v2 登录失败: {}", e))),
         }
     }
 
     /// Token 登录处理（普通用户）。
     pub fn handle_token(&self, token: &str, status: AccountStatus) -> MewResult<LoginResult> {
+        if token.trim().is_empty() {
+            return Err(MewError::Auth("Token 不能为空".into()));
+        }
+
         let auth_details = self.processor.fetch_auth_details(token)?;
         self.set_token_and_identity(token, status.to_identity())?;
         Ok(LoginResult::new(true, LoginMethod::Token, "Token 登录成功")
@@ -645,21 +638,13 @@ impl LoginHandler {
             .with_auth_details(auth_details))
     }
 
-    /// 管理员 Token 登录（若未提供则从标准输入读取）。
-    pub fn handle_admin_token(&self, token: Option<&str>) -> MewResult<LoginResult> {
-        let token_str = match token {
-            Some(t) if !t.trim().is_empty() => t.to_string(),
-            _ => {
-                info!("请输入管理员 Token:");
-                let mut input = String::new();
-                std::io::stdin()
-                    .read_line(&mut input)
-                    .map_err(MewError::Io)?;
-                input.trim().to_string()
-            }
-        };
+    /// 管理员 Token 登录（所有参数通过传参获取）。
+    pub fn handle_admin_token(&self, token: &str) -> MewResult<LoginResult> {
+        if token.trim().is_empty() {
+            return Err(MewError::Auth("管理员 Token 不能为空".into()));
+        }
 
-        self.client().set_token(Catsona::Judge, &token_str)?;
+        self.client().set_token(Catsona::Judge, token)?;
         self.client().switch_identity(Catsona::Judge)?;
 
         match self.processor.fetch_admin_details() {
@@ -667,7 +652,7 @@ impl LoginHandler {
                 if data.get("admin").is_some() {
                     Ok(
                         LoginResult::new(true, LoginMethod::AdminToken, "管理员 Token 登录成功")
-                            .with_token(&token_str)
+                            .with_token(token)
                             .with_auth_details(data),
                     )
                 } else {
@@ -682,107 +667,49 @@ impl LoginHandler {
         }
     }
 
-    /// 管理员用户名密码登录（交互式验证码流程）。
+    /// 管理员用户名密码登录（完全由参数驱动，不再交互与重试）。
     ///
-    /// 若用户名或密码为空，则通过标准输入交互获取。验证码错误时会提示重新输入用户名密码。
+    /// 需要调用者先通过 `AuthProcessor::fetch_admin_captcha` 获取 `timestamp` 和验证码图片，
+    /// 然后将用户识别的验证码字符串传入。
     pub fn handle_admin_password(
         &self,
-        username: Option<&str>,
-        password: Option<&str>,
+        username: &str,
+        password: &str,
+        timestamp: i64,
+        captcha: &str,
     ) -> MewResult<LoginResult> {
-        let mut username = match username {
-            Some(u) if !u.trim().is_empty() => u.to_string(),
-            _ => {
-                info!("请输入管理员用户名:");
-                let mut input = String::new();
-                std::io::stdin()
-                    .read_line(&mut input)
-                    .map_err(MewError::Io)?;
-                input.trim().to_string()
-            }
-        };
-
-        let mut password = match password {
-            Some(p) if !p.trim().is_empty() => p.to_string(),
-            _ => {
-                info!("请输入管理员密码:");
-                let mut input = String::new();
-                std::io::stdin()
-                    .read_line(&mut input)
-                    .map_err(MewError::Io)?;
-                input.trim().to_string()
-            }
-        };
-
-        loop {
-            let timestamp = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("系统时间错误")
-                .as_millis() as i64;
-
-            info!("正在获取验证码...");
-            self.processor.fetch_admin_captcha(timestamp)?;
-
-            info!(
-                "请输入验证码 (图片路径: {:?}):",
-                PathConfig::global().captcha_file_path()
-            );
-            let mut captcha = String::new();
-            std::io::stdin()
-                .read_line(&mut captcha)
-                .map_err(MewError::Io)?;
-            let captcha = captcha.trim();
-
-            match self
-                .processor
-                .authenticate_admin_user(&username, &password, timestamp, captcha)
-            {
-                Ok(response) => {
-                    if let Some(token) = response.get("token").and_then(|t| t.as_str()) {
-                        self.client().set_token(Catsona::Judge, token)?;
-                        self.client().switch_identity(Catsona::Judge)?;
-                        return Ok(LoginResult::new(
-                            true,
-                            LoginMethod::AdminPassword,
-                            "管理员账密登录成功",
-                        )
-                        .with_token(token));
-                    }
-
-                    let error_code = response
-                        .get("error_code")
-                        .and_then(|e| e.as_str())
-                        .unwrap_or("");
-                    let error_msg = response
-                        .get("error_msg")
-                        .and_then(|e| e.as_str())
-                        .unwrap_or("未知错误");
-
-                    if error_code == "Admin-Password-Error@Community-Admin"
-                        || error_code == "Param-Invalid@Common"
-                    {
-                        warn!("用户名或密码错误，请重新输入");
-                        info!("请输入用户名:");
-                        let mut input = String::new();
-                        std::io::stdin()
-                            .read_line(&mut input)
-                            .map_err(MewError::Io)?;
-                        username = input.trim().to_string();
-                        info!("请输入密码:");
-                        std::io::stdin()
-                            .read_line(&mut input)
-                            .map_err(MewError::Io)?;
-                        password = input.trim().to_string();
-                        continue;
-                    } else {
-                        return Err(MewError::Auth(format!("管理员登录失败: {}", error_msg)));
-                    }
-                }
-                Err(e) => {
-                    return Err(MewError::Auth(format!("认证请求失败: {}", e)));
-                }
-            }
+        // 参数校验
+        if username.trim().is_empty() {
+            return Err(MewError::Auth("管理员用户名不能为空".into()));
         }
+        if password.trim().is_empty() {
+            return Err(MewError::Auth("管理员密码不能为空".into()));
+        }
+        if captcha.trim().is_empty() {
+            return Err(MewError::Auth("验证码不能为空".into()));
+        }
+
+        let response = self
+            .processor
+            .authenticate_admin_user(username, password, timestamp, captcha)?;
+
+        if let Some(token) = response.get("token").and_then(|t| t.as_str()) {
+            self.client().set_token(Catsona::Judge, token)?;
+            self.client().switch_identity(Catsona::Judge)?;
+            return Ok(LoginResult::new(
+                true,
+                LoginMethod::AdminPassword,
+                "管理员账密登录成功",
+            )
+            .with_token(token));
+        }
+
+        // 提取错误信息，直接返回失败
+        let error_msg = response
+            .get("error_msg")
+            .and_then(|e| e.as_str())
+            .unwrap_or("未知错误");
+        Err(MewError::Auth(format!("管理员登录失败: {}", error_msg)))
     }
 }
 
@@ -999,10 +926,18 @@ impl AuthManager {
     ) -> MewResult<LoginResult> {
         let method = self.get_admin_login_method(credentials, prefer_method)?;
         let mut result = match method {
-            LoginMethod::AdminToken => self.handler.handle_admin_token(Some(&credentials.token))?,
-            LoginMethod::AdminPassword => self
-                .handler
-                .handle_admin_password(Some(&credentials.identity), Some(&credentials.password))?,
+            LoginMethod::AdminToken => self.handler.handle_admin_token(&credentials.token)?,
+            LoginMethod::AdminPassword => {
+                let timestamp = credentials
+                    .timestamp
+                    .ok_or_else(|| MewError::Auth("管理员密码登录需要提供 timestamp".into()))?;
+                let captcha = credentials
+                    .captcha
+                    .as_deref()
+                    .ok_or_else(|| MewError::Auth("管理员密码登录需要提供验证码".into()))?;
+                self.handler
+                    .handle_admin_password(&credentials.identity, &credentials.password, timestamp, captcha)?
+            }
             _ => {
                 return Err(MewError::Auth(format!(
                     "不支持的管理员登录方式: {}",
@@ -1187,6 +1122,8 @@ pub struct LoginBuilder {
     status: AccountStatus,
     role: UserRole,
     prefer_method: Option<LoginMethod>,
+    timestamp: Option<i64>,
+    captcha: Option<String>,
 }
 
 impl LoginBuilder {
@@ -1200,6 +1137,8 @@ impl LoginBuilder {
             status: AccountStatus::Average,
             role: UserRole::User,
             prefer_method: None,
+            timestamp: None,
+            captcha: None,
         }
     }
 
@@ -1238,6 +1177,16 @@ impl LoginBuilder {
         self
     }
 
+    pub fn timestamp(mut self, val: i64) -> Self {
+        self.timestamp = Some(val);
+        self
+    }
+
+    pub fn captcha(mut self, val: impl Into<String>) -> Self {
+        self.captcha = Some(val.into());
+        self
+    }
+
     pub fn execute(mut self) -> MewResult<LoginResult> {
         let credentials = LoginCredentials {
             identity: self.identity.unwrap_or_default(),
@@ -1246,6 +1195,8 @@ impl LoginBuilder {
             pid: self.pid.unwrap_or_else(|| "65edCTyg".to_string()),
             status: self.status,
             role: self.role,
+            timestamp: self.timestamp,
+            captcha: self.captcha,
         };
         self.auth_manager.login(&credentials, self.prefer_method)
     }
