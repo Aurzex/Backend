@@ -9,8 +9,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde_json::Value;
 
 use super::pipeline::{
-    BatchActionManager, BatchGroup, ProcessingContext, ProcessingPipeline, ReportIdExt,
-    apply_action_by_method,
+    BatchActionManager, BatchGroup, CheckConfig, ProcessingContext, ProcessingPipeline,
+    ReportIdExt, apply_action_by_method, global_action_registry,
 };
 use super::types::{
     ProcessorError, ReportFetcher, ReportTypeRegistry, bytes_to_human, get_valid_input,
@@ -20,25 +20,26 @@ use crate::api::whale::{ReportHandler, ReportStatus, Resolution};
 use crate::utils::acquire::{FileUploader, KittyFactory};
 
 // ==================== 文件处理器 ====================
-const MAX_SIZE_BYTES: u64 = 15 * 1024 * 1024;
-
 pub struct FileProcessor;
 
 impl FileProcessor {
+    /// 上传单个文件，max_size_bytes 可从配置传入，此处保留默认常量
     pub fn handle_file_upload(
         file_path: &Path,
         save_path: &str,
         method: &str,
+        max_size_bytes: u64,
     ) -> Result<String, ProcessorError> {
         let metadata = fs::metadata(file_path)?;
         let file_size = metadata.len();
 
-        if file_size > MAX_SIZE_BYTES {
+        if file_size > max_size_bytes {
             let size_mb = file_size as f64 / 1024.0 / 1024.0;
             println!(
-                "警告: 文件 {} 大小 {:.2} MB 超过 15MB 限制, 跳过上传",
+                "警告: 文件 {} 大小 {:.2} MB 超过 {} MB 限制, 跳过上传",
                 file_path.display(),
-                size_mb
+                size_mb,
+                max_size_bytes as f64 / 1024.0 / 1024.0
             );
             return Err(ProcessorError::Processing(format!(
                 "文件过大: {} ({} bytes)",
@@ -73,12 +74,13 @@ impl FileProcessor {
         dir_path: &Path,
         save_path: &str,
         method: &str,
+        max_size_bytes: u64,
     ) -> Result<HashMap<PathBuf, String>, ProcessorError> {
         let mut results = HashMap::new();
         let mut cb = |entry: fs::DirEntry| {
             if entry.file_type().is_ok_and(|ft| ft.is_file()) {
                 let path = entry.path();
-                match Self::handle_file_upload(path.as_path(), save_path, method) {
+                match Self::handle_file_upload(path.as_path(), save_path, method, max_size_bytes) {
                     Ok(url) => {
                         results.insert(path.to_path_buf(), url);
                     }
@@ -117,12 +119,18 @@ pub struct ReportProcessor {
     pub fetcher: ReportFetcher,
     pub pipeline_factory: Arc<ReportTypeRegistry>,
     pub batch_manager: Arc<Mutex<BatchActionManager>>,
-    // 跨 chunk 批量组等待池
     pending_groups: Mutex<HashMap<(String, String), Vec<String>>>,
+    config: CheckConfig, // 注入配置，包含批量识别阈值等
 }
 
 impl ReportProcessor {
+    /// 使用默认配置构造
     pub fn new() -> Self {
+        Self::new_with_config(CheckConfig::default())
+    }
+
+    /// 使用自定义配置构造
+    pub fn new_with_config(config: CheckConfig) -> Self {
         let fetcher = ReportFetcher::new();
         let registry = Arc::new(fetcher.registry.clone());
         let batch_manager = Arc::new(Mutex::new(BatchActionManager::new()));
@@ -131,6 +139,7 @@ impl ReportProcessor {
             pipeline_factory: registry,
             batch_manager,
             pending_groups: Mutex::new(HashMap::new()),
+            config,
         }
     }
 
@@ -200,7 +209,7 @@ impl ReportProcessor {
         Ok(total_processed)
     }
 
-    // 分块更新并处理已达阈值的组
+    /// 分块更新并处理已达阈值的组
     fn update_and_handle_pending_groups(
         &self,
         chunk: &[Value],
@@ -213,8 +222,12 @@ impl ReportProcessor {
             if let Some((key, record_id)) = self.extract_group_key(item) {
                 let entry = pending.entry(key.clone()).or_default();
                 entry.push(record_id);
-                // 阈值：item_id 组 >=5，content 组 >=3
-                let threshold = if key.0 == "item_id" { 5 } else { 3 };
+                // 使用配置中的阈值
+                let threshold = if key.0 == "item_id" {
+                    self.config.batch_item_id_threshold
+                } else {
+                    self.config.batch_content_threshold
+                };
                 if entry.len() >= threshold {
                     ready_groups.push(BatchGroup::new(&key.0, &key.1, entry.clone()));
                     pending.remove(&key);
@@ -232,7 +245,7 @@ impl ReportProcessor {
 
     fn extract_group_key(&self, item: &Value) -> Option<((String, String), String)> {
         let rt = self.infer_report_type(item)?;
-        let config = self.fetcher.registry.get_config(&rt)?;
+        let config = self.fetcher.registry.get_config(rt)?;
         let record_id = item.get(&config.report_id_field).map(value_to_string)?;
         let item_id = item
             .get(&config.item_id_field)
@@ -281,10 +294,10 @@ impl ReportProcessor {
                     && self
                         .fetcher
                         .registry
-                        .is_action_available(&report_type, &action)
+                        .is_action_available(report_type, &action)
                 {
                     // 仅成功时标记已处理
-                    match self.apply_simple_action(item, &report_type, &action, admin_id) {
+                    match self.apply_simple_action(item, report_type, &action, admin_id) {
                         Ok(()) => {
                             self.batch_manager
                                 .lock()
@@ -305,27 +318,28 @@ impl ReportProcessor {
                     .find(|v| self.record_id_matches(v, first_record_id))
                 && let Some(report_type) = self.infer_report_type(first_item)
             {
-                let config = self.fetcher.registry.get_config(&report_type).cloned();
+                let config = self.fetcher.registry.get_config(report_type).cloned();
                 let mut context = ProcessingContext::new(
-                    first_record_id.clone(),
-                    report_type.clone(),
+                    first_record_id.to_string(),
+                    report_type.to_string(),
                     first_item.clone(),
                     admin_id,
                 );
-                context.is_batch_mode = false;
-                context.config = config;
+                context.record.is_batch_mode = false;
+                context.record.config = config;
 
                 let pipeline = ProcessingPipeline::create_default(
                     self.pipeline_factory.clone(),
                     self.batch_manager.clone(),
+                    self.config.clone(),
                 );
                 pipeline.execute(&mut context)?;
 
-                if let Some(action) = context.action {
+                if let Some(action) = &context.state.action {
                     self.batch_manager.lock().unwrap().save_batch_action(
                         &group.group_type,
                         &group.group_key,
-                        &action,
+                        action,
                     );
 
                     for record_id in &group.record_ids[1..] {
@@ -333,8 +347,7 @@ impl ReportProcessor {
                             chunk.iter().find(|v| self.record_id_matches(v, record_id))
                             && let Some(rt) = self.infer_report_type(item)
                         {
-                            // 仅成功时标记已处理
-                            match self.apply_simple_action(item, &rt, &action, admin_id) {
+                            match self.apply_simple_action(item, rt, action, admin_id) {
                                 Ok(()) => {
                                     self.batch_manager
                                         .lock()
@@ -362,9 +375,7 @@ impl ReportProcessor {
 
         for item in chunk {
             let report_type = self.infer_report_type(item);
-            let config = report_type
-                .as_ref()
-                .and_then(|rt| self.fetcher.registry.get_config(rt));
+            let config = report_type.and_then(|rt| self.fetcher.registry.get_config(rt));
 
             let record_id = config
                 .map(|c| {
@@ -384,20 +395,25 @@ impl ReportProcessor {
             }
 
             if let (Some(rt), Some(cfg)) = (report_type, config) {
-                let mut context =
-                    ProcessingContext::new(record_id.clone(), rt.clone(), item.clone(), admin_id);
-                context.config = Some(cfg.clone());
+                let mut context = ProcessingContext::new(
+                    record_id.clone(),
+                    rt.to_string(),
+                    item.clone(),
+                    admin_id,
+                );
+                context.record.config = Some(cfg.clone());
 
                 let pipeline = ProcessingPipeline::create_default(
                     self.pipeline_factory.clone(),
                     self.batch_manager.clone(),
+                    self.config.clone(),
                 );
                 if let Err(e) = pipeline.execute(&mut context) {
                     eprintln!("处理记录 {} 失败: {}，跳过", record_id, e);
                     continue;
                 }
 
-                if context.processed {
+                if context.state.processed {
                     processed += 1;
                     self.batch_manager
                         .lock()
@@ -412,7 +428,7 @@ impl ReportProcessor {
 
     fn record_id_matches(&self, item: &Value, target_id: &str) -> bool {
         if let Some(rt) = self.infer_report_type(item)
-            && let Some(cfg) = self.fetcher.registry.get_config(&rt)
+            && let Some(cfg) = self.fetcher.registry.get_config(rt)
         {
             return item
                 .get(&cfg.report_id_field)
@@ -447,7 +463,7 @@ impl ReportProcessor {
         for chunk in self.fetcher.fetch_reports_chunked(ReportStatus::ToBeDone) {
             for item in chunk {
                 if let Some(report_type) = self.infer_report_type(&item)
-                    && let Some(cfg) = self.fetcher.registry.get_config(&report_type)
+                    && let Some(cfg) = self.fetcher.registry.get_config(report_type)
                 {
                     let report_id = match cfg.get_report_id(&item) {
                         Ok(id) => id,
@@ -456,33 +472,13 @@ impl ReportProcessor {
                             continue;
                         }
                     };
-                    let handler = ReportHandler::new();
-                    let result = match cfg.handle_method.as_str() {
-                        "execute_process_comment_report" => handler.execute_process_comment_report(
-                            report_id,
-                            admin_id,
-                            Resolution::Pass,
-                        ),
-                        "execute_process_work_report" => handler.execute_process_work_report(
-                            report_id,
-                            admin_id,
-                            Resolution::Pass,
-                        ),
-                        "execute_process_post_report" => handler.execute_process_post_report(
-                            report_id,
-                            admin_id,
-                            Resolution::Pass,
-                        ),
-                        "execute_process_discussion_report" => handler
-                            .execute_process_discussion_report(
-                                report_id,
-                                admin_id,
-                                Resolution::Pass,
-                            ),
-                        _ => Ok(false),
-                    };
+                    // 使用全局动作注册表代替字符串匹配
+                    let registry = global_action_registry();
+                    let result =
+                        registry.apply(&cfg.handle_method, report_id, admin_id, Resolution::Pass);
                     match result {
-                        Ok(_) => count += 1,
+                        Ok(true) => count += 1,
+                        Ok(false) => eprintln!("一键通过返回 false (id={})", report_id),
                         Err(e) => eprintln!("一键通过失败 (id={}): {}", report_id, e),
                     }
                 }
@@ -493,18 +489,19 @@ impl ReportProcessor {
         Ok(count)
     }
 
-    fn infer_report_type(&self, item: &Value) -> Option<String> {
+    /// 推断举报类型，返回字符串引用以减少分配
+    fn infer_report_type<'a>(&self, item: &'a Value) -> Option<&'a str> {
         if let Some(t) = item.get("_report_type").and_then(|v| v.as_str()) {
-            return Some(t.to_string());
+            return Some(t);
         }
         if item.get("comment_content").is_some() || item.get("comment_id").is_some() {
-            Some("shop_comment".into())
+            Some("shop_comment")
         } else if item.get("work_name").is_some() {
-            Some("work_work".into())
+            Some("work_work")
         } else if item.get("discussion_content").is_some() || item.get("discussion_id").is_some() {
-            Some("forum_discussion".into())
+            Some("forum_discussion")
         } else if item.get("post_title").is_some() && item.get("board_name").is_some() {
-            Some("forum_post".into())
+            Some("forum_post")
         } else {
             None
         }

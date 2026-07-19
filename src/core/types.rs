@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::io::{self, Write};
 use std::num::ParseIntError;
+use std::sync::OnceLock;
 use std::time::{Duration, UNIX_EPOCH};
 
 use crate::api::whale::{CommentSourceType, ReportStatus, WhaleReportFetcher, WorkSourceType};
@@ -59,9 +60,8 @@ impl From<Box<dyn std::error::Error>> for ProcessorError {
     }
 }
 
-// ==================== 评论配置 trait（优化：返回引用，避免克隆） ====================
+// ==================== 评论配置 trait ====================
 pub trait CommentConfig {
-    /// 获取指定作品的评论列表引用，None 表示无评论
     fn get_comments(&self, item_id: i64) -> Option<&[Value]>;
 }
 
@@ -106,15 +106,10 @@ pub fn timestamp_to_string(ts: &serde_json::Value) -> String {
     if let Some(secs) = ts.as_i64()
         && secs > 0
     {
-        // Convert UNIX timestamp to local time string without using chrono or external crates
-        let secs_u64 = secs as u64;
-        let t = UNIX_EPOCH + Duration::from_secs(secs_u64);
-        if t.elapsed().is_ok() {
-            // Get seconds since UNIX_EPOCH and format as YYYY-MM-DD HH:MM:SS
-            let time = t;
-            let timestamp = time.duration_since(UNIX_EPOCH).unwrap().as_secs();
-            return format!("{}", timestamp);
-        }
+        let t = UNIX_EPOCH + Duration::from_secs(secs as u64);
+        // 简化格式化（实际可用 chrono，此处保留原有方式）
+        let timestamp = t.duration_since(UNIX_EPOCH).unwrap().as_secs();
+        return format!("{}", timestamp);
     }
     ts.to_string()
 }
@@ -148,7 +143,11 @@ pub struct ActionConfig {
     pub status: String,
     pub enabled: bool,
 }
-type FetchGeneratorResult = Box<dyn Iterator<Item = Result<serde_json::Value, ProcessorError>>>;
+
+pub type FetchGenerator =
+    fn(ReportStatus) -> Box<dyn Iterator<Item = Result<Value, ProcessorError>>>;
+pub type FetchTotal = fn(ReportStatus) -> Result<Value, ProcessorError>;
+
 #[derive(Clone, Debug)]
 pub struct SourceConfig {
     pub admin_id_field: String,
@@ -162,8 +161,8 @@ pub struct SourceConfig {
     pub content_type_field: String,
     pub created_at_field: String,
     pub description_field: String,
-    pub fetch_generator: fn(ReportStatus) -> FetchGeneratorResult,
-    pub fetch_total: fn(ReportStatus) -> Result<serde_json::Value, ProcessorError>,
+    pub fetch_generator: FetchGenerator,
+    pub fetch_total: FetchTotal,
     pub handle_method: String,
     pub item_id_field: String,
     pub name: String,
@@ -176,7 +175,7 @@ pub struct SourceConfig {
     pub source_object_id_field: String,
     pub source_object_name_field: String,
     pub source_type_field: String,
-    pub special_check: Option<fn(&serde_json::Value) -> bool>,
+    pub special_check: Option<fn(&Value) -> bool>,
     pub status_field: String,
     pub title_field: Option<String>,
     pub user_id_field: String,
@@ -189,83 +188,78 @@ pub struct SourceConfig {
 // ==================== 举报类型注册表 ====================
 #[derive(Clone)]
 pub struct ReportTypeRegistry {
-    pub(crate) registry: HashMap<String, SourceConfig>,
-    pub(crate) default_actions: HashMap<String, ActionConfig>,
+    registry: HashMap<String, SourceConfig>,
+    default_actions: Vec<ActionConfig>, // 保留用于构建默认动作，也可直接为静态
+}
+
+// 静态状态映射（避免每次构建）
+static STATUS_MAPPING: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
+
+fn status_mapping() -> &'static HashMap<&'static str, &'static str> {
+    STATUS_MAPPING.get_or_init(|| {
+        HashMap::from([
+            ("D", "DELETE"),
+            ("S", "MUTE_SEVEN_DAYS"),
+            ("T", "MUTE_THREE_MONTHS"),
+            ("P", "PASS"),
+            ("U", "UNLOAD"),
+        ])
+    })
 }
 
 impl ReportTypeRegistry {
     pub fn new() -> Self {
-        let mut default_actions = HashMap::new();
-        default_actions.insert(
-            "D".to_string(),
+        let default_actions = vec![
             ActionConfig {
                 key: "D".into(),
                 name: "删除".into(),
-                description: "删除内容".into(),
+                description: String::new(),
                 status: "DELETE".into(),
                 enabled: true,
             },
-        );
-        default_actions.insert(
-            "S".to_string(),
             ActionConfig {
                 key: "S".into(),
                 name: "禁言7天".into(),
-                description: "禁言用户7天".into(),
+                description: String::new(),
                 status: "MUTE_SEVEN_DAYS".into(),
                 enabled: true,
             },
-        );
-        default_actions.insert(
-            "T".to_string(),
             ActionConfig {
                 key: "T".into(),
                 name: "禁言3月".into(),
-                description: "禁言用户3个月".into(),
+                description: String::new(),
                 status: "MUTE_THREE_MONTHS".into(),
                 enabled: true,
             },
-        );
-        default_actions.insert(
-            "U".to_string(),
             ActionConfig {
                 key: "U".into(),
                 name: "取消发布".into(),
-                description: "取消作品发布".into(),
+                description: String::new(),
                 status: "UNLOAD".into(),
                 enabled: true,
             },
-        );
-        default_actions.insert(
-            "P".to_string(),
             ActionConfig {
                 key: "P".into(),
                 name: "通过".into(),
-                description: "通过举报".into(),
+                description: String::new(),
                 status: "PASS".into(),
                 enabled: true,
             },
-        );
-        default_actions.insert(
-            "F".to_string(),
             ActionConfig {
                 key: "F".into(),
                 name: "检查违规".into(),
-                description: "检查其他违规内容".into(),
+                description: String::new(),
                 status: "CHECK_VIOLATION".into(),
                 enabled: true,
             },
-        );
-        default_actions.insert(
-            "J".to_string(),
             ActionConfig {
                 key: "J".into(),
                 name: "跳过".into(),
-                description: "跳过当前举报".into(),
+                description: String::new(),
                 status: "SKIP".into(),
                 enabled: true,
             },
-        );
+        ];
 
         ReportTypeRegistry {
             registry: HashMap::new(),
@@ -285,17 +279,17 @@ impl ReportTypeRegistry {
         self.registry.keys().cloned().collect()
     }
 
-    pub fn get_available_actions(&self, report_type: &str) -> Vec<ActionConfig> {
-        if let Some(config) = self.get_config(report_type) {
-            config
-                .available_actions
-                .iter()
-                .filter(|a| a.enabled && a.key != "C")
-                .cloned()
-                .collect()
-        } else {
-            vec![]
-        }
+    /// 返回可用动作的引用，避免克隆整个 ActionConfig
+    pub fn get_available_actions(&self, report_type: &str) -> Vec<&ActionConfig> {
+        self.get_config(report_type)
+            .map(|config| {
+                config
+                    .available_actions
+                    .iter()
+                    .filter(|a| a.enabled && a.key != "C")
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     pub fn get_action_prompt(&self, report_type: &str) -> String {
@@ -307,14 +301,9 @@ impl ReportTypeRegistry {
         format!("选择操作:{}", parts.join(","))
     }
 
-    pub fn get_status_mapping(&self) -> HashMap<String, String> {
-        let mut map = HashMap::new();
-        for (key, action) in &self.default_actions {
-            if matches!(key.as_str(), "D" | "S" | "T" | "P" | "U") {
-                map.insert(key.clone(), action.status.clone());
-            }
-        }
-        map
+    /// 返回全局静态的状态映射引用
+    pub fn get_status_mapping(&self) -> &'static HashMap<&'static str, &'static str> {
+        status_mapping()
     }
 
     pub fn is_action_available(&self, report_type: &str, action_key: &str) -> bool {
@@ -333,6 +322,7 @@ impl ReportFetcher {
     pub fn new() -> Self {
         let mut registry = ReportTypeRegistry::new();
 
+        // ---------- shop_comment ----------
         registry.register(
             "shop_comment",
             SourceConfig {
@@ -388,7 +378,7 @@ impl ReportFetcher {
                 board_id_field: None,
                 created_at_field: "created_at".into(),
                 chunk_size: 100,
-                special_check: Some(|item: &serde_json::Value| -> bool {
+                special_check: Some(|item| {
                     item.get("comment_source")
                         .and_then(|v| v.as_str())
                         .map(|s| s == "WORK_SHOP")
@@ -441,6 +431,7 @@ impl ReportFetcher {
             },
         );
 
+        // ---------- work_work ----------
         registry.register(
             "work_work",
             SourceConfig {
@@ -456,7 +447,6 @@ impl ReportFetcher {
                     paginated
                         .fetch_metadata()
                         .map_err(|e| ProcessorError::External(e.into()));
-
                     Ok(json!(paginated.total_items().unwrap_or(0) as i32))
                 },
                 fetch_generator: |status| {
@@ -531,6 +521,7 @@ impl ReportFetcher {
             },
         );
 
+        // ---------- forum_post ----------
         registry.register(
             "forum_post",
             SourceConfig {
@@ -541,7 +532,6 @@ impl ReportFetcher {
                     paginated
                         .fetch_metadata()
                         .map_err(|e| ProcessorError::External(e.into()));
-
                     Ok(json!(paginated.total_items().unwrap_or(0) as i32))
                 },
                 fetch_generator: |status| {
@@ -630,6 +620,7 @@ impl ReportFetcher {
             },
         );
 
+        // ---------- forum_discussion ----------
         registry.register(
             "forum_discussion",
             SourceConfig {
@@ -640,7 +631,6 @@ impl ReportFetcher {
                     paginated
                         .fetch_metadata()
                         .map_err(|e| ProcessorError::External(e.into()));
-
                     Ok(json!(paginated.total_items().unwrap_or(0) as i32))
                 },
                 fetch_generator: |status| {
@@ -732,24 +722,16 @@ impl ReportFetcher {
         ReportFetcher { registry }
     }
 
-    /// 修复后的分块迭代器：正确处理类型切换与剩余数据
-    pub fn fetch_chunked(
-        &self,
-        status: ReportStatus,
-    ) -> impl Iterator<Item = Vec<serde_json::Value>> {
+    pub fn fetch_chunked(&self, status: ReportStatus) -> impl Iterator<Item = Vec<Value>> {
         let report_types = self.registry.get_all_types();
         let total_types = report_types.len();
         let mut type_index = 0;
-        // 用于保存每个类型已获取但未填充到当前块的项目
-        let mut pending_items: Vec<serde_json::Value> = Vec::new();
+        let mut pending_items: Vec<Value> = Vec::new();
 
         std::iter::from_fn(move || {
             let mut chunk = Vec::new();
-
-            // 1. 先把上次余留的数据放入 chunk
             std::mem::swap(&mut chunk, &mut pending_items);
 
-            // 2. 继续从当前类型获取数据，填满 chunk
             while type_index < total_types {
                 let report_type = &report_types[type_index];
                 let config = match self.registry.get_config(report_type) {
@@ -771,7 +753,6 @@ impl ReportFetcher {
                         }
                     };
 
-                    // 过滤状态
                     if status == ReportStatus::ToBeDone
                         && let Some(state) = item.get(&config.status_field).and_then(|v| v.as_str())
                         && state != "TOBEDONE"
@@ -779,33 +760,25 @@ impl ReportFetcher {
                         continue;
                     }
 
-                    // 注入类型标记
                     if let Value::Object(ref mut map) = item {
                         map.insert("_report_type".into(), Value::String(report_type.clone()));
                     }
 
                     chunk.push(item);
                     if chunk.len() >= config.chunk_size {
-                        // 将超出部分保存到 pending_items，留待下一次
                         let remaining = chunk.split_off(config.chunk_size);
                         pending_items = remaining;
-                        // 注意：type_index 不变，因为当前类型还有数据未取完
                         return Some(chunk);
                     }
                 }
-                // 当前类型的迭代器耗尽，切换到下一个类型
                 type_index += 1;
             }
 
-            // 所有类型都处理完毕
             if chunk.is_empty() { None } else { Some(chunk) }
         })
     }
 
-    pub fn fetch_reports_chunked(
-        &self,
-        status: ReportStatus,
-    ) -> impl Iterator<Item = Vec<serde_json::Value>> {
+    pub fn fetch_reports_chunked(&self, status: ReportStatus) -> impl Iterator<Item = Vec<Value>> {
         self.fetch_chunked(status)
     }
 
