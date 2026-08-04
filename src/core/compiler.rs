@@ -553,22 +553,26 @@ pub enum WorkType {
     Wood,
 }
 
-impl WorkType {
-    pub fn from_str(s: &str) -> Option<Self> {
+impl std::str::FromStr for WorkType {
+    type Err = ();
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s {
-            "KITTEN2" => Some(WorkType::Kitten2),
-            "KITTEN3" => Some(WorkType::Kitten3),
+            "KITTEN2" => Ok(WorkType::Kitten2),
+            "KITTEN3" => Ok(WorkType::Kitten3),
             // 无后缀的 KITTEN 作品（如 geometry 对战）编辑版使用 XML shadow，对应 Kitten3 格式
-            "KITTEN" => Some(WorkType::Kitten3),
-            "KITTEN4" => Some(WorkType::Kitten4),
-            "COCO" => Some(WorkType::Coco),
-            "NEKO" => Some(WorkType::Neko),
-            "NEMO" => Some(WorkType::Nemo),
-            "WOOD" => Some(WorkType::Wood),
-            _ => None,
+            "KITTEN" => Ok(WorkType::Kitten3),
+            "KITTEN4" => Ok(WorkType::Kitten4),
+            "COCO" => Ok(WorkType::Coco),
+            "NEKO" => Ok(WorkType::Neko),
+            "NEMO" => Ok(WorkType::Nemo),
+            "WOOD" => Ok(WorkType::Wood),
+            _ => Err(()),
         }
     }
+}
 
+impl WorkType {
     pub fn as_str(&self) -> &'static str {
         match self {
             WorkType::Kitten2 => "KITTEN2",
@@ -623,7 +627,7 @@ pub struct WorkInfo {
 impl WorkInfo {
     pub fn from_api_response(data: &Value) -> Result<Self> {
         let work_type_str = data.get_str_or("type", "NEMO");
-        let work_type = WorkType::from_str(work_type_str).unwrap_or(WorkType::Nemo);
+        let work_type = work_type_str.parse::<WorkType>().unwrap_or(WorkType::Nemo);
         let name = data
             .get("work_name")
             .or_else(|| data.get("name"))

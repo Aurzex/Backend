@@ -86,17 +86,17 @@ impl ReportStatus {
 /// 作品举报过滤类型
 #[derive(Debug, Clone, Copy)]
 pub enum WorkReportFilterType {
-    AdminId,
-    WorkUserId,
-    WorkId,
+    Admin,
+    WorkUser,
+    Work,
 }
 
 impl WorkReportFilterType {
     fn as_str(&self) -> &'static str {
         match self {
-            WorkReportFilterType::AdminId => "admin_id",
-            WorkReportFilterType::WorkUserId => "work_user_id",
-            WorkReportFilterType::WorkId => "work_id",
+            WorkReportFilterType::Admin => "admin_id",
+            WorkReportFilterType::WorkUser => "work_user_id",
+            WorkReportFilterType::Work => "work_id",
         }
     }
 }
@@ -104,17 +104,17 @@ impl WorkReportFilterType {
 /// 评论举报过滤类型
 #[derive(Debug, Clone, Copy)]
 pub enum CommentReportFilterType {
-    AdminId,
-    CommentUserId,
-    CommentId,
+    Admin,
+    CommentUser,
+    Comment,
 }
 
 impl CommentReportFilterType {
     fn as_str(&self) -> &'static str {
         match self {
-            CommentReportFilterType::AdminId => "admin_id",
-            CommentReportFilterType::CommentUserId => "comment_user_id",
-            CommentReportFilterType::CommentId => "comment_id",
+            CommentReportFilterType::Admin => "admin_id",
+            CommentReportFilterType::CommentUser => "comment_user_id",
+            CommentReportFilterType::Comment => "comment_id",
         }
     }
 }

@@ -31,7 +31,7 @@ pub enum SelectMethod {
 }
 
 impl SelectMethod {
-    fn to_http_method(&self) -> HttpMethod {
+    fn to_http_method(self) -> HttpMethod {
         match self {
             SelectMethod::Post => HttpMethod::Post,
             SelectMethod::Delete => HttpMethod::Delete,
@@ -451,6 +451,35 @@ impl Default for CommentOperations {
 
 // ==================== KITTEN 作品管理类 ====================
 
+/// 创建 Kitten 作品的参数。
+pub struct CreateKittenWorkArgs<'a> {
+    pub name: &'a str,
+    pub work_url: &'a str,
+    pub preview: &'a str,
+    pub version: &'a str,
+    pub orientation: Option<i32>,
+    pub sample_id: Option<&'a str>,
+    pub work_source_label: Option<i32>,
+    pub save_type: Option<i32>,
+}
+
+/// 发布 Kitten 作品的参数。
+pub struct PublishKittenWorkArgs<'a> {
+    pub work_id: i32,
+    pub name: &'a str,
+    pub description: &'a str,
+    pub operation: &'a str,
+    pub labels: Vec<Value>,
+    pub cover_url: &'a str,
+    pub bcmc_url: &'a str,
+    pub work_url: &'a str,
+    pub fork_enable: i32,
+    pub if_default_cover: i32,
+    pub version: &'a str,
+    pub cover_type: Option<i32>,
+    pub user_labels: Option<Vec<Value>>,
+}
+
 /// Kitten 作品管理接口（创建、发布、删除、回收站等）。
 pub struct KittenWorkManager {
     client: &'static CodeMaoClient,
@@ -480,27 +509,17 @@ impl KittenWorkManager {
     }
 
     /// 创建 Kitten 作品
-    pub fn create_kitten_work(
-        &self,
-        name: &str,
-        work_url: &str,
-        preview: &str,
-        version: &str,
-        orientation: Option<i32>,
-        sample_id: Option<&str>,
-        work_source_label: Option<i32>,
-        save_type: Option<i32>,
-    ) -> MewResult<Value> {
-        debug!("创建Kitten作品: name={}, version={}", name, version);
+    pub fn create_kitten_work(&self, args: CreateKittenWorkArgs<'_>) -> MewResult<Value> {
+        debug!("创建Kitten作品: name={}, version={}", args.name, args.version);
         let payload = json!({
-            "name": name,
-            "work_url": work_url,
-            "preview": preview,
-            "orientation": orientation.unwrap_or(1),
-            "sample_id": sample_id.unwrap_or(""),
-            "version": version,
-            "work_source_label": work_source_label.unwrap_or(1),
-            "save_type": save_type.unwrap_or(2),
+            "name": args.name,
+            "work_url": args.work_url,
+            "preview": args.preview,
+            "orientation": args.orientation.unwrap_or(1),
+            "sample_id": args.sample_id.unwrap_or(""),
+            "version": args.version,
+            "work_source_label": args.work_source_label.unwrap_or(1),
+            "save_type": args.save_type.unwrap_or(2),
         });
         let builder = self
             .client
@@ -512,35 +531,26 @@ impl KittenWorkManager {
     /// 发布 Kitten 作品
     pub fn execute_publish_kitten_work(
         &self,
-        work_id: i32,
-        name: &str,
-        description: &str,
-        operation: &str,
-        labels: Vec<Value>,
-        cover_url: &str,
-        bcmc_url: &str,
-        work_url: &str,
-        fork_enable: i32,
-        if_default_cover: i32,
-        version: &str,
-        cover_type: Option<i32>,
-        user_labels: Option<Vec<Value>>,
+        args: PublishKittenWorkArgs<'_>,
     ) -> MewResult<bool> {
-        debug!("发布Kitten作品: work_id={}, name={}", work_id, name);
-        let endpoint = format!("/kitten/r2/work/{}/publish", work_id);
+        debug!(
+            "发布Kitten作品: work_id={}, name={}",
+            args.work_id, args.name
+        );
+        let endpoint = format!("/kitten/r2/work/{}/publish", args.work_id);
         let payload = json!({
-            "name": name,
-            "description": description,
-            "operation": operation,
-            "labels": labels,
-            "cover_url": cover_url,
-            "bcmc_url": bcmc_url,
-            "work_url": work_url,
-            "fork_enable": fork_enable,
-            "if_default_cover": if_default_cover,
-            "version": version,
-            "cover_type": cover_type.unwrap_or(1),
-            "user_labels": user_labels.unwrap_or_default(),
+            "name": args.name,
+            "description": args.description,
+            "operation": args.operation,
+            "labels": args.labels,
+            "cover_url": args.cover_url,
+            "bcmc_url": args.bcmc_url,
+            "work_url": args.work_url,
+            "fork_enable": args.fork_enable,
+            "if_default_cover": args.if_default_cover,
+            "version": args.version,
+            "cover_type": args.cover_type.unwrap_or(1),
+            "user_labels": args.user_labels.unwrap_or_default(),
         });
         let builder = self
             .client
@@ -615,6 +625,35 @@ impl Default for KittenWorkManager {
 
 // ==================== NEKO (Kitten N) 作品管理类 ====================
 
+/// 创建 KN 作品的参数。
+pub struct CreateKnWorkArgs<'a> {
+    pub name: &'a str,
+    pub work_url: &'a str,
+    pub preview_url: &'a str,
+    pub bcm_version: &'a str,
+    pub save_type: Option<i32>,
+    pub stage_type: Option<i32>,
+    pub n_blocks: Option<i32>,
+    pub n_roles: Option<i32>,
+    pub n_scenes: Option<i32>,
+    pub pic_need_check_file_url: Option<&'a str>,
+}
+
+/// 发布 KN 作品的参数。
+pub struct PublishKnWorkArgs<'a> {
+    pub work_id: i32,
+    pub name: &'a str,
+    pub preview_url: &'a str,
+    pub description: &'a str,
+    pub operation: &'a str,
+    pub fork_enable: i32,
+    pub if_default_cover: i32,
+    pub bcmc_url: &'a str,
+    pub work_url: &'a str,
+    pub bcm_version: &'a str,
+    pub cover_url: Option<&'a str>,
+}
+
 /// KN 作品管理接口。
 pub struct NekoWorkManager {
     client: &'static CodeMaoClient,
@@ -644,31 +683,19 @@ impl NekoWorkManager {
     }
 
     /// 创建 KN 作品
-    pub fn create_kn_work(
-        &self,
-        name: &str,
-        work_url: &str,
-        preview_url: &str,
-        bcm_version: &str,
-        save_type: Option<i32>,
-        stage_type: Option<i32>,
-        n_blocks: Option<i32>,
-        n_roles: Option<i32>,
-        n_scenes: Option<i32>,
-        pic_need_check_file_url: Option<&str>,
-    ) -> MewResult<Value> {
-        debug!("创建KN作品: name={}", name);
+    pub fn create_kn_work(&self, args: CreateKnWorkArgs<'_>) -> MewResult<Value> {
+        debug!("创建KN作品: name={}", args.name);
         let payload = json!({
-            "bcm_version": bcm_version,
-            "save_type": save_type.unwrap_or(2),
-            "name": name,
-            "work_url": work_url,
-            "preview_url": preview_url,
-            "stage_type": stage_type.unwrap_or(2),
-            "n_blocks": n_blocks.unwrap_or(0),
-            "n_roles": n_roles.unwrap_or(2),
-            "n_scenes": n_scenes.unwrap_or(1),
-            "pic_need_check_file_url": pic_need_check_file_url.unwrap_or(""),
+            "bcm_version": args.bcm_version,
+            "save_type": args.save_type.unwrap_or(2),
+            "name": args.name,
+            "work_url": args.work_url,
+            "preview_url": args.preview_url,
+            "stage_type": args.stage_type.unwrap_or(2),
+            "n_blocks": args.n_blocks.unwrap_or(0),
+            "n_roles": args.n_roles.unwrap_or(2),
+            "n_scenes": args.n_scenes.unwrap_or(1),
+            "pic_need_check_file_url": args.pic_need_check_file_url.unwrap_or(""),
         });
         let builder = self
             .client
@@ -680,31 +707,21 @@ impl NekoWorkManager {
     /// 发布 KN 作品
     pub fn execute_publish_kn_work(
         &self,
-        work_id: i32,
-        name: &str,
-        preview_url: &str,
-        description: &str,
-        operation: &str,
-        fork_enable: i32,
-        if_default_cover: i32,
-        bcmc_url: &str,
-        work_url: &str,
-        bcm_version: &str,
-        cover_url: Option<&str>,
+        args: PublishKnWorkArgs<'_>,
     ) -> MewResult<bool> {
-        debug!("发布KN作品: work_id={}, name={}", work_id, name);
-        let endpoint = format!("/neko/community/work/publish/{}", work_id);
+        debug!("发布KN作品: work_id={}, name={}", args.work_id, args.name);
+        let endpoint = format!("/neko/community/work/publish/{}", args.work_id);
         let payload = json!({
-            "name": name,
-            "preview_url": preview_url,
-            "description": description,
-            "operation": operation,
-            "fork_enable": fork_enable,
-            "if_default_cover": if_default_cover,
-            "bcmc_url": bcmc_url,
-            "work_url": work_url,
-            "bcm_version": bcm_version,
-            "cover_url": cover_url.unwrap_or(""),
+            "name": args.name,
+            "preview_url": args.preview_url,
+            "description": args.description,
+            "operation": args.operation,
+            "fork_enable": args.fork_enable,
+            "if_default_cover": args.if_default_cover,
+            "bcmc_url": args.bcmc_url,
+            "work_url": args.work_url,
+            "bcm_version": args.bcm_version,
+            "cover_url": args.cover_url.unwrap_or(""),
         });
         let builder = self
             .client
@@ -805,6 +822,19 @@ impl Default for NekoWorkManager {
 
 // ==================== WOOD (海龟编辑器) 作品管理类 ====================
 
+/// 创建海龟编辑器作品的参数。
+pub struct CreateWoodProjectArgs<'a> {
+    pub work_name: Option<&'a str>,
+    pub language_type: Option<i32>,
+    pub run_mode: Option<i32>,
+    pub files: Option<Vec<Value>>,
+    pub preview_code: Option<&'a str>,
+    pub preview_url: Option<&'a str>,
+    pub is_turn_on_debug: Option<bool>,
+    pub editor_mode: Option<&'a str>,
+    pub update_time: Option<i32>,
+}
+
 /// 海龟编辑器作品管理接口。
 pub struct WoodWorkManager {
     client: &'static CodeMaoClient,
@@ -844,31 +874,23 @@ impl WoodWorkManager {
     /// 创建海龟编辑器作品
     pub fn create_wood_project(
         &self,
-        work_name: Option<&str>,
-        language_type: Option<i32>,
-        run_mode: Option<i32>,
-        files: Option<Vec<Value>>,
-        preview_code: Option<&str>,
-        preview_url: Option<&str>,
-        is_turn_on_debug: Option<bool>,
-        editor_mode: Option<&str>,
-        update_time: Option<i32>,
+        args: CreateWoodProjectArgs<'_>,
     ) -> MewResult<Value> {
-        debug!("创建海龟编辑器作品: name={:?}", work_name);
+        debug!("创建海龟编辑器作品: name={:?}", args.work_name);
         let payload = json!({
-            "work_name": work_name.unwrap_or("新的作品"),
-            "language_type": language_type.unwrap_or(3),
-            "run_mode": run_mode.unwrap_or(0),
-            "update_time": update_time.unwrap_or(0),
+            "work_name": args.work_name.unwrap_or("新的作品"),
+            "language_type": args.language_type.unwrap_or(3),
+            "run_mode": args.run_mode.unwrap_or(0),
+            "update_time": args.update_time.unwrap_or(0),
             "addition": {
                 "readonly_paths": [],
                 "locking_file_lines": {},
-                "isTurnOnDebug": is_turn_on_debug.unwrap_or(true),
-                "editorMode": editor_mode.unwrap_or("code"),
+                "isTurnOnDebug": args.is_turn_on_debug.unwrap_or(true),
+                "editorMode": args.editor_mode.unwrap_or("code"),
             },
-            "files": files.unwrap_or_default(),
-            "preview_url": preview_url.unwrap_or(""),
-            "preview_code": preview_code.unwrap_or(""),
+            "files": args.files.unwrap_or_default(),
+            "preview_url": args.preview_url.unwrap_or(""),
+            "preview_code": args.preview_code.unwrap_or(""),
         });
         let builder = self
             .client
@@ -941,17 +963,17 @@ impl WoodWorkManager {
         files.push(file_data);
 
         // 更新项目
-        self.create_wood_project(
-            project["work_name"].as_str(),
-            project["language_type"].as_i64().map(|v| v as i32),
-            project["run_mode"].as_i64().map(|v| v as i32),
-            Some(files),
-            project["preview_code"].as_str(),
-            project["preview_url"].as_str(),
-            project["addition"]["isTurnOnDebug"].as_bool(),
-            project["addition"]["editorMode"].as_str(),
-            project["update_time"].as_i64().map(|v| v as i32),
-        )
+        self.create_wood_project(CreateWoodProjectArgs {
+            work_name: project["work_name"].as_str(),
+            language_type: project["language_type"].as_i64().map(|v| v as i32),
+            run_mode: project["run_mode"].as_i64().map(|v| v as i32),
+            files: Some(files),
+            preview_code: project["preview_code"].as_str(),
+            preview_url: project["preview_url"].as_str(),
+            is_turn_on_debug: project["addition"]["isTurnOnDebug"].as_bool(),
+            editor_mode: project["addition"]["editorMode"].as_str(),
+            update_time: project["update_time"].as_i64().map(|v| v as i32),
+        })
     }
 }
 

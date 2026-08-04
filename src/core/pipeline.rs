@@ -16,7 +16,7 @@ use super::types::{
 use crate::api::forum::{
     ForumActionHandler, ForumDataFetcher, ForumReportReasonId, ItemType, PostReportReasonId,
 };
-use crate::api::shop::{WorkShopReportReasonId, WorkshopActionHandler};
+use crate::api::shop::{ReportCommentArgs, WorkShopReportReasonId, WorkshopActionHandler};
 use crate::api::whale::{ReportHandler, Resolution};
 use crate::api::work::{BaseWorkOperations, CommentOperations};
 use crate::core::retrieve::{CommentSource, DataQuery, JsonObject};
@@ -1369,15 +1369,19 @@ impl ViolationChecker {
                     "shop" => {
                         let reporter_id = fastrand::i32(10000..=199999999);
                         WorkshopActionHandler::new()
-                            .execute_report_comment(
-                                content_id,
+                            .execute_report_comment(ReportCommentArgs {
+                                comment_id: content_id,
                                 reason_content,
-                                WorkShopReportReasonId::Reason7,
+                                reason_id: WorkShopReportReasonId::Reason7,
                                 reporter_id,
-                                None,
-                                if is_reply { Some(parent_id) } else { None },
-                                Some(""),
-                            )
+                                comment_source: None,
+                                comment_parent_id: if is_reply {
+                                    Some(parent_id)
+                                } else {
+                                    None
+                                },
+                                description: Some(""),
+                            })
                             .map_err(|e| ProcessorError::External(e.into()))?;
                     }
                     _ => return Err(ProcessorError::Processing("不支持的来源".into())),

@@ -32,18 +32,6 @@ impl LoginMethod {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "password_v0" => Some(LoginMethod::PasswordV0),
-            "password_v1" => Some(LoginMethod::PasswordV1),
-            "password_v2" => Some(LoginMethod::PasswordV2),
-            "token" => Some(LoginMethod::Token),
-            "admin_token" => Some(LoginMethod::AdminToken),
-            "admin_password" => Some(LoginMethod::AdminPassword),
-            _ => None,
-        }
-    }
-
     /// 判断该登录方法是否属于普通用户
     pub fn is_user_method(&self) -> bool {
         matches!(
@@ -58,6 +46,22 @@ impl LoginMethod {
     /// 判断该登录方法是否属于管理员
     pub fn is_admin_method(&self) -> bool {
         matches!(self, LoginMethod::AdminToken | LoginMethod::AdminPassword)
+    }
+}
+
+impl std::str::FromStr for LoginMethod {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "password_v0" => Ok(LoginMethod::PasswordV0),
+            "password_v1" => Ok(LoginMethod::PasswordV1),
+            "password_v2" => Ok(LoginMethod::PasswordV2),
+            "token" => Ok(LoginMethod::Token),
+            "admin_token" => Ok(LoginMethod::AdminToken),
+            "admin_password" => Ok(LoginMethod::AdminPassword),
+            _ => Err(()),
+        }
     }
 }
 

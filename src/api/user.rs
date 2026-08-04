@@ -724,6 +724,17 @@ impl Default for UserDataFetcher {
 
 // ==================== 用户管理器 ====================
 
+/// 更新个人资料详细信息的参数。
+pub struct UpdateProfileDetailsArgs<'a> {
+    pub avatar_url: &'a str,
+    pub nickname: &'a str,
+    pub birthday: i32,
+    pub description: &'a str,
+    pub fullname: &'a str,
+    pub qq: &'a str,
+    pub sex: Gender,
+}
+
 /// 用户相关操作接口（更新资料、修改密码、注销等）。
 pub struct UserManager {
     client: &'static CodeMaoClient,
@@ -882,23 +893,17 @@ impl UserManager {
     /// 更新个人资料详细信息
     pub fn update_profile_details(
         &self,
-        avatar_url: &str,
-        nickname: &str,
-        birthday: i32,
-        description: &str,
-        fullname: &str,
-        qq: &str,
-        sex: Gender,
+        args: UpdateProfileDetailsArgs<'_>,
     ) -> MewResult<bool> {
-        debug!("更新个人资料: nickname={}", nickname);
+        debug!("更新个人资料: nickname={}", args.nickname);
         let payload = json!({
-            "avatar_url": avatar_url,
-            "nickname": nickname,
-            "birthday": birthday,
-            "description": description,
-            "fullname": fullname,
-            "qq": qq,
-            "sex": sex as i32,
+            "avatar_url": args.avatar_url,
+            "nickname": args.nickname,
+            "birthday": args.birthday,
+            "description": args.description,
+            "fullname": args.fullname,
+            "qq": args.qq,
+            "sex": args.sex as i32,
         });
         let builder = self
             .client

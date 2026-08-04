@@ -50,7 +50,7 @@ pub const DESCENDING_ORDER: i64 = -1;
 #[derive(Debug, Error)]
 pub enum CloudError {
     #[error("WebSocket 错误: {0}")]
-    WebSocket(#[from] tungstenite::Error),
+    WebSocket(#[from] Box<tungstenite::Error>),
     #[error("HTTP 握手失败: {0}")]
     Handshake(String),
     #[error("JSON 错误: {0}")]
@@ -67,6 +67,12 @@ pub enum CloudError {
     Auth(String),
     #[error("线程错误: {0}")]
     Thread(String),
+}
+
+impl From<tungstenite::Error> for CloudError {
+    fn from(err: tungstenite::Error) -> Self {
+        CloudError::WebSocket(Box::new(err))
+    }
 }
 
 /// 本模块统一的 `Result` 别名。

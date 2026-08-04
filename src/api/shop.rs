@@ -263,6 +263,17 @@ impl Default for WorkshopDataFetcher {
 
 // ==================== 工作室操作处理器 ====================
 
+/// 举报讨论区评论的参数。
+pub struct ReportCommentArgs<'a> {
+    pub comment_id: i32,
+    pub reason_content: &'a str,
+    pub reason_id: WorkShopReportReasonId,
+    pub reporter_id: i32,
+    pub comment_source: Option<Source>,
+    pub comment_parent_id: Option<i32>,
+    pub description: Option<&'a str>,
+}
+
 /// 工作室相关操作接口（创建、投稿、评论、审核等）。
 pub struct WorkshopActionHandler {
     client: &'static CodeMaoClient,
@@ -426,26 +437,20 @@ impl WorkshopActionHandler {
     /// 举报讨论区下的评论
     pub fn execute_report_comment(
         &self,
-        comment_id: i32,
-        reason_content: &str,
-        reason_id: WorkShopReportReasonId,
-        reporter_id: i32,
-        comment_source: Option<Source>,
-        comment_parent_id: Option<i32>,
-        description: Option<&str>,
+        args: ReportCommentArgs<'_>,
     ) -> MewResult<bool> {
         debug!(
             "举报评论: comment_id={}, reason_id={:?}",
-            comment_id, reason_id
+            args.comment_id, args.reason_id
         );
         let payload = json!({
-            "comment_id": comment_id,
-            "comment_parent_id": comment_parent_id.unwrap_or(0),
-            "description": description.unwrap_or(""),
-            "reason_content": reason_content,
-            "reason_id": (reason_id as i32).to_string(),
-            "reporter_id": reporter_id,
-            "comment_source": comment_source.unwrap_or(Source::WorkShop).as_str(),
+            "comment_id": args.comment_id,
+            "comment_parent_id": args.comment_parent_id.unwrap_or(0),
+            "description": args.description.unwrap_or(""),
+            "reason_content": args.reason_content,
+            "reason_id": (args.reason_id as i32).to_string(),
+            "reporter_id": args.reporter_id,
+            "comment_source": args.comment_source.unwrap_or(Source::WorkShop).as_str(),
         });
         let builder = self
             .client

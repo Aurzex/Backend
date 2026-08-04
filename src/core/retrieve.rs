@@ -767,7 +767,7 @@ impl DataQuery {
             let mut comment_paginated = WhaleReportFetcher::new().fetch_comment_reports_gen(
                 CommentSourceType::All,
                 ReportStatus::All,
-                Some(CommentReportFilterType::AdminId),
+                Some(CommentReportFilterType::Admin),
                 Some(admin_id),
                 None, // 不设置limit，使用默认值
             );
@@ -783,7 +783,7 @@ impl DataQuery {
             let mut work_paginated = WhaleReportFetcher::new().fetch_work_reports_gen(
                 WorkSourceType::All,
                 ReportStatus::All,
-                Some(WorkReportFilterType::AdminId),
+                Some(WorkReportFilterType::Admin),
                 Some(admin_id),
                 None, // 不设置limit，使用默认值
             );

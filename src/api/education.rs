@@ -23,6 +23,32 @@ fn current_timestamp_13() -> u128 {
 
 // ==================== 教育用户操作 ====================
 
+/// 为学生作品评分的参数。
+pub struct GradeStudentWorkArgs<'a> {
+    pub work_id: i32,
+    pub work_name: &'a str,
+    pub artistic_score: i32,
+    pub creative_score: i32,
+    pub commentary: &'a str,
+    pub logical_score: i32,
+    pub programming_score: i32,
+}
+
+/// 完善教师信息的参数。
+pub struct ImproveTeacherInfoArgs<'a> {
+    pub user_id: i32,
+    pub real_name: &'a str,
+    pub grade: Vec<String>,
+    pub school_id: i32,
+    pub school_name: &'a str,
+    pub school_type: i32,
+    pub country_id: &'a str,
+    pub province_id: i32,
+    pub city_id: i32,
+    pub district_id: i32,
+    pub teacher_card_number: &'a str,
+}
+
 /// 教育管理相关操作（班级、学生、作业等）。
 pub struct EduUserAction {
     client: &'static CodeMaoClient,
@@ -274,23 +300,17 @@ impl EduUserAction {
     /// 为学生作品评分
     pub fn execute_grade_student_work(
         &self,
-        work_id: i32,
-        work_name: &str,
-        artistic_score: i32,
-        creative_score: i32,
-        commentary: &str,
-        logical_score: i32,
-        programming_score: i32,
+        args: GradeStudentWorkArgs<'_>,
     ) -> MewResult<bool> {
-        debug!("评分作品: work_id={}, name={}", work_id, work_name);
+        debug!("评分作品: work_id={}, name={}", args.work_id, args.work_name);
         let data = json!({
-            "artistic_score": artistic_score,
-            "commentary": commentary,
-            "creative_score": creative_score,
-            "id": work_id,
-            "logical_score": logical_score,
-            "programming_score": programming_score,
-            "work_name": work_name
+            "artistic_score": args.artistic_score,
+            "commentary": args.commentary,
+            "creative_score": args.creative_score,
+            "id": args.work_id,
+            "logical_score": args.logical_score,
+            "programming_score": args.programming_score,
+            "work_name": args.work_name
         });
         let builder = self
             .client
@@ -344,31 +364,21 @@ impl EduUserAction {
     /// 完善教师信息
     pub fn execute_improve_teacher_info(
         &self,
-        user_id: i32,
-        real_name: &str,
-        grade: Vec<String>,
-        school_id: i32,
-        school_name: &str,
-        school_type: i32,
-        country_id: &str,
-        province_id: i32,
-        city_id: i32,
-        district_id: i32,
-        teacher_card_number: &str,
+        args: ImproveTeacherInfoArgs<'_>,
     ) -> MewResult<bool> {
-        debug!("完善教师信息: user_id={}", user_id);
+        debug!("完善教师信息: user_id={}", args.user_id);
         let data = json!({
-            "id": user_id,
-            "real_name": real_name,
-            "grade": grade,
-            "schoolId": school_id,
-            "schoolName": school_name,
-            "schoolType": school_type,
-            "country_id": country_id,
-            "province_id": province_id,
-            "city_id": city_id,
-            "district_id": district_id,
-            "teacherCardNumber": teacher_card_number
+            "id": args.user_id,
+            "real_name": args.real_name,
+            "grade": args.grade,
+            "schoolId": args.school_id,
+            "schoolName": args.school_name,
+            "schoolType": args.school_type,
+            "country_id": args.country_id,
+            "province_id": args.province_id,
+            "city_id": args.city_id,
+            "district_id": args.district_id,
+            "teacherCardNumber": args.teacher_card_number
         });
         let builder = self
             .client

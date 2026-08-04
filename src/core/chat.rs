@@ -47,7 +47,7 @@ pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 #[derive(Debug, Error)]
 pub enum ChatError {
     #[error("WebSocket 错误: {0}")]
-    WebSocket(#[from] tungstenite::Error),
+    WebSocket(#[from] Box<tungstenite::Error>),
     #[error("HTTP 握手失败: {0}")]
     Handshake(String),
     #[error("JSON 错误: {0}")]
@@ -64,6 +64,12 @@ pub enum ChatError {
     Auth(String),
     #[error("线程错误: {0}")]
     Thread(String),
+}
+
+impl From<tungstenite::Error> for ChatError {
+    fn from(err: tungstenite::Error) -> Self {
+        ChatError::WebSocket(Box::new(err))
+    }
 }
 
 /// 本模块统一的 `Result` 别名。

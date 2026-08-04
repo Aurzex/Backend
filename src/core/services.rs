@@ -123,6 +123,12 @@ pub struct ReportProcessor {
     config: CheckConfig, // 注入配置，包含批量识别阈值等
 }
 
+impl Default for ReportProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ReportProcessor {
     /// 使用默认配置构造
     pub fn new() -> Self {
