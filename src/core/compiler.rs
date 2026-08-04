@@ -16,7 +16,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use thiserror::Error;
 
 // ========================= 错误定义 =========================
@@ -1143,10 +1143,10 @@ impl<'a> BlockDecompilerCore<'a> {
                 .ok_or_else(|| DecompilerError::InvalidResponse("next_block缺少id".to_string()))?
                 .to_string();
             context.blocks.insert(next_id.clone(), next_block);
-            if let Some(b) = context.blocks.get_mut(&next_id) {
-                if let Some(o) = b.as_object_mut() {
-                    o.insert("parent_id".to_string(), json!(parent_id));
-                }
+            if let Some(b) = context.blocks.get_mut(&next_id)
+                && let Some(o) = b.as_object_mut()
+            {
+                o.insert("parent_id".to_string(), json!(parent_id));
             }
             context.insert_connection(&parent_id, &next_id, json!({"type": "next"}));
         }
@@ -1188,10 +1188,10 @@ impl<'a> BlockDecompilerCore<'a> {
                         .to_string();
                     let input_name = self.behavior.get_child_input_name(i, conditions_count);
                     context.blocks.insert(child_id.clone(), child_block);
-                    if let Some(b) = context.blocks.get_mut(&child_id) {
-                        if let Some(o) = b.as_object_mut() {
-                            o.insert("parent_id".to_string(), json!(parent_id));
-                        }
+                    if let Some(b) = context.blocks.get_mut(&child_id)
+                        && let Some(o) = b.as_object_mut()
+                    {
+                        o.insert("parent_id".to_string(), json!(parent_id));
                     }
                     context.insert_connection(
                         &parent_id,
@@ -1244,10 +1244,10 @@ impl<'a> BlockDecompilerCore<'a> {
                         })?
                         .to_string();
                     context.blocks.insert(cond_id.clone(), condition_block);
-                    if let Some(b) = context.blocks.get_mut(&cond_id) {
-                        if let Some(o) = b.as_object_mut() {
-                            o.insert("parent_id".to_string(), json!(parent_id));
-                        }
+                    if let Some(b) = context.blocks.get_mut(&cond_id)
+                        && let Some(o) = b.as_object_mut()
+                    {
+                        o.insert("parent_id".to_string(), json!(parent_id));
                     }
                     context.insert_connection(
                         &parent_id,
@@ -1319,10 +1319,10 @@ impl<'a> BlockDecompilerCore<'a> {
                         })?
                         .to_string();
                     context.blocks.insert(param_id.clone(), param_block.clone());
-                    if let Some(b) = context.blocks.get_mut(&param_id) {
-                        if let Some(o) = b.as_object_mut() {
-                            o.insert("parent_id".to_string(), json!(parent_id));
-                        }
+                    if let Some(b) = context.blocks.get_mut(&param_id)
+                        && let Some(o) = b.as_object_mut()
+                    {
+                        o.insert("parent_id".to_string(), json!(parent_id));
                     }
                     context.insert_connection(
                         &parent_id,
@@ -1347,7 +1347,9 @@ impl<'a> BlockDecompilerCore<'a> {
                         // 编辑版 shadow 模板显示的是类型默认值（如 math_number 的 0），
                         // 与参数块实际值无关，因此不传 text
                         let shadow_value =
-                            context.shadow_builder.create(param_type, Some(param_id.clone()), None);
+                            context
+                                .shadow_builder
+                                .create(param_type, Some(param_id.clone()), None);
                         shadows.insert(name.clone(), shadow_value);
                     } else {
                         let shadow_type = self.infer_shadow_type(name, &Value::Null);
@@ -1891,190 +1893,6 @@ impl KittenDecompiler {
         Ok(scene)
     }
 
-    // ===== Kitten2/3：blocksXML 序列化 =====
-    // Kitten3 编辑版（如春风得意）使用 Blockly XML 字符串存储积木（scene/actor 的 blocksXML 字段），
-    // 与 Kitten4 的 block_data_json（blocks/connections）不同，需要单独序列化。
-
-    /// XML 转义
-    fn escape_xml_text(s: &str) -> String {
-        s.replace('&', "&amp;")
-            .replace('<', "&lt;")
-            .replace('>', "&gt;")
-            .replace('"', "&quot;")
-            .replace('\'', "&apos;")
-    }
-
-    fn value_to_xml_text(v: &Value) -> String {
-        match v {
-            Value::String(s) => s.clone(),
-            Value::Number(n) => n.to_string(),
-            Value::Bool(b) => b.to_string(),
-            _ => String::new(),
-        }
-    }
-
-    /// 将编译块树的单个块渲染为 Blockly XML
-    fn block_xml(compiled: &Value, config: &DecompilerConfig, is_root: bool, y: f64) -> String {
-        let bt = compiled.get_str_or("type", "");
-        let bid = compiled.get_str_or("id", "");
-        let mut s = if is_root {
-            format!(
-                r#"<block type="{}" id="{}" inline="true" visible="visible" x="0" y="{}">"#,
-                bt, bid, y
-            )
-        } else {
-            format!(r#"<block type="{}" id="{}" inline="true" visible="visible">"#, bt, bid)
-        };
-
-        // fields：params 标量
-        let mut field_xml = String::new();
-        let mut value_xml = String::new();
-        if let Some(params) = compiled.get_object_opt("params") {
-            for (k, v) in params {
-                if !v.is_object() && !v.is_array() {
-                    field_xml.push_str(&format!(
-                        r#"<field name="{}">{}</field>"#,
-                        k,
-                        Self::escape_xml_text(&Self::value_to_xml_text(v))
-                    ));
-                }
-            }
-            // value 插槽：params 对象
-            for (k, v) in params {
-                if v.is_object() {
-                    value_xml.push_str(&format!(r#"<value name="{}">"#, k));
-                    value_xml.push_str(&Self::value_xml(v, config));
-                    value_xml.push_str("</value>");
-                }
-            }
-        }
-        s.push_str(&field_xml);
-        // value 插槽先于 statement（编辑版如 self_listen 为 <value>...<statement>）
-        s.push_str(&value_xml);
-
-        // conditions → <value name="IF{i}">
-        let conditions = compiled
-            .get("conditions")
-            .and_then(|v| v.as_array())
-            .cloned()
-            .unwrap_or_default();
-        for (i, c) in conditions.iter().enumerate() {
-            if c.is_object() {
-                s.push_str(&format!(r#"<value name="IF{}">"#, i));
-                s.push_str(&Self::value_xml(c, config));
-                s.push_str("</value>");
-            }
-        }
-
-        // child_block → <statement name="...">
-        if let Some(children) = compiled.get("child_block").and_then(|v| v.as_array()) {
-            let bt_str = bt;
-            for (i, c) in children.iter().enumerate() {
-                if !c.is_object() {
-                    continue;
-                }
-                let name = match bt_str {
-                    "controls_if" | "controls_if_no_else" => {
-                        if i < conditions.len() {
-                            format!("DO{}", i)
-                        } else {
-                            "ELSE".to_string()
-                        }
-                    }
-                    "procedures_2_defnoreturn" => "STACK".to_string(),
-                    _ => "DO".to_string(),
-                };
-                s.push_str(&format!(r#"<statement name="{}">"#, name));
-                s.push_str(&Self::block_xml(c, config, false, 0.0));
-                s.push_str("</statement>");
-            }
-        }
-
-        // next 链
-        if let Some(nb) = compiled.get("next_block") {
-            if nb.is_object() {
-                s.push_str("<next>");
-                s.push_str(&Self::block_xml(nb, config, false, 0.0));
-                s.push_str("</next>");
-            }
-        }
-
-        s.push_str("</block>");
-        s
-    }
-
-    /// value 插槽内容：shadow 类型渲染为 <shadow>，否则递归为 <block>
-    fn value_xml(v: &Value, config: &DecompilerConfig) -> String {
-        let vt = v.get_str_or("type", "");
-        let vid = v.get_str_or("id", "");
-        if config.shadow_types.contains(vt) {
-            let mut s = format!(r#"<shadow type="{}" id="{}" visible="visible">"#, vt, vid);
-            if let Some(params) = v.get_object_opt("params") {
-                for (k, fv) in params {
-                    if !fv.is_object() && !fv.is_array() {
-                        s.push_str(&format!(
-                            r#"<field name="{}">{}</field>"#,
-                            k,
-                            Self::escape_xml_text(&Self::value_to_xml_text(fv))
-                        ));
-                    }
-                }
-            }
-            s.push_str("</shadow>");
-            s
-        } else {
-            Self::block_xml(v, config, false, 0.0)
-        }
-    }
-
-    /// 生成 actor/场景的 blocksXML（<variables></variables> + 各根块）
-    fn decompile_blocks_xml(actor_compiled: &Value, config: &DecompilerConfig) -> Result<String> {
-        let mut xml = String::from("<variables></variables>");
-        let compiled_blocks = actor_compiled
-            .get("compiled_block_map")
-            .and_then(|v| v.as_object());
-        if let Some(blocks) = compiled_blocks {
-            // 收集被引用的块 id，只将顶层根块作为独立 XML 块输出
-            let mut referenced_ids: HashSet<String> = HashSet::new();
-            for (_, block) in blocks {
-                if let Some(next) = block.get("next_block") {
-                    if let Some(id) = next.get("id").and_then(|v| v.as_str()) {
-                        referenced_ids.insert(id.to_string());
-                    }
-                }
-                if let Some(children) = block.get("child_block").and_then(|v| v.as_array()) {
-                    for child in children {
-                        if let Some(id) = child.get("id").and_then(|v| v.as_str()) {
-                            referenced_ids.insert(id.to_string());
-                        }
-                    }
-                }
-                if let Some(conds) = block.get("conditions").and_then(|v| v.as_array()) {
-                    for c in conds {
-                        if let Some(id) = c.get("id").and_then(|v| v.as_str()) {
-                            referenced_ids.insert(id.to_string());
-                        }
-                    }
-                }
-                if let Some(params) = block.get("params").and_then(|v| v.as_object()) {
-                    for (_, pv) in params {
-                        if let Some(id) = pv.get("id").and_then(|v| v.as_str()) {
-                            referenced_ids.insert(id.to_string());
-                        }
-                    }
-                }
-            }
-            let mut y = 0.0;
-            for (id, block) in blocks {
-                if !referenced_ids.contains(id) {
-                    xml.push_str(&Self::block_xml(block, config, true, y));
-                    y += 220.0;
-                }
-            }
-        }
-        Ok(xml)
-    }
-
     fn update_work_info(
         work: &mut Value,
         work_info: &WorkInfo,
@@ -2108,10 +1926,7 @@ impl KittenDecompiler {
             }),
         );
         // Kitten3 编辑版（如春风得意）work_source_label 为 6，且无 sample_id/设备/最后工具箱等字段
-        let is_k3 = matches!(
-            work_info.work_type,
-            WorkType::Kitten2 | WorkType::Kitten3
-        );
+        let is_k3 = matches!(work_info.work_type, WorkType::Kitten2 | WorkType::Kitten3);
         work_obj.insert(
             "work_source_label".to_string(),
             json!(if is_k3 { 6 } else { 1 }),
@@ -2153,11 +1968,11 @@ impl KittenDecompiler {
         }
         // 清理编译版 theatre 的运行时字段：Kitten4 编辑版无这些键，
         // 但 Kitten3 编辑版（如春风得意）保留 current_entity/current_scene/style_collections
-        if !matches!(work_type, WorkType::Kitten2 | WorkType::Kitten3) {
-            if let Some(theatre) = work.get_mut("theatre").and_then(|t| t.as_object_mut()) {
-                for key in ["current_entity", "current_scene", "style_collections"] {
-                    theatre.remove(key);
-                }
+        if !matches!(work_type, WorkType::Kitten2 | WorkType::Kitten3)
+            && let Some(theatre) = work.get_mut("theatre").and_then(|t| t.as_object_mut())
+        {
+            for key in ["current_entity", "current_scene", "style_collections"] {
+                theatre.remove(key);
             }
         }
         Ok(())
@@ -2202,6 +2017,202 @@ impl KittenDecompiler {
     }
 }
 
+// ========================= Kitten2/3 blocksXML 序列化器 =========================
+/// Kitten2/3 编辑版（如春风得意）以 Blockly XML 字符串（blocksXML）存储积木，
+/// 与 Kitten4 的 block_data_json（blocks/connections）不同。
+/// 本组件负责把编译块树序列化为 Blockly XML，独立成组件便于单独测试与复用。
+pub struct XmlBlockWriter<'a> {
+    config: &'a DecompilerConfig,
+}
+
+impl<'a> XmlBlockWriter<'a> {
+    pub fn new(config: &'a DecompilerConfig) -> Self {
+        Self { config }
+    }
+
+    /// 生成 actor/场景的 blocksXML（`<variables></variables>` + 各根块）
+    pub fn write_blocks(&self, actor_compiled: &Value) -> Result<String> {
+        let mut xml = String::from("<variables></variables>");
+        let compiled_blocks = actor_compiled
+            .get("compiled_block_map")
+            .and_then(|v| v.as_object());
+        if let Some(blocks) = compiled_blocks {
+            // 收集被引用的块 id，只将顶层根块作为独立 XML 块输出
+            let mut referenced_ids: HashSet<String> = HashSet::new();
+            for (_, block) in blocks {
+                if let Some(next) = block.get("next_block")
+                    && let Some(id) = next.get("id").and_then(|v| v.as_str())
+                {
+                    referenced_ids.insert(id.to_string());
+                }
+                if let Some(children) = block.get("child_block").and_then(|v| v.as_array()) {
+                    for child in children {
+                        if let Some(id) = child.get("id").and_then(|v| v.as_str()) {
+                            referenced_ids.insert(id.to_string());
+                        }
+                    }
+                }
+                if let Some(conds) = block.get("conditions").and_then(|v| v.as_array()) {
+                    for c in conds {
+                        if let Some(id) = c.get("id").and_then(|v| v.as_str()) {
+                            referenced_ids.insert(id.to_string());
+                        }
+                    }
+                }
+                if let Some(params) = block.get("params").and_then(|v| v.as_object()) {
+                    for (_, pv) in params {
+                        if let Some(id) = pv.get("id").and_then(|v| v.as_str()) {
+                            referenced_ids.insert(id.to_string());
+                        }
+                    }
+                }
+            }
+            let mut y = 0.0;
+            for (id, block) in blocks {
+                if !referenced_ids.contains(id) {
+                    xml.push_str(&self.block_xml(block, true, y));
+                    y += 220.0;
+                }
+            }
+        }
+        Ok(xml)
+    }
+
+    /// 将编译块树的单个块渲染为 Blockly XML
+    fn block_xml(&self, compiled: &Value, is_root: bool, y: f64) -> String {
+        let bt = compiled.get_str_or("type", "");
+        let bid = compiled.get_str_or("id", "");
+        let mut s = if is_root {
+            format!(
+                r#"<block type="{}" id="{}" inline="true" visible="visible" x="0" y="{}">"#,
+                bt, bid, y
+            )
+        } else {
+            format!(
+                r#"<block type="{}" id="{}" inline="true" visible="visible">"#,
+                bt, bid
+            )
+        };
+
+        // fields：params 标量
+        let mut field_xml = String::new();
+        let mut value_xml = String::new();
+        if let Some(params) = compiled.get_object_opt("params") {
+            for (k, v) in params {
+                if !v.is_object() && !v.is_array() {
+                    field_xml.push_str(&format!(
+                        r#"<field name="{}">{}</field>"#,
+                        k,
+                        Self::escape_text(&Self::value_to_text(v))
+                    ));
+                }
+            }
+            // value 插槽：params 对象
+            for (k, v) in params {
+                if v.is_object() {
+                    value_xml.push_str(&format!(r#"<value name="{}">"#, k));
+                    value_xml.push_str(&self.value_xml(v));
+                    value_xml.push_str("</value>");
+                }
+            }
+        }
+        s.push_str(&field_xml);
+        // value 插槽先于 statement（编辑版如 self_listen 为 <value>...<statement>）
+        s.push_str(&value_xml);
+
+        // conditions → <value name="IF{i}">
+        let conditions = compiled
+            .get("conditions")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        for (i, c) in conditions.iter().enumerate() {
+            if c.is_object() {
+                s.push_str(&format!(r#"<value name="IF{}">"#, i));
+                s.push_str(&self.value_xml(c));
+                s.push_str("</value>");
+            }
+        }
+
+        // child_block → <statement name="...">
+        if let Some(children) = compiled.get("child_block").and_then(|v| v.as_array()) {
+            for (i, c) in children.iter().enumerate() {
+                if !c.is_object() {
+                    continue;
+                }
+                let name = match bt {
+                    "controls_if" | "controls_if_no_else" => {
+                        if i < conditions.len() {
+                            format!("DO{}", i)
+                        } else {
+                            "ELSE".to_string()
+                        }
+                    }
+                    "procedures_2_defnoreturn" => "STACK".to_string(),
+                    _ => "DO".to_string(),
+                };
+                s.push_str(&format!(r#"<statement name="{}">"#, name));
+                s.push_str(&self.block_xml(c, false, 0.0));
+                s.push_str("</statement>");
+            }
+        }
+
+        // next 链
+        if let Some(nb) = compiled.get("next_block")
+            && nb.is_object()
+        {
+            s.push_str("<next>");
+            s.push_str(&self.block_xml(nb, false, 0.0));
+            s.push_str("</next>");
+        }
+
+        s.push_str("</block>");
+        s
+    }
+
+    /// value 插槽内容：shadow 类型渲染为 `<shadow>`，否则递归为 `<block>`
+    fn value_xml(&self, v: &Value) -> String {
+        let vt = v.get_str_or("type", "");
+        let vid = v.get_str_or("id", "");
+        if self.config.shadow_types.contains(vt) {
+            let mut s = format!(r#"<shadow type="{}" id="{}" visible="visible">"#, vt, vid);
+            if let Some(params) = v.get_object_opt("params") {
+                for (k, fv) in params {
+                    if !fv.is_object() && !fv.is_array() {
+                        s.push_str(&format!(
+                            r#"<field name="{}">{}</field>"#,
+                            k,
+                            Self::escape_text(&Self::value_to_text(fv))
+                        ));
+                    }
+                }
+            }
+            s.push_str("</shadow>");
+            s
+        } else {
+            self.block_xml(v, false, 0.0)
+        }
+    }
+
+    /// XML 转义
+    fn escape_text(s: &str) -> String {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+            .replace('\'', "&apos;")
+    }
+
+    fn value_to_text(v: &Value) -> String {
+        match v {
+            Value::String(s) => s.clone(),
+            Value::Number(n) => n.to_string(),
+            Value::Bool(b) => b.to_string(),
+            _ => String::new(),
+        }
+    }
+}
+
 impl WorkDecompiler for KittenDecompiler {
     fn decompile(&self, raw: RawWorkData, context: &DecompilerContext) -> Result<DecompileResult> {
         let work_arc = match raw {
@@ -2240,9 +2251,7 @@ impl WorkDecompiler for KittenDecompiler {
         // 因此合并所有 compile_result 的 procedures，否则跨角色调用会被禁用
         let mut global_functions: HashMap<String, Value> = HashMap::new();
         for actor_compiled in &compile_result {
-            if let Some(procedures) =
-                actor_compiled.get("procedures").and_then(|v| v.as_object())
-            {
+            if let Some(procedures) = actor_compiled.get("procedures").and_then(|v| v.as_object()) {
                 for (name, func_data) in procedures {
                     global_functions.insert(name.clone(), func_data.clone());
                 }
@@ -2261,13 +2270,15 @@ impl WorkDecompiler for KittenDecompiler {
             if is_scene {
                 if use_blocks_xml {
                     // Kitten2/3：生成 blocksXML 字符串
-                    let xml = Self::decompile_blocks_xml(actor_compiled, context.config.as_ref())
+                    let xml = XmlBlockWriter::new(context.config.as_ref())
+                        .write_blocks(actor_compiled)
                         .with_context(|| format!("反编译场景 {} 失败", actor_id))?;
                     if let Some(scenes) = work
                         .get_mut("theatre")
                         .and_then(|t| t.get_mut("scenes"))
                         .and_then(|s| s.as_object_mut())
-                        && let Some(scene) = scenes.get_mut(actor_id).and_then(|v| v.as_object_mut())
+                        && let Some(scene) =
+                            scenes.get_mut(actor_id).and_then(|v| v.as_object_mut())
                     {
                         scene.insert("blocksXML".to_string(), Value::String(xml));
                     }
@@ -2292,13 +2303,15 @@ impl WorkDecompiler for KittenDecompiler {
             } else {
                 if use_blocks_xml {
                     // Kitten2/3：生成 blocksXML 字符串
-                    let xml = Self::decompile_blocks_xml(actor_compiled, context.config.as_ref())
+                    let xml = XmlBlockWriter::new(context.config.as_ref())
+                        .write_blocks(actor_compiled)
                         .with_context(|| format!("反编译角色 {} 失败", actor_id))?;
                     if let Some(actors) = work
                         .get_mut("theatre")
                         .and_then(|t| t.get_mut("actors"))
                         .and_then(|a| a.as_object_mut())
-                        && let Some(actor) = actors.get_mut(actor_id).and_then(|v| v.as_object_mut())
+                        && let Some(actor) =
+                            actors.get_mut(actor_id).and_then(|v| v.as_object_mut())
                     {
                         actor.insert("blocksXML".to_string(), Value::String(xml));
                     }
@@ -3166,9 +3179,9 @@ impl<'a> BlockDecompiler<'a> for IfBlockDecompiler<'a> {
             }
             // 编辑版：有 else 时 mutation 标记 else="1"，无 else 时为空字符串
             if has_else {
-                let mutation = format!(
+                let mutation =
                     r#"<mutation xmlns="http://www.w3.org/1999/xhtml" else="1"></mutation>"#
-                );
+                        .to_string();
                 obj.insert("mutation".to_string(), Value::String(mutation));
             }
         }
@@ -3499,10 +3512,10 @@ impl<'a> BlockDecompiler<'a> for FunctionCallDecompiler<'a> {
                     })?
                     .to_string();
                 context.blocks.insert(param_id.clone(), param_block);
-                if let Some(b) = context.blocks.get_mut(&param_id) {
-                    if let Some(o) = b.as_object_mut() {
-                        o.insert("parent_id".to_string(), json!(parent_id));
-                    }
+                if let Some(b) = context.blocks.get_mut(&param_id)
+                    && let Some(o) = b.as_object_mut()
+                {
+                    o.insert("parent_id".to_string(), json!(parent_id));
                 }
                 context.insert_connection(
                     &parent_id,
@@ -3682,11 +3695,158 @@ impl HttpClient for CodeMaoHttpClient {
     }
 }
 
+// ========================= 反编译选项（构建器） =========================
+/// 反编译调用配置，供外部通过链式方法定制（门面模式的参数对象）。
+#[derive(Debug, Clone)]
+pub struct DecompileOptions {
+    /// 输出目录；`None` 时使用 `DecompilerConfig::default_output_dir`
+    output_dir: Option<PathBuf>,
+    /// 是否保存原始（未反编译）数据到 `output_dir/raw/`，默认 true
+    save_raw: bool,
+    /// 批处理并发数（≥1），默认 1
+    batch_concurrency: usize,
+}
+
+impl Default for DecompileOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DecompileOptions {
+    pub fn new() -> Self {
+        Self {
+            output_dir: None,
+            save_raw: true,
+            batch_concurrency: 1,
+        }
+    }
+
+    /// 指定输出目录
+    pub fn output_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.output_dir = Some(dir.into());
+        self
+    }
+
+    /// 是否保存原始数据（默认 true）
+    pub fn save_raw(mut self, on: bool) -> Self {
+        self.save_raw = on;
+        self
+    }
+
+    /// 批处理并发数（默认 1）
+    pub fn batch_concurrency(mut self, n: usize) -> Self {
+        self.batch_concurrency = n.max(1);
+        self
+    }
+}
+
+// ========================= 作品处理器注册表（注册表模式） =========================
+/// fetcher 构造器：按作品类型创建对应的 `WorkFetcher`
+pub type FetcherFactory =
+    Box<dyn Fn(Box<dyn HttpClient>, Arc<DecompilerConfig>) -> Box<dyn WorkFetcher> + Send + Sync>;
+/// decompiler 构造器：按作品类型创建对应的 `WorkDecompiler`
+pub type DecompilerFactory =
+    Box<dyn Fn(&Arc<DecompilerConfig>) -> Box<dyn WorkDecompiler> + Send + Sync>;
+
+/// 作品类型 → 处理器（fetcher/decompiler）的注册表。
+/// 新增作品类型时只需 `register`，无需修改门面代码（开闭原则）。
+pub struct WorkProcessorRegistry {
+    fetchers: HashMap<WorkType, FetcherFactory>,
+    decompilers: HashMap<WorkType, DecompilerFactory>,
+}
+
+impl WorkProcessorRegistry {
+    pub fn new() -> Self {
+        Self {
+            fetchers: HashMap::new(),
+            decompilers: HashMap::new(),
+        }
+    }
+
+    /// 注册某一作品类型的 fetcher 与 decompiler 构造器
+    pub fn register(
+        &mut self,
+        work_type: WorkType,
+        fetcher: FetcherFactory,
+        decompiler: DecompilerFactory,
+    ) {
+        self.fetchers.insert(work_type, fetcher);
+        self.decompilers.insert(work_type, decompiler);
+    }
+
+    /// 按作品类型创建 fetcher
+    pub fn fetcher_for(
+        &self,
+        work_type: &WorkType,
+        client: Box<dyn HttpClient>,
+        config: Arc<DecompilerConfig>,
+    ) -> Result<Box<dyn WorkFetcher>> {
+        self.fetchers
+            .get(work_type)
+            .ok_or_else(|| DecompilerError::UnsupportedType(format!("{:?}", work_type)))
+            .map(|factory| factory(client, config))
+    }
+
+    /// 按作品类型创建 decompiler
+    pub fn decompiler_for(
+        &self,
+        work_type: &WorkType,
+        config: &Arc<DecompilerConfig>,
+    ) -> Result<Box<dyn WorkDecompiler>> {
+        self.decompilers
+            .get(work_type)
+            .ok_or_else(|| DecompilerError::UnsupportedType(format!("{:?}", work_type)))
+            .map(|factory| factory(config))
+    }
+
+    /// 内置全部作品类型的默认注册
+    fn with_defaults() -> Self {
+        let mut registry = Self::new();
+        // Kitten2/3/4 共用 KittenFetcher / KittenDecompiler
+        for wt in [WorkType::Kitten2, WorkType::Kitten3, WorkType::Kitten4] {
+            registry.register(
+                wt,
+                Box::new(|client, config| Box::new(KittenFetcher::new(client, config))),
+                Box::new(|_| Box::new(KittenDecompiler)),
+            );
+        }
+        registry.register(
+            WorkType::Neko,
+            Box::new(|client, config| Box::new(NekoFetcher::new(client, config))),
+            Box::new(|config| Box::new(NekoDecompiler::new(config.crypto_salt.as_slice()))),
+        );
+        registry.register(
+            WorkType::Nemo,
+            Box::new(|client, config| Box::new(NemoFetcher::new(client, config))),
+            Box::new(|_| Box::new(NemoDecompiler)),
+        );
+        registry.register(
+            WorkType::Wood,
+            Box::new(|client, config| Box::new(WoodFetcher::new(client, config))),
+            Box::new(|_| Box::new(WoodDecompiler)),
+        );
+        registry.register(
+            WorkType::Coco,
+            Box::new(|client, config| Box::new(CocoFetcher::new(client, config))),
+            Box::new(|_| Box::new(CocoDecompiler)),
+        );
+        registry
+    }
+}
+
+impl Default for WorkProcessorRegistry {
+    fn default() -> Self {
+        Self::with_defaults()
+    }
+}
+
 // ========================= 主入口 =========================
 pub struct CodemaoDecompiler {
     config: Arc<DecompilerConfig>,
     client: Arc<CodeMaoClient>,
     id_generator: IdGenerator,
+    registry: Arc<WorkProcessorRegistry>,
 }
 
 impl CodemaoDecompiler {
@@ -3696,27 +3856,112 @@ impl CodemaoDecompiler {
             config,
             client,
             id_generator: IdGenerator::new(),
+            registry: Arc::new(WorkProcessorRegistry::default()),
         }
     }
+
+    /// 全局单例门面：复用全局 HTTP 客户端与默认注册表，
+    /// 多次反编译不重复创建客户端（性能优化）。
+    pub fn global() -> &'static Self {
+        static GLOBAL: OnceLock<CodemaoDecompiler> = OnceLock::new();
+        GLOBAL.get_or_init(|| {
+            let client = Arc::new(KittyFactory::global_client().clone());
+            Self::new(None, client)
+        })
+    }
+    /// 反编译单个作品（默认选项，向后兼容）
     pub fn decompile(&self, work_id: i64, output_dir: Option<&Path>) -> Result<String> {
+        let mut options = DecompileOptions::new();
+        if let Some(dir) = output_dir {
+            options = options.output_dir(dir.to_path_buf());
+        }
+        self.decompile_with_options(work_id, options)
+    }
+
+    /// 使用自定义选项反编译单个作品
+    pub fn decompile_with_options(
+        &self,
+        work_id: i64,
+        options: DecompileOptions,
+    ) -> Result<String> {
+        self.decompile_inner(work_id, &options)
+    }
+
+    /// 批处理反编译多个作品，返回与输入顺序一致的 `Vec<Result>`
+    pub fn decompile_batch(
+        &self,
+        work_ids: &[i64],
+        options: DecompileOptions,
+    ) -> Vec<Result<String>> {
+        let concurrency = options.batch_concurrency.max(1);
+        if concurrency == 1 || work_ids.len() <= 1 {
+            return work_ids
+                .iter()
+                .map(|&id| self.decompile_inner(id, &options))
+                .collect();
+        }
+        // 按并发数分块，块内并发执行（thread::scope），块间顺序收集保持结果顺序
+        let options_ref = &options;
+        let mut results = Vec::with_capacity(work_ids.len());
+        for chunk in work_ids.chunks(concurrency) {
+            let chunk_results: Vec<Result<String>> = std::thread::scope(|scope| {
+                let handles: Vec<_> = chunk
+                    .iter()
+                    .map(|&id| scope.spawn(move || self.decompile_inner(id, options_ref)))
+                    .collect();
+                handles
+                    .into_iter()
+                    .map(|handle| {
+                        handle.join().unwrap_or_else(|_| {
+                            Err(DecompilerError::Other {
+                                msg: "反编译线程异常".to_string(),
+                                source: None,
+                            })
+                        })
+                    })
+                    .collect()
+            });
+            results.extend(chunk_results);
+        }
+        results
+    }
+
+    /// 反编译主流程（模板方法）：获取信息 → 创建处理器 → 取原始数据 →
+    /// （可选）保存原始数据 → 反编译 → 保存结果
+    fn decompile_inner(&self, work_id: i64, options: &DecompileOptions) -> Result<String> {
         info!("开始反编译作品 [work_id={}]", work_id);
         let http_client = Box::new(CodeMaoHttpClient::new(self.client.clone()));
         let work_info = self
             .fetch_work_info(&*http_client, work_id)
             .with_context(|| format!("获取作品 {} 信息失败", work_id))?;
 
-        let fetcher = Self::create_fetcher(&work_info, http_client.clone(), self.config.clone())?;
-        let decompiler = Self::create_decompiler(&work_info, &self.config);
+        let fetcher = self
+            .registry
+            .fetcher_for(
+                &work_info.work_type,
+                http_client.clone(),
+                self.config.clone(),
+            )
+            .with_context(|| format!("不支持的{}作品类型", work_id))?;
+        let decompiler = self
+            .registry
+            .decompiler_for(&work_info.work_type, &self.config)
+            .with_context(|| format!("不支持的{}作品类型", work_id))?;
         let raw = fetcher
             .fetch(&work_info)
             .with_context(|| format!("获取作品 {} 原始数据失败", work_id))?;
 
         // 确定输出目录（用户指定或默认）
-        let output_path = output_dir.unwrap_or(&self.config.default_output_dir);
+        let output_path = options
+            .output_dir
+            .as_deref()
+            .unwrap_or(&self.config.default_output_dir);
 
-        // 新增：保存原始数据到 raw/ 子目录
-        self.save_raw_data(&work_info, &raw, output_path)
-            .with_context(|| format!("保存作品 {} 原始数据失败", work_id))?;
+        // 可选：保存原始数据到 raw/ 子目录
+        if options.save_raw {
+            self.save_raw_data(&work_info, &raw, output_path)
+                .with_context(|| format!("保存作品 {} 原始数据失败", work_id))?;
+        }
 
         let context = DecompilerContextBuilder::new()
             .work_info(work_info)
@@ -3778,40 +4023,19 @@ impl CodemaoDecompiler {
         let data = http_client.get_json(&url, None)?;
         WorkInfo::from_api_response(&data)
     }
-
-    fn create_fetcher(
-        work_info: &WorkInfo,
-        http_client: Box<dyn HttpClient>,
-        config: Arc<DecompilerConfig>,
-    ) -> Result<Box<dyn WorkFetcher>> {
-        Ok(match work_info.work_type {
-            WorkType::Neko => Box::new(NekoFetcher::new(http_client, config.clone())),
-            WorkType::Nemo => Box::new(NemoFetcher::new(http_client, config.clone())),
-            WorkType::Wood => Box::new(WoodFetcher::new(http_client, config.clone())),
-            WorkType::Kitten2 | WorkType::Kitten3 | WorkType::Kitten4 => {
-                Box::new(KittenFetcher::new(http_client, config.clone()))
-            }
-            WorkType::Coco => Box::new(CocoFetcher::new(http_client, config.clone())),
-        })
-    }
-
-    fn create_decompiler(
-        work_info: &WorkInfo,
-        config: &Arc<DecompilerConfig>,
-    ) -> Box<dyn WorkDecompiler> {
-        match work_info.work_type {
-            WorkType::Neko => Box::new(NekoDecompiler::new(&config.crypto_salt)),
-            WorkType::Kitten2 | WorkType::Kitten3 | WorkType::Kitten4 => Box::new(KittenDecompiler),
-            WorkType::Nemo => Box::new(NemoDecompiler),
-            WorkType::Wood => Box::new(WoodDecompiler),
-            WorkType::Coco => Box::new(CocoDecompiler),
-        }
-    }
 }
 
-/// 便捷反编译函数
+/// 便捷反编译函数：使用全局单例门面（复用 HTTP 客户端），功能与之前一致
 pub fn decompile_work(work_id: i64, output_dir: Option<&Path>) -> Result<String> {
-    let decompiler =
-        CodemaoDecompiler::new(None, Arc::new(KittyFactory::create_global_client(None)));
-    decompiler.decompile(work_id, output_dir)
+    CodemaoDecompiler::global().decompile(work_id, output_dir)
+}
+
+/// 便捷反编译函数：使用自定义选项
+pub fn decompile_work_with(work_id: i64, options: DecompileOptions) -> Result<String> {
+    CodemaoDecompiler::global().decompile_with_options(work_id, options)
+}
+
+/// 便捷批量反编译函数：返回与输入顺序一致的 `Vec<Result<String>>`
+pub fn decompile_works(work_ids: &[i64], options: DecompileOptions) -> Vec<Result<String>> {
+    CodemaoDecompiler::global().decompile_batch(work_ids, options)
 }
