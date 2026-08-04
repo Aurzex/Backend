@@ -23,7 +23,7 @@ impl Log for ConsoleLogger {
 fn main() {
     log::set_logger(&ConsoleLogger).unwrap(); // 改这里
     log::set_max_level(LevelFilter::Info);
-    for work_id in [215246857i64, 301113412] {
+    for work_id in [215246857i64, 301113412, 324995084] {
         match decompile_work(work_id, None) {
             Ok(path) => println!("[OK] work_id={} -> {}", work_id, path),
             Err(e) => eprintln!("[ERR] work_id={} -> {:?}", work_id, e),

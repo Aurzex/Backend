@@ -1891,6 +1891,190 @@ impl KittenDecompiler {
         Ok(scene)
     }
 
+    // ===== Kitten2/3：blocksXML 序列化 =====
+    // Kitten3 编辑版（如春风得意）使用 Blockly XML 字符串存储积木（scene/actor 的 blocksXML 字段），
+    // 与 Kitten4 的 block_data_json（blocks/connections）不同，需要单独序列化。
+
+    /// XML 转义
+    fn escape_xml_text(s: &str) -> String {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+            .replace('\'', "&apos;")
+    }
+
+    fn value_to_xml_text(v: &Value) -> String {
+        match v {
+            Value::String(s) => s.clone(),
+            Value::Number(n) => n.to_string(),
+            Value::Bool(b) => b.to_string(),
+            _ => String::new(),
+        }
+    }
+
+    /// 将编译块树的单个块渲染为 Blockly XML
+    fn block_xml(compiled: &Value, config: &DecompilerConfig, is_root: bool, y: f64) -> String {
+        let bt = compiled.get_str_or("type", "");
+        let bid = compiled.get_str_or("id", "");
+        let mut s = if is_root {
+            format!(
+                r#"<block type="{}" id="{}" inline="true" visible="visible" x="0" y="{}">"#,
+                bt, bid, y
+            )
+        } else {
+            format!(r#"<block type="{}" id="{}" inline="true" visible="visible">"#, bt, bid)
+        };
+
+        // fields：params 标量
+        let mut field_xml = String::new();
+        let mut value_xml = String::new();
+        if let Some(params) = compiled.get_object_opt("params") {
+            for (k, v) in params {
+                if !v.is_object() && !v.is_array() {
+                    field_xml.push_str(&format!(
+                        r#"<field name="{}">{}</field>"#,
+                        k,
+                        Self::escape_xml_text(&Self::value_to_xml_text(v))
+                    ));
+                }
+            }
+            // value 插槽：params 对象
+            for (k, v) in params {
+                if v.is_object() {
+                    value_xml.push_str(&format!(r#"<value name="{}">"#, k));
+                    value_xml.push_str(&Self::value_xml(v, config));
+                    value_xml.push_str("</value>");
+                }
+            }
+        }
+        s.push_str(&field_xml);
+        // value 插槽先于 statement（编辑版如 self_listen 为 <value>...<statement>）
+        s.push_str(&value_xml);
+
+        // conditions → <value name="IF{i}">
+        let conditions = compiled
+            .get("conditions")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        for (i, c) in conditions.iter().enumerate() {
+            if c.is_object() {
+                s.push_str(&format!(r#"<value name="IF{}">"#, i));
+                s.push_str(&Self::value_xml(c, config));
+                s.push_str("</value>");
+            }
+        }
+
+        // child_block → <statement name="...">
+        if let Some(children) = compiled.get("child_block").and_then(|v| v.as_array()) {
+            let bt_str = bt;
+            for (i, c) in children.iter().enumerate() {
+                if !c.is_object() {
+                    continue;
+                }
+                let name = match bt_str {
+                    "controls_if" | "controls_if_no_else" => {
+                        if i < conditions.len() {
+                            format!("DO{}", i)
+                        } else {
+                            "ELSE".to_string()
+                        }
+                    }
+                    "procedures_2_defnoreturn" => "STACK".to_string(),
+                    _ => "DO".to_string(),
+                };
+                s.push_str(&format!(r#"<statement name="{}">"#, name));
+                s.push_str(&Self::block_xml(c, config, false, 0.0));
+                s.push_str("</statement>");
+            }
+        }
+
+        // next 链
+        if let Some(nb) = compiled.get("next_block") {
+            if nb.is_object() {
+                s.push_str("<next>");
+                s.push_str(&Self::block_xml(nb, config, false, 0.0));
+                s.push_str("</next>");
+            }
+        }
+
+        s.push_str("</block>");
+        s
+    }
+
+    /// value 插槽内容：shadow 类型渲染为 <shadow>，否则递归为 <block>
+    fn value_xml(v: &Value, config: &DecompilerConfig) -> String {
+        let vt = v.get_str_or("type", "");
+        let vid = v.get_str_or("id", "");
+        if config.shadow_types.contains(vt) {
+            let mut s = format!(r#"<shadow type="{}" id="{}" visible="visible">"#, vt, vid);
+            if let Some(params) = v.get_object_opt("params") {
+                for (k, fv) in params {
+                    if !fv.is_object() && !fv.is_array() {
+                        s.push_str(&format!(
+                            r#"<field name="{}">{}</field>"#,
+                            k,
+                            Self::escape_xml_text(&Self::value_to_xml_text(fv))
+                        ));
+                    }
+                }
+            }
+            s.push_str("</shadow>");
+            s
+        } else {
+            Self::block_xml(v, config, false, 0.0)
+        }
+    }
+
+    /// 生成 actor/场景的 blocksXML（<variables></variables> + 各根块）
+    fn decompile_blocks_xml(actor_compiled: &Value, config: &DecompilerConfig) -> Result<String> {
+        let mut xml = String::from("<variables></variables>");
+        let compiled_blocks = actor_compiled
+            .get("compiled_block_map")
+            .and_then(|v| v.as_object());
+        if let Some(blocks) = compiled_blocks {
+            // 收集被引用的块 id，只将顶层根块作为独立 XML 块输出
+            let mut referenced_ids: HashSet<String> = HashSet::new();
+            for (_, block) in blocks {
+                if let Some(next) = block.get("next_block") {
+                    if let Some(id) = next.get("id").and_then(|v| v.as_str()) {
+                        referenced_ids.insert(id.to_string());
+                    }
+                }
+                if let Some(children) = block.get("child_block").and_then(|v| v.as_array()) {
+                    for child in children {
+                        if let Some(id) = child.get("id").and_then(|v| v.as_str()) {
+                            referenced_ids.insert(id.to_string());
+                        }
+                    }
+                }
+                if let Some(conds) = block.get("conditions").and_then(|v| v.as_array()) {
+                    for c in conds {
+                        if let Some(id) = c.get("id").and_then(|v| v.as_str()) {
+                            referenced_ids.insert(id.to_string());
+                        }
+                    }
+                }
+                if let Some(params) = block.get("params").and_then(|v| v.as_object()) {
+                    for (_, pv) in params {
+                        if let Some(id) = pv.get("id").and_then(|v| v.as_str()) {
+                            referenced_ids.insert(id.to_string());
+                        }
+                    }
+                }
+            }
+            let mut y = 0.0;
+            for (id, block) in blocks {
+                if !referenced_ids.contains(id) {
+                    xml.push_str(&Self::block_xml(block, config, true, y));
+                    y += 220.0;
+                }
+            }
+        }
+        Ok(xml)
+    }
+
     fn update_work_info(
         work: &mut Value,
         work_info: &WorkInfo,
@@ -1923,19 +2107,35 @@ impl KittenDecompiler {
                 "blocks": [],
             }),
         );
-        work_obj.insert("work_source_label".to_string(), json!(1));
-        work_obj.insert("sample_id".to_string(), json!(""));
-        work_obj.insert("codemao_value".to_string(), json!(work_info.id.to_string()));
-        work_obj.insert("device_widget_type".to_string(), Value::Null);
+        // Kitten3 编辑版（如春风得意）work_source_label 为 6，且无 sample_id/设备/最后工具箱等字段
+        let is_k3 = matches!(
+            work_info.work_type,
+            WorkType::Kitten2 | WorkType::Kitten3
+        );
+        work_obj.insert(
+            "work_source_label".to_string(),
+            json!(if is_k3 { 6 } else { 1 }),
+        );
+        if is_k3 {
+            // Kitten3 编辑版（如春风得意）顶层含 work_business 字段
+            work_obj.insert("work_business".to_string(), json!(0));
+        }
+        if !is_k3 {
+            work_obj.insert("sample_id".to_string(), json!(""));
+            work_obj.insert("codemao_value".to_string(), json!(work_info.id.to_string()));
+            work_obj.insert("device_widget_type".to_string(), Value::Null);
+        }
         work_obj.insert("project_name".to_string(), json!(work_info.name));
         work_obj.insert(
             "toolbox_order".to_string(),
             json!(config.toolbox_categories),
         );
-        work_obj.insert(
-            "last_toolbox_order".to_string(),
-            json!(config.toolbox_categories),
-        );
+        if !is_k3 {
+            work_obj.insert(
+                "last_toolbox_order".to_string(),
+                json!(config.toolbox_categories),
+            );
+        }
 
         for (k, v) in original_features {
             work_obj.insert(k, v);
@@ -1943,7 +2143,7 @@ impl KittenDecompiler {
         Ok(())
     }
 
-    fn clean_work_data(work: &mut Value) -> Result<()> {
+    fn clean_work_data(work: &mut Value, work_type: WorkType) -> Result<()> {
         let work_obj = work
             .as_object_mut()
             .ok_or_else(|| DecompilerError::Decompile("work不是对象".to_string()))?;
@@ -1951,10 +2151,13 @@ impl KittenDecompiler {
         for key in &keys_to_remove {
             work_obj.remove(*key);
         }
-        // 清理编译版 theatre 的运行时字段（编辑版 theatre 无这些键）
-        if let Some(theatre) = work.get_mut("theatre").and_then(|t| t.as_object_mut()) {
-            for key in ["current_entity", "current_scene", "style_collections"] {
-                theatre.remove(key);
+        // 清理编译版 theatre 的运行时字段：Kitten4 编辑版无这些键，
+        // 但 Kitten3 编辑版（如春风得意）保留 current_entity/current_scene/style_collections
+        if !matches!(work_type, WorkType::Kitten2 | WorkType::Kitten3) {
+            if let Some(theatre) = work.get_mut("theatre").and_then(|t| t.as_object_mut()) {
+                for key in ["current_entity", "current_scene", "style_collections"] {
+                    theatre.remove(key);
+                }
             }
         }
         Ok(())
@@ -2030,6 +2233,8 @@ impl WorkDecompiler for KittenDecompiler {
         }
 
         let work_type = context.work_info.work_type;
+        // Kitten2/3 编辑版用 blocksXML（Blockly XML 字符串），Kitten4 用 block_data_json
+        let use_blocks_xml = matches!(work_type, WorkType::Kitten2 | WorkType::Kitten3);
 
         // 全局函数表：过程可在一个角色（如 Function）中定义、被其它角色调用，
         // 因此合并所有 compile_result 的 procedures，否则跨角色调用会被禁用
@@ -2054,48 +2259,76 @@ impl WorkDecompiler for KittenDecompiler {
                 .is_some();
 
             if is_scene {
-                let scene_info = work["theatre"]["scenes"][actor_id].clone();
-                let updated_scene = Self::decompile_scene_blocks(
-                    &context.config,
-                    &context.id_generator,
-                    actor_compiled,
-                    &scene_info,
-                    work_type,
-                )
-                .with_context(|| format!("反编译场景 {} 失败", actor_id))?;
-                if let Some(scenes) = work
-                    .get_mut("theatre")
-                    .and_then(|t| t.get_mut("scenes"))
-                    .and_then(|s| s.as_object_mut())
-                {
-                    scenes.insert(actor_id.to_string(), updated_scene);
+                if use_blocks_xml {
+                    // Kitten2/3：生成 blocksXML 字符串
+                    let xml = Self::decompile_blocks_xml(actor_compiled, context.config.as_ref())
+                        .with_context(|| format!("反编译场景 {} 失败", actor_id))?;
+                    if let Some(scenes) = work
+                        .get_mut("theatre")
+                        .and_then(|t| t.get_mut("scenes"))
+                        .and_then(|s| s.as_object_mut())
+                        && let Some(scene) = scenes.get_mut(actor_id).and_then(|v| v.as_object_mut())
+                    {
+                        scene.insert("blocksXML".to_string(), Value::String(xml));
+                    }
+                } else {
+                    let scene_info = work["theatre"]["scenes"][actor_id].clone();
+                    let updated_scene = Self::decompile_scene_blocks(
+                        &context.config,
+                        &context.id_generator,
+                        actor_compiled,
+                        &scene_info,
+                        work_type,
+                    )
+                    .with_context(|| format!("反编译场景 {} 失败", actor_id))?;
+                    if let Some(scenes) = work
+                        .get_mut("theatre")
+                        .and_then(|t| t.get_mut("scenes"))
+                        .and_then(|s| s.as_object_mut())
+                    {
+                        scenes.insert(actor_id.to_string(), updated_scene);
+                    }
                 }
             } else {
-                let actor_info = Self::get_actor_info(&work, actor_id);
-                // 角色也使用全局变量映射
-                let updated_actor = Self::decompile_actor_blocks(
-                    &context.config,
-                    &context.id_generator,
-                    actor_compiled,
-                    &global_functions,
-                    actor_info,
-                    global_variable_map.clone(), // 克隆，每个角色独立
-                    work_type,
-                )
-                .with_context(|| format!("反编译角色 {} 失败", actor_id))?;
+                if use_blocks_xml {
+                    // Kitten2/3：生成 blocksXML 字符串
+                    let xml = Self::decompile_blocks_xml(actor_compiled, context.config.as_ref())
+                        .with_context(|| format!("反编译角色 {} 失败", actor_id))?;
+                    if let Some(actors) = work
+                        .get_mut("theatre")
+                        .and_then(|t| t.get_mut("actors"))
+                        .and_then(|a| a.as_object_mut())
+                        && let Some(actor) = actors.get_mut(actor_id).and_then(|v| v.as_object_mut())
+                    {
+                        actor.insert("blocksXML".to_string(), Value::String(xml));
+                    }
+                } else {
+                    let actor_info = Self::get_actor_info(&work, actor_id);
+                    // 角色也使用全局变量映射
+                    let updated_actor = Self::decompile_actor_blocks(
+                        &context.config,
+                        &context.id_generator,
+                        actor_compiled,
+                        &global_functions,
+                        actor_info,
+                        global_variable_map.clone(), // 克隆，每个角色独立
+                        work_type,
+                    )
+                    .with_context(|| format!("反编译角色 {} 失败", actor_id))?;
 
-                if let Some(actors) = work
-                    .get_mut("theatre")
-                    .and_then(|t| t.get_mut("actors"))
-                    .and_then(|a| a.as_object_mut())
-                {
-                    actors.insert(actor_id.to_string(), updated_actor);
+                    if let Some(actors) = work
+                        .get_mut("theatre")
+                        .and_then(|t| t.get_mut("actors"))
+                        .and_then(|a| a.as_object_mut())
+                    {
+                        actors.insert(actor_id.to_string(), updated_actor);
+                    }
                 }
             }
         }
 
         Self::update_work_info(&mut work, &context.work_info, context.config.as_ref())?;
-        Self::clean_work_data(&mut work)?;
+        Self::clean_work_data(&mut work, work_type)?;
         Self::restore_global_fields(&mut work, &original_work);
 
         Ok(DecompileResult::Json(work))
