@@ -1,5 +1,5 @@
 use log::debug;
-use serde_json::{to_string_pretty, Value};
+use serde_json::{Value, to_string_pretty};
 use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;

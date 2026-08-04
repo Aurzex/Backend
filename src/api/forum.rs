@@ -196,9 +196,8 @@ impl ForumDataFetcher {
     ) -> PaginatedIter {
         let endpoint = format!("/web/forums/posts/{}/replies", post_id);
         debug!("获取回帖迭代器: post_id={}, sort={:?}", post_id, sort);
-        
-        self
-            .build_paginated(&endpoint, 10, limit.unwrap_or(15))
+
+        self.build_paginated(&endpoint, 10, limit.unwrap_or(15))
             .with_iter_param("sort", sort.unwrap_or_else(|| "-created_at".to_string()))
             .with_total_key("total")
     }
@@ -207,7 +206,7 @@ impl ForumDataFetcher {
     pub fn fetch_reply_comments_gen(&self, reply_id: i32, limit: Option<usize>) -> PaginatedIter {
         let endpoint = format!("/web/forums/replies/{}/comments", reply_id);
         debug!("获取评论迭代器: reply_id={}", reply_id);
-        
+
         self.build_paginated(&endpoint, 10, limit.unwrap_or(10))
     }
 
@@ -215,7 +214,7 @@ impl ForumDataFetcher {
     pub fn fetch_my_posts_gen(&self, post_type: PostType, limit: Option<usize>) -> PaginatedIter {
         let endpoint = format!("/web/forums/posts/mine/{}", post_type.as_str());
         debug!("获取我的帖子迭代器: type={:?}", post_type);
-        
+
         self.build_paginated(&endpoint, 10, limit.unwrap_or(10))
     }
 
@@ -312,9 +311,8 @@ impl ForumDataFetcher {
     /// 按标题搜索帖子分页迭代器
     pub fn search_posts_gen(&self, title: &str, limit: Option<usize>) -> PaginatedIter {
         debug!("搜索帖子: title={}", title);
-        
-        self
-            .build_paginated("/web/forums/posts/search", 20, limit.unwrap_or(20))
+
+        self.build_paginated("/web/forums/posts/search", 20, limit.unwrap_or(20))
             .with_iter_param("title", title)
     }
 
@@ -329,16 +327,15 @@ impl ForumDataFetcher {
             None => "/web/forums/boards/posts/7dayHot".to_string(),
         };
         debug!("获取7天热门: board_id={:?}", board_id);
-        
-        self
-            .build_paginated(&endpoint, 10, limit.unwrap_or(15))
+
+        self.build_paginated(&endpoint, 10, limit.unwrap_or(15))
             .with_total_key("total")
     }
 
     /// 求助帖子分页迭代器
     pub fn fetch_ask_help_posts_gen(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取求助帖子迭代器");
-        
+
         self.build_paginated("/web/forums/boards/posts/ask-help", 10, limit.unwrap_or(10))
     }
 }

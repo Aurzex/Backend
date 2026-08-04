@@ -1,9 +1,9 @@
 use crate::utils::acquire::{
-    BaseKey, CodeMaoClient, HTTPStatus, HttpMethod, KittyRequestBuilder, MewResult,
-    PaginatedIter, PaginationMethod,
+    BaseKey, CodeMaoClient, HTTPStatus, HttpMethod, KittyRequestBuilder, MewResult, PaginatedIter,
+    PaginationMethod,
 };
 use log::{debug, warn};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 // ==================== 工具函数 ====================
@@ -162,11 +162,7 @@ impl BaseWorkOperations {
     }
 
     /// 发送请求并返回 status == 预期状态码。
-    fn check_status(
-        &self,
-        builder: KittyRequestBuilder,
-        expected: HTTPStatus,
-    ) -> MewResult<bool> {
+    fn check_status(&self, builder: KittyRequestBuilder, expected: HTTPStatus) -> MewResult<bool> {
         let response = builder.send()?;
         Ok(response.status() == expected as u16)
     }
@@ -297,11 +293,7 @@ impl CommentOperations {
     }
 
     /// 发送请求并返回 status == 预期状态码。
-    fn check_status(
-        &self,
-        builder: KittyRequestBuilder,
-        expected: HTTPStatus,
-    ) -> MewResult<bool> {
+    fn check_status(&self, builder: KittyRequestBuilder, expected: HTTPStatus) -> MewResult<bool> {
         let response = builder.send()?;
         Ok(response.status() == expected as u16)
     }
@@ -372,10 +364,7 @@ impl CommentOperations {
 
     /// 删除作品评论
     pub fn delete_comment(&self, work_id: i32, comment_id: i32) -> MewResult<bool> {
-        debug!(
-            "删除评论: work_id={}, comment_id={}",
-            work_id, comment_id
-        );
+        debug!("删除评论: work_id={}, comment_id={}", work_id, comment_id);
         let endpoint = format!(
             "/creation-tools/v1/works/{}/comment/{}",
             work_id, comment_id
@@ -479,11 +468,7 @@ impl KittenWorkManager {
     }
 
     /// 发送请求并返回 status == 预期状态码。
-    fn check_status(
-        &self,
-        builder: KittyRequestBuilder,
-        expected: HTTPStatus,
-    ) -> MewResult<bool> {
+    fn check_status(&self, builder: KittyRequestBuilder, expected: HTTPStatus) -> MewResult<bool> {
         let response = builder.send()?;
         Ok(response.status() == expected as u16)
     }
@@ -568,9 +553,9 @@ impl KittenWorkManager {
     pub fn delete_kitten_draft(&self, work_id: i32) -> MewResult<bool> {
         debug!("删除Kitten草稿: work_id={}", work_id);
         let endpoint = format!("/kitten/common/work/{}/temporarily", work_id);
-        let builder = self
-            .client
-            .build_request(HttpMethod::Delete, &endpoint, Some(BaseKey::Creation));
+        let builder =
+            self.client
+                .build_request(HttpMethod::Delete, &endpoint, Some(BaseKey::Creation));
         self.check_status(builder, HTTPStatus::Ok)
     }
 
@@ -599,13 +584,11 @@ impl KittenWorkManager {
     /// 清空 Kitten 作品回收站
     pub fn execute_empty_kitten_trash(&self) -> MewResult<bool> {
         debug!("清空Kitten回收站");
-        let builder = self
-            .client
-            .build_request(
-                HttpMethod::Delete,
-                "/work/user/works/permanently",
-                Some(BaseKey::Creation),
-            );
+        let builder = self.client.build_request(
+            HttpMethod::Delete,
+            "/work/user/works/permanently",
+            Some(BaseKey::Creation),
+        );
         self.check_status(builder, HTTPStatus::NoContent)
     }
 
@@ -649,11 +632,7 @@ impl NekoWorkManager {
     }
 
     /// 发送请求并返回 status == 预期状态码。
-    fn check_status(
-        &self,
-        builder: KittyRequestBuilder,
-        expected: HTTPStatus,
-    ) -> MewResult<bool> {
+    fn check_status(&self, builder: KittyRequestBuilder, expected: HTTPStatus) -> MewResult<bool> {
         let response = builder.send()?;
         Ok(response.status() == expected as u16)
     }
@@ -751,22 +730,20 @@ impl NekoWorkManager {
     pub fn execute_unpublish_kn_work(&self, work_id: i32) -> MewResult<bool> {
         debug!("取消发布KN作品: work_id={}", work_id);
         let endpoint = format!("/neko/community/work/unpublish/{}", work_id);
-        let builder = self
-            .client
-            .build_request(HttpMethod::Put, &endpoint, Some(BaseKey::Creation));
+        let builder =
+            self.client
+                .build_request(HttpMethod::Put, &endpoint, Some(BaseKey::Creation));
         self.check_status(builder, HTTPStatus::Ok)
     }
 
     /// 清空 KN 作品回收站
     pub fn execute_empty_kn_trash(&self) -> MewResult<bool> {
         debug!("清空KN回收站");
-        let builder = self
-            .client
-            .build_request(
-                HttpMethod::Delete,
-                "/neko/works/permanently",
-                Some(BaseKey::Creation),
-            );
+        let builder = self.client.build_request(
+            HttpMethod::Delete,
+            "/neko/works/permanently",
+            Some(BaseKey::Creation),
+        );
         self.check_status(builder, HTTPStatus::Ok)
     }
 
@@ -774,9 +751,9 @@ impl NekoWorkManager {
     pub fn execute_recover_kn_trash(&self, work_id: i32) -> MewResult<bool> {
         debug!("恢复KN回收站作品: work_id={}", work_id);
         let endpoint = format!("/neko/works/{}/recover", work_id);
-        let builder = self
-            .client
-            .build_request(HttpMethod::Patch, &endpoint, Some(BaseKey::Creation));
+        let builder =
+            self.client
+                .build_request(HttpMethod::Patch, &endpoint, Some(BaseKey::Creation));
         self.check_status(builder, HTTPStatus::Ok)
     }
 
@@ -813,9 +790,9 @@ impl NekoWorkManager {
     pub fn troubleshoot_work_pics(&self, work_id: i32) -> MewResult<Value> {
         debug!("作品图片故障排查: work_id={}", work_id);
         let endpoint = format!("/neko/works/pic-troubleshoot/{}", work_id);
-        let builder = self
-            .client
-            .build_request(HttpMethod::Put, &endpoint, Some(BaseKey::Creation));
+        let builder =
+            self.client
+                .build_request(HttpMethod::Put, &endpoint, Some(BaseKey::Creation));
         self.send_and_parse(builder)
     }
 }
@@ -841,11 +818,7 @@ impl WoodWorkManager {
     }
 
     /// 发送请求并返回 status == 预期状态码。
-    fn check_status(
-        &self,
-        builder: KittyRequestBuilder,
-        expected: HTTPStatus,
-    ) -> MewResult<bool> {
+    fn check_status(&self, builder: KittyRequestBuilder, expected: HTTPStatus) -> MewResult<bool> {
         let response = builder.send()?;
         Ok(response.status() == expected as u16)
     }
@@ -908,9 +881,9 @@ impl WoodWorkManager {
     pub fn delete_wood_draft(&self, work_id: i32) -> MewResult<bool> {
         debug!("删除海龟编辑器草稿: work_id={}", work_id);
         let endpoint = format!("/wood/project/{}/temporarily", work_id);
-        let builder = self
-            .client
-            .build_request(HttpMethod::Delete, &endpoint, Some(BaseKey::Creation));
+        let builder =
+            self.client
+                .build_request(HttpMethod::Delete, &endpoint, Some(BaseKey::Creation));
         self.check_status(builder, HTTPStatus::Ok)
     }
 
@@ -948,13 +921,13 @@ impl WoodWorkManager {
         file_type: Option<i32>,
         is_open: bool,
     ) -> MewResult<Value> {
-        debug!("创建海龟编辑器文件: work_id={}, file_name={:?}", work_id, file_name);
+        debug!(
+            "创建海龟编辑器文件: work_id={}, file_name={:?}",
+            work_id, file_name
+        );
         // 先获取现有项目
         let project = self.fetch_wood_project(work_id)?;
-        let mut files = project["files"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default();
+        let mut files = project["files"].as_array().cloned().unwrap_or_default();
 
         let file_data = json!({
             "work_id": work_id,
@@ -1011,13 +984,11 @@ impl CocoWorkManager {
     /// 获取 Coco 平台的主要课程列表
     pub fn fetch_coco_primary_courses(&self) -> MewResult<Value> {
         debug!("获取Coco主要课程");
-        let builder = self
-            .client
-            .build_request(
-                HttpMethod::Get,
-                "/coconut/primary-course/list",
-                Some(BaseKey::Creation),
-            );
+        let builder = self.client.build_request(
+            HttpMethod::Get,
+            "/coconut/primary-course/list",
+            Some(BaseKey::Creation),
+        );
         self.send_and_parse(builder)
     }
 
@@ -1042,26 +1013,22 @@ impl CocoWorkManager {
     /// 获取 Coco 的示范教程列表
     pub fn fetch_demo_courses(&self) -> MewResult<Value> {
         debug!("获取Coco示范教程");
-        let builder = self
-            .client
-            .build_request(
-                HttpMethod::Get,
-                "/coconut/sample/list",
-                Some(BaseKey::Creation),
-            );
+        let builder = self.client.build_request(
+            HttpMethod::Get,
+            "/coconut/sample/list",
+            Some(BaseKey::Creation),
+        );
         self.send_and_parse(builder)
     }
 
     /// 获取 Coco 的白名单作品链接
     pub fn fetch_whitelisted_works(&self) -> MewResult<Value> {
         debug!("获取Coco白名单作品");
-        let builder = self
-            .client
-            .build_request(
-                HttpMethod::Get,
-                "https://static.bcmcdn.com/coco/whitelist.json",
-                None,
-            );
+        let builder = self.client.build_request(
+            HttpMethod::Get,
+            "https://static.bcmcdn.com/coco/whitelist.json",
+            None,
+        );
         self.send_and_parse(builder)
     }
 
@@ -1161,11 +1128,7 @@ impl CollaborationManager {
     }
 
     /// 发送请求并返回 status == 预期状态码。
-    fn check_status(
-        &self,
-        builder: KittyRequestBuilder,
-        expected: HTTPStatus,
-    ) -> MewResult<bool> {
+    fn check_status(&self, builder: KittyRequestBuilder, expected: HTTPStatus) -> MewResult<bool> {
         let response = builder.send()?;
         Ok(response.status() == expected as u16)
     }
@@ -1251,9 +1214,9 @@ impl CollaborationManager {
     pub fn fetch_collaboration_status(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取协作状态: work_id={}", work_id);
         let endpoint = format!("/collaboration/user/{}", work_id);
-        let builder = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
+        let builder =
+            self.client
+                .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
         self.send_and_parse(builder)
     }
 
@@ -1261,9 +1224,9 @@ impl CollaborationManager {
     pub fn fetch_collaboration_user(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取协作用户: work_id={}", work_id);
         let endpoint = format!("/collaboration/user/edited/{}", work_id);
-        let builder = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
+        let builder =
+            self.client
+                .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
         self.send_and_parse(builder)
     }
 
@@ -1273,10 +1236,7 @@ impl CollaborationManager {
         work_id: i32,
         work_type: CollabWorkType,
     ) -> MewResult<bool> {
-        debug!(
-            "启用协作: work_id={}, type={:?}",
-            work_id, work_type
-        );
+        debug!("启用协作: work_id={}, type={:?}", work_id, work_type);
         let endpoint = format!(
             "https://socketcoll.codemao.cn/coll/{}/{}",
             work_type.as_str(),
@@ -1336,13 +1296,11 @@ impl AIServices {
     /// 获取文生图提示词
     pub fn fetch_text2img_prompt(&self) -> MewResult<Value> {
         debug!("获取文生图提示词");
-        let builder = self
-            .client
-            .build_request(
-                HttpMethod::Get,
-                "/neko/text2img/prompt",
-                Some(BaseKey::Creation),
-            );
+        let builder = self.client.build_request(
+            HttpMethod::Get,
+            "/neko/text2img/prompt",
+            Some(BaseKey::Creation),
+        );
         self.send_and_parse(builder)
     }
 
@@ -1486,9 +1444,9 @@ impl TeachingPlanManager {
     pub fn fetch_work_editing_status(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取作品编辑状态: work_id={}", work_id);
         let endpoint = format!("/neko/teaching-plan/work/editing-status/{}", work_id);
-        let builder = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
+        let builder =
+            self.client
+                .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
         self.send_and_parse(builder)
     }
 
@@ -1581,10 +1539,7 @@ impl ImageClassifyManager {
         limit: Option<i32>,
         offset: Option<i32>,
     ) -> MewResult<Value> {
-        debug!(
-            "获取图像分类列表: limit={:?}, offset={:?}",
-            limit, offset
-        );
+        debug!("获取图像分类列表: limit={:?}, offset={:?}", limit, offset);
         let timestamp = current_timestamp_13();
         let builder = self
             .client
@@ -1628,9 +1583,9 @@ impl ImageClassifyManager {
     pub fn delete_image_classify(&self, classify_id: &str) -> MewResult<Value> {
         debug!("删除图像分类: classify_id={}", classify_id);
         let endpoint = format!("/neko/image-classify/{}", classify_id);
-        let builder = self
-            .client
-            .build_request(HttpMethod::Delete, &endpoint, Some(BaseKey::Creation));
+        let builder =
+            self.client
+                .build_request(HttpMethod::Delete, &endpoint, Some(BaseKey::Creation));
         self.send_and_parse(builder)
     }
 }
@@ -1721,9 +1676,9 @@ impl PackageManager {
     pub fn delete_package(&self, package_id: &str) -> MewResult<Value> {
         debug!("删除包: package_id={}", package_id);
         let endpoint = format!("/neko/package/{}", package_id);
-        let builder = self
-            .client
-            .build_request(HttpMethod::Delete, &endpoint, Some(BaseKey::Creation));
+        let builder =
+            self.client
+                .build_request(HttpMethod::Delete, &endpoint, Some(BaseKey::Creation));
         self.send_and_parse(builder)
     }
 }
@@ -1836,9 +1791,7 @@ impl WorkDataFetcher {
     pub fn fetch_work_details(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取作品详情: work_id={}", work_id);
         let endpoint = format!("/creation-tools/v1/works/{}", work_id);
-        let builder = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, None);
+        let builder = self.client.build_request(HttpMethod::Get, &endpoint, None);
         self.send_and_parse(builder)
     }
 
@@ -1846,9 +1799,9 @@ impl WorkDataFetcher {
     pub fn fetch_kitten_work_details(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取Kitten作品详情: work_id={}", work_id);
         let endpoint = format!("/kitten/work/detail/{}", work_id);
-        let builder = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
+        let builder =
+            self.client
+                .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
         self.send_and_parse(builder)
     }
 
@@ -1856,9 +1809,9 @@ impl WorkDataFetcher {
     pub fn fetch_kn_work_details(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取KN作品详情: work_id={}", work_id);
         let endpoint = format!("/neko/works/{}", work_id);
-        let builder = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
+        let builder =
+            self.client
+                .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
         self.send_and_parse(builder)
     }
 
@@ -1866,9 +1819,9 @@ impl WorkDataFetcher {
     pub fn fetch_coco_work_info(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取Coco作品信息: work_id={}", work_id);
         let endpoint = format!("/coconut/web/work/{}/info", work_id);
-        let builder = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
+        let builder =
+            self.client
+                .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
         self.send_and_parse(builder)
     }
 
@@ -1876,9 +1829,9 @@ impl WorkDataFetcher {
     pub fn fetch_kn_publish_status(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取KN作品发布状态: work_id={}", work_id);
         let endpoint = format!("/neko/community/work/detail/{}", work_id);
-        let builder = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
+        let builder =
+            self.client
+                .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
         self.send_and_parse(builder)
     }
 
@@ -1886,9 +1839,9 @@ impl WorkDataFetcher {
     pub fn fetch_kn_work_state(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取KN作品状态: work_id={}", work_id);
         let endpoint = format!("/neko/works/status/{}", work_id);
-        let builder = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
+        let builder =
+            self.client
+                .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
         self.send_and_parse(builder)
     }
 
@@ -1896,9 +1849,9 @@ impl WorkDataFetcher {
     pub fn fetch_kn_work_detail(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取KN作品详情: work_id={}", work_id);
         let endpoint = format!("/neko/community/player/published-work-detail/{}", work_id);
-        let builder = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
+        let builder =
+            self.client
+                .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
         self.send_and_parse(builder)
     }
 
@@ -1906,9 +1859,9 @@ impl WorkDataFetcher {
     pub fn fetch_player_work_detail(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取玩家作品详情: work_id={}", work_id);
         let endpoint = format!("/neko/works/player/work-detail/{}", work_id);
-        let builder = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
+        let builder =
+            self.client
+                .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
         self.send_and_parse(builder)
     }
 
@@ -1932,9 +1885,9 @@ impl WorkDataFetcher {
     pub fn fetch_work_status(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取作品状态: work_id={}", work_id);
         let endpoint = format!("/neko/works/status/{}", work_id);
-        let builder = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
+        let builder =
+            self.client
+                .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
         self.send_and_parse(builder)
     }
 
@@ -1942,9 +1895,7 @@ impl WorkDataFetcher {
     pub fn fetch_work_activity(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取作品活动信息: work_id={}", work_id);
         let endpoint = format!("/web/works/activity/info/{}", work_id);
-        let builder = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, None);
+        let builder = self.client.build_request(HttpMethod::Get, &endpoint, None);
         self.send_and_parse(builder)
     }
 
@@ -1952,9 +1903,9 @@ impl WorkDataFetcher {
     pub fn check_user_operation_status(&self, work_id: i32) -> MewResult<Value> {
         debug!("检查用户操作状态: work_id={}", work_id);
         let endpoint = format!("/neko/community/check-user-opr-work-status/{}", work_id);
-        let builder = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
+        let builder =
+            self.client
+                .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
         self.send_and_parse(builder)
     }
 
@@ -1974,9 +1925,7 @@ impl WorkDataFetcher {
     pub fn fetch_work_source_code(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取作品源代码: work_id={}", work_id);
         let endpoint = format!("/creation-tools/v1/works/{}/source/public", work_id);
-        let builder = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, None);
+        let builder = self.client.build_request(HttpMethod::Get, &endpoint, None);
         self.send_and_parse(builder)
     }
 
@@ -1984,9 +1933,9 @@ impl WorkDataFetcher {
     pub fn fetch_kitten_source_code(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取Kitten源代码: work_id={}", work_id);
         let endpoint = format!("/kitten/work/ide/load/{}", work_id);
-        let builder = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
+        let builder =
+            self.client
+                .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
         self.send_and_parse(builder)
     }
 
@@ -1994,9 +1943,9 @@ impl WorkDataFetcher {
     pub fn fetch_kitten_player_code(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取Kitten播放器代码: work_id={}", work_id);
         let endpoint = format!("/kitten/r2/work/player/load/{}", work_id);
-        let builder = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
+        let builder =
+            self.client
+                .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
         self.send_and_parse(builder)
     }
 
@@ -2004,9 +1953,9 @@ impl WorkDataFetcher {
     pub fn fetch_coco_source_code(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取Coco源代码: work_id={}", work_id);
         let endpoint = format!("/coconut/web/work/{}/content", work_id);
-        let builder = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
+        let builder =
+            self.client
+                .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
         self.send_and_parse(builder)
     }
 
@@ -2014,9 +1963,9 @@ impl WorkDataFetcher {
     pub fn fetch_coco_player_code(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取Coco播放器代码: work_id={}", work_id);
         let endpoint = format!("/coconut/web/work/{}/load", work_id);
-        let builder = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
+        let builder =
+            self.client
+                .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
         self.send_and_parse(builder)
     }
 
@@ -2037,9 +1986,9 @@ impl WorkDataFetcher {
     pub fn fetch_kn_work_versions(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取KN作品历史版本: work_id={}", work_id);
         let endpoint = format!("/neko/works/archive/{}", work_id);
-        let builder = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
+        let builder =
+            self.client
+                .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
         self.send_and_parse(builder)
     }
 
@@ -2049,9 +1998,7 @@ impl WorkDataFetcher {
     pub fn fetch_web_recommendations(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取Web端推荐: work_id={}", work_id);
         let endpoint = format!("/nemo/v2/works/web/{}/recommended", work_id);
-        let builder = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, None);
+        let builder = self.client.build_request(HttpMethod::Get, &endpoint, None);
         self.send_and_parse(builder)
     }
 
@@ -2127,9 +2074,9 @@ impl WorkDataFetcher {
     /// 获取 Nemo 端发现页作品
     pub fn fetch_nemo_discover(&self) -> MewResult<Value> {
         debug!("获取Nemo端发现页作品");
-        let builder = self
-            .client
-            .build_request(HttpMethod::Get, "/creation-tools/v1/home/discover", None);
+        let builder =
+            self.client
+                .build_request(HttpMethod::Get, "/creation-tools/v1/home/discover", None);
         self.send_and_parse(builder)
     }
 
@@ -2140,10 +2087,7 @@ impl WorkDataFetcher {
         limit: Option<i32>,
         offset: Option<i32>,
     ) -> MewResult<Value> {
-        debug!(
-            "获取Nemo端最新作品: type={:?}, limit={:?}",
-            types, limit
-        );
+        debug!("获取Nemo端最新作品: type={:?}, limit={:?}", types, limit);
         let timestamp = current_timestamp_13();
         let endpoint = format!("/nemo/v3/newest/work/{}/list", types.as_str());
         let builder = self
@@ -2171,13 +2115,11 @@ impl WorkDataFetcher {
     /// 获取动态推荐用户
     pub fn fetch_recommended_users(&self) -> MewResult<Value> {
         debug!("获取推荐用户");
-        let builder = self
-            .client
-            .build_request(
-                HttpMethod::Get,
-                "/nemo/v3/dynamic/focus/user/recommend",
-                None,
-            );
+        let builder = self.client.build_request(
+            HttpMethod::Get,
+            "/nemo/v3/dynamic/focus/user/recommend",
+            None,
+        );
         self.send_and_parse(builder)
     }
 
@@ -2186,9 +2128,9 @@ impl WorkDataFetcher {
     /// 获取随机作品主题 ID 列表
     pub fn fetch_random_subjects(&self) -> MewResult<Value> {
         debug!("获取随机主题");
-        let builder = self
-            .client
-            .build_request(HttpMethod::Get, "/nemo/v3/work-subject/random", None);
+        let builder =
+            self.client
+                .build_request(HttpMethod::Get, "/nemo/v3/work-subject/random", None);
         self.send_and_parse(builder)
     }
 
@@ -2196,9 +2138,7 @@ impl WorkDataFetcher {
     pub fn fetch_subject_details(&self, ids: i32) -> MewResult<Value> {
         debug!("获取主题详情: ids={}", ids);
         let endpoint = format!("/nemo/v3/work-subject/{}/info", ids);
-        let builder = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, None);
+        let builder = self.client.build_request(HttpMethod::Get, &endpoint, None);
         self.send_and_parse(builder)
     }
 
@@ -2244,9 +2184,7 @@ impl WorkDataFetcher {
     pub fn fetch_work_lineage_web(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取Web端作品谱系: work_id={}", work_id);
         let endpoint = format!("/tiger/work/tree/{}", work_id);
-        let builder = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, None);
+        let builder = self.client.build_request(HttpMethod::Get, &endpoint, None);
         self.send_and_parse(builder)
     }
 
@@ -2254,9 +2192,7 @@ impl WorkDataFetcher {
     pub fn fetch_work_lineage_nemo(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取Nemo端作品谱系: work_id={}", work_id);
         let endpoint = format!("/nemo/v2/works/root/{}", work_id);
-        let builder = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, None);
+        let builder = self.client.build_request(HttpMethod::Get, &endpoint, None);
         self.send_and_parse(builder)
     }
 
@@ -2415,9 +2351,7 @@ impl WorkDataFetcher {
     pub fn fetch_work_metadata(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取作品元数据: work_id={}", work_id);
         let endpoint = format!("/api/work/info/{}", work_id);
-        let builder = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, None);
+        let builder = self.client.build_request(HttpMethod::Get, &endpoint, None);
         self.send_and_parse(builder)
     }
 
@@ -2440,26 +2374,22 @@ impl WorkDataFetcher {
     /// 获取所有 Kitten 作品标签
     pub fn fetch_kitten_tags(&self) -> MewResult<Value> {
         debug!("获取Kitten标签");
-        let builder = self
-            .client
-            .build_request(
-                HttpMethod::Get,
-                "/kitten/work/labels",
-                Some(BaseKey::Creation),
-            );
+        let builder = self.client.build_request(
+            HttpMethod::Get,
+            "/kitten/work/labels",
+            Some(BaseKey::Creation),
+        );
         self.send_and_parse(builder)
     }
 
     /// 获取 Kitten 默认封面
     pub fn fetch_kitten_default_covers(&self) -> MewResult<Value> {
         debug!("获取Kitten默认封面");
-        let builder = self
-            .client
-            .build_request(
-                HttpMethod::Get,
-                "/kitten/work/cover/defaultCovers",
-                Some(BaseKey::Creation),
-            );
+        let builder = self.client.build_request(
+            HttpMethod::Get,
+            "/kitten/work/cover/defaultCovers",
+            Some(BaseKey::Creation),
+        );
         self.send_and_parse(builder)
     }
 
@@ -2467,9 +2397,9 @@ impl WorkDataFetcher {
     pub fn fetch_recent_covers(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取作品最近封面: work_id={}", work_id);
         let endpoint = format!("/kitten/work/cover/{}/recentCovers", work_id);
-        let builder = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
+        let builder =
+            self.client
+                .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
         self.send_and_parse(builder)
     }
 
@@ -2492,9 +2422,7 @@ impl WorkDataFetcher {
     pub fn fetch_author_portfolio(&self, user_id: i32) -> MewResult<Value> {
         debug!("获取作者作品集: user_id={}", user_id);
         let endpoint = format!("/web/works/users/{}", user_id);
-        let builder = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, None);
+        let builder = self.client.build_request(HttpMethod::Get, &endpoint, None);
         self.send_and_parse(builder)
     }
 
@@ -2519,9 +2447,7 @@ impl WorkDataFetcher {
             "https://socketcv.codemao.cn/neko/cv/list/variables/{}",
             work_id
         );
-        let builder = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, None);
+        let builder = self.client.build_request(HttpMethod::Get, &endpoint, None);
         self.send_and_parse(builder)
     }
 

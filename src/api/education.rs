@@ -562,9 +562,8 @@ impl EduDataFetcher {
     pub fn fetch_class_students_gen(&self, invalid: i32, limit: Option<usize>) -> PaginatedIter {
         debug!("获取班级学生迭代器: invalid={}", invalid);
         let data = json!({ "invalid": invalid });
-        
-        self
-            .client
+
+        self.client
             .paginated("https://eduzone.codemao.cn/edu/zone/students")
             .with_iter_param("page", "1")
             .with_page_size(100)
