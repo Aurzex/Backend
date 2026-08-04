@@ -202,8 +202,6 @@ impl Default for DecompilerConfig {
             "text",
             "shadow_text",
             "shadow_number",
-            "procedures_2_stable_parameter", // 新增
-            "procedures_2_parameter",        // 新增
         ] {
             shadow_types.insert(st.to_string());
         }
@@ -560,6 +558,8 @@ impl WorkType {
         match s {
             "KITTEN2" => Some(WorkType::Kitten2),
             "KITTEN3" => Some(WorkType::Kitten3),
+            // 无后缀的 KITTEN 作品（如 geometry 对战）编辑版使用 XML shadow，对应 Kitten3 格式
+            "KITTEN" => Some(WorkType::Kitten3),
             "KITTEN4" => Some(WorkType::Kitten4),
             "COCO" => Some(WorkType::Coco),
             "NEKO" => Some(WorkType::Neko),
@@ -1088,6 +1088,7 @@ impl<'a> BlockDecompilerCore<'a> {
             "is_output": is_output,
             "collapsed": false,
             "disabled": false,
+            "parent_id": null,
             "deletable": true,
             "movable": true,
             "editable": true,
@@ -1136,6 +1137,11 @@ impl<'a> BlockDecompilerCore<'a> {
                 .ok_or_else(|| DecompilerError::InvalidResponse("next_block缺少id".to_string()))?
                 .to_string();
             context.blocks.insert(next_id.clone(), next_block);
+            if let Some(b) = context.blocks.get_mut(&next_id) {
+                if let Some(o) = b.as_object_mut() {
+                    o.insert("parent_id".to_string(), json!(parent_id));
+                }
+            }
             context.insert_connection(&parent_id, &next_id, json!({"type": "next"}));
         }
         Ok(())
@@ -1176,6 +1182,11 @@ impl<'a> BlockDecompilerCore<'a> {
                         .to_string();
                     let input_name = self.behavior.get_child_input_name(i, conditions_count);
                     context.blocks.insert(child_id.clone(), child_block);
+                    if let Some(b) = context.blocks.get_mut(&child_id) {
+                        if let Some(o) = b.as_object_mut() {
+                            o.insert("parent_id".to_string(), json!(parent_id));
+                        }
+                    }
                     context.insert_connection(
                         &parent_id,
                         &child_id,
@@ -1228,6 +1239,11 @@ impl<'a> BlockDecompilerCore<'a> {
                         })?
                         .to_string();
                     context.blocks.insert(cond_id.clone(), condition_block);
+                    if let Some(b) = context.blocks.get_mut(&cond_id) {
+                        if let Some(o) = b.as_object_mut() {
+                            o.insert("parent_id".to_string(), json!(parent_id));
+                        }
+                    }
                     context.insert_connection(
                         &parent_id,
                         &cond_id,
@@ -1298,6 +1314,11 @@ impl<'a> BlockDecompilerCore<'a> {
                         })?
                         .to_string();
                     context.blocks.insert(param_id.clone(), param_block.clone());
+                    if let Some(b) = context.blocks.get_mut(&param_id) {
+                        if let Some(o) = b.as_object_mut() {
+                            o.insert("parent_id".to_string(), json!(parent_id));
+                        }
+                    }
                     context.insert_connection(
                         &parent_id,
                         &param_id,
@@ -1318,16 +1339,10 @@ impl<'a> BlockDecompilerCore<'a> {
                         .shadow_types
                         .contains(param_type)
                     {
-                        let field_value = param_block
-                            .get("fields")
-                            .and_then(|v| v.get("text"))
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("");
-                        let shadow_value = context.shadow_builder.create(
-                            param_type,
-                            Some(param_id.clone()),
-                            Some(field_value),
-                        );
+                        // 编辑版 shadow 模板显示的是类型默认值（如 math_number 的 0），
+                        // 与参数块实际值无关，因此不传 text
+                        let shadow_value =
+                            context.shadow_builder.create(param_type, Some(param_id.clone()), None);
                         shadows.insert(name.clone(), shadow_value);
                     } else {
                         let shadow_type = self.infer_shadow_type(name, &Value::Null);
@@ -1729,15 +1744,16 @@ impl KittenDecompiler {
                     let _ = decompiler.decompile(&mut context)?;
                 }
             }
+        }
 
-            // 生成函数定义块（procedures_2_defnoreturn），否则调用块会因找不到
-            // 定义而被 FunctionCallDecompiler 置为 disabled，函数功能丢失
-            if let Some(procedures) = actor_compiled.get("procedures").and_then(|v| v.as_object()) {
-                for (_, func_data) in procedures {
-                    context.layout_row += 50.0;
-                    let mut decompiler = factory.create(func_data);
-                    let _ = decompiler.decompile(&mut context)?;
-                }
+        // 生成函数定义块（procedures_2_defnoreturn），否则调用块会因找不到
+        // 定义而被 FunctionCallDecompiler 置为 disabled，函数功能丢失。
+        // 独立于 compiled_block_map，避免其缺失时连带丢失函数定义。
+        if let Some(procedures) = actor_compiled.get("procedures").and_then(|v| v.as_object()) {
+            for (_, func_data) in procedures {
+                context.layout_row += 50.0;
+                let mut decompiler = factory.create(func_data);
+                let _ = decompiler.decompile(&mut context)?;
             }
         }
 
@@ -1748,11 +1764,6 @@ impl KittenDecompiler {
 
         let mut actor_data = context.actor_data;
         if let Some(obj) = actor_data.as_object_mut() {
-            for block in context.blocks.values_mut() {
-                if let Some(obj) = block.as_object_mut() {
-                    obj.remove("parent_id");
-                }
-            }
             obj.insert(
                 "block_data_json".to_string(),
                 json!({
@@ -1850,11 +1861,6 @@ impl KittenDecompiler {
 
         let mut scene = scene_info.clone();
         if let Some(obj) = scene.as_object_mut() {
-            for block in context.blocks.values_mut() {
-                if let Some(obj) = block.as_object_mut() {
-                    obj.remove("parent_id");
-                }
-            }
             obj.insert(
                 "block_data_json".to_string(),
                 json!({
@@ -1899,7 +1905,7 @@ impl KittenDecompiler {
                 "blocks": [],
             }),
         );
-        work_obj.insert("work_source_label".to_string(), json!(0));
+        work_obj.insert("work_source_label".to_string(), json!(1));
         work_obj.insert("sample_id".to_string(), json!(""));
         work_obj.insert("project_name".to_string(), json!(work_info.name));
         work_obj.insert(
@@ -2892,14 +2898,7 @@ impl<'a> BlockDecompiler<'a> for IfBlockDecompiler<'a> {
                     shadows.insert("ELSE_TEXT".to_string(), json!(""));
                 }
             }
-            if conditions_len > 0 {
-                let mutation = format!(
-                    r#"<mutation elseif="{}" else="{}"></mutation>"#,
-                    conditions_len.saturating_sub(1),
-                    if has_else { 1 } else { 0 }
-                );
-                obj.insert("mutation".to_string(), Value::String(mutation));
-            }
+            // 编辑版 controls_if 的 mutation 为空字符串，无需生成
         }
         Ok(block_value)
     }
@@ -3103,6 +3102,7 @@ impl<'a> BlockDecompiler<'a> for FunctionDefDecompiler<'a> {
                 "location": [0, 0],
                 "collapsed": false,
                 "disabled": false,
+                "parent_id": parent_id,
                 "deletable": true,
                 "movable": true,
                 "editable": true,
@@ -3227,6 +3227,11 @@ impl<'a> BlockDecompiler<'a> for FunctionCallDecompiler<'a> {
                     })?
                     .to_string();
                 context.blocks.insert(param_id.clone(), param_block);
+                if let Some(b) = context.blocks.get_mut(&param_id) {
+                    if let Some(o) = b.as_object_mut() {
+                        o.insert("parent_id".to_string(), json!(parent_id));
+                    }
+                }
                 context.insert_connection(
                     &parent_id,
                     &param_id,
