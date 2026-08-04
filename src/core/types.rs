@@ -144,6 +144,34 @@ pub struct ActionConfig {
     pub enabled: bool,
 }
 
+impl ActionConfig {
+    /// 由动作键构造配置（名称与状态取自内置映射）
+    fn simple(key: &str) -> Self {
+        let (name, status) = match key {
+            "D" => ("删除", "DELETE"),
+            "S" => ("禁言7天", "MUTE_SEVEN_DAYS"),
+            "T" => ("禁言3月", "MUTE_THREE_MONTHS"),
+            "U" => ("取消发布", "UNLOAD"),
+            "P" => ("通过", "PASS"),
+            "F" => ("检查违规", "CHECK_VIOLATION"),
+            "J" => ("跳过", "SKIP"),
+            _ => (key, key),
+        };
+        ActionConfig {
+            key: key.into(),
+            name: name.into(),
+            description: String::new(),
+            status: status.into(),
+            enabled: true,
+        }
+    }
+}
+
+/// 按给定动作键列表批量构造动作配置
+fn actions(keys: &[&str]) -> Vec<ActionConfig> {
+    keys.iter().map(|k| ActionConfig::simple(k)).collect()
+}
+
 pub type FetchGenerator =
     fn(ReportStatus) -> Box<dyn Iterator<Item = Result<Value, ProcessorError>>>;
 pub type FetchTotal = fn(ReportStatus) -> Result<Value, ProcessorError>;
@@ -185,6 +213,55 @@ pub struct SourceConfig {
     pub work_type_field: Option<String>,
 }
 
+impl SourceConfig {
+    /// 构造带公共默认字段名的配置；差异字段由调用方覆盖后再注册。
+    ///
+    /// 大部分举报类型的字段名高度一致（如 `report_id_field` 均为 "id"），
+    /// 通过"公共默认值 + 覆盖差异"大幅减少重复。
+    fn base(
+        name: &str,
+        handle_method: &str,
+        fetch_total: FetchTotal,
+        fetch_generator: FetchGenerator,
+    ) -> Self {
+        SourceConfig {
+            name: name.into(),
+            handle_method: handle_method.into(),
+            fetch_total,
+            fetch_generator,
+            admin_id_field: "admin_id".into(),
+            admin_username_field: String::new(),
+            available_actions: Vec::new(),
+            board_id_field: None,
+            board_name_field: None,
+            chunk_size: 100,
+            content_field: String::new(),
+            content_id_field: String::new(),
+            content_type_field: String::new(),
+            created_at_field: "created_at".into(),
+            description_field: "description".into(),
+            item_id_field: "id".into(),
+            parent_id_field: String::new(),
+            reason_field: "reason_content".into(),
+            reason_id_field: "reason_id".into(),
+            report_id_field: "id".into(),
+            source_id_field: String::new(),
+            source_name_field: String::new(),
+            source_object_id_field: String::new(),
+            source_object_name_field: String::new(),
+            source_type_field: String::new(),
+            special_check: None,
+            status_field: "status".into(),
+            title_field: None,
+            user_id_field: String::new(),
+            user_nickname_field: String::new(),
+            user_parent_id_field: String::new(),
+            user_parent_nickname_field: String::new(),
+            work_type_field: None,
+        }
+    }
+}
+
 // ==================== 举报类型注册表 ====================
 #[derive(Clone)]
 pub struct ReportTypeRegistry {
@@ -195,7 +272,7 @@ pub struct ReportTypeRegistry {
 // 静态状态映射（避免每次构建）
 static STATUS_MAPPING: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
 
-fn status_mapping() -> &'static HashMap<&'static str, &'static str> {
+pub(crate) fn status_mapping() -> &'static HashMap<&'static str, &'static str> {
     STATUS_MAPPING.get_or_init(|| {
         HashMap::from([
             ("D", "DELETE"),
@@ -209,57 +286,7 @@ fn status_mapping() -> &'static HashMap<&'static str, &'static str> {
 
 impl ReportTypeRegistry {
     pub fn new() -> Self {
-        let default_actions = vec![
-            ActionConfig {
-                key: "D".into(),
-                name: "删除".into(),
-                description: String::new(),
-                status: "DELETE".into(),
-                enabled: true,
-            },
-            ActionConfig {
-                key: "S".into(),
-                name: "禁言7天".into(),
-                description: String::new(),
-                status: "MUTE_SEVEN_DAYS".into(),
-                enabled: true,
-            },
-            ActionConfig {
-                key: "T".into(),
-                name: "禁言3月".into(),
-                description: String::new(),
-                status: "MUTE_THREE_MONTHS".into(),
-                enabled: true,
-            },
-            ActionConfig {
-                key: "U".into(),
-                name: "取消发布".into(),
-                description: String::new(),
-                status: "UNLOAD".into(),
-                enabled: true,
-            },
-            ActionConfig {
-                key: "P".into(),
-                name: "通过".into(),
-                description: String::new(),
-                status: "PASS".into(),
-                enabled: true,
-            },
-            ActionConfig {
-                key: "F".into(),
-                name: "检查违规".into(),
-                description: String::new(),
-                status: "CHECK_VIOLATION".into(),
-                enabled: true,
-            },
-            ActionConfig {
-                key: "J".into(),
-                name: "跳过".into(),
-                description: String::new(),
-                status: "SKIP".into(),
-                enabled: true,
-            },
-        ];
+        let default_actions = actions(&["D", "S", "T", "U", "P", "F", "J"]);
 
         ReportTypeRegistry {
             registry: HashMap::new(),
@@ -314,6 +341,9 @@ impl ReportTypeRegistry {
 }
 
 // ==================== 举报获取器 ====================
+/// 举报状态字段中表示“待处理”的值
+const TO_BE_DONE_STATUS: &str = "TOBEDONE";
+
 pub struct ReportFetcher {
     pub registry: ReportTypeRegistry,
 }
@@ -323,11 +353,12 @@ impl ReportFetcher {
         let mut registry = ReportTypeRegistry::new();
 
         // ---------- shop_comment ----------
-        registry.register(
-            "shop_comment",
-            SourceConfig {
-                name: "工作室评论举报".into(),
-                fetch_total: |status| {
+        // ---------- shop_comment ----------
+        {
+            let mut cfg = SourceConfig::base(
+                "工作室评论举报",
+                "execute_process_comment_report",
+                |status| {
                     let mut paginated = WhaleReportFetcher::new().fetch_comment_reports_gen(
                         CommentSourceType::All,
                         status,
@@ -340,7 +371,7 @@ impl ReportFetcher {
                         .map_err(|e| ProcessorError::External(e.into()))?;
                     Ok(json!(paginated.total_items().unwrap_or(0) as i32))
                 },
-                fetch_generator: |status| {
+                |status| {
                     let iter = WhaleReportFetcher::new().fetch_comment_reports_gen(
                         CommentSourceType::All,
                         status,
@@ -350,93 +381,37 @@ impl ReportFetcher {
                     );
                     Box::new(iter.map(|r| r.map_err(|e| ProcessorError::External(e.into()))))
                 },
-                handle_method: "execute_process_comment_report".into(),
-                item_id_field: "id".into(),
-                report_id_field: "id".into(),
-                reason_field: "reason_content".into(),
-                reason_id_field: "reason_id".into(),
-                description_field: "description".into(),
-                status_field: "status".into(),
-                admin_id_field: "admin_id".into(),
-                admin_username_field: "admin_user_name".into(),
-                content_field: "comment_content".into(),
-                content_type_field: "comment_source".into(),
-                content_id_field: "comment_id".into(),
-                user_id_field: "comment_user_id".into(),
-                user_nickname_field: "comment_user_nickname".into(),
-                user_parent_id_field: "comment_parent_user_id".into(),
-                user_parent_nickname_field: "comment_parent_user_nickname".into(),
-                source_id_field: "comment_source_object_id".into(),
-                source_name_field: "comment_source_object_name".into(),
-                source_type_field: "comment_source".into(),
-                source_object_id_field: "comment_source_object_id".into(),
-                source_object_name_field: "comment_source_object_name".into(),
-                parent_id_field: "comment_parent_id".into(),
-                work_type_field: None,
-                title_field: None,
-                board_name_field: None,
-                board_id_field: None,
-                created_at_field: "created_at".into(),
-                chunk_size: 100,
-                special_check: Some(|item| {
-                    item.get("comment_source")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s == "WORK_SHOP")
-                        .unwrap_or(false)
-                }),
-                available_actions: vec![
-                    ActionConfig {
-                        key: "D".into(),
-                        name: "删除".into(),
-                        description: "".into(),
-                        status: "DELETE".into(),
-                        enabled: true,
-                    },
-                    ActionConfig {
-                        key: "S".into(),
-                        name: "禁言7天".into(),
-                        description: "".into(),
-                        status: "MUTE_SEVEN_DAYS".into(),
-                        enabled: true,
-                    },
-                    ActionConfig {
-                        key: "T".into(),
-                        name: "禁言3月".into(),
-                        description: "".into(),
-                        status: "MUTE_THREE_MONTHS".into(),
-                        enabled: true,
-                    },
-                    ActionConfig {
-                        key: "P".into(),
-                        name: "通过".into(),
-                        description: "".into(),
-                        status: "PASS".into(),
-                        enabled: true,
-                    },
-                    ActionConfig {
-                        key: "F".into(),
-                        name: "检查违规".into(),
-                        description: "".into(),
-                        status: "CHECK_VIOLATION".into(),
-                        enabled: true,
-                    },
-                    ActionConfig {
-                        key: "J".into(),
-                        name: "跳过".into(),
-                        description: "".into(),
-                        status: "SKIP".into(),
-                        enabled: true,
-                    },
-                ],
-            },
-        );
+            );
+            cfg.admin_username_field = "admin_user_name".into();
+            cfg.available_actions = actions(&["D", "S", "T", "P", "F", "J"]);
+            cfg.content_field = "comment_content".into();
+            cfg.content_type_field = "comment_source".into();
+            cfg.content_id_field = "comment_id".into();
+            cfg.user_id_field = "comment_user_id".into();
+            cfg.user_nickname_field = "comment_user_nickname".into();
+            cfg.user_parent_id_field = "comment_parent_user_id".into();
+            cfg.user_parent_nickname_field = "comment_parent_user_nickname".into();
+            cfg.source_id_field = "comment_source_object_id".into();
+            cfg.source_name_field = "comment_source_object_name".into();
+            cfg.source_type_field = "comment_source".into();
+            cfg.source_object_id_field = "comment_source_object_id".into();
+            cfg.source_object_name_field = "comment_source_object_name".into();
+            cfg.parent_id_field = "comment_parent_id".into();
+            cfg.special_check = Some(|item| {
+                item.get("comment_source")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s == "WORK_SHOP")
+                    .unwrap_or(false)
+            });
+            registry.register("shop_comment", cfg);
+        }
 
         // ---------- work_work ----------
-        registry.register(
-            "work_work",
-            SourceConfig {
-                name: "作品举报".into(),
-                fetch_total: |status| {
+        {
+            let mut cfg = SourceConfig::base(
+                "作品举报",
+                "execute_process_work_report",
+                |status| {
                     let mut paginated = WhaleReportFetcher::new().fetch_work_reports_gen(
                         WorkSourceType::All,
                         status,
@@ -446,10 +421,10 @@ impl ReportFetcher {
                     );
                     paginated
                         .fetch_metadata()
-                        .map_err(|e| ProcessorError::External(e.into()));
+                        .map_err(|e| ProcessorError::External(e.into()))?;
                     Ok(json!(paginated.total_items().unwrap_or(0) as i32))
                 },
-                fetch_generator: |status| {
+                |status| {
                     let iter = WhaleReportFetcher::new().fetch_work_reports_gen(
                         WorkSourceType::All,
                         status,
@@ -459,82 +434,38 @@ impl ReportFetcher {
                     );
                     Box::new(iter.map(|r| r.map_err(|e| ProcessorError::External(e.into()))))
                 },
-                handle_method: "execute_process_work_report".into(),
-                item_id_field: "id".into(),
-                report_id_field: "id".into(),
-                reason_field: "reason_content".into(),
-                reason_id_field: "reason_id".into(),
-                description_field: "description".into(),
-                status_field: "status".into(),
-                admin_id_field: "admin_id".into(),
-                admin_username_field: "admin_username".into(),
-                content_field: "work_name".into(),
-                content_type_field: "work_type".into(),
-                content_id_field: "work_id".into(),
-                user_id_field: "work_user_id".into(),
-                user_nickname_field: "work_user_nickname".into(),
-                user_parent_id_field: String::new(),
-                user_parent_nickname_field: String::new(),
-                source_id_field: "work_id".into(),
-                source_name_field: "work_name".into(),
-                source_type_field: "work_type".into(),
-                source_object_id_field: "work_id".into(),
-                source_object_name_field: "work_name".into(),
-                parent_id_field: String::new(),
-                work_type_field: Some("work_type".into()),
-                title_field: Some("work_name".into()),
-                board_name_field: None,
-                board_id_field: None,
-                created_at_field: "created_at".into(),
-                chunk_size: 100,
-                special_check: None,
-                available_actions: vec![
-                    ActionConfig {
-                        key: "D".into(),
-                        name: "删除".into(),
-                        description: "".into(),
-                        status: "DELETE".into(),
-                        enabled: true,
-                    },
-                    ActionConfig {
-                        key: "P".into(),
-                        name: "通过".into(),
-                        description: "".into(),
-                        status: "PASS".into(),
-                        enabled: true,
-                    },
-                    ActionConfig {
-                        key: "U".into(),
-                        name: "取消发布".into(),
-                        description: "".into(),
-                        status: "UNLOAD".into(),
-                        enabled: true,
-                    },
-                    ActionConfig {
-                        key: "J".into(),
-                        name: "跳过".into(),
-                        description: "".into(),
-                        status: "SKIP".into(),
-                        enabled: true,
-                    },
-                ],
-            },
-        );
+            );
+            cfg.admin_username_field = "admin_username".into();
+            cfg.available_actions = actions(&["D", "P", "U", "J"]);
+            cfg.content_field = "work_name".into();
+            cfg.content_type_field = "work_type".into();
+            cfg.content_id_field = "work_id".into();
+            cfg.user_id_field = "work_user_id".into();
+            cfg.user_nickname_field = "work_user_nickname".into();
+            cfg.source_id_field = "work_id".into();
+            cfg.source_name_field = "work_name".into();
+            cfg.source_type_field = "work_type".into();
+            cfg.source_object_id_field = "work_id".into();
+            cfg.source_object_name_field = "work_name".into();
+            cfg.work_type_field = Some("work_type".into());
+            cfg.title_field = Some("work_name".into());
+            registry.register("work_work", cfg);
+        }
 
         // ---------- forum_post ----------
-        registry.register(
-            "forum_post",
-            SourceConfig {
-                name: "帖子举报".into(),
-                fetch_total: |status| {
+        {
+            let mut cfg = SourceConfig::base(
+                "帖子举报",
+                "execute_process_post_report",
+                |status| {
                     let mut paginated = WhaleReportFetcher::new()
                         .fetch_post_reports_gen(status, None, None, None, None);
                     paginated
                         .fetch_metadata()
-                        .map_err(|e| ProcessorError::External(e.into()));
+                        .map_err(|e| ProcessorError::External(e.into()))?;
                     Ok(json!(paginated.total_items().unwrap_or(0) as i32))
                 },
-                fetch_generator: |status| {
+                |status| {
                     let iter = WhaleReportFetcher::new().fetch_post_reports_gen(
                         status,
                         None,
@@ -544,96 +475,39 @@ impl ReportFetcher {
                     );
                     Box::new(iter.map(|r| r.map_err(|e| ProcessorError::External(e.into()))))
                 },
-                handle_method: "execute_process_post_report".into(),
-                item_id_field: "id".into(),
-                report_id_field: "id".into(),
-                reason_field: "reason_content".into(),
-                reason_id_field: "reason_id".into(),
-                description_field: "description".into(),
-                status_field: "status".into(),
-                admin_id_field: "admin_id".into(),
-                admin_username_field: "admin_username".into(),
-                content_field: "post_title".into(),
-                content_type_field: "board_name".into(),
-                content_id_field: "post_id".into(),
-                user_id_field: "post_user_id".into(),
-                user_nickname_field: "post_user_nick_name".into(),
-                user_parent_id_field: String::new(),
-                user_parent_nickname_field: String::new(),
-                source_id_field: "post_id".into(),
-                source_name_field: "board_name".into(),
-                source_type_field: "board_name".into(),
-                source_object_id_field: "post_id".into(),
-                source_object_name_field: "board_name".into(),
-                parent_id_field: String::new(),
-                work_type_field: None,
-                title_field: Some("post_title".into()),
-                board_name_field: Some("board_name".into()),
-                board_id_field: Some("board_id".into()),
-                created_at_field: "created_at".into(),
-                chunk_size: 100,
-                special_check: None,
-                available_actions: vec![
-                    ActionConfig {
-                        key: "D".into(),
-                        name: "删除".into(),
-                        description: "".into(),
-                        status: "DELETE".into(),
-                        enabled: true,
-                    },
-                    ActionConfig {
-                        key: "S".into(),
-                        name: "禁言7天".into(),
-                        description: "".into(),
-                        status: "MUTE_SEVEN_DAYS".into(),
-                        enabled: true,
-                    },
-                    ActionConfig {
-                        key: "T".into(),
-                        name: "禁言3月".into(),
-                        description: "".into(),
-                        status: "MUTE_THREE_MONTHS".into(),
-                        enabled: true,
-                    },
-                    ActionConfig {
-                        key: "P".into(),
-                        name: "通过".into(),
-                        description: "".into(),
-                        status: "PASS".into(),
-                        enabled: true,
-                    },
-                    ActionConfig {
-                        key: "F".into(),
-                        name: "检查违规".into(),
-                        description: "".into(),
-                        status: "CHECK_VIOLATION".into(),
-                        enabled: true,
-                    },
-                    ActionConfig {
-                        key: "J".into(),
-                        name: "跳过".into(),
-                        description: "".into(),
-                        status: "SKIP".into(),
-                        enabled: true,
-                    },
-                ],
-            },
-        );
+            );
+            cfg.admin_username_field = "admin_username".into();
+            cfg.available_actions = actions(&["D", "S", "T", "P", "F", "J"]);
+            cfg.content_field = "post_title".into();
+            cfg.content_type_field = "board_name".into();
+            cfg.content_id_field = "post_id".into();
+            cfg.user_id_field = "post_user_id".into();
+            cfg.user_nickname_field = "post_user_nick_name".into();
+            cfg.source_id_field = "post_id".into();
+            cfg.source_name_field = "board_name".into();
+            cfg.source_type_field = "board_name".into();
+            cfg.source_object_id_field = "post_id".into();
+            cfg.source_object_name_field = "board_name".into();
+            cfg.title_field = Some("post_title".into());
+            cfg.board_name_field = Some("board_name".into());
+            cfg.board_id_field = Some("board_id".into());
+            registry.register("forum_post", cfg);
+        }
 
         // ---------- forum_discussion ----------
-        registry.register(
-            "forum_discussion",
-            SourceConfig {
-                name: "讨论举报".into(),
-                fetch_total: |status| {
+        {
+            let mut cfg = SourceConfig::base(
+                "讨论举报",
+                "execute_process_discussion_report",
+                |status| {
                     let mut paginated = WhaleReportFetcher::new()
                         .fetch_discussion_reports_gen(status, None, None, None, None);
                     paginated
                         .fetch_metadata()
-                        .map_err(|e| ProcessorError::External(e.into()));
+                        .map_err(|e| ProcessorError::External(e.into()))?;
                     Ok(json!(paginated.total_items().unwrap_or(0) as i32))
                 },
-                fetch_generator: |status| {
+                |status| {
                     let iter = WhaleReportFetcher::new().fetch_discussion_reports_gen(
                         status,
                         None,
@@ -643,81 +517,24 @@ impl ReportFetcher {
                     );
                     Box::new(iter.map(|r| r.map_err(|e| ProcessorError::External(e.into()))))
                 },
-                handle_method: "execute_process_discussion_report".into(),
-                item_id_field: "id".into(),
-                report_id_field: "id".into(),
-                reason_field: "reason_content".into(),
-                reason_id_field: "reason_id".into(),
-                description_field: "description".into(),
-                status_field: "status".into(),
-                admin_id_field: "admin_id".into(),
-                admin_username_field: "admin_username".into(),
-                content_field: "discussion_content".into(),
-                content_type_field: "discussion_source".into(),
-                content_id_field: "discussion_id".into(),
-                user_id_field: "discussion_user_id".into(),
-                user_nickname_field: "discussion_user_nickname".into(),
-                user_parent_id_field: String::new(),
-                user_parent_nickname_field: String::new(),
-                source_id_field: "post_id".into(),
-                source_name_field: "post_title".into(),
-                source_type_field: "discussion_source".into(),
-                source_object_id_field: "post_id".into(),
-                source_object_name_field: "post_title".into(),
-                parent_id_field: String::new(),
-                work_type_field: None,
-                title_field: Some("post_title".into()),
-                board_name_field: Some("board_name".into()),
-                board_id_field: Some("board_id".into()),
-                created_at_field: "created_at".into(),
-                chunk_size: 100,
-                special_check: None,
-                available_actions: vec![
-                    ActionConfig {
-                        key: "D".into(),
-                        name: "删除".into(),
-                        description: "".into(),
-                        status: "DELETE".into(),
-                        enabled: true,
-                    },
-                    ActionConfig {
-                        key: "S".into(),
-                        name: "禁言7天".into(),
-                        description: "".into(),
-                        status: "MUTE_SEVEN_DAYS".into(),
-                        enabled: true,
-                    },
-                    ActionConfig {
-                        key: "T".into(),
-                        name: "禁言3月".into(),
-                        description: "".into(),
-                        status: "MUTE_THREE_MONTHS".into(),
-                        enabled: true,
-                    },
-                    ActionConfig {
-                        key: "P".into(),
-                        name: "通过".into(),
-                        description: "".into(),
-                        status: "PASS".into(),
-                        enabled: true,
-                    },
-                    ActionConfig {
-                        key: "F".into(),
-                        name: "检查违规".into(),
-                        description: "".into(),
-                        status: "CHECK_VIOLATION".into(),
-                        enabled: true,
-                    },
-                    ActionConfig {
-                        key: "J".into(),
-                        name: "跳过".into(),
-                        description: "".into(),
-                        status: "SKIP".into(),
-                        enabled: true,
-                    },
-                ],
-            },
-        );
+            );
+            cfg.admin_username_field = "admin_username".into();
+            cfg.available_actions = actions(&["D", "S", "T", "P", "F", "J"]);
+            cfg.content_field = "discussion_content".into();
+            cfg.content_type_field = "discussion_source".into();
+            cfg.content_id_field = "discussion_id".into();
+            cfg.user_id_field = "discussion_user_id".into();
+            cfg.user_nickname_field = "discussion_user_nickname".into();
+            cfg.source_id_field = "post_id".into();
+            cfg.source_name_field = "post_title".into();
+            cfg.source_type_field = "discussion_source".into();
+            cfg.source_object_id_field = "post_id".into();
+            cfg.source_object_name_field = "post_title".into();
+            cfg.title_field = Some("post_title".into());
+            cfg.board_name_field = Some("board_name".into());
+            cfg.board_id_field = Some("board_id".into());
+            registry.register("forum_discussion", cfg);
+        }
 
         ReportFetcher { registry }
     }
@@ -755,7 +572,7 @@ impl ReportFetcher {
 
                     if status == ReportStatus::ToBeDone
                         && let Some(state) = item.get(&config.status_field).and_then(|v| v.as_str())
-                        && state != "TOBEDONE"
+                        && state != TO_BE_DONE_STATUS
                     {
                         continue;
                     }
@@ -787,7 +604,7 @@ impl ReportFetcher {
         for rtype in self.registry.get_all_types() {
             if let Some(config) = self.registry.get_config(&rtype)
                 && let Ok(result) = (config.fetch_total)(status)
-                && let Some(t) = result.get("total").and_then(|v| v.as_i64())
+                && let Some(t) = result.as_i64()
             {
                 total += t;
             }

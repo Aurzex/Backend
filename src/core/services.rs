@@ -13,8 +13,8 @@ use super::pipeline::{
     ReportIdExt, apply_action_by_method, global_action_registry,
 };
 use super::types::{
-    ProcessorError, ReportFetcher, ReportTypeRegistry, bytes_to_human, get_valid_input,
-    value_to_string,
+    ProcessorError, ReportFetcher, ReportTypeRegistry, SourceConfig, bytes_to_human,
+    get_valid_input, value_to_string,
 };
 use crate::api::whale::{ReportHandler, ReportStatus, Resolution};
 use crate::utils::acquire::{FileUploader, KittyFactory};
@@ -145,8 +145,7 @@ impl ReportProcessor {
 
     pub fn process_all_reports(&self, admin_id: i32) -> Result<i64, ProcessorError> {
         println!("=== 开始处理所有举报 ===");
-        self.batch_manager.lock().unwrap().clear_processed_records();
-        self.pending_groups.lock().unwrap().clear();
+        self.reset_batch_state();
 
         let total = self.fetcher.get_total_reports(ReportStatus::ToBeDone);
         println!("当前待处理举报总数: {}", total);
@@ -281,85 +280,105 @@ impl ReportProcessor {
             group.record_ids.len()
         );
 
-        let saved_action = {
-            let bm = self.batch_manager.lock().unwrap();
-            bm.get_batch_action(&group.group_type, &group.group_key)
-        };
+        let saved_action = self
+            .batch_manager
+            .lock()
+            .unwrap()
+            .get_batch_action(&group.group_type, &group.group_key);
 
         if let Some(action) = saved_action {
+            // 已有保存的批量动作：应用到组内全部记录
             println!("应用保存的批量动作: {}", action);
-            for record_id in &group.record_ids {
-                if let Some(item) = chunk.iter().find(|v| self.record_id_matches(v, record_id))
-                    && let Some(report_type) = self.infer_report_type(item)
-                    && self
-                        .fetcher
-                        .registry
-                        .is_action_available(report_type, &action)
-                {
-                    // 仅成功时标记已处理
-                    match self.apply_simple_action(item, report_type, &action, admin_id) {
-                        Ok(()) => {
-                            self.batch_manager
-                                .lock()
-                                .unwrap()
-                                .mark_record_processed(record_id);
-                        }
-                        Err(e) => {
-                            eprintln!("批量应用失败 (id={}): {}", record_id, e);
-                        }
-                    }
-                }
+            self.apply_action_to_records(chunk, &group.record_ids, &action, admin_id)?;
+        } else if let Some(action) = self.ask_first_record_action(group, chunk, admin_id)? {
+            // 无保存动作：询问第一条后，将动作应用到剩余记录
+            self.apply_action_to_records(chunk, &group.record_ids[1..], &action, admin_id)?;
+            // 第一条已由管道处理，标记避免在 process_non_group_items 中被重复处理
+            if let Some(first_record_id) = group.record_ids.first() {
+                self.batch_manager
+                    .lock()
+                    .unwrap()
+                    .mark_record_processed(first_record_id);
             }
-        } else {
-            // 无保存动作，交互询问第一条
-            if let Some(first_record_id) = group.record_ids.first()
-                && let Some(first_item) = chunk
-                    .iter()
-                    .find(|v| self.record_id_matches(v, first_record_id))
-                && let Some(report_type) = self.infer_report_type(first_item)
+        }
+        Ok(())
+    }
+
+    /// 无保存动作时，通过管道交互询问组内第一条记录的处理动作，并保存该动作
+    fn ask_first_record_action(
+        &self,
+        group: &BatchGroup,
+        chunk: &[Value],
+        admin_id: i32,
+    ) -> Result<Option<String>, ProcessorError> {
+        let Some(first_record_id) = group.record_ids.first() else {
+            return Ok(None);
+        };
+        let Some(first_item) = chunk
+            .iter()
+            .find(|v| self.record_id_matches(v, first_record_id))
+        else {
+            return Ok(None);
+        };
+        let Some(report_type) = self.infer_report_type(first_item) else {
+            return Ok(None);
+        };
+
+        let config = self.fetcher.registry.get_config(report_type).cloned();
+        let mut context = ProcessingContext::new(
+            first_record_id.to_string(),
+            report_type.to_string(),
+            first_item.clone(),
+            admin_id,
+        );
+        context.record.is_batch_mode = false;
+        context.record.config = config;
+
+        let pipeline = self.create_pipeline();
+        pipeline.execute(&mut context)?;
+
+        let action = context.state.action.clone();
+        if let Some(action) = &action {
+            self.batch_manager.lock().unwrap().save_batch_action(
+                &group.group_type,
+                &group.group_key,
+                action,
+            );
+        }
+        Ok(action)
+    }
+
+    /// 将批量动作应用到一批记录：仅对动作可用的记录执行，成功才标记已处理，失败仅记录日志
+    fn apply_action_to_records(
+        &self,
+        chunk: &[Value],
+        record_ids: &[String],
+        action: &str,
+        admin_id: i32,
+    ) -> Result<(), ProcessorError> {
+        for record_id in record_ids {
+            let Some(item) = chunk.iter().find(|v| self.record_id_matches(v, record_id)) else {
+                continue;
+            };
+            let Some(report_type) = self.infer_report_type(item) else {
+                continue;
+            };
+            if !self
+                .fetcher
+                .registry
+                .is_action_available(report_type, action)
             {
-                let config = self.fetcher.registry.get_config(report_type).cloned();
-                let mut context = ProcessingContext::new(
-                    first_record_id.to_string(),
-                    report_type.to_string(),
-                    first_item.clone(),
-                    admin_id,
-                );
-                context.record.is_batch_mode = false;
-                context.record.config = config;
-
-                let pipeline = ProcessingPipeline::create_default(
-                    self.pipeline_factory.clone(),
-                    self.batch_manager.clone(),
-                    self.config.clone(),
-                );
-                pipeline.execute(&mut context)?;
-
-                if let Some(action) = &context.state.action {
-                    self.batch_manager.lock().unwrap().save_batch_action(
-                        &group.group_type,
-                        &group.group_key,
-                        action,
-                    );
-
-                    for record_id in &group.record_ids[1..] {
-                        if let Some(item) =
-                            chunk.iter().find(|v| self.record_id_matches(v, record_id))
-                            && let Some(rt) = self.infer_report_type(item)
-                        {
-                            match self.apply_simple_action(item, rt, action, admin_id) {
-                                Ok(()) => {
-                                    self.batch_manager
-                                        .lock()
-                                        .unwrap()
-                                        .mark_record_processed(record_id);
-                                }
-                                Err(e) => {
-                                    eprintln!("批量应用失败 (id={}): {}", record_id, e);
-                                }
-                            }
-                        }
-                    }
+                continue;
+            }
+            match self.apply_simple_action(item, report_type, action, admin_id) {
+                Ok(()) => {
+                    self.batch_manager
+                        .lock()
+                        .unwrap()
+                        .mark_record_processed(record_id);
+                }
+                Err(e) => {
+                    eprintln!("批量应用失败 (id={}): {}", record_id, e);
                 }
             }
         }
@@ -374,56 +393,71 @@ impl ReportProcessor {
         let mut processed = 0i64;
 
         for item in chunk {
-            let report_type = self.infer_report_type(item);
-            let config = report_type.and_then(|rt| self.fetcher.registry.get_config(rt));
+            let Some(report_type) = self.infer_report_type(item) else {
+                continue;
+            };
+            let Some(config) = self.fetcher.registry.get_config(report_type) else {
+                continue;
+            };
+            let record_id = self.extract_record_id(item, config);
 
-            let record_id = config
-                .map(|c| {
-                    item.get(&c.report_id_field)
-                        .map(value_to_string)
-                        .unwrap_or_else(|| "0".to_string())
-                })
-                .unwrap_or_else(|| "0".to_string());
-
-            if self
-                .batch_manager
-                .lock()
-                .unwrap()
-                .is_record_processed(&record_id)
-            {
+            if self.is_record_processed(&record_id) {
                 continue;
             }
 
-            if let (Some(rt), Some(cfg)) = (report_type, config) {
-                let mut context = ProcessingContext::new(
-                    record_id.clone(),
-                    rt.to_string(),
-                    item.clone(),
-                    admin_id,
-                );
-                context.record.config = Some(cfg.clone());
+            let mut context = ProcessingContext::new(
+                record_id.clone(),
+                report_type.to_string(),
+                item.clone(),
+                admin_id,
+            );
+            context.record.config = Some(config.clone());
 
-                let pipeline = ProcessingPipeline::create_default(
-                    self.pipeline_factory.clone(),
-                    self.batch_manager.clone(),
-                    self.config.clone(),
-                );
-                if let Err(e) = pipeline.execute(&mut context) {
-                    eprintln!("处理记录 {} 失败: {}，跳过", record_id, e);
-                    continue;
-                }
+            let pipeline = self.create_pipeline();
+            if let Err(e) = pipeline.execute(&mut context) {
+                eprintln!("处理记录 {} 失败: {}，跳过", record_id, e);
+                continue;
+            }
 
-                if context.state.processed {
-                    processed += 1;
-                    self.batch_manager
-                        .lock()
-                        .unwrap()
-                        .mark_record_processed(&record_id);
-                }
+            if context.state.processed {
+                processed += 1;
+                self.batch_manager
+                    .lock()
+                    .unwrap()
+                    .mark_record_processed(&record_id);
             }
         }
 
         Ok(processed)
+    }
+
+    /// 创建默认处理管道（复用注入的注册表 / 批量管理器 / 配置）
+    fn create_pipeline(&self) -> ProcessingPipeline {
+        ProcessingPipeline::create_default(
+            self.pipeline_factory.clone(),
+            self.batch_manager.clone(),
+            self.config.clone(),
+        )
+    }
+
+    /// 重置批量处理状态（已处理记录与跨 chunk 待分组）
+    fn reset_batch_state(&self) {
+        self.batch_manager.lock().unwrap().clear_processed_records();
+        self.pending_groups.lock().unwrap().clear();
+    }
+
+    /// 从举报记录中提取 report_id 字符串
+    fn extract_record_id(&self, item: &Value, config: &SourceConfig) -> String {
+        item.get(&config.report_id_field)
+            .map(value_to_string)
+            .unwrap_or_else(|| "0".to_string())
+    }
+
+    fn is_record_processed(&self, record_id: &str) -> bool {
+        self.batch_manager
+            .lock()
+            .unwrap()
+            .is_record_processed(record_id)
     }
 
     fn record_id_matches(&self, item: &Value, target_id: &str) -> bool {

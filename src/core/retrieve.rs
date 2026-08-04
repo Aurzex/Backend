@@ -13,7 +13,9 @@ use crate::api::whale::{
     WorkReportFilterType, WorkSourceType,
 };
 use crate::api::work::{NemoWorkType, WorkDataFetcher};
-use crate::utils::acquire::{BaseKey, Catsona, CodeMaoClient, MewError, PaginationMethod};
+use crate::utils::acquire::{
+    BaseKey, Catsona, CodeMaoClient, MewError, PaginatedIter, PaginationMethod,
+};
 
 // ==================== 错误类型 ====================
 
@@ -239,6 +241,41 @@ impl CommentQueryBuilder {
         }
     }
 
+    /// 获取某条主评论下的所有回复对象。
+    ///
+    /// 论坛来源需额外请求回复接口；其余来源直接取内联的 `replies.items` 字段。
+    fn reply_items(
+        source: CommentSource,
+        comment_id: i64,
+        comment_obj: &JsonObject,
+    ) -> Vec<Result<JsonObject, DataQueryError>> {
+        if source == CommentSource::Forum {
+            ForumDataFetcher::new()
+                .fetch_reply_comments_gen(comment_id as i32, None)
+                .map(|r| {
+                    r.map_err(DataQueryError::from).and_then(|v| {
+                        v.as_object()
+                            .cloned()
+                            .ok_or_else(|| DataQueryError::ParseError("回复不是对象".into()))
+                    })
+                })
+                .collect()
+        } else {
+            comment_obj
+                .get("replies")
+                .and_then(|r| r.as_object())
+                .and_then(|r| r.get("items"))
+                .and_then(|items| items.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_object().cloned())
+                        .map(Ok)
+                        .collect()
+                })
+                .unwrap_or_default()
+        }
+    }
+
     /// 惰性获取评论原始数据流
     pub fn stream_raw_comments(
         self,
@@ -274,7 +311,7 @@ impl CommentQueryBuilder {
                 Ok(v) => v,
                 Err(e) => return vec![Err(e)].into_iter(),
             };
-            let mut ids = Vec::new();
+            let mut ids: Vec<Result<String, DataQueryError>> = Vec::new();
 
             // 主评论用户
             if let Some(obj) = comment.as_object()
@@ -288,36 +325,15 @@ impl CommentQueryBuilder {
             }
 
             let comment_id = comment.get("id").and_then(|id| id.as_i64()).unwrap_or(0);
-
-            if source == CommentSource::Forum {
-                let reply_stream =
-                    ForumDataFetcher::new().fetch_reply_comments_gen(comment_id as i32, None);
-                for reply_result in reply_stream {
-                    match reply_result {
-                        Ok(reply_val) => {
-                            if let Some(reply_obj) = reply_val.as_object()
-                                && let Some(uid) = extract_reply_user_id(reply_obj)
-                            {
-                                ids.push(Ok(uid.to_string()));
-                            }
-                        }
-                        Err(e) => ids.push(Err(DataQueryError::from(e))),
-                    }
-                }
-            } else {
-                if let Some(replies) = comment
-                    .get("replies")
-                    .and_then(|r| r.as_object())
-                    .and_then(|r| r.get("items"))
-                    .and_then(|items| items.as_array())
-                {
-                    for reply_val in replies {
-                        if let Some(reply_obj) = reply_val.as_object()
-                            && let Some(uid) = extract_reply_user_id(reply_obj)
-                        {
+            let comment_obj = comment.as_object().cloned().unwrap_or_default();
+            for reply in Self::reply_items(source, comment_id, &comment_obj) {
+                match reply {
+                    Ok(reply_obj) => {
+                        if let Some(uid) = extract_reply_user_id(&reply_obj) {
                             ids.push(Ok(uid.to_string()));
                         }
                     }
+                    Err(e) => ids.push(Err(e)),
                 }
             }
             ids.into_iter()
@@ -341,46 +357,24 @@ impl CommentQueryBuilder {
         let mapped = raw_stream.flat_map(move |comment_result| {
             let comment = match comment_result {
                 Ok(v) => v,
-                Err(e) => return vec![Err(e)].into_iter(), // 修正：直接返回迭代器
+                Err(e) => return vec![Err(e)].into_iter(),
             };
-            let mut ids = Vec::new();
-            let main_id = comment.get("id").and_then(|id| id.as_i64());
+            let mut ids: Vec<Result<String, DataQueryError>> = Vec::new();
+            let comment_id = comment.get("id").and_then(|id| id.as_i64()).unwrap_or(0);
 
-            if let Some(mid) = main_id {
-                ids.push(Ok(mid.to_string()));
+            if comment_id != 0 {
+                ids.push(Ok(comment_id.to_string()));
             }
 
-            let comment_id = main_id.unwrap_or(0);
-
-            if source == CommentSource::Forum {
-                let reply_stream =
-                    ForumDataFetcher::new().fetch_reply_comments_gen(comment_id as i32, None);
-                for reply_result in reply_stream {
-                    match reply_result {
-                        Ok(reply_val) => {
-                            if let Some(reply_obj) = reply_val.as_object()
-                                && let Some(rid) = reply_obj.get("id").and_then(|id| id.as_i64())
-                            {
-                                ids.push(Ok(format!("{}.{}", comment_id, rid)));
-                            }
-                        }
-                        Err(e) => ids.push(Err(DataQueryError::from(e))),
-                    }
-                }
-            } else {
-                if let Some(replies) = comment
-                    .get("replies")
-                    .and_then(|r| r.as_object())
-                    .and_then(|r| r.get("items"))
-                    .and_then(|items| items.as_array())
-                {
-                    for reply_val in replies {
-                        if let Some(reply_obj) = reply_val.as_object()
-                            && let Some(rid) = reply_obj.get("id").and_then(|id| id.as_i64())
-                        {
+            let comment_obj = comment.as_object().cloned().unwrap_or_default();
+            for reply in Self::reply_items(source, comment_id, &comment_obj) {
+                match reply {
+                    Ok(reply_obj) => {
+                        if let Some(rid) = reply_obj.get("id").and_then(|id| id.as_i64()) {
                             ids.push(Ok(format!("{}.{}", comment_id, rid)));
                         }
                     }
+                    Err(e) => ids.push(Err(e)),
                 }
             }
             ids.into_iter()
@@ -425,32 +419,11 @@ impl CommentQueryBuilder {
                 .unwrap_or(0);
 
             // 收集该评论的所有回复（此处回复数量通常较少，收集为 Vec 可以接受）
-            let replies: Vec<JsonObject> = if source == CommentSource::Forum {
-                let reply_stream =
-                    ForumDataFetcher::new().fetch_reply_comments_gen(comment_id as i32, None);
-                reply_stream
-                    .filter_map(|r| r.ok())
-                    .filter_map(|v| v.as_object().cloned())
-                    .filter_map(|reply| {
-                        build_compact_reply(&reply, user_field, &extract_reply_user_id)
-                    })
-                    .collect()
-            } else {
-                comment_obj
-                    .get("replies")
-                    .and_then(|r| r.as_object())
-                    .and_then(|r| r.get("items"))
-                    .and_then(|items| items.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|v| v.as_object())
-                            .filter_map(|reply| {
-                                build_compact_reply(reply, user_field, &extract_reply_user_id)
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default()
-            };
+            let replies: Vec<JsonObject> = Self::reply_items(source, comment_id, comment_obj)
+                .into_iter()
+                .filter_map(|r| r.ok())
+                .filter_map(|reply| build_compact_reply(&reply, user_field, &extract_reply_user_id))
+                .collect();
 
             let mut comment_data = JsonObject::new();
             if let Some(user) = comment_obj.get("user").and_then(|u| u.as_object()) {
@@ -565,6 +538,18 @@ impl DataQuery {
             .stream_detailed_comments()
     }
 
+    /// 构造分页迭代器并获取元数据中的总数
+    fn paginated_total(
+        client: &CodeMaoClient,
+        endpoint: String,
+        total_key: &str,
+        configure: impl FnOnce(PaginatedIter) -> PaginatedIter,
+    ) -> Result<i32, DataQueryError> {
+        let mut paginated = configure(client.paginated(endpoint).with_total_key(total_key));
+        paginated.fetch_metadata().map_err(DataQueryError::from)?;
+        Ok(paginated.total_items().unwrap_or(0) as i32)
+    }
+
     /// 获取评论总数
     pub fn count_comments(
         &self,
@@ -573,82 +558,45 @@ impl DataQuery {
     ) -> Result<i32, DataQueryError> {
         let client = CodeMaoClient::global();
         match source {
-            CommentSource::Work => {
-                let mut paginated = client
-                    .paginated(format!("/creation-tools/v1/works/{}/comments", target_id))
-                    .with_base_key(BaseKey::Default)
-                    .with_page_size(15)
-                    .with_pagination_method(PaginationMethod::Offset)
-                    .with_offset_key("offset")
-                    .with_amount_key("limit")
-                    .with_total_key("total");
-
-                paginated.fetch_metadata().map_err(DataQueryError::from)?;
-
-                Ok(paginated.total_items().unwrap_or(0) as i32)
-            }
+            CommentSource::Work => Self::paginated_total(
+                client,
+                format!("/creation-tools/v1/works/{}/comments", target_id),
+                "total",
+                |p| {
+                    p.with_base_key(BaseKey::Default)
+                        .with_page_size(15)
+                        .with_pagination_method(PaginationMethod::Offset)
+                        .with_offset_key("offset")
+                        .with_amount_key("limit")
+                },
+            ),
             CommentSource::Shop => {
-                let mut paginated = client
-                    .paginated(format!("/web/discussions/{}/comments", target_id))
-                    .with_base_key(BaseKey::Default)
-                    .with_iter_param("source", "WORK_SHOP")
-                    .with_iter_param("sort", "-created_at")
-                    .with_page_size(15)
-                    .with_pagination_method(PaginationMethod::Offset)
-                    .with_offset_key("offset")
-                    .with_amount_key("limit")
-                    .with_total_key("total");
-
-                paginated.fetch_metadata().map_err(DataQueryError::from)?;
-
-                let total = paginated.total_items().unwrap_or(0) as i32;
-
-                let mut reply_paginated = client
-                    .paginated(format!("/web/discussions/{}/comments", target_id))
-                    .with_base_key(BaseKey::Default)
-                    .with_iter_param("source", "WORK_SHOP")
-                    .with_iter_param("sort", "-created_at")
-                    .with_page_size(15)
-                    .with_pagination_method(PaginationMethod::Offset)
-                    .with_offset_key("offset")
-                    .with_amount_key("limit")
-                    .with_total_key("totalReply");
-
-                reply_paginated
-                    .fetch_metadata()
-                    .map_err(DataQueryError::from)?;
-
-                let total_reply = reply_paginated.total_items().unwrap_or(0) as i32;
+                let configure = |p: PaginatedIter| {
+                    p.with_base_key(BaseKey::Default)
+                        .with_iter_param("source", "WORK_SHOP")
+                        .with_iter_param("sort", "-created_at")
+                        .with_page_size(15)
+                        .with_pagination_method(PaginationMethod::Offset)
+                        .with_offset_key("offset")
+                        .with_amount_key("limit")
+                };
+                let endpoint = format!("/web/discussions/{}/comments", target_id);
+                let total = Self::paginated_total(client, endpoint.clone(), "total", configure)?;
+                let total_reply = Self::paginated_total(client, endpoint, "totalReply", configure)?;
                 Ok(total + total_reply)
             }
             CommentSource::Forum => {
-                let mut paginated = client
-                    .paginated(format!("/web/forums/posts/{}/details", target_id))
-                    .with_base_key(BaseKey::Default)
-                    .with_page_size(15)
-                    .with_pagination_method(PaginationMethod::Offset)
-                    .with_offset_key("offset")
-                    .with_amount_key("limit")
-                    .with_total_key("n_replies");
-
-                paginated.fetch_metadata().map_err(DataQueryError::from)?;
-
-                let n_replies = paginated.total_items().unwrap_or(0) as i32;
-
-                let mut comment_paginated = client
-                    .paginated(format!("/web/forums/posts/{}/details", target_id))
-                    .with_base_key(BaseKey::Default)
-                    .with_page_size(15)
-                    .with_pagination_method(PaginationMethod::Offset)
-                    .with_offset_key("offset")
-                    .with_amount_key("limit")
-                    .with_total_key("n_comments");
-
-                comment_paginated
-                    .fetch_metadata()
-                    .map_err(DataQueryError::from)?;
-
-                let n_comments = comment_paginated.total_items().unwrap_or(0) as i32;
+                let configure = |p: PaginatedIter| {
+                    p.with_base_key(BaseKey::Default)
+                        .with_page_size(15)
+                        .with_pagination_method(PaginationMethod::Offset)
+                        .with_offset_key("offset")
+                        .with_amount_key("limit")
+                };
+                let endpoint = format!("/web/forums/posts/{}/details", target_id);
+                let n_replies =
+                    Self::paginated_total(client, endpoint.clone(), "n_replies", configure)?;
+                let n_comments = Self::paginated_total(client, endpoint, "n_comments", configure)?;
                 Ok(n_replies + n_comments)
             }
         }
