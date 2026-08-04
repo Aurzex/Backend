@@ -198,6 +198,7 @@ impl Default for DecompilerConfig {
             "get_whole_audios",
             "lists_get",
             "logic_empty",
+            "logic_boolean",
             "math_number",
             "text",
             "shadow_text",
@@ -307,6 +308,17 @@ impl Default for DecompilerConfig {
         let mut shadow_templates = HashMap::new();
         shadow_templates.insert(
             "logic_empty".to_string(),
+            ShadowTemplate {
+                editable: false,
+                visible: "visible".to_string(),
+                extra_fields: vec![],
+                default_text: None,
+                use_custom_name: false,
+                main_field: None,
+            },
+        );
+        shadow_templates.insert(
+            "logic_boolean".to_string(),
             ShadowTemplate {
                 editable: false,
                 visible: "visible".to_string(),
@@ -1362,6 +1374,11 @@ impl<'a> BlockDecompilerCore<'a> {
                     }
                 } else {
                     // 处理基本类型参数（如变量 UUID 引用）
+                    // 布尔开关参数（如 bump 的 warp）在编辑版中不呈现
+                    // （无 shadow、无 fields），跳过以对齐编辑版格式
+                    if value.is_boolean() {
+                        continue;
+                    }
                     if name == "VAR" {
                         // 编辑版格式：变量引用以 UUID 存入 fields（variables_set/get 均如此），
                         // 且不生成 shadow（编辑版变量块的 shadows 中无 VAR 键）
@@ -1699,6 +1716,11 @@ impl KittenDecompiler {
             .and_then(|v| v.as_object());
         let estimated_blocks = compiled_blocks.map(|m| m.len() * 10 + 100).unwrap_or(256);
         let functions_arc = Arc::new(functions.clone());
+        // 移动前先提取 actor_info 中已有的注释，供注释回退使用
+        let actor_existing_comments = actor_info
+            .get("block_data_json")
+            .and_then(|b| b.get("comments"))
+            .cloned();
         let mut context = BlockContext::with_capacity(
             actor_info,
             functions_arc,
@@ -1784,10 +1806,17 @@ impl KittenDecompiler {
             }
         }
 
-        let comments = actor_compiled
+        // 优先使用 compile_result 中的注释；若数据源未提供，则保留 actor_info
+        // 中已有的注释，避免反编译覆盖掉输入中已有的注释数据
+        let mut comments = actor_compiled
             .get("comments")
             .cloned()
             .unwrap_or_else(|| json!({}));
+        if comments.as_object().map(|o| o.is_empty()).unwrap_or(true)
+            && let Some(existing) = actor_existing_comments
+        {
+            comments = existing;
+        }
 
         let mut actor_data = context.actor_data;
         if let Some(obj) = actor_data.as_object_mut() {
@@ -1809,15 +1838,19 @@ impl KittenDecompiler {
         actor_compiled: &Value,
         scene_info: &Value,
         work_type: WorkType,
+        functions: &HashMap<String, Value>,
     ) -> Result<Value> {
         let shadow_builder = ShadowBuilder::new(config.clone(), id_generator.clone(), work_type);
         let compiled_blocks = actor_compiled
             .get("compiled_block_map")
             .and_then(|v| v.as_object());
         let estimated_blocks = compiled_blocks.map(|m| m.len() * 10 + 100).unwrap_or(256);
+        // 场景同样使用全局函数表：函数可定义在某个场景（屏幕角色）中、
+        // 被其它场景/角色调用（如“总移动设置4”定义在背景(3)、调用在背景(1)），
+        // 否则场景中的调用块会因找不到定义而被禁用
         let mut context = BlockContext::with_capacity(
             json!({}),
-            Arc::new(HashMap::new()),
+            Arc::new(functions.clone()),
             shadow_builder,
             HashMap::new(), // 场景没有变量映射
             estimated_blocks,
@@ -1884,10 +1917,34 @@ impl KittenDecompiler {
             }
         }
 
-        let comments = actor_compiled
+        // 生成函数定义块（procedures_2_defnoreturn）。函数可能定义在场景
+        // （屏幕角色）中（如“总移动设置4”定义在背景(3)），与角色分支一致，
+        // 否则场景中定义的函数缺失、调用块会被 FunctionCallDecompiler 禁用。
+        if let Some(procedures) = actor_compiled.get("procedures").and_then(|v| v.as_object()) {
+            for (_, func_data) in procedures {
+                context.layout_row += 50.0;
+                let mut decompiler = factory.create(func_data);
+                // 重新插入：FunctionDefDecompiler 补充的 shadows/mutation/NAME 需覆盖 core 版本
+                let block_value = decompiler.decompile(&mut context)?;
+                if let Some(bid) = block_value.get("id").and_then(|v| v.as_str()) {
+                    context.blocks.insert(bid.to_string(), block_value);
+                }
+            }
+        }
+
+        // 优先使用 compile_result 中的注释；若数据源未提供，则保留 scene_info
+        // 中已有的注释，避免反编译覆盖掉输入中已有的注释数据
+        let mut comments = actor_compiled
             .get("comments")
             .cloned()
             .unwrap_or_else(|| json!({}));
+        if comments.as_object().map(|o| o.is_empty()).unwrap_or(true)
+            && let Some(existing) = scene_info
+                .get("block_data_json")
+                .and_then(|b| b.get("comments"))
+        {
+            comments = existing.clone();
+        }
 
         let mut scene = scene_info.clone();
         if let Some(obj) = scene.as_object_mut() {
@@ -2300,6 +2357,7 @@ impl WorkDecompiler for KittenDecompiler {
                         actor_compiled,
                         &scene_info,
                         work_type,
+                        &global_functions,
                     )
                     .with_context(|| format!("反编译场景 {} 失败", actor_id))?;
                     if let Some(scenes) = work

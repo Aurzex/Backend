@@ -3,7 +3,7 @@ mod core;
 mod utils;
 
 use crate::core::compiler::decompile_work;
-use log::{LevelFilter, Log, Metadata, Record, info};
+use log::{info, LevelFilter, Log, Metadata, Record};
 
 struct ConsoleLogger; // 改这里
 
@@ -23,7 +23,7 @@ impl Log for ConsoleLogger {
 fn main() {
     log::set_logger(&ConsoleLogger).unwrap(); // 改这里
     log::set_max_level(LevelFilter::Info);
-    for work_id in [215246857i64, 301113412, 324995084] {
+    for work_id in [136021231] {
         match decompile_work(work_id, None) {
             Ok(path) => println!("[OK] work_id={} -> {}", work_id, path),
             Err(e) => eprintln!("[ERR] work_id={} -> {:?}", work_id, e),

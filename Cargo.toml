@@ -17,24 +17,24 @@ panic = "abort"
 unused = "allow"
 
 [dependencies]
-aes-gcm = "0"
-base64 = "0"
-fastrand ="2"
-log = "0"
+aes-gcm = "0.11.0"
+base64 = "0.23.1"
+fastrand = "2.5.0"
+log = "0.4.33"
 serde = {
-	version = "1",
+	version = "1.0.229",
     features = ["derive"]
 }
-serde_json = "1"
-sha2 = "0"
-thiserror = "2"
-http = "1"
+serde_json = "1.0.151"
+sha2 = "0.11.0"
+thiserror = "2.0.19"
+http = "1.5.0"
 tungstenite = {
-	version = "0.26",
+	version = "0.30.0",
     features = ["rustls-tls-webpki-roots"]
 }
-url = "2"
+url = "2.5.8"
 ureq = {
-	version = "3",
+	version = "3.3.0",
     features = ["json", "cookies", "multipart","gzip"]
 }
