@@ -304,6 +304,12 @@ pub struct StrategyFactory {
     strategies: HashMap<String, Box<dyn CommentProcessStrategy>>,
 }
 
+impl Default for StrategyFactory {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StrategyFactory {
     pub fn new() -> Self {
         let mut factory = StrategyFactory {
@@ -330,6 +336,12 @@ impl StrategyFactory {
 // ==================== 评论处理器 ====================
 pub struct CommentProcessor {
     factory: StrategyFactory,
+}
+
+impl Default for CommentProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CommentProcessor {
@@ -484,6 +496,12 @@ type ActionFn = fn(i32, i32, Resolution) -> Result<bool, Box<dyn std::error::Err
 
 pub struct ActionRegistry {
     handlers: HashMap<&'static str, ActionFn>,
+}
+
+impl Default for ActionRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ActionRegistry {
@@ -1558,6 +1576,12 @@ impl ProcessingPipeline {
 // ==================== 多账号管理器 ====================
 pub struct MultiAccount {
     pub accounts: Vec<(String, String)>,
+}
+
+impl Default for MultiAccount {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MultiAccount {

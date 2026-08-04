@@ -1,12 +1,3 @@
-//! 云存储(云变量)操作模块。
-//!
-//! 移植自 Python `src/translate/cloudcfg.py`,采用 Rust 惯用方式实现:
-//! - 建造者模式 + 链式调用(`CloudBuilder`)
-//! - 命令模式 + 工厂(`CloudCommand` / `CommandFactory`,支持批量合并上传)
-//! - 策略模式(消息处理器 `MessageHandler` 按事件名分派)
-//! - 观察者模式(变量/列表/连接事件的回调注册)
-//! - 日志统一使用 `log` 宏,替代 Python 的 `print`
-
 use std::collections::{HashMap, VecDeque};
 use std::net::TcpStream;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -558,22 +549,12 @@ impl<T> CallbackStore<T> {
 }
 
 /// 连接级事件回调集合。
+#[derive(Default)]
 struct Events {
     data_ready: CallbackStore<ReadyCallback>,
     online_users: CallbackStore<OnlineUsersCallback>,
     ranking: CallbackStore<RankingCallback>,
     connection: CallbackStore<ConnectionCallback>,
-}
-
-impl Default for Events {
-    fn default() -> Self {
-        Self {
-            data_ready: CallbackStore::default(),
-            online_users: CallbackStore::default(),
-            ranking: CallbackStore::default(),
-            connection: CallbackStore::default(),
-        }
-    }
 }
 
 impl std::fmt::Debug for Events {
@@ -906,12 +887,7 @@ impl CloudConnection {
         &self,
         cb: impl Fn(RankingData) + Send + Sync + 'static,
     ) -> CallbackHandle {
-        self.inner
-            .events
-            .lock()
-            .unwrap()
-            .ranking
-            .add(Box::new(cb))
+        self.inner.events.lock().unwrap().ranking.add(Box::new(cb))
     }
 
     /// 注册连接生命周期事件回调。
@@ -982,8 +958,7 @@ impl CloudConnection {
 
     /// 设置公有变量值。
     pub fn set_public_variable(&self, name: &str, value: impl Into<CloudValue>) -> Result<()> {
-        self.inner
-            .set_variable(VarKind::Public, name, value.into())
+        self.inner.set_variable(VarKind::Public, name, value.into())
     }
 
     /// 获取全部私有变量(名字 → 值)。
@@ -1109,7 +1084,8 @@ impl CloudConnection {
     }
 
     pub fn list_remove(&self, name: &str, index: usize) -> Result<()> {
-        self.inner.list_apply_local(name, ListAction::DeleteAt(index))
+        self.inner
+            .list_apply_local(name, ListAction::DeleteAt(index))
     }
 
     pub fn list_replace(
@@ -1239,10 +1215,7 @@ impl CloudVariable {
     }
 
     /// 注册排行榜数据回调(仅私有变量有效)。
-    pub fn on_ranking(
-        &self,
-        cb: impl Fn(RankingData) + Send + Sync + 'static,
-    ) -> CallbackHandle {
+    pub fn on_ranking(&self, cb: impl Fn(RankingData) + Send + Sync + 'static) -> CallbackHandle {
         self.inner
             .state
             .lock()
@@ -1318,7 +1291,8 @@ impl CloudList {
             .unwrap()
             .list(&self.name)
             .and_then(|l| l.items.last().cloned());
-        self.inner.list_apply_local(&self.name, ListAction::DeleteLast)?;
+        self.inner
+            .list_apply_local(&self.name, ListAction::DeleteLast)?;
         Ok(popped)
     }
 
@@ -1335,7 +1309,8 @@ impl CloudList {
             .unwrap()
             .list(&self.name)
             .and_then(|l| l.items.first().cloned());
-        self.inner.list_apply_local(&self.name, ListAction::DeleteAt(0))?;
+        self.inner
+            .list_apply_local(&self.name, ListAction::DeleteAt(0))?;
         Ok(popped)
     }
 
@@ -1352,7 +1327,8 @@ impl CloudList {
             .unwrap()
             .list(&self.name)
             .and_then(|l| l.items.get(index).cloned());
-        self.inner.list_apply_local(&self.name, ListAction::DeleteAt(index))?;
+        self.inner
+            .list_apply_local(&self.name, ListAction::DeleteAt(index))?;
         Ok(removed)
     }
 
@@ -1367,7 +1343,8 @@ impl CloudList {
     }
 
     pub fn clear(&self) -> Result<()> {
-        self.inner.list_apply_local(&self.name, ListAction::DeleteAll)
+        self.inner
+            .list_apply_local(&self.name, ListAction::DeleteAll)
     }
 
     pub fn index_of(&self, item: &CloudValue) -> Option<usize> {
@@ -1659,8 +1636,7 @@ impl CloudInner {
         };
         if let Some(callbacks) = op_callbacks {
             for (_, cb) in &callbacks {
-                if let Err(e) = catch_unwind(AssertUnwindSafe(|| cb(&outcome.op, &outcome.args)))
-                {
+                if let Err(e) = catch_unwind(AssertUnwindSafe(|| cb(&outcome.op, &outcome.args))) {
                     warn!("列表操作回调 panic: {e:?}");
                 }
             }
@@ -1886,13 +1862,15 @@ impl MessageHandler for AllDataHandler {
                 truncate(&payload.to_string(), 200)
             );
         }
-        inner.notify.notify_with(|| inner.data_ready.store(true, Ordering::Release));
+        inner
+            .notify
+            .notify_with(|| inner.data_ready.store(true, Ordering::Release));
         let callbacks = {
             let mut events = inner.events.lock().unwrap();
             events.data_ready.take_all()
         };
         for (_, cb) in &callbacks {
-            if let Err(e) = catch_unwind(AssertUnwindSafe(|| cb())) {
+            if let Err(e) = catch_unwind(AssertUnwindSafe(cb)) {
                 warn!("数据就绪回调 panic: {e:?}");
             }
         }
@@ -1949,10 +1927,9 @@ impl MessageHandler for UpdatePublicVarHandler {
         }
         if let Some(items) = payload.as_array() {
             for item in items {
-                if let (Some(cvid), Some(value)) = (
-                    item.get("cvid").and_then(Value::as_str),
-                    item.get("value"),
-                ) {
+                if let (Some(cvid), Some(value)) =
+                    (item.get("cvid").and_then(Value::as_str), item.get("value"))
+                {
                     let new_value = CloudValue::from_json(value);
                     let old = {
                         let mut store = inner.state.lock().unwrap();
@@ -2067,7 +2044,12 @@ impl MessageHandler for RankingHandler {
                     warn!("排行榜回调 panic: {e:?}");
                 }
             }
-            if let Some(v) = inner.state.lock().unwrap().variable_mut(VarKind::Private, &cvid) {
+            if let Some(v) = inner
+                .state
+                .lock()
+                .unwrap()
+                .variable_mut(VarKind::Private, &cvid)
+            {
                 v.ranking_callbacks.extend(callbacks);
             }
         }
@@ -2142,10 +2124,18 @@ fn create_data_item(inner: &Arc<CloudInner>, item: &Value) -> Result<()> {
     let mut store = inner.state.lock().unwrap();
     match data_type {
         0 => {
-            store.create_private(cvid.to_string(), name.to_string(), CloudValue::from_json(value));
+            store.create_private(
+                cvid.to_string(),
+                name.to_string(),
+                CloudValue::from_json(value),
+            );
         }
         1 => {
-            store.create_public(cvid.to_string(), name.to_string(), CloudValue::from_json(value));
+            store.create_public(
+                cvid.to_string(),
+                name.to_string(),
+                CloudValue::from_json(value),
+            );
         }
         2 => {
             let items = value
@@ -2246,10 +2236,7 @@ fn truncate(text: &str, max: usize) -> String {
         const SUFFIX: &str = "...";
         let half = (max.saturating_sub(SUFFIX.len())) / 2;
         let head: String = text.chars().take(half).collect();
-        let tail: String = text
-            .chars()
-            .skip(text.chars().count() - half)
-            .collect();
+        let tail: String = text.chars().skip(text.chars().count() - half).collect();
         format!("{head}{SUFFIX}{tail}")
     }
 }
@@ -2436,9 +2423,7 @@ fn flush_loop(inner: Arc<CloudInner>) {
             continue;
         }
         // 仅在连接且 Socket.IO 握手完成后上传,避免消息发往未握手会话被丢弃
-        if !inner.connected.load(Ordering::Acquire)
-            || !inner.io_ready.load(Ordering::Acquire)
-        {
+        if !inner.connected.load(Ordering::Acquire) || !inner.io_ready.load(Ordering::Acquire) {
             // 未连接(断线/重连窗口):命令保留,待连接恢复后补发,避免数据丢失
             warn!("云连接未就绪, {} 条命令保留待上传", batch.len());
             let mut queue = inner.commands.lock().unwrap();
@@ -2526,7 +2511,10 @@ mod tests {
         let private = CommandFactory::update_private_variable("1001", &value);
         let public = CommandFactory::update_public_variable("1002", &value);
         match &private {
-            CloudCommand::Variable { private: true, data } => {
+            CloudCommand::Variable {
+                private: true,
+                data,
+            } => {
                 assert_eq!(data["cvid"], "1001");
                 assert_eq!(data["value"], 3);
                 assert_eq!(data["param_type"], "number");
@@ -2534,7 +2522,10 @@ mod tests {
             _ => panic!("应为私有变量命令"),
         }
         match &public {
-            CloudCommand::Variable { private: false, data } => {
+            CloudCommand::Variable {
+                private: false,
+                data,
+            } => {
                 assert_eq!(data["action"], "set");
                 assert_eq!(data["param_type"], "number");
             }
@@ -2557,11 +2548,7 @@ mod tests {
         assert_eq!(merged.private_updates.len(), 2);
         assert_eq!(merged.public_updates.len(), 1);
         assert_eq!(merged.list_updates.len(), 2);
-        let (cvid, ops) = merged
-            .list_updates
-            .iter()
-            .find(|(c, _)| c == "L1")
-            .unwrap();
+        let (cvid, ops) = merged.list_updates.iter().find(|(c, _)| c == "L1").unwrap();
         assert_eq!(cvid, "L1");
         assert_eq!(ops.len(), 2);
     }
@@ -2586,7 +2573,9 @@ mod tests {
         );
         // 载荷为 JSON 字符串时二次解析(如 list_variables_done)
         assert_eq!(
-            parse_frame("42[\"list_variables_done\",\"[{\\\"cvid\\\":\\\"A\\\",\\\"name\\\":\\\"分数\\\",\\\"value\\\":1,\\\"type\\\":0}]\"]"),
+            parse_frame(
+                "42[\"list_variables_done\",\"[{\\\"cvid\\\":\\\"A\\\",\\\"name\\\":\\\"分数\\\",\\\"value\\\":1,\\\"type\\\":0}]\"]"
+            ),
             Frame::Event(
                 "list_variables_done".into(),
                 json!([{"cvid": "A", "name": "分数", "value": 1, "type": 0}])
@@ -2615,7 +2604,10 @@ mod tests {
         let mut items: Vec<CloudValue> = vec![1i64.into(), 2i64.into(), 3i64.into()];
         let out = execute_list_action(&mut items, &ListAction::Append(4i64.into())).unwrap();
         assert_eq!(out.op, "push");
-        assert_eq!(items, vec![1i64.into(), 2i64.into(), 3i64.into(), 4i64.into()]);
+        assert_eq!(
+            items,
+            vec![1i64.into(), 2i64.into(), 3i64.into(), 4i64.into()]
+        );
 
         let out = execute_list_action(&mut items, &ListAction::DeleteLast).unwrap();
         assert_eq!(out.op, "pop");
@@ -2737,10 +2729,7 @@ mod tests {
             store.create_public("200".into(), "昵称".into(), CloudValue::Text("旧".into()));
         }
         UpdatePublicVarHandler
-            .handle(
-                &conn.inner,
-                &json!([{"cvid": "200", "value": "新"}]),
-            )
+            .handle(&conn.inner, &json!([{"cvid": "200", "value": "新"}]))
             .unwrap();
         let variable = conn.get_public_variable("昵称").unwrap();
         assert_eq!(variable.get(), Some(CloudValue::Text("新".into())));
@@ -2760,11 +2749,11 @@ mod tests {
             calls2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         });
         // 模拟重连后全量数据重建:同名条目应保留旧回调
-        conn.inner
-            .state
-            .lock()
-            .unwrap()
-            .create_private("100".into(), "分数".into(), CloudValue::Number(5));
+        conn.inner.state.lock().unwrap().create_private(
+            "100".into(),
+            "分数".into(),
+            CloudValue::Number(5),
+        );
         let variable2 = conn.get_private_variable("分数").unwrap();
         assert_eq!(variable2.get(), Some(CloudValue::Number(5)));
         variable2.set(CloudValue::Number(7)).unwrap();
@@ -2778,9 +2767,14 @@ mod tests {
             .build();
         let inner = conn.inner.clone();
         inner.connected.store(false, Ordering::Release);
-        inner.commands.lock().unwrap().push_back(
-            CommandFactory::update_private_variable("c", &CloudValue::Number(1)),
-        );
+        inner
+            .commands
+            .lock()
+            .unwrap()
+            .push_back(CommandFactory::update_private_variable(
+                "c",
+                &CloudValue::Number(1),
+            ));
         let flush_inner = inner.clone();
         let handle = thread::spawn(move || flush_loop(flush_inner));
         thread::sleep(Duration::from_millis(50));
@@ -2814,4 +2808,3 @@ mod tests {
         assert_eq!(got[0].2, "local");
     }
 }
-

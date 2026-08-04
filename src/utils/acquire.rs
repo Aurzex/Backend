@@ -337,6 +337,12 @@ pub trait KittyAuth: Send + Sync + std::fmt::Debug {
 #[derive(Debug, Clone)]
 pub struct GlobalKittyAuth;
 
+impl Default for GlobalKittyAuth {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GlobalKittyAuth {
     pub fn new() -> Self {
         Self
@@ -366,6 +372,12 @@ impl KittyAuth for GlobalKittyAuth {
 #[derive(Debug, Clone)]
 pub struct LocalKittyAuth {
     inner: Arc<KittyIdentityManager>,
+}
+
+impl Default for LocalKittyAuth {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl LocalKittyAuth {

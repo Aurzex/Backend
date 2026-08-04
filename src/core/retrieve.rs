@@ -182,6 +182,12 @@ pub struct CommentQueryBuilder {
     limit: Option<usize>,
 }
 
+impl Default for CommentQueryBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CommentQueryBuilder {
     pub fn new() -> Self {
         Self {

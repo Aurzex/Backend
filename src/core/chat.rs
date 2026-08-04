@@ -1,12 +1,3 @@
-//! CodeMao AI 助手对话模块。
-//!
-//! 移植自 Python `src/translate/deepser.py`,采用 Rust 惯用方式实现:
-//! - 建造者模式 + 链式调用(`ChatBuilder`)
-//! - 策略模式(事件处理器 `ChatEventHandler` 按事件名分派)
-//! - 观察者模式(流式回复回调注册/移除)
-//! - 条件变量驱动的等待(`wait_for_response_*`),替代 Python 的轮询
-//! - 日志统一使用 `log` 宏,替代 Python 的 `print`
-
 use std::collections::HashMap;
 use std::net::TcpStream;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -390,11 +381,7 @@ impl ChatClient {
         &self,
         cb: impl Fn(&str, ChatEventType) + Send + Sync + 'static,
     ) -> CallbackHandle {
-        self.inner
-            .callbacks
-            .lock()
-            .unwrap()
-            .add(Box::new(cb))
+        self.inner.callbacks.lock().unwrap().add(Box::new(cb))
     }
 
     /// 移除流式回复回调。
@@ -568,10 +555,16 @@ pub fn parse_chat_ack(payload: &Value) -> Option<StreamEvent> {
     match content_type {
         "stream_output_begin" => Some(StreamEvent::Begin),
         "stream_output_content" => Some(StreamEvent::Chunk(
-            data.get("content").and_then(Value::as_str).unwrap_or("").to_string(),
+            data.get("content")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
         )),
         "stream_output_end" => Some(StreamEvent::End(
-            data.get("content").and_then(Value::as_str).unwrap_or("").to_string(),
+            data.get("content")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
         )),
         _ => None,
     }
@@ -629,7 +622,8 @@ impl ChatEventHandler for JoinAckHandler {
         if let Some(data) = data {
             // 服务器将 user_id 以字符串形式返回(如 "1742185446")
             let user_id = data.get("user_id").and_then(|v| {
-                v.as_i64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+                v.as_i64()
+                    .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
             });
             if let Some(user_id) = user_id {
                 *inner.user_id.lock().unwrap() = Some(user_id);
@@ -644,10 +638,14 @@ impl ChatEventHandler for JoinAckHandler {
             *inner.search_session.lock().unwrap()
         );
         // 发送预设消息
-        let _ = send_event_on(inner, "preset_chat_message", &json!({
-            "turn_count": 5,
-            "system_content_enum": "default",
-        }));
+        let _ = send_event_on(
+            inner,
+            "preset_chat_message",
+            &json!({
+                "turn_count": 5,
+                "system_content_enum": "default",
+            }),
+        );
         let _ = send_event_on(inner, "get_text2Img_remaining_times", &Value::Null);
     }
 }
@@ -669,10 +667,7 @@ impl ChatEventHandler for RemainingTimesHandler {
         if payload.get("code").and_then(Value::as_i64) != Some(1) {
             return;
         }
-        if let Some(remaining) = payload
-            .get("data")
-            .and_then(|d| d.get("remaining_times"))
-        {
+        if let Some(remaining) = payload.get("data").and_then(|d| d.get("remaining_times")) {
             inner
                 .user_info
                 .lock()
@@ -712,11 +707,7 @@ impl ChatEventHandler for ChatAckHandler {
             }
             StreamEvent::Chunk(content) => {
                 if inner.receiving.load(Ordering::Acquire) {
-                    inner
-                        .current_response
-                        .lock()
-                        .unwrap()
-                        .push_str(&content);
+                    inner.current_response.lock().unwrap().push_str(&content);
                     emit_stream(inner, &content, ChatEventType::Text);
                 }
             }
@@ -768,12 +759,7 @@ fn emit_stream(inner: &Arc<ChatInner>, content: &str, event: ChatEventType) {
             warn!("流式回调 panic: {e:?}");
         }
     }
-    inner
-        .callbacks
-        .lock()
-        .unwrap()
-        .items
-        .extend(callbacks);
+    inner.callbacks.lock().unwrap().items.extend(callbacks);
 }
 
 /// 在 `ChatInner` 上发送事件(供读线程内使用)。
@@ -833,8 +819,8 @@ fn send_raw(inner: &Arc<ChatInner>, payload: &str) -> Result<()> {
 /// 建立连接并启动读线程。
 fn establish(inner: &Arc<ChatInner>) -> Result<()> {
     // 与 Python build_websocket_url 一致(token 经 URL 编码)
-    let mut url = url::Url::parse(CHAT_WS_BASE_URL)
-        .map_err(|e| ChatError::Handshake(e.to_string()))?;
+    let mut url =
+        url::Url::parse(CHAT_WS_BASE_URL).map_err(|e| ChatError::Handshake(e.to_string()))?;
     url.query_pairs_mut()
         .append_pair("stag", "6")
         .append_pair("rf", "")
@@ -850,13 +836,11 @@ fn establish(inner: &Arc<ChatInner>) -> Result<()> {
         .map_err(|e| ChatError::Handshake(e.to_string()))?;
     request.headers_mut().insert(
         "User-Agent",
-        HeaderValue::from_str(&inner.user_agent)
-            .map_err(|e| ChatError::Auth(e.to_string()))?,
+        HeaderValue::from_str(&inner.user_agent).map_err(|e| ChatError::Auth(e.to_string()))?,
     );
-    request.headers_mut().insert(
-        "Origin",
-        HeaderValue::from_static("https://kn.codemao.cn"),
-    );
+    request
+        .headers_mut()
+        .insert("Origin", HeaderValue::from_static("https://kn.codemao.cn"));
 
     let (mut ws, response) = connect(request)?;
     // WebSocket 升级成功返回 HTTP 101 Switching Protocols
@@ -983,10 +967,7 @@ fn truncate(text: &str, max: usize) -> String {
         const SUFFIX: &str = "...";
         let half = (max.saturating_sub(SUFFIX.len())) / 2;
         let head: String = text.chars().take(half).collect();
-        let tail: String = text
-            .chars()
-            .skip(text.chars().count() - half)
-            .collect();
+        let tail: String = text.chars().skip(text.chars().count() - half).collect();
         format!("{head}{SUFFIX}{tail}")
     }
 }
@@ -1022,11 +1003,15 @@ mod tests {
             Some(StreamEvent::Begin)
         );
         assert_eq!(
-            parse_chat_ack(&json!({"code": 1, "data": {"content_type": "stream_output_content", "content": "你好"}})),
+            parse_chat_ack(
+                &json!({"code": 1, "data": {"content_type": "stream_output_content", "content": "你好"}})
+            ),
             Some(StreamEvent::Chunk("你好".into()))
         );
         assert_eq!(
-            parse_chat_ack(&json!({"code": 1, "data": {"content_type": "stream_output_end", "content": "你好世界"}})),
+            parse_chat_ack(
+                &json!({"code": 1, "data": {"content_type": "stream_output_end", "content": "你好世界"}})
+            ),
             Some(StreamEvent::End("你好世界".into()))
         );
         // 非成功码 / 未知类型返回 None
@@ -1061,7 +1046,10 @@ mod tests {
         for _ in 0..50 {
             let id = generate_session_id();
             assert_eq!(id.len(), 8);
-            assert!(id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()));
+            assert!(
+                id.chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+            );
         }
     }
 
@@ -1069,16 +1057,11 @@ mod tests {
     fn history_and_conversation_count() {
         let client = ChatBuilder::new("test-token").build();
         assert_eq!(client.conversation_count(), 0);
-        client
-            .inner
-            .history
-            .lock()
-            .unwrap()
-            .extend([
-                HistoryMessage::user("q1"),
-                HistoryMessage::assistant("a1"),
-                HistoryMessage::user("q2"),
-            ]);
+        client.inner.history.lock().unwrap().extend([
+            HistoryMessage::user("q1"),
+            HistoryMessage::assistant("a1"),
+            HistoryMessage::user("q2"),
+        ]);
         assert_eq!(client.conversation_count(), 2);
         assert_eq!(client.conversation_history().len(), 3);
         client.new_conversation();
@@ -1118,10 +1101,7 @@ mod tests {
     #[test]
     fn missing_token_rejected() {
         let client = ChatBuilder::new("").build();
-        assert!(matches!(
-            client.connect(),
-            Err(ChatError::MissingToken)
-        ));
+        assert!(matches!(client.connect(), Err(ChatError::MissingToken)));
     }
 
     #[test]

@@ -284,6 +284,12 @@ pub(crate) fn status_mapping() -> &'static HashMap<&'static str, &'static str> {
     })
 }
 
+impl Default for ReportTypeRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ReportTypeRegistry {
     pub fn new() -> Self {
         let default_actions = actions(&["D", "S", "T", "U", "P", "F", "J"]);
@@ -346,6 +352,12 @@ const TO_BE_DONE_STATUS: &str = "TOBEDONE";
 
 pub struct ReportFetcher {
     pub registry: ReportTypeRegistry,
+}
+
+impl Default for ReportFetcher {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ReportFetcher {

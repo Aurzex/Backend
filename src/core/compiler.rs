@@ -1416,6 +1416,12 @@ pub struct DecompilerContextBuilder {
     id_generator: Option<IdGenerator>,
 }
 
+impl Default for DecompilerContextBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DecompilerContextBuilder {
     pub fn new() -> Self {
         Self {
