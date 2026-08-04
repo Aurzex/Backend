@@ -1527,9 +1527,11 @@ impl WorkFetcher for NekoFetcher {
                 })),
             })?;
 
-        let device_auth_str = serde_json::to_string(&device_auth)?;
+        // 修复：generate_x_device_auth 已返回 JSON 字符串（{"sign":...,"timestamp":...,"client_id":...}），
+        // 直接作为 header 值。此前二次 serde_json::to_string 会再包一层引号转义，
+        // 服务器解析 device-auth 失败返回 500 "Not a JSON Object"，导致 NEKO 作品无法获取原始数据。
         let headers: Vec<(String, String)> =
-            vec![("x-creation-tools-device-auth".to_string(), device_auth_str)];
+            vec![("x-creation-tools-device-auth".to_string(), device_auth)];
 
         let detail = self.http_client.get_json(&detail_url, Some(headers))?;
 
