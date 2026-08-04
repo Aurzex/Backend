@@ -600,7 +600,11 @@ impl WorkType {
         matches!(self, WorkType::Wood)
     }
     pub fn use_xml_shadow(&self) -> bool {
-        matches!(self, WorkType::Kitten2 | WorkType::Kitten3)
+        // Kitten2/3/4 编辑版（.bcm/.bcm4）的 shadows 均为 XML 字符串
+        matches!(
+            self,
+            WorkType::Kitten2 | WorkType::Kitten3 | WorkType::Kitten4
+        )
     }
 }
 
@@ -978,7 +982,8 @@ impl BlockDecompilerBehavior for BlockBehavior {
                     // 编辑版插槽名为 DO0/DO1/...（无空格）
                     format!("DO{}", index)
                 } else {
-                    format!("ELSE{}", index - *conditions_count)
+                    // 编辑版 else 分支插槽名为 ELSE（无编号）
+                    "ELSE".to_string()
                 }
             }
             // 函数定义块的函数体插槽名为 STACK
@@ -1126,7 +1131,8 @@ impl<'a> BlockDecompilerCore<'a> {
                 .ok_or_else(|| DecompilerError::InvalidResponse("当前块缺少 id".to_string()))?
                 .to_string();
 
-            let mut decompiler = BlockDecompilerCore::new(next_compiled, BlockBehavior::Default);
+            // 树内块也经专用分派，保证 callnoreturn/controls_if 等专用反编译器生效
+            let mut decompiler = create_block_decompiler(next_compiled);
             // 下一层链块向右缩进一个层级
             context.layout_col += 220.0;
             let next_block = decompiler.decompile(context)?;
@@ -1169,7 +1175,7 @@ impl<'a> BlockDecompilerCore<'a> {
 
             for (i, child) in children.iter().enumerate() {
                 if !child.is_null() {
-                    let mut decompiler = BlockDecompilerCore::new(child, BlockBehavior::Default);
+                    let mut decompiler = create_block_decompiler(child);
                     context.layout_col += 220.0;
                     let child_block = decompiler.decompile(context)?;
                     context.layout_col -= 220.0;
@@ -1226,8 +1232,7 @@ impl<'a> BlockDecompilerCore<'a> {
                     let shadow_value = context.shadow_builder.create("logic_empty", None, None);
                     shadows.insert(input_name, shadow_value);
                 } else {
-                    let mut decompiler =
-                        BlockDecompilerCore::new(condition, BlockBehavior::Default);
+                    let mut decompiler = create_block_decompiler(condition);
                     context.layout_col += 220.0;
                     let condition_block = decompiler.decompile(context)?;
                     context.layout_col -= 220.0;
@@ -1302,7 +1307,7 @@ impl<'a> BlockDecompilerCore<'a> {
 
             for (name, value) in params {
                 if value.is_object() {
-                    let mut decompiler = BlockDecompilerCore::new(value, BlockBehavior::Default);
+                    let mut decompiler = create_block_decompiler(value);
                     context.layout_col += 220.0;
                     let param_block = decompiler.decompile(context)?;
                     context.layout_col -= 220.0;
@@ -1586,7 +1591,7 @@ impl WorkDecompiler for NekoDecompiler {
                 let filename = FileService::safe_filename(
                     &context.work_info.name,
                     context.work_info.id,
-                    "json",
+                    "bcmkn",
                 );
                 let filepath = output_path.join(filename);
                 FileService::write_json(&filepath, json)?;
@@ -1743,7 +1748,11 @@ impl KittenDecompiler {
                     // 根块之间增加垂直间距，避免自动布局后挤在一起
                     context.layout_row += 50.0;
                     let mut decompiler = factory.create(block_data);
-                    let _ = decompiler.decompile(&mut context)?;
+                    // 重新插入补充后的块（If/FunctionDef 等会修改 block_value）
+                    let block_value = decompiler.decompile(&mut context)?;
+                    if let Some(bid) = block_value.get("id").and_then(|v| v.as_str()) {
+                        context.blocks.insert(bid.to_string(), block_value);
+                    }
                 }
             }
         }
@@ -1755,7 +1764,11 @@ impl KittenDecompiler {
             for (_, func_data) in procedures {
                 context.layout_row += 50.0;
                 let mut decompiler = factory.create(func_data);
-                let _ = decompiler.decompile(&mut context)?;
+                // 重新插入：FunctionDefDecompiler 补充的 shadows/mutation/NAME 需覆盖 core 版本
+                let block_value = decompiler.decompile(&mut context)?;
+                if let Some(bid) = block_value.get("id").and_then(|v| v.as_str()) {
+                    context.blocks.insert(bid.to_string(), block_value);
+                }
             }
         }
 
@@ -1851,7 +1864,10 @@ impl KittenDecompiler {
                     // 根块之间增加垂直间距，避免自动布局后挤在一起
                     context.layout_row += 50.0;
                     let mut decompiler = factory.create(block_data);
-                    let _ = decompiler.decompile(&mut context)?;
+                    let block_value = decompiler.decompile(&mut context)?;
+                    if let Some(bid) = block_value.get("id").and_then(|v| v.as_str()) {
+                        context.blocks.insert(bid.to_string(), block_value);
+                    }
                 }
             }
         }
@@ -1909,6 +1925,8 @@ impl KittenDecompiler {
         );
         work_obj.insert("work_source_label".to_string(), json!(1));
         work_obj.insert("sample_id".to_string(), json!(""));
+        work_obj.insert("codemao_value".to_string(), json!(work_info.id.to_string()));
+        work_obj.insert("device_widget_type".to_string(), Value::Null);
         work_obj.insert("project_name".to_string(), json!(work_info.name));
         work_obj.insert(
             "toolbox_order".to_string(),
@@ -1932,6 +1950,12 @@ impl KittenDecompiler {
         let keys_to_remove = ["compile_result", "preview", "author_nickname"];
         for key in &keys_to_remove {
             work_obj.remove(*key);
+        }
+        // 清理编译版 theatre 的运行时字段（编辑版 theatre 无这些键）
+        if let Some(theatre) = work.get_mut("theatre").and_then(|t| t.as_object_mut()) {
+            for key in ["current_entity", "current_scene", "style_collections"] {
+                theatre.remove(key);
+            }
         }
         Ok(())
     }
@@ -2007,6 +2031,19 @@ impl WorkDecompiler for KittenDecompiler {
 
         let work_type = context.work_info.work_type;
 
+        // 全局函数表：过程可在一个角色（如 Function）中定义、被其它角色调用，
+        // 因此合并所有 compile_result 的 procedures，否则跨角色调用会被禁用
+        let mut global_functions: HashMap<String, Value> = HashMap::new();
+        for actor_compiled in &compile_result {
+            if let Some(procedures) =
+                actor_compiled.get("procedures").and_then(|v| v.as_object())
+            {
+                for (name, func_data) in procedures {
+                    global_functions.insert(name.clone(), func_data.clone());
+                }
+            }
+        }
+
         for actor_compiled in &compile_result {
             let actor_id = actor_compiled.get_str_or("id", "");
 
@@ -2034,21 +2071,13 @@ impl WorkDecompiler for KittenDecompiler {
                     scenes.insert(actor_id.to_string(), updated_scene);
                 }
             } else {
-                let mut actor_functions: HashMap<String, Value> = HashMap::new();
-                if let Some(procedures) =
-                    actor_compiled.get("procedures").and_then(|v| v.as_object())
-                {
-                    for (name, func_data) in procedures {
-                        actor_functions.insert(name.clone(), func_data.clone());
-                    }
-                }
                 let actor_info = Self::get_actor_info(&work, actor_id);
                 // 角色也使用全局变量映射
                 let updated_actor = Self::decompile_actor_blocks(
                     &context.config,
                     &context.id_generator,
                     actor_compiled,
-                    &actor_functions,
+                    &global_functions,
                     actor_info,
                     global_variable_map.clone(), // 克隆，每个角色独立
                     work_type,
@@ -2897,10 +2926,18 @@ impl<'a> BlockDecompiler<'a> for IfBlockDecompiler<'a> {
                 if !has_else {
                     shadows.insert("EXTRA_ADD_ELSE".to_string(), json!(""));
                 } else {
+                    // 编辑版：有 else 时 shadows 同时含 ELSE_TEXT 与 ELSE
                     shadows.insert("ELSE_TEXT".to_string(), json!(""));
+                    shadows.insert("ELSE".to_string(), json!(""));
                 }
             }
-            // 编辑版 controls_if 的 mutation 为空字符串，无需生成
+            // 编辑版：有 else 时 mutation 标记 else="1"，无 else 时为空字符串
+            if has_else {
+                let mutation = format!(
+                    r#"<mutation xmlns="http://www.w3.org/1999/xhtml" else="1"></mutation>"#
+                );
+                obj.insert("mutation".to_string(), Value::String(mutation));
+            }
         }
         Ok(block_value)
     }
@@ -3295,6 +3332,39 @@ impl<'a> BlockDecompiler<'a> for MutationDecompiler<'a> {
 }
 
 // ========================= 积木反编译器工厂 =========================
+/// 按块类型分派专用反编译器。
+/// 树内递归（process_next/children/conditions/params）也使用本函数，
+/// 否则嵌套的 procedures_2_callnoreturn / controls_if 等不会走专用反编译器，
+/// 导致 NAME/mutation/ARG 参数块/if-else 结构缺失。
+/// 独立于 BlockDecompilerFactory，避免其 lifetime 绑定 BlockContext。
+fn create_block_decompiler<'a>(compiled: &'a Value) -> Box<dyn BlockDecompiler<'a> + 'a> {
+    let block_type = compiled.get_str_or("type", "");
+    match block_type {
+        "controls_if" | "controls_if_no_else" => Box::new(IfBlockDecompiler::new(compiled)),
+        "text_join" => Box::new(TextJoinDecompiler::new(compiled)),
+        "ask_and_choose" => Box::new(AskAndChooseDecompiler::new(compiled)),
+        "set_entity_show_hide" => Box::new(SetEntityShowHideDecompiler::new(compiled)),
+        "text_select_changeable" => Box::new(TextSelectChangeableDecompiler::new(compiled)),
+        "procedures_2_defnoreturn" => Box::new(FunctionDefDecompiler::new(compiled)),
+        "procedures_2_callnoreturn" | "procedures_2_callreturn" => {
+            Box::new(FunctionCallDecompiler::new(compiled))
+        }
+        "procedures_2_return_value" => {
+            let item_count = compiled
+                .get("params")
+                .and_then(|v| v.as_object())
+                .map(|obj| obj.len())
+                .unwrap_or(0);
+            let mutation = format!("<mutation items=\"{}\"></mutation>", item_count);
+            Box::new(MutationDecompiler::new(compiled, mutation))
+        }
+        "procedures_2_stable_parameter" | "procedures_2_parameter" => {
+            Box::new(DefaultBlockDecompiler::new(compiled))
+        }
+        _ => Box::new(DefaultBlockDecompiler::new(compiled)),
+    }
+}
+
 pub struct BlockDecompilerFactory<'a> {
     config: &'a DecompilerConfig,
     id_generator: &'a IdGenerator,
@@ -3309,32 +3379,7 @@ impl<'a> BlockDecompilerFactory<'a> {
     }
 
     pub fn create(&self, compiled: &'a Value) -> Box<dyn BlockDecompiler<'a> + 'a> {
-        let block_type = compiled.get_str_or("type", "");
-        match block_type {
-            "controls_if" | "controls_if_no_else" => Box::new(IfBlockDecompiler::new(compiled)),
-            "text_join" => Box::new(TextJoinDecompiler::new(compiled)),
-            "ask_and_choose" => Box::new(AskAndChooseDecompiler::new(compiled)),
-            "set_entity_show_hide" => Box::new(SetEntityShowHideDecompiler::new(compiled)),
-            "text_select_changeable" => Box::new(TextSelectChangeableDecompiler::new(compiled)),
-            "procedures_2_defnoreturn" => Box::new(FunctionDefDecompiler::new(compiled)),
-            "procedures_2_callnoreturn" | "procedures_2_callreturn" => {
-                Box::new(FunctionCallDecompiler::new(compiled))
-            }
-            "procedures_2_return_value" => {
-                let item_count = compiled
-                    .get("params")
-                    .and_then(|v| v.as_object())
-                    .map(|obj| obj.len())
-                    .unwrap_or(0);
-                let mutation = format!("<mutation items=\"{}\"></mutation>", item_count);
-                Box::new(MutationDecompiler::new(compiled, mutation))
-            }
-            // 对于内部参数块使用默认解编译器，它们已在 shadow_types 中，会被标记为 is_shadow 和 is_output
-            "procedures_2_stable_parameter" | "procedures_2_parameter" => {
-                Box::new(DefaultBlockDecompiler::new(compiled))
-            }
-            _ => Box::new(DefaultBlockDecompiler::new(compiled)),
-        }
+        create_block_decompiler(compiled)
     }
 }
 
