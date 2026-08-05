@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 // ==================== 枚举定义 ====================
 
-/// 回复消息类型。
+/// 回复消息类型.
 #[derive(Debug, Clone, Copy)]
 pub enum ReplyTypes {
     LikeFork,
@@ -24,14 +24,14 @@ impl ReplyTypes {
     }
 }
 
-/// 消息平台（Web / Nemo）。
+/// 消息平台(Web / Nemo).
 #[derive(Debug, Clone, Copy)]
 pub enum MessageMethod {
     Web,
     Nemo,
 }
 
-/// 网页头图类型。
+/// 网页头图类型.
 #[derive(Debug, Clone, Copy)]
 pub enum BannerType {
     FloatBanner,
@@ -53,7 +53,7 @@ impl BannerType {
     }
 }
 
-/// Nemo 端头图类型。
+/// Nemo 端头图类型.
 #[derive(Debug, Clone, Copy)]
 pub enum NemoBannerType {
     Type1 = 1,
@@ -61,14 +61,14 @@ pub enum NemoBannerType {
     Type3 = 3,
 }
 
-/// 作品推荐类型。
+/// 作品推荐类型.
 #[derive(Debug, Clone, Copy)]
 pub enum WorkRecommendType {
     Type1 = 1,
     Type2 = 2,
 }
 
-/// 作品频道类型。
+/// 作品频道类型.
 #[derive(Debug, Clone, Copy)]
 pub enum WorkChannelType {
     Kitten,
@@ -84,14 +84,14 @@ impl WorkChannelType {
     }
 }
 
-/// 学科 ID。
+/// 学科 ID.
 #[derive(Debug, Clone, Copy)]
 pub enum SubjectId {
     Basic = 1,
     Advanced = 2,
 }
 
-/// 社区各模块开启状态查询类型。
+/// 社区各模块开启状态查询类型.
 #[derive(Debug, Clone, Copy)]
 pub enum CommunityStatusType {
     WebForumStatus,
@@ -107,7 +107,7 @@ impl CommunityStatusType {
     }
 }
 
-/// 作品排序方式。
+/// 作品排序方式.
 #[derive(Debug, Clone, Copy)]
 pub enum OrderBy {
     UpdateTime,
@@ -123,7 +123,7 @@ impl OrderBy {
     }
 }
 
-/// 消息阅读状态。
+/// 消息阅读状态.
 #[derive(Debug, Clone, Copy)]
 pub enum ReadStatus {
     Read,
@@ -141,7 +141,7 @@ impl ReadStatus {
 
 // ==================== 社区数据获取器 ====================
 
-/// 社区相关数据与配置获取。
+/// 社区相关数据与配置获取.
 pub struct CommunityDataFetcher {
     client: &'static CodeMaoClient,
 }
@@ -155,9 +155,9 @@ impl CommunityDataFetcher {
 
     // ==================== 辅助方法 ====================
 
-    /// 从 `/coconut/clouddb/currentTime` 获取 10 位时间戳，返回原始 JSON。
+    /// 从 `/coconut/clouddb/currentTime` 获取 10 位时间戳,返回原始 JSON.
     ///
-    /// 内部复用，避免代码重复。
+    /// 内部复用,避免代码重复.
     fn raw_timestamp_10(&self) -> MewResult<Value> {
         let response = self
             .client
@@ -166,7 +166,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 安全地从时间戳 JSON 中提取字符串值，若失败则记录警告并返回空字符串。
+    /// 安全地从时间戳 JSON 中提取字符串值,若失败则记录警告并返回空字符串.
     fn extract_time_string(json: &Value) -> String {
         match json["data"].as_str() {
             Some(s) => s.to_string(),
@@ -179,7 +179,7 @@ impl CommunityDataFetcher {
 
     // ==================== 公共方法 ====================
 
-    /// 获取随机昵称。
+    /// 获取随机昵称.
     pub fn fetch_random_nickname(&self) -> MewResult<Value> {
         debug!("获取随机昵称");
         let response = self
@@ -189,7 +189,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取新消息数量（根据平台）。
+    /// 获取新消息数量(根据平台).
     pub fn fetch_message_count(&self, method: MessageMethod) -> MewResult<Value> {
         let endpoint = match method {
             MessageMethod::Web => "/web/message-record/count",
@@ -203,7 +203,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取指定类型的回复列表。
+    /// 获取指定类型的回复列表.
     pub fn fetch_replies(&self, types: ReplyTypes, limit: i32, offset: i32) -> MewResult<Value> {
         debug!(
             "获取回复: type={:?}, limit={}, offset={}",
@@ -219,7 +219,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取回复的分页迭代器。
+    /// 获取回复的分页迭代器.
     pub fn fetch_replies_gen(&self, types: ReplyTypes, limit: Option<usize>) -> PaginatedIter {
         self
             .client
@@ -232,7 +232,7 @@ impl CommunityDataFetcher {
             .with_limit(limit.unwrap_or(15))
     }
 
-    /// 获取 Nemo 消息（喜欢或评论）。
+    /// 获取 Nemo 消息(喜欢或评论).
     pub fn fetch_nemo_messages(&self, types: &str) -> MewResult<Value> {
         let extra_url = if types == "like" { "1" } else { "3" };
         let endpoint = format!("/nemo/v2/user/message/{}", extra_url);
@@ -244,7 +244,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取 PC 客户端最新版本信息。
+    /// 获取 PC 客户端最新版本信息.
     pub fn fetch_pc_client(&self) -> MewResult<Value> {
         debug!("获取PC客户端更新");
         let response = self
@@ -254,7 +254,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取点个猫更新信息。
+    /// 获取点个猫更新信息.
     pub fn fetch_pickcat_update(&self) -> MewResult<Value> {
         debug!("获取点个猫更新");
         let response = self
@@ -268,7 +268,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取 Kitten4 更新信息。
+    /// 获取 Kitten4 更新信息.
     pub fn fetch_kitten4_update(&self) -> MewResult<Value> {
         let timestamp = self.raw_timestamp_10()?;
         let time_value = Self::extract_time_string(&timestamp);
@@ -286,7 +286,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取 Kitten 更新信息。
+    /// 获取 Kitten 更新信息.
     pub fn fetch_kitten_update(&self) -> MewResult<Value> {
         let timestamp = self.raw_timestamp_10()?;
         let time_value = Self::extract_time_string(&timestamp);
@@ -304,7 +304,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取海龟编辑器更新信息。
+    /// 获取海龟编辑器更新信息.
     pub fn fetch_wood_editor_update(&self) -> MewResult<Value> {
         let timestamp = self.raw_timestamp_10()?;
         let time_value = Self::extract_time_string(&timestamp);
@@ -322,7 +322,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取源码智造编辑器更新信息。
+    /// 获取源码智造编辑器更新信息.
     pub fn fetch_matrix_editor_update(&self) -> MewResult<Value> {
         let timestamp = self.raw_timestamp_10()?;
         let time_value = Self::extract_time_string(&timestamp);
@@ -340,12 +340,12 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取 10 位时间戳（保持原有公共接口）。
+    /// 获取 10 位时间戳(保持原有公共接口).
     pub fn fetch_current_timestamp_10(&self) -> MewResult<Value> {
         self.raw_timestamp_10()
     }
 
-    /// 获取 13 位时间戳（独立接口）。
+    /// 获取 13 位时间戳(独立接口).
     pub fn fetch_current_timestamp_13(&self) -> MewResult<Value> {
         debug!("获取13位时间戳");
         let response = self
@@ -359,7 +359,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取 Web 端头图。
+    /// 获取 Web 端头图.
     pub fn fetch_web_banners(&self, banner_type: Option<BannerType>) -> MewResult<Value> {
         let mut builder = self
             .client
@@ -374,7 +374,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取 Nemo 端头图。
+    /// 获取 Nemo 端头图.
     pub fn fetch_nemo_banners(&self, banner_type: NemoBannerType) -> MewResult<Value> {
         debug!("获取Nemo端头图: {:?}", banner_type);
         let response = self
@@ -385,7 +385,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取 Coco 端头图。
+    /// 获取 Coco 端头图.
     pub fn fetch_coco_banners(&self) -> MewResult<Value> {
         debug!("获取Coco端头图");
         let response = self
@@ -399,7 +399,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取 Coco 话题。
+    /// 获取 Coco 话题.
     pub fn fetch_coco_topic(&self) -> MewResult<Value> {
         debug!("获取Coco话题");
         let response = self
@@ -413,7 +413,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取举报原因列表。
+    /// 获取举报原因列表.
     pub fn fetch_report_reasons(&self) -> MewResult<Value> {
         debug!("获取举报原因");
         let response = self
@@ -423,7 +423,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取 Nemo 配置。
+    /// 获取 Nemo 配置.
     pub fn fetch_nemo_config(&self) -> MewResult<Value> {
         debug!("获取Nemo配置");
         let response = self
@@ -433,7 +433,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取社区配置。
+    /// 获取社区配置.
     pub fn fetch_community_config(&self) -> MewResult<Value> {
         debug!("获取社区配置");
         let response = self
@@ -443,7 +443,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取编程猫客户端配置。
+    /// 获取编程猫客户端配置.
     pub fn fetch_client_config(&self) -> MewResult<Value> {
         debug!("获取客户端配置");
         let response = self
@@ -457,7 +457,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取编程猫首页推荐作品。
+    /// 获取编程猫首页推荐作品.
     pub fn fetch_recommended_works(&self, recommend_type: WorkRecommendType) -> MewResult<Value> {
         debug!("获取推荐作品: {:?}", recommend_type);
         let response = self
@@ -472,7 +472,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取 Nemo 新作喵喵看更多列表。
+    /// 获取 Nemo 新作喵喵看更多列表.
     pub fn fetch_new_recommend_works(&self, limit: i32, offset: i32) -> MewResult<Value> {
         debug!("获取新推荐作品: limit={}, offset={}", limit, offset);
         let response = self
@@ -484,7 +484,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取 Nemo 系统推荐池。
+    /// 获取 Nemo 系统推荐池.
     pub fn fetch_recommended_works_nemo(&self) -> MewResult<Value> {
         debug!("获取Nemo推荐池");
         let response = self
@@ -494,7 +494,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取作品频道列表。
+    /// 获取作品频道列表.
     pub fn fetch_work_channels(&self, channel_type: WorkChannelType) -> MewResult<Value> {
         debug!("获取作品频道: {:?}", channel_type);
         let response = self
@@ -505,7 +505,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取指定频道下的作品列表。
+    /// 获取指定频道下的作品列表.
     pub fn fetch_channel_works(
         &self,
         channel_id: i32,
@@ -528,7 +528,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取社区星推荐用户。
+    /// 获取社区星推荐用户.
     pub fn fetch_recommended_users(&self) -> MewResult<Value> {
         debug!("获取推荐用户");
         let response = self
@@ -538,7 +538,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取训练师小课堂内容。
+    /// 获取训练师小课堂内容.
     pub fn fetch_training_courses(&self) -> MewResult<Value> {
         debug!("获取训练师小课堂");
         let response = self
@@ -552,7 +552,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取 KN 课程。
+    /// 获取 KN 课程.
     pub fn fetch_kn_courses(&self) -> MewResult<Value> {
         debug!("获取KN课程");
         let response = self
@@ -566,7 +566,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// KN 公开课分页迭代器。
+    /// KN 公开课分页迭代器.
     pub fn fetch_public_courses_gen(&self, limit: Option<usize>) -> PaginatedIter {
         self
             .client
@@ -578,7 +578,7 @@ impl CommunityDataFetcher {
             .with_limit(limit.unwrap_or(10))
     }
 
-    /// 获取 KN 模板作品。
+    /// 获取 KN 模板作品.
     pub fn fetch_sample_works(&self, subject_id: SubjectId) -> MewResult<Value> {
         debug!("获取模板作品: subject_id={:?}", subject_id);
         let response = self
@@ -593,7 +593,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取社区各模块开启状态。
+    /// 获取社区各模块开启状态.
     pub fn fetch_community_status(&self, status_type: CommunityStatusType) -> MewResult<Value> {
         let endpoint = format!(
             "/web/config/tab/on-off/status?config_type={}",
@@ -607,7 +607,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取 Kitten 编辑页精选活动。
+    /// 获取 Kitten 编辑页精选活动.
     pub fn fetch_kitten_activities(&self) -> MewResult<Value> {
         debug!("获取Kitten活动");
         let response = self
@@ -621,7 +621,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// Nemo 端教程合集分页迭代器。
+    /// Nemo 端教程合集分页迭代器.
     pub fn fetch_course_packages_gen(&self, platform: i32, limit: Option<usize>) -> PaginatedIter {
         self
             .client
@@ -631,7 +631,7 @@ impl CommunityDataFetcher {
             .with_limit(limit.unwrap_or(50))
     }
 
-    /// Nemo 教程详情分页迭代器。
+    /// Nemo 教程详情分页迭代器.
     pub fn fetch_course_details_gen(
         &self,
         course_package_id: i32,
@@ -646,7 +646,7 @@ impl CommunityDataFetcher {
             .with_limit(limit.unwrap_or(50))
     }
 
-    /// 教学计划分页迭代器。
+    /// 教学计划分页迭代器.
     pub fn fetch_teaching_plans_gen(&self, limit: usize) -> PaginatedIter {
         debug!("获取教学计划迭代器, limit={}", limit);
         self.client
@@ -655,7 +655,7 @@ impl CommunityDataFetcher {
             .with_base_key(BaseKey::Creation)
     }
 
-    /// 获取板块未读消息数量。
+    /// 获取板块未读消息数量.
     pub fn fetch_board_unread_count(&self, board_id: i32) -> MewResult<Value> {
         let endpoint = format!("/web/forums/boards/{}/unread-count", board_id);
         debug!("获取板块未读数: board_id={}", board_id);
@@ -666,7 +666,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取活动（工作室）信息。
+    /// 获取活动(工作室)信息.
     pub fn fetch_studio_info(&self, studio_id: i32) -> MewResult<Value> {
         let endpoint = format!("/web/studios/{}", studio_id);
         debug!("获取活动信息: studio_id={}", studio_id);
@@ -677,7 +677,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 活动帖子分页迭代器。
+    /// 活动帖子分页迭代器.
     pub fn fetch_studio_posts_gen(&self, studio_id: i32, limit: Option<usize>) -> PaginatedIter {
         self
             .client
@@ -688,7 +688,7 @@ impl CommunityDataFetcher {
             .with_limit(limit.unwrap_or(24))
     }
 
-    /// 活动教程分页迭代器。
+    /// 活动教程分页迭代器.
     pub fn fetch_studio_courses_gen(&self, studio_id: i32, limit: Option<usize>) -> PaginatedIter {
         let endpoint = format!("/web/studios/{}/courses", studio_id);
         self
@@ -698,7 +698,7 @@ impl CommunityDataFetcher {
             .with_limit(limit.unwrap_or(100))
     }
 
-    /// 活动作品分页迭代器。
+    /// 活动作品分页迭代器.
     pub fn fetch_studio_works_gen(&self, studio_id: i32, limit: Option<usize>) -> PaginatedIter {
         let endpoint = format!("/web/studios/{}/works", studio_id);
         self
@@ -709,7 +709,7 @@ impl CommunityDataFetcher {
             .with_limit(limit.unwrap_or(24))
     }
 
-    /// 活动参与者分页迭代器。
+    /// 活动参与者分页迭代器.
     pub fn fetch_studio_participators_gen(
         &self,
         studio_id: i32,
@@ -723,7 +723,7 @@ impl CommunityDataFetcher {
             .with_limit(limit.unwrap_or(24))
     }
 
-    /// 获取旧版作品标签。
+    /// 获取旧版作品标签.
     pub fn fetch_work_labels(&self) -> MewResult<Value> {
         debug!("获取作品标签");
         let response = self
@@ -733,7 +733,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取旧版标签分类。
+    /// 获取旧版标签分类.
     pub fn fetch_work_category(&self) -> MewResult<Value> {
         debug!("获取作品分类");
         let response = self
@@ -743,7 +743,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取推荐作品（IDE 专用）。
+    /// 获取推荐作品(IDE 专用).
     pub fn fetch_recommended_ide_works(
         &self,
         work_type: &str,
@@ -764,7 +764,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取所有推荐作品（带排序）。
+    /// 获取所有推荐作品(带排序).
     pub fn fetch_recommended_works_all(
         &self,
         work_type: &str,
@@ -787,7 +787,7 @@ impl CommunityDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取推荐素材。
+    /// 获取推荐素材.
     pub fn fetch_material_recommend(
         &self,
         category_id: i32,
@@ -817,7 +817,7 @@ impl Default for CommunityDataFetcher {
 
 // ==================== 用户操作接口 ====================
 
-/// 用户相关操作（注册、协议签署、消息管理等）。
+/// 用户相关操作(注册,协议签署,消息管理等).
 pub struct UserAction {
     client: &'static CodeMaoClient,
 }
@@ -829,7 +829,7 @@ impl UserAction {
         }
     }
 
-    /// 签订 Nemo 友好协议。
+    /// 签订 Nemo 友好协议.
     pub fn execute_sign_agreement(&self) -> MewResult<bool> {
         debug!("签订友好协议");
         let response = self
@@ -840,7 +840,7 @@ impl UserAction {
         Ok(response.status() == HTTPStatus::Ok as u16)
     }
 
-    /// 获取用户协议列表。
+    /// 获取用户协议列表.
     pub fn fetch_agreements(&self) -> MewResult<Value> {
         debug!("获取用户协议");
         let response = self
@@ -850,7 +850,7 @@ impl UserAction {
         self.client.response_to_json(response)
     }
 
-    /// 手机号注册账号。
+    /// 手机号注册账号.
     pub fn create_account(
         &self,
         identity: &str,
@@ -888,7 +888,7 @@ impl UserAction {
         self.client.response_to_json(response)
     }
 
-    /// 删除指定消息。
+    /// 删除指定消息.
     pub fn delete_message(&self, message_id: i32) -> MewResult<bool> {
         let endpoint = format!("/web/message-record/{}", message_id);
         debug!("删除消息: id={}", message_id);
@@ -899,7 +899,7 @@ impl UserAction {
         Ok(response.status() == 204)
     }
 
-    /// 获取广播消息分页迭代器。
+    /// 获取广播消息分页迭代器.
     pub fn fetch_broadcast_messages_gen(
         &self,
         limit: Option<usize>,

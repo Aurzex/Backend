@@ -23,7 +23,7 @@ use crate::utils::acquire::{FileUploader, KittyFactory};
 pub struct FileProcessor;
 
 impl FileProcessor {
-    /// 上传单个文件，返回上传后的 URL。
+    /// 上传单个文件,返回上传后的 URL.
     pub fn handle_file_upload(
         file_path: &Path,
         save_path: &str,
@@ -120,7 +120,7 @@ pub struct ReportProcessor {
     pub pipeline_factory: Arc<ReportTypeRegistry>,
     pub batch_manager: Arc<Mutex<BatchActionManager>>,
     pending_groups: Mutex<HashMap<(String, String), Vec<String>>>,
-    config: CheckConfig, // 注入配置，包含批量识别阈值等
+    config: CheckConfig, // 注入配置,包含批量识别阈值等
 }
 
 impl Default for ReportProcessor {
@@ -130,12 +130,12 @@ impl Default for ReportProcessor {
 }
 
 impl ReportProcessor {
-    /// 使用默认配置构造。
+    /// 使用默认配置构造.
     pub fn new() -> Self {
         Self::new_with_config(CheckConfig::default())
     }
 
-    /// 使用自定义配置构造。
+    /// 使用自定义配置构造.
     pub fn new_with_config(config: CheckConfig) -> Self {
         let fetcher = ReportFetcher::new();
         let registry = Arc::new(fetcher.registry.clone());
@@ -194,7 +194,7 @@ impl ReportProcessor {
             );
         }
 
-        // 流结束：处理所有剩余未达阈值的组（记录警告，将在下一个周期处理）
+        // 流结束:处理所有剩余未达阈值的组(记录警告,将在下一个周期处理)
         let remaining = self
             .pending_groups
             .lock()
@@ -203,7 +203,7 @@ impl ReportProcessor {
             .collect::<Vec<_>>();
         for ((group_type, group_key), record_ids) in remaining {
             eprintln!(
-                "警告: 跨 chunk 组 ({}, {}) 未达到处理阈值，包含 {} 个记录，将在下一个周期处理",
+                "警告: 跨 chunk 组 ({}, {}) 未达到处理阈值,包含 {} 个记录,将在下一个周期处理",
                 group_type,
                 group_key,
                 record_ids.len()
@@ -214,7 +214,7 @@ impl ReportProcessor {
         Ok(total_processed)
     }
 
-    /// 分块更新并处理已达阈值的组。
+    /// 分块更新并处理已达阈值的组.
     fn update_and_handle_pending_groups(
         &self,
         chunk: &[Value],
@@ -293,13 +293,13 @@ impl ReportProcessor {
             .get_batch_action(&group.group_type, &group.group_key);
 
         if let Some(action) = saved_action {
-            // 已有保存的批量动作：应用到组内全部记录
+            // 已有保存的批量动作:应用到组内全部记录
             println!("应用保存的批量动作: {}", action);
             self.apply_action_to_records(chunk, &group.record_ids, &action, admin_id)?;
         } else if let Some(action) = self.ask_first_record_action(group, chunk, admin_id)? {
-            // 无保存动作：询问第一条后，将动作应用到剩余记录
+            // 无保存动作:询问第一条后,将动作应用到剩余记录
             self.apply_action_to_records(chunk, &group.record_ids[1..], &action, admin_id)?;
-            // 第一条已由管道处理，标记避免在 process_non_group_items 中被重复处理
+            // 第一条已由管道处理,标记避免在 process_non_group_items 中被重复处理
             if let Some(first_record_id) = group.record_ids.first() {
                 self.batch_manager
                     .lock()
@@ -310,7 +310,7 @@ impl ReportProcessor {
         Ok(())
     }
 
-    /// 无保存动作时，通过管道交互询问组内第一条记录的处理动作，并保存该动作。
+    /// 无保存动作时,通过管道交互询问组内第一条记录的处理动作,并保存该动作.
     fn ask_first_record_action(
         &self,
         group: &BatchGroup,
@@ -354,7 +354,7 @@ impl ReportProcessor {
         Ok(action)
     }
 
-    /// 将批量动作应用到一批记录：仅对动作可用的记录执行，成功才标记已处理，失败仅记录日志。
+    /// 将批量动作应用到一批记录:仅对动作可用的记录执行,成功才标记已处理,失败仅记录日志.
     fn apply_action_to_records(
         &self,
         chunk: &[Value],
@@ -421,7 +421,7 @@ impl ReportProcessor {
 
             let pipeline = self.create_pipeline();
             if let Err(e) = pipeline.execute(&mut context) {
-                eprintln!("处理记录 {} 失败: {}，跳过", record_id, e);
+                eprintln!("处理记录 {} 失败: {},跳过", record_id, e);
                 continue;
             }
 
@@ -437,7 +437,7 @@ impl ReportProcessor {
         Ok(processed)
     }
 
-    /// 创建默认处理管道，复用注入的注册表、批量管理器与配置。
+    /// 创建默认处理管道,复用注入的注册表,批量管理器与配置.
     fn create_pipeline(&self) -> ProcessingPipeline {
         ProcessingPipeline::create_default(
             self.pipeline_factory.clone(),
@@ -446,13 +446,13 @@ impl ReportProcessor {
         )
     }
 
-    /// 重置批量处理状态，清空已处理记录与跨 chunk 待分组。
+    /// 重置批量处理状态,清空已处理记录与跨 chunk 待分组.
     fn reset_batch_state(&self) {
         self.batch_manager.lock().unwrap().clear_processed_records();
         self.pending_groups.lock().unwrap().clear();
     }
 
-    /// 从举报记录中提取 report_id 字符串。
+    /// 从举报记录中提取 report_id 字符串.
     fn extract_record_id(&self, item: &Value, config: &SourceConfig) -> String {
         item.get(&config.report_id_field)
             .map(value_to_string)
@@ -529,7 +529,7 @@ impl ReportProcessor {
         Ok(count)
     }
 
-    /// 推断举报类型，返回字符串引用以减少分配。
+    /// 推断举报类型,返回字符串引用以减少分配.
     fn infer_report_type<'a>(&self, item: &'a Value) -> Option<&'a str> {
         if let Some(t) = item.get("_report_type").and_then(|v| v.as_str()) {
             return Some(t);

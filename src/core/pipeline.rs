@@ -23,7 +23,7 @@ use crate::core::retrieve::{CommentSource, DataQuery, JsonObject};
 use crate::utils::acquire::{Catsona, KittyFactory};
 use crate::utils::data::PathConfig;
 
-// ==================== 配置结构体（依赖注入） ====================
+// ==================== 配置结构体(依赖注入) ====================
 #[derive(Clone)]
 pub struct CheckConfig {
     pub official_ids: &'static [i64],
@@ -86,7 +86,7 @@ impl Default for CheckConfig {
 }
 
 // ==================== 静态映射与注册表 ====================
-/// 来源类型映射。
+/// 来源类型映射.
 static SOURCE_TYPE_MAP: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
 fn get_source_type_map() -> &'static HashMap<&'static str, &'static str> {
     SOURCE_TYPE_MAP.get_or_init(|| {
@@ -182,7 +182,7 @@ impl ReportIdExt for SourceConfig {
     }
 }
 
-// ==================== 策略模式：评论违规检测 ====================
+// ==================== 策略模式:评论违规检测 ====================
 pub trait CommentProcessStrategy: Send + Sync {
     fn process(
         &self,
@@ -351,7 +351,7 @@ impl CommentProcessor {
         }
     }
 
-    /// 处理单条评论的违规检测，参数较多，保留显式参数以保持调用清晰。
+    /// 处理单条评论的违规检测,参数较多,保留显式参数以保持调用清晰.
     #[allow(clippy::too_many_arguments)]
     pub fn process_item(
         &self,
@@ -438,7 +438,7 @@ impl BatchActionManager {
     }
 }
 
-// ==================== 处理上下文（不可变记录 + 可变状态） ====================
+// ==================== 处理上下文(不可变记录 + 可变状态) ====================
 #[derive(Debug, Clone)]
 pub struct ReportRecord {
     pub record_id: String,
@@ -491,7 +491,7 @@ pub trait Processor: Send + Sync {
     ) -> Result<(), ProcessorError>;
 }
 
-// ==================== 动作注册表（静态函数表） ====================
+// ==================== 动作注册表(静态函数表) ====================
 type ActionFn = fn(i32, i32, Resolution) -> Result<bool, Box<dyn std::error::Error>>;
 
 pub struct ActionRegistry {
@@ -577,7 +577,7 @@ pub(crate) fn apply_action_by_method(
     global_action_registry().apply(method, report_id, admin_id, resolution_enum)
 }
 
-/// 依据动作键查找 resolution 并执行处理动作，动作键不在映射中时静默跳过。
+/// 依据动作键查找 resolution 并执行处理动作,动作键不在映射中时静默跳过.
 fn apply_action_by_key(
     config: &SourceConfig,
     report_id: i32,
@@ -590,12 +590,12 @@ fn apply_action_by_key(
     Ok(())
 }
 
-// ==================== 详情展示（字段表驱动） ====================
+// ==================== 详情展示(字段表驱动) ====================
 pub trait ReportDisplay: Send + Sync {
     fn display(&self, item: &Value, config: &SourceConfig);
 }
 
-/// 单个展示字段：标签、数据字段与可选格式化函数。
+/// 单个展示字段:标签,数据字段与可选格式化函数.
 struct DisplayField<'a> {
     label: &'static str,
     field: &'a str,
@@ -603,7 +603,7 @@ struct DisplayField<'a> {
 }
 
 impl<'a> DisplayField<'a> {
-    /// 原样输出字符串字段。
+    /// 原样输出字符串字段.
     fn raw(label: &'static str, field: &'a str) -> Self {
         DisplayField {
             label,
@@ -612,7 +612,7 @@ impl<'a> DisplayField<'a> {
         }
     }
 
-    /// 原样输出可选字段，为 None 时自动跳过。
+    /// 原样输出可选字段,为 None 时自动跳过.
     fn optional_raw(label: &'static str, field: Option<&'a str>) -> Self {
         DisplayField {
             label,
@@ -621,7 +621,7 @@ impl<'a> DisplayField<'a> {
         }
     }
 
-    /// 格式化输出字段。
+    /// 格式化输出字段.
     fn formatted(label: &'static str, field: &'a str, format: fn(&Value) -> String) -> Self {
         DisplayField {
             label,
@@ -643,7 +643,7 @@ fn html_content(v: &Value) -> String {
     html_to_text(v.as_str().unwrap_or(""))
 }
 
-/// 渲染单个字段，无格式化函数时仅输出字符串字段。
+/// 渲染单个字段,无格式化函数时仅输出字符串字段.
 fn print_field(item: &Value, label: &str, field: &str, format: Option<fn(&Value) -> String>) {
     if let Some(val) = item.get(field) {
         let text = match format {
@@ -657,7 +657,7 @@ fn print_field(item: &Value, label: &str, field: &str, format: Option<fn(&Value)
     }
 }
 
-/// 渲染详情：统一遍历字段表，避免各 Display 重复宏定义。
+/// 渲染详情:统一遍历字段表,避免各 Display 重复宏定义.
 fn render_details(item: &Value, config: &SourceConfig, fields: &[DisplayField<'_>]) {
     info!("=== {} 详情 ===", config.name);
     for f in fields {
@@ -707,7 +707,7 @@ impl ReportDisplay for ShopCommentDisplay {
     }
 }
 
-/// 拉取并展示帖子正文，论坛帖子举报需要额外请求。
+/// 拉取并展示帖子正文,论坛帖子举报需要额外请求.
 fn print_forum_post_content(item: &Value, config: &SourceConfig) {
     if let Ok(post_id) = item
         .get(&config.source_id_field)
@@ -850,7 +850,7 @@ impl Processor for OfficialCheckProcessor {
         if let Some(uid) = user_id
             && self.config.official_ids.contains(&uid)
         {
-            state.messages.push("官方内容，自动通过".into());
+            state.messages.push("官方内容,自动通过".into());
             state.action = Some("P".into());
             state.processed = true;
 
@@ -899,7 +899,7 @@ impl ViolationChecker {
         }
     }
 
-    /// 构建违规标识符 "source:source_id:type:parent_id:content_id"。
+    /// 构建违规标识符 "source:source_id:type:parent_id:content_id".
     fn violation_identifier(
         source_type: &str,
         source_id: i64,
@@ -917,7 +917,7 @@ impl ViolationChecker {
         )
     }
 
-    /// 处理单条评论，返回违规信息，仅在违规时构建标识符。
+    /// 处理单条评论,返回违规信息,仅在违规时构建标识符.
     fn process_single_comment(
         item: &JsonObject,
         source_type: &str,
@@ -966,7 +966,7 @@ impl ViolationChecker {
         None
     }
 
-    /// 遍历评论与回复，收集违规候选。
+    /// 遍历评论与回复,收集违规候选.
     fn collect_pending_violations(
         &self,
         comments: &[JsonObject],
@@ -1013,7 +1013,7 @@ impl ViolationChecker {
         pending
     }
 
-    /// 将违规候选分类为广告标识符与达到阈值的刷屏标识符。
+    /// 将违规候选分类为广告标识符与达到阈值的刷屏标识符.
     fn classify_violations(pending: Vec<ViolationKind>, spam_threshold: usize) -> Vec<String> {
         let mut ads = Vec::new();
         let mut duplicate_counts: HashMap<(String, String), (usize, Vec<String>)> = HashMap::new();
@@ -1040,7 +1040,7 @@ impl ViolationChecker {
         ads
     }
 
-    /// 交互询问评论获取数量，无效输入回退默认值。
+    /// 交互询问评论获取数量,无效输入回退默认值.
     fn prompt_comment_limit(&self) -> usize {
         let limit_str = prompt_input("输入要获取的评论数: ");
         limit_str
@@ -1048,7 +1048,7 @@ impl ViolationChecker {
             .unwrap_or(self.config.comment_fetch_default_limit)
     }
 
-    /// 流式获取详细评论，单条失败仅记录日志。
+    /// 流式获取详细评论,单条失败仅记录日志.
     fn fetch_detailed_comments(
         &self,
         source: CommentSource,
@@ -1062,7 +1062,7 @@ impl ViolationChecker {
         for result in stream {
             match result {
                 Ok(comment) => comments.push(comment),
-                Err(e) => error!("获取评论失败: {}，跳过", e),
+                Err(e) => error!("获取评论失败: {},跳过", e),
             }
         }
         Ok(comments)
@@ -1138,7 +1138,7 @@ impl ViolationChecker {
         let threshold = self.config.spam_threshold;
         if user_posts.len() >= threshold {
             warn!(
-                "警告: 用户 {} 已连续发布标题为【{}】的帖子 {} 次 (疑似刷屏)",
+                "警告: 用户 {} 已连续发布标题为[{}]的帖子 {} 次 (疑似刷屏)",
                 user_id,
                 title,
                 user_posts.len()
@@ -1160,7 +1160,7 @@ impl ViolationChecker {
         if password_path.exists() {
             multi_account.load_from_file(&password_path)?;
         } else {
-            info!("未找到学生账号文件，跳过自动举报");
+            info!("未找到学生账号文件,跳过自动举报");
             return Ok(());
         }
         if multi_account.accounts.is_empty() {
@@ -1181,11 +1181,11 @@ impl ViolationChecker {
         if let Err(e) = KittyFactory::global_client().switch_identity(Catsona::Judge) {
             warn!("切换回管理员身份失败: {}", e);
         }
-        info!("自动举报完成，成功 {}/{}", success, violations.len());
+        info!("自动举报完成,成功 {}/{}", success, violations.len());
         Ok(())
     }
 
-    /// 轮询选择一个未达举报上限的账号索引，无可用账号时返回 None。
+    /// 轮询选择一个未达举报上限的账号索引,无可用账号时返回 None.
     fn select_report_account(
         &self,
         accounts: &[(String, String)],
@@ -1207,7 +1207,7 @@ impl ViolationChecker {
         None
     }
 
-    /// 确保账号已登录，登录失败则移除该账号并返回 false。
+    /// 确保账号已登录,登录失败则移除该账号并返回 false.
     fn ensure_account_login(
         &self,
         accounts: &mut Vec<(String, String)>,
@@ -1222,7 +1222,7 @@ impl ViolationChecker {
         match self.login_student(&user, &pass) {
             Ok(()) => true,
             Err(e) => {
-                warn!("账号 {} 登录失败: {}，移除", user, e);
+                warn!("账号 {} 登录失败: {},移除", user, e);
                 accounts.remove(idx);
                 account_usage.remove(&idx);
                 if idx < *current_idx && *current_idx > 0 {
@@ -1234,7 +1234,7 @@ impl ViolationChecker {
         }
     }
 
-    /// 用多账号轮流举报违规内容，返回成功数。
+    /// 用多账号轮流举报违规内容,返回成功数.
     fn report_violations(
         &self,
         accounts: &mut Vec<(String, String)>,
@@ -1254,7 +1254,7 @@ impl ViolationChecker {
             let Some(chosen_idx) =
                 self.select_report_account(accounts, &account_usage, &mut current_idx)
             else {
-                info!("所有账号均已达到举报上限，停止");
+                info!("所有账号均已达到举报上限,停止");
                 break;
             };
             if !self.ensure_account_login(

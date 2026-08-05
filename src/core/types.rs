@@ -80,7 +80,7 @@ pub fn get_valid_input(prompt: &str, valid_options: &HashSet<String>) -> String 
         if valid_options.contains(&input.to_uppercase()) {
             return input.to_uppercase();
         }
-        println!("无效输入，请重试");
+        println!("无效输入,请重试");
     }
 }
 
@@ -101,13 +101,13 @@ pub fn value_to_i64(v: &serde_json::Value) -> Option<i64> {
     }
 }
 
-/// 将时间戳转换为字符串表示。
+/// 将时间戳转换为字符串表示.
 pub fn timestamp_to_string(ts: &serde_json::Value) -> String {
     if let Some(secs) = ts.as_i64()
         && secs > 0
     {
         let t = UNIX_EPOCH + Duration::from_secs(secs as u64);
-        // 简化格式化（实际可用 chrono，此处保留原有方式）
+        // 简化格式化(实际可用 chrono,此处保留原有方式)
         let timestamp = t.duration_since(UNIX_EPOCH).unwrap().as_secs();
         return format!("{}", timestamp);
     }
@@ -145,7 +145,7 @@ pub struct ActionConfig {
 }
 
 impl ActionConfig {
-    /// 由动作键构造配置（名称与状态取自内置映射）。
+    /// 由动作键构造配置(名称与状态取自内置映射).
     fn simple(key: &str) -> Self {
         let (name, status) = match key {
             "D" => ("删除", "DELETE"),
@@ -167,7 +167,7 @@ impl ActionConfig {
     }
 }
 
-/// 按给定动作键列表批量构造动作配置。
+/// 按给定动作键列表批量构造动作配置.
 fn actions(keys: &[&str]) -> Vec<ActionConfig> {
     keys.iter().map(|k| ActionConfig::simple(k)).collect()
 }
@@ -214,10 +214,10 @@ pub struct SourceConfig {
 }
 
 impl SourceConfig {
-    /// 构造带公共默认字段名的配置；差异字段由调用方覆盖后再注册。
+    /// 构造带公共默认字段名的配置;差异字段由调用方覆盖后再注册.
     ///
-    /// 大部分举报类型的字段名高度一致（如 `report_id_field` 均为 "id"），
-    /// 通过"公共默认值 + 覆盖差异"大幅减少重复。
+    /// 大部分举报类型的字段名高度一致(如 `report_id_field` 均为 "id"),
+    /// 通过"公共默认值 + 覆盖差异"大幅减少重复.
     fn base(
         name: &str,
         handle_method: &str,
@@ -266,10 +266,10 @@ impl SourceConfig {
 #[derive(Clone)]
 pub struct ReportTypeRegistry {
     registry: HashMap<String, SourceConfig>,
-    default_actions: Vec<ActionConfig>, // 保留用于构建默认动作，也可直接为静态
+    default_actions: Vec<ActionConfig>, // 保留用于构建默认动作,也可直接为静态
 }
 
-// 静态状态映射（避免每次构建）
+// 静态状态映射(避免每次构建)
 static STATUS_MAPPING: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
 
 pub(crate) fn status_mapping() -> &'static HashMap<&'static str, &'static str> {
@@ -312,7 +312,7 @@ impl ReportTypeRegistry {
         self.registry.keys().cloned().collect()
     }
 
-    /// 返回可用动作的引用，避免克隆整个 ActionConfig。
+    /// 返回可用动作的引用,避免克隆整个 ActionConfig.
     pub fn get_available_actions(&self, report_type: &str) -> Vec<&ActionConfig> {
         self.get_config(report_type)
             .map(|config| {
@@ -334,7 +334,7 @@ impl ReportTypeRegistry {
         format!("选择操作:{}", parts.join(","))
     }
 
-    /// 返回全局静态的状态映射引用。
+    /// 返回全局静态的状态映射引用.
     pub fn get_status_mapping(&self) -> &'static HashMap<&'static str, &'static str> {
         status_mapping()
     }
@@ -347,7 +347,7 @@ impl ReportTypeRegistry {
 }
 
 // ==================== 举报获取器 ====================
-/// 举报状态字段中表示“待处理”的值。
+/// 举报状态字段中表示"待处理"的值.
 const TO_BE_DONE_STATUS: &str = "TOBEDONE";
 
 pub struct ReportFetcher {
