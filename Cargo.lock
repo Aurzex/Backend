@@ -50,7 +50,6 @@ dependencies = [
  "aes-gcm",
  "base64 0.23.1",
  "fastrand",
- "http",
  "log",
  "serde",
  "serde_json",
@@ -940,7 +939,6 @@ dependencies = [
  "serde",
  "serde_json",
  "ureq-proto",
- "url",
  "utf8-zero",
  "webpki-roots 1.0.9",
 ]

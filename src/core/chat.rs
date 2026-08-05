@@ -6,7 +6,7 @@ use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use http::HeaderValue;
+use tungstenite::http::HeaderValue;
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -850,7 +850,7 @@ fn establish(inner: &Arc<ChatInner>) -> Result<()> {
 
     let (mut ws, response) = connect(request)?;
     // WebSocket 升级成功返回 HTTP 101 Switching Protocols
-    if response.status() != http::StatusCode::SWITCHING_PROTOCOLS {
+    if response.status() != tungstenite::http::StatusCode::SWITCHING_PROTOCOLS {
         return Err(ChatError::Handshake(format!(
             "HTTP 状态: {}",
             response.status()
