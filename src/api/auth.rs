@@ -1,6 +1,6 @@
 use crate::utils::acquire::{BaseKey, Catsona, CodeMaoClient, HttpMethod, MewError, MewResult};
-use crate::utils::data::{CodeMaoFile, FileContent, PathConfig};
-use log::{debug, info, warn};
+use crate::utils::data::{CodeMaoFile, PathConfig};
+use log::{debug, warn};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 

@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -16,7 +15,7 @@ use super::types::{
     ProcessorError, ReportFetcher, ReportTypeRegistry, SourceConfig, bytes_to_human,
     get_valid_input, value_to_string,
 };
-use crate::api::whale::{ReportHandler, ReportStatus, Resolution};
+use crate::api::whale::{ReportStatus, Resolution};
 use crate::utils::acquire::{FileUploader, KittyFactory};
 
 // ==================== 文件处理器 ====================
