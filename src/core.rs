@@ -1,5 +1,5 @@
-pub mod chat;
-pub mod cloud;
+pub mod converse;
+pub mod cloudvar;
 pub mod compiler;
 pub mod pipeline;
 pub mod retrieve;
