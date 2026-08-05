@@ -891,10 +891,7 @@ impl UserManager {
     }
 
     /// 更新个人资料详细信息
-    pub fn update_profile_details(
-        &self,
-        args: UpdateProfileDetailsArgs<'_>,
-    ) -> MewResult<bool> {
+    pub fn update_profile_details(&self, args: UpdateProfileDetailsArgs<'_>) -> MewResult<bool> {
         debug!("更新个人资料: nickname={}", args.nickname);
         let payload = json!({
             "avatar_url": args.avatar_url,

@@ -435,10 +435,7 @@ impl WorkshopActionHandler {
     }
 
     /// 举报讨论区下的评论
-    pub fn execute_report_comment(
-        &self,
-        args: ReportCommentArgs<'_>,
-    ) -> MewResult<bool> {
+    pub fn execute_report_comment(&self, args: ReportCommentArgs<'_>) -> MewResult<bool> {
         debug!(
             "举报评论: comment_id={}, reason_id={:?}",
             args.comment_id, args.reason_id

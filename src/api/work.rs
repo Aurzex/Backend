@@ -510,7 +510,10 @@ impl KittenWorkManager {
 
     /// 创建 Kitten 作品
     pub fn create_kitten_work(&self, args: CreateKittenWorkArgs<'_>) -> MewResult<Value> {
-        debug!("创建Kitten作品: name={}, version={}", args.name, args.version);
+        debug!(
+            "创建Kitten作品: name={}, version={}",
+            args.name, args.version
+        );
         let payload = json!({
             "name": args.name,
             "work_url": args.work_url,
@@ -529,10 +532,7 @@ impl KittenWorkManager {
     }
 
     /// 发布 Kitten 作品
-    pub fn execute_publish_kitten_work(
-        &self,
-        args: PublishKittenWorkArgs<'_>,
-    ) -> MewResult<bool> {
+    pub fn execute_publish_kitten_work(&self, args: PublishKittenWorkArgs<'_>) -> MewResult<bool> {
         debug!(
             "发布Kitten作品: work_id={}, name={}",
             args.work_id, args.name
@@ -705,10 +705,7 @@ impl NekoWorkManager {
     }
 
     /// 发布 KN 作品
-    pub fn execute_publish_kn_work(
-        &self,
-        args: PublishKnWorkArgs<'_>,
-    ) -> MewResult<bool> {
+    pub fn execute_publish_kn_work(&self, args: PublishKnWorkArgs<'_>) -> MewResult<bool> {
         debug!("发布KN作品: work_id={}, name={}", args.work_id, args.name);
         let endpoint = format!("/neko/community/work/publish/{}", args.work_id);
         let payload = json!({
@@ -872,10 +869,7 @@ impl WoodWorkManager {
     }
 
     /// 创建海龟编辑器作品
-    pub fn create_wood_project(
-        &self,
-        args: CreateWoodProjectArgs<'_>,
-    ) -> MewResult<Value> {
+    pub fn create_wood_project(&self, args: CreateWoodProjectArgs<'_>) -> MewResult<Value> {
         debug!("创建海龟编辑器作品: name={:?}", args.work_name);
         let payload = json!({
             "work_name": args.work_name.unwrap_or("新的作品"),

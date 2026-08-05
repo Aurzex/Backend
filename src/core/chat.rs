@@ -6,13 +6,13 @@ use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use tungstenite::http::HeaderValue;
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
 use tungstenite::Message;
 use tungstenite::client::IntoClientRequest;
+use tungstenite::http::HeaderValue;
 use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{WebSocket, connect};
 

@@ -298,11 +298,11 @@ impl EduUserAction {
     }
 
     /// 为学生作品评分
-    pub fn execute_grade_student_work(
-        &self,
-        args: GradeStudentWorkArgs<'_>,
-    ) -> MewResult<bool> {
-        debug!("评分作品: work_id={}, name={}", args.work_id, args.work_name);
+    pub fn execute_grade_student_work(&self, args: GradeStudentWorkArgs<'_>) -> MewResult<bool> {
+        debug!(
+            "评分作品: work_id={}, name={}",
+            args.work_id, args.work_name
+        );
         let data = json!({
             "artistic_score": args.artistic_score,
             "commentary": args.commentary,

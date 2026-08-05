@@ -1375,11 +1375,7 @@ impl ViolationChecker {
                                 reason_id: WorkShopReportReasonId::Reason7,
                                 reporter_id,
                                 comment_source: None,
-                                comment_parent_id: if is_reply {
-                                    Some(parent_id)
-                                } else {
-                                    None
-                                },
+                                comment_parent_id: if is_reply { Some(parent_id) } else { None },
                                 description: Some(""),
                             })
                             .map_err(|e| ProcessorError::External(e.into()))?;
