@@ -9,11 +9,12 @@ use std::sync::{
 use std::time::Duration;
 use thiserror::Error as ThisError;
 use ureq::http::Response;
+use ureq::typestate::{WithBody, WithoutBody};
 use ureq::unversioned::multipart::Form;
 use ureq::{Agent, Body, RequestBuilder};
 
 // 引入日志宏(库使用者需自行选择日志实现,如 env_logger)
-use log::{debug, info};
+use log::debug;
 
 // ==================== 错误定义(使用 thiserror) ====================
 #[derive(ThisError, Debug)]
@@ -115,14 +116,9 @@ pub enum Catsona {
 }
 
 impl Catsona {
-    /// 转换为数组索引(范围 0 到 3).
+    /// 转换为数组索引(范围 0 到 3), 与 `ALL` 中声明顺序一致.
     fn index(self) -> usize {
-        match self {
-            Catsona::Fluffy => 0,
-            Catsona::Scholar => 1,
-            Catsona::Judge => 2,
-            Catsona::Blanky => 3,
-        }
+        self as usize
     }
 
     /// 所有身份变体.
@@ -175,63 +171,6 @@ impl KittyIdentityManager {
             token_bowl: RwLock::new(Default::default()),
             current_cat: AtomicUsize::new(Catsona::Fluffy.index()),
         }
-    }
-
-    /// 设置指定身份的令牌.
-    ///
-    /// - 若 token 非空,则设置该身份的令牌.
-    /// - 若 token 为空字符串,则**清除**该身份的令牌(设为 None).
-    /// - `Blanky` 身份不允许持有令牌,尝试设置将返回错误.
-    fn set_token(&self, identity: Catsona, token: String) -> MewResult<()> {
-        // Blanky 身份不允许设置令牌
-        if identity == Catsona::Blanky {
-            return Err(MewError::Auth("Blanky identity cannot hold a token".into()));
-        }
-        let mut bowl = self.token_bowl.write().unwrap();
-        if token.is_empty() {
-            // 清空令牌
-            bowl[identity.index()] = None;
-        } else {
-            bowl[identity.index()] = Some(Arc::from(token));
-        }
-        Ok(())
-    }
-
-    /// 切换到指定身份.
-    ///
-    /// 切换使用 `Release` 存储,确保之前的 token 写入对后续 `current_token` 可见.
-    fn switch_identity(&self, identity: Catsona) -> MewResult<()> {
-        // Blanky 可以切换(不需要令牌),其他身份需要有令牌
-        if identity == Catsona::Blanky
-            || self.token_bowl.read().unwrap()[identity.index()].is_some()
-        {
-            self.current_cat.store(identity.index(), Ordering::Release);
-            Ok(())
-        } else {
-            Err(MewError::Auth(format!(
-                "No token for identity {:?}",
-                identity
-            )))
-        }
-    }
-
-    /// 当前身份(使用 `Acquire` 加载,与切换时的 `Release` 配对,保证可见性).
-    fn current_identity(&self) -> Catsona {
-        let idx = self.current_cat.load(Ordering::Acquire);
-        Catsona::ALL[idx]
-    }
-
-    /// 当前身份对应的令牌.
-    fn current_token(&self) -> Option<Arc<str>> {
-        let idx = self.current_cat.load(Ordering::Acquire);
-        let bowl = self.token_bowl.read().unwrap();
-        bowl[idx].clone()
-    }
-
-    /// 生成认证头.
-    fn auth_header(&self) -> Option<(&'static str, String)> {
-        self.current_token()
-            .map(|token| ("Authorization", format!("Bearer {}", token)))
     }
 }
 
@@ -308,9 +247,10 @@ pub enum HttpMethod {
     Head,
 }
 
-impl From<HttpMethod> for &'static str {
-    fn from(m: HttpMethod) -> Self {
-        match m {
+impl HttpMethod {
+    /// 返回 HTTP 方法名.
+    pub fn as_str(self) -> &'static str {
+        match self {
             HttpMethod::Get => "GET",
             HttpMethod::Post => "POST",
             HttpMethod::Delete => "DELETE",
@@ -318,6 +258,12 @@ impl From<HttpMethod> for &'static str {
             HttpMethod::Put => "PUT",
             HttpMethod::Head => "HEAD",
         }
+    }
+}
+
+impl From<HttpMethod> for &'static str {
+    fn from(method: HttpMethod) -> Self {
+        method.as_str()
     }
 }
 
@@ -332,6 +278,60 @@ pub trait KittyAuth: Send + Sync + std::fmt::Debug {
     }
     fn set_token(&self, identity: Catsona, token: String) -> MewResult<()>;
     fn switch_identity(&self, identity: Catsona) -> MewResult<()>;
+}
+
+// ==================== 身份管理器实现认证特质 ====================
+/// 直接为 `KittyIdentityManager` 实现 `KittyAuth`,
+/// 使其成为唯一的认证逻辑实现点,全局与本地提供者只做轻量委托.
+impl KittyAuth for KittyIdentityManager {
+    /// 当前身份(使用 `Acquire` 加载,与切换时的 `Release` 配对,保证可见性).
+    fn current_identity(&self) -> Catsona {
+        let idx = self.current_cat.load(Ordering::Acquire);
+        Catsona::ALL[idx]
+    }
+
+    /// 当前身份对应的令牌.
+    fn current_token(&self) -> Option<Arc<str>> {
+        let idx = self.current_cat.load(Ordering::Acquire);
+        let bowl = self.token_bowl.read().unwrap();
+        bowl[idx].clone()
+    }
+
+    /// 设置指定身份的令牌.
+    ///
+    /// - 若 token 非空,则设置该身份的令牌.
+    /// - 若 token 为空字符串,则**清除**该身份的令牌(设为 None).
+    /// - `Blanky` 身份不允许持有令牌,尝试设置将返回错误.
+    fn set_token(&self, identity: Catsona, token: String) -> MewResult<()> {
+        if identity == Catsona::Blanky {
+            return Err(MewError::Auth("Blanky identity cannot hold a token".into()));
+        }
+        let mut bowl = self.token_bowl.write().unwrap();
+        // 空字符串表示清空令牌,否则存入新令牌.
+        bowl[identity.index()] = if token.is_empty() {
+            None
+        } else {
+            Some(Arc::from(token))
+        };
+        Ok(())
+    }
+
+    /// 切换到指定身份.
+    ///
+    /// 切换使用 `Release` 存储,确保之前的 token 写入对后续 `current_token` 可见.
+    /// Blanky 可以无条件切换(不需要令牌),其他身份必须已持有令牌.
+    fn switch_identity(&self, identity: Catsona) -> MewResult<()> {
+        if identity != Catsona::Blanky
+            && self.token_bowl.read().unwrap()[identity.index()].is_none()
+        {
+            return Err(MewError::Auth(format!(
+                "No token for identity {:?}",
+                identity
+            )));
+        }
+        self.current_cat.store(identity.index(), Ordering::Release);
+        Ok(())
+    }
 }
 
 /// 全局认证提供者.
@@ -618,6 +618,34 @@ impl KittyCore {
         builder
     }
 
+    /// 创建无请求体方法的构建器(GET/DELETE/HEAD).
+    fn bodyless_builder(
+        &self,
+        method: HttpMethod,
+        url: &str,
+    ) -> MewResult<RequestBuilder<WithoutBody>> {
+        match method {
+            HttpMethod::Get => Ok(self.agent.get(url)),
+            HttpMethod::Delete => Ok(self.agent.delete(url)),
+            HttpMethod::Head => Ok(self.agent.head(url)),
+            _ => Err(MewError::Other(
+                "HTTP method does not support a request body".into(),
+            )),
+        }
+    }
+
+    /// 创建带请求体方法的构建器(POST/PATCH/PUT).
+    fn bodied_builder(&self, method: HttpMethod, url: &str) -> MewResult<RequestBuilder<WithBody>> {
+        match method {
+            HttpMethod::Post => Ok(self.agent.post(url)),
+            HttpMethod::Patch => Ok(self.agent.patch(url)),
+            HttpMethod::Put => Ok(self.agent.put(url)),
+            _ => Err(MewError::Other(
+                "HTTP method requires a request body".into(),
+            )),
+        }
+    }
+
     fn send_request(
         &self,
         method: HttpMethod,
@@ -631,8 +659,9 @@ impl KittyCore {
         self.log_request(method, &url, params, payload);
 
         let response = match method {
-            HttpMethod::Get => {
-                let builder = self.agent.get(&url);
+            // 无请求体方法: 直接发送.
+            HttpMethod::Get | HttpMethod::Delete | HttpMethod::Head => {
+                let builder = self.bodyless_builder(method, &url)?;
                 let builder = Self::apply_to_request_builder(
                     builder,
                     self.auth.as_ref(),
@@ -641,8 +670,9 @@ impl KittyCore {
                 );
                 builder.call()?
             }
-            HttpMethod::Post => {
-                let builder = self.agent.post(&url);
+            // 带请求体方法: 有 payload 时发送 JSON,否则发送空请求体.
+            HttpMethod::Post | HttpMethod::Patch | HttpMethod::Put => {
+                let builder = self.bodied_builder(method, &url)?;
                 let builder = Self::apply_to_request_builder(
                     builder,
                     self.auth.as_ref(),
@@ -654,54 +684,6 @@ impl KittyCore {
                 } else {
                     builder.send_empty()?
                 }
-            }
-            HttpMethod::Delete => {
-                let builder = self.agent.delete(&url);
-                let builder = Self::apply_to_request_builder(
-                    builder,
-                    self.auth.as_ref(),
-                    params,
-                    extra_headers,
-                );
-                builder.call()?
-            }
-            HttpMethod::Patch => {
-                let builder = self.agent.patch(&url);
-                let builder = Self::apply_to_request_builder(
-                    builder,
-                    self.auth.as_ref(),
-                    params,
-                    extra_headers,
-                );
-                if let Some(payload) = payload {
-                    builder.send_json(payload)?
-                } else {
-                    builder.send_empty()?
-                }
-            }
-            HttpMethod::Put => {
-                let builder = self.agent.put(&url);
-                let builder = Self::apply_to_request_builder(
-                    builder,
-                    self.auth.as_ref(),
-                    params,
-                    extra_headers,
-                );
-                if let Some(payload) = payload {
-                    builder.send_json(payload)?
-                } else {
-                    builder.send_empty()?
-                }
-            }
-            HttpMethod::Head => {
-                let builder = self.agent.head(&url);
-                let builder = Self::apply_to_request_builder(
-                    builder,
-                    self.auth.as_ref(),
-                    params,
-                    extra_headers,
-                );
-                builder.call()?
             }
         };
 
@@ -721,17 +703,8 @@ impl KittyCore {
         let url = self.build_url(endpoint, base_key);
         self.log_request(method, &url, params, None); // multipart 无 JSON 负载
 
-        let builder = match method {
-            HttpMethod::Post => self.agent.post(&url),
-            HttpMethod::Put => self.agent.put(&url),
-            HttpMethod::Patch => self.agent.patch(&url),
-            _ => {
-                return Err(MewError::Other(
-                    "Multipart only supports POST/PUT/PATCH".into(),
-                ));
-            }
-        };
-
+        // 仅 POST/PUT/PATCH 支持 multipart, 其余方法会返回错误.
+        let builder = self.bodied_builder(method, &url)?;
         let builder =
             Self::apply_to_request_builder(builder, self.auth.as_ref(), params, extra_headers);
 
@@ -965,8 +938,8 @@ impl Default for PaginationConfig {
     fn default() -> Self {
         Self {
             page_size: 15,
-            amount_key: Some("limit".to_string()),
-            offset_key: Some("offset".to_string()),
+            amount_key: Some("limit".into()),
+            offset_key: Some("offset".into()),
             response_amount_key: None,
             response_offset_key: None,
         }
@@ -983,8 +956,8 @@ enum IterState {
     Ready {
         /// 当前页码(从 0 开始).
         current_page: usize,
-        /// 当前页的所有数据,使用 Arc 共享.
-        current_page_data: Arc<[Value]>,
+        /// 当前页的所有数据.
+        current_page_data: Vec<Value>,
         /// 当前页内的消费指针.
         current_index: usize,
         /// 总数(若响应未提供则为 None).
@@ -1001,9 +974,9 @@ pub struct PaginatedIter {
     method: HttpMethod,
     endpoint: String,
     /// 基础查询参数,所有分页请求都会携带.
-    base_params: Arc<Vec<(String, String)>>,
+    base_params: Vec<(String, String)>,
     /// POST/PUT 等请求的 JSON 负载(可选).
-    payload: Option<Arc<Value>>,
+    payload: Option<Value>,
     /// 用户设定的获取上限(最多产出多少条).
     limit: Option<usize>,
     /// 可选的基础 URL 键.
@@ -1030,18 +1003,16 @@ impl PaginatedIter {
 
     /// 创建一个新的分页迭代器,默认 GET 请求,endpoint 可拼接完整 URL 或相对路径.
     pub fn new(client: CodeMaoClient, endpoint: impl Into<String>) -> Self {
-        let total_key = "total".to_string();
-        let data_key = "items".to_string();
         Self {
             client,
             method: HttpMethod::Get,
             endpoint: endpoint.into(),
-            base_params: Arc::new(Vec::new()),
+            base_params: Vec::new(),
             payload: None,
             limit: None,
             base_key: None,
-            total_pointer: Self::key_to_pointer(&total_key),
-            data_pointer: Self::key_to_pointer(&data_key),
+            total_pointer: Self::key_to_pointer("total"),
+            data_pointer: Self::key_to_pointer("items"),
             pagination_method: PaginationMethod::Offset,
             config: PaginationConfig::default(),
             state: IterState::Uninit,
@@ -1066,19 +1037,19 @@ impl PaginatedIter {
 
     /// 添加单个基础查询参数.
     pub fn with_iter_param(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        Arc::make_mut(&mut self.base_params).push((key.into(), value.into()));
+        self.base_params.push((key.into(), value.into()));
         self
     }
 
     /// 批量添加基础查询参数.
     pub fn with_iter_params(mut self, params: Vec<(String, String)>) -> Self {
-        Arc::make_mut(&mut self.base_params).extend(params);
+        self.base_params.extend(params);
         self
     }
 
     /// 设置 POST/PUT 请求的 JSON 负载.
     pub fn with_iter_payload(mut self, payload: Value) -> Self {
-        self.payload = Some(Arc::new(payload));
+        self.payload = Some(payload);
         self
     }
 
@@ -1148,15 +1119,15 @@ impl PaginatedIter {
 
     /// 构造指定页的请求参数:基础参数 + 分页参数.
     fn build_params(&self, page: usize) -> Vec<(String, String)> {
-        let mut params: Vec<(String, String)> = (*self.base_params).clone();
-        if let Some(ref key) = self.config.amount_key {
+        let mut params = self.base_params.clone();
+        if let Some(key) = &self.config.amount_key {
             params.push((key.clone(), self.config.page_size.to_string()));
         }
-        if let Some(ref key) = self.config.offset_key {
-            let offset_value = self
+        if let Some(key) = &self.config.offset_key {
+            let offset = self
                 .pagination_method
                 .calc_offset(page, self.config.page_size);
-            params.push((key.clone(), offset_value));
+            params.push((key.clone(), offset));
         }
         params
     }
@@ -1170,30 +1141,31 @@ impl PaginatedIter {
             .client
             .build_request(self.method, &self.endpoint, self.base_key)
             .with_params(params);
-        if let Some(ref payload) = self.payload {
-            builder = builder.with_payload((**payload).clone());
+        if let Some(payload) = &self.payload {
+            builder = builder.with_payload(payload.clone());
         }
         let response = builder.send()?;
         self.client.response_to_json(response)
     }
 
+    /// 从响应 JSON 中提取数据数组,缺失或类型不符时返回空数组.
+    fn extract_page_data(json: &Value, data_pointer: &str) -> Vec<Value> {
+        json.pointer(data_pointer)
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default()
+    }
+
     /// 从响应 JSON 中尝试提取总数(total),支持多种数字类型,并对浮点数做范围检查.
-    fn try_extract_total(&self, json: &Value) -> Option<usize> {
-        json.pointer(&self.total_pointer)
-            .and_then(|v| {
-                // 优先使用整数类型
-                v.as_u64()
-                    .or_else(|| v.as_i64().map(|i| i as u64))
-                    // 浮点数需检查非负且在 usize 范围内
-                    .or_else(|| {
-                        v.as_f64().and_then(|f| {
-                            if f >= 0.0 && f <= usize::MAX as f64 {
-                                Some(f as u64)
-                            } else {
-                                None
-                            }
-                        })
-                    })
+    fn try_extract_total(json: &Value, total_pointer: &str) -> Option<usize> {
+        let value = json.pointer(total_pointer)?;
+        value
+            .as_u64()
+            .or_else(|| value.as_i64().map(|i| i as u64))
+            // 浮点数需检查非负且在 usize 范围内
+            .or_else(|| {
+                let f = value.as_f64()?;
+                (f >= 0.0 && f <= usize::MAX as f64).then_some(f as u64)
             })
             .map(|n| n as usize)
     }
@@ -1201,25 +1173,20 @@ impl PaginatedIter {
     /// 惰性初始化:发送第一页请求,解析元数据并设置为 Ready 状态.
     fn initialize(&mut self) -> MewResult<()> {
         let json = self.request_page(0)?;
-        let total = self.try_extract_total(&json);
+        let total = Self::try_extract_total(&json, &self.total_pointer);
 
         // 若配置了响应中的实际每页大小键,则用服务器返回值覆盖 page_size
-        if let Some(ref key) = self.config.response_amount_key {
+        if let Some(key) = &self.config.response_amount_key {
             let pointer = Self::key_to_pointer(key);
             if let Some(n) = json.pointer(&pointer).and_then(|v| v.as_u64()) {
                 self.config.page_size = n as usize;
             }
         }
 
-        let data = json
-            .pointer(&self.data_pointer)
-            .and_then(|v| v.as_array())
-            .cloned()
-            .unwrap_or_default();
-
+        let data = Self::extract_page_data(&json, &self.data_pointer);
         self.state = IterState::Ready {
             current_page: 0,
-            current_page_data: data.into(),
+            current_page_data: data,
             current_index: 0,
             total,
         };
@@ -1246,76 +1213,58 @@ impl PaginatedIter {
         loop {
             // 取出状态,用 Finished 占位,避免复杂借用
             let state = std::mem::replace(&mut self.state, IterState::Finished);
-            match state {
-                IterState::Finished => return None,
-                // 理论上初始化后不会再进入 Uninit,但为完整性保留
-                IterState::Uninit => {
-                    self.state = IterState::Finished;
-                    return None;
-                }
-                IterState::Ready {
+            let IterState::Ready {
+                current_page,
+                current_page_data,
+                current_index,
+                total,
+            } = state
+            else {
+                // Finished / Uninit 均视为迭代结束.
+                return None;
+            };
+
+            // 达到用户设置的获取上限后立即结束.
+            if self.reached_limit() {
+                return None;
+            }
+
+            // 当前页还有数据,直接返回.
+            if current_index < current_page_data.len() {
+                let item = current_page_data[current_index].clone();
+                self.state = IterState::Ready {
                     current_page,
                     current_page_data,
-                    current_index,
+                    current_index: current_index + 1,
                     total,
-                } => {
-                    if self.reached_limit() {
-                        return None;
-                    }
-
-                    // 当前页还有数据,直接返回
-                    if current_index < current_page_data.len() {
-                        let item = current_page_data[current_index].clone();
-                        self.state = IterState::Ready {
-                            current_page,
-                            current_page_data,
-                            current_index: current_index + 1,
-                            total,
-                        };
-                        self.yielded += 1;
-                        return Some(Ok(item));
-                    }
-
-                    // 判断是否需要翻页
-                    let should_fetch = if let Some(t) = total {
-                        // 已知总数:已取完则不再请求
-                        (current_page + 1) * self.config.page_size < t
-                    } else {
-                        // 未知总数:必须尝试下一页
-                        true
-                    };
-
-                    if !should_fetch {
-                        return None;
-                    }
-
-                    let next_page = current_page + 1;
-                    match self.request_page(next_page) {
-                        Ok(json) => {
-                            let data = json
-                                .pointer(&self.data_pointer)
-                                .and_then(|v| v.as_array())
-                                .cloned()
-                                .unwrap_or_default();
-
-                            if data.is_empty() {
-                                return None; // 空数据表示结束
-                            }
-
-                            self.state = IterState::Ready {
-                                current_page: next_page,
-                                current_page_data: data.into(),
-                                current_index: 0,
-                                total,
-                            };
-                            // 循环继续,下一次将返回新页第一条
-                        }
-                        Err(e) => {
-                            return Some(Err(e)); // 请求失败,终止迭代并传递错误
-                        }
-                    }
-                }
+                };
+                self.yielded += 1;
+                return Some(Ok(item));
             }
+
+            // 已知总数且已取完,则不再请求下一页;总数未知时必须尝试.
+            if total.is_some_and(|t| (current_page + 1) * self.config.page_size >= t) {
+                return None;
+            }
+
+            let next_page = current_page + 1;
+            let json = match self.request_page(next_page) {
+                Ok(json) => json,
+                Err(e) => return Some(Err(e)), // 请求失败,终止迭代并传递错误
+            };
+
+            let data = Self::extract_page_data(&json, &self.data_pointer);
+            if data.is_empty() {
+                return None; // 空数据表示结束
+            }
+
+            self.state = IterState::Ready {
+                current_page: next_page,
+                current_page_data: data,
+                current_index: 0,
+                total,
+            };
+            // 循环继续,下一次将返回新页第一条
         }
     }
 
@@ -1361,15 +1310,10 @@ impl PaginatedIter {
 
     /// 计算总页数(基于 total / page_size),仅在 total 已知时返回 Some.
     pub fn total_pages(&self) -> Option<usize> {
-        if let Some(t) = self.total_items() {
-            let ps = self.config.page_size;
-            if ps == 0 {
-                return None;
-            }
-            Some(t.div_ceil(ps)) // 向上取整
-        } else {
-            None
-        }
+        let total = self.total_items()?;
+        let page_size = self.config.page_size;
+        // 每页大小为 0 时无法计算, 返回 None.
+        (page_size > 0).then(|| total.div_ceil(page_size))
     }
 
     /// 获取当前使用的每页大小(可能因响应调整而变化).
@@ -1413,7 +1357,6 @@ impl Iterator for PaginatedIter {
                 // 根据 total 和 limit 计算精确剩余上限
                 let known_remaining = total.map(|t| t.saturating_sub(self.yielded));
                 let limit_remaining = self.limit.map(|lim| lim.saturating_sub(self.yielded));
-
                 let exact_upper = match (known_remaining, limit_remaining) {
                     (Some(k), Some(l)) => Some(k.min(l)),
                     (Some(k), None) => Some(k),
@@ -1421,13 +1364,8 @@ impl Iterator for PaginatedIter {
                     (None, None) => None,
                 };
 
-                // 下限:至少是当前页剩余,但不超过已知上限
-                let lower = if let Some(upper) = exact_upper {
-                    remaining_in_page.min(upper)
-                } else {
-                    remaining_in_page
-                };
-
+                // 下限:至少是当前页剩余,但不超过已知上限(上限未知时视为无限).
+                let lower = remaining_in_page.min(exact_upper.unwrap_or(usize::MAX));
                 (lower, exact_upper)
             }
         }
@@ -1478,20 +1416,15 @@ impl FileUploader {
     fn upload_codegame(&self, file_path: &Path, save_path: &str) -> MewResult<String> {
         let token_info = self.get_codegame_token(save_path, file_path)?;
 
-        let form = Form::new()
-            .text("token", &token_info.token)
-            .text("key", &token_info.file_path)
-            .text("fname", "avatar")
-            .file("file", file_path)?;
-
-        let response = self
-            .client
-            .build_request(HttpMethod::Post, &token_info.upload_url, None)
-            .send_multipart(form)?;
-
-        let json = self.client.response_to_json(response)?;
+        let json = self.upload_qiniu_form(
+            &token_info.token,
+            &token_info.file_path,
+            "avatar",
+            file_path,
+            &token_info.upload_url,
+        )?;
         let key = json["key"].as_str().unwrap_or("");
-        Ok(format!("{}/{}", token_info.pic_host, key))
+        Ok(format!("{}/{}", token_info.bucket_url, key))
     }
 
     fn upload_codemao(&self, file_path: &Path, save_path: &str) -> MewResult<String> {
@@ -1506,24 +1439,48 @@ impl FileUploader {
         let unique_name = format!("{}/{}", save_path, unique_filename);
 
         let token_info = self.get_codemao_token(&unique_name)?;
-
-        let form = Form::new()
-            .text("token", &token_info.token)
-            .text("key", &token_info.file_path)
-            .text("fname", &unique_filename)
-            .file("file", file_path)?;
-
-        let response = self
-            .client
-            .build_request(HttpMethod::Post, &token_info.upload_url, None)
-            .send_multipart(form)?;
-
-        let json = self.client.response_to_json(response)?;
+        let json = self.upload_qiniu_form(
+            &token_info.token,
+            &token_info.file_path,
+            &unique_filename,
+            file_path,
+            &token_info.upload_url,
+        )?;
         let key = json["key"].as_str().unwrap_or("");
         Ok(format!("{}{}", token_info.bucket_url, key))
     }
 
-    fn get_codemao_token(&self, file_path: &str) -> MewResult<CodeMaoTokenInfo> {
+    /// 发送七牛云上传表单(token/key/fname/file), 返回响应 JSON.
+    fn upload_qiniu_form(
+        &self,
+        token: &str,
+        key: &str,
+        fname: &str,
+        file_path: &Path,
+        upload_url: &str,
+    ) -> MewResult<Value> {
+        let form = Form::new()
+            .text("token", token)
+            .text("key", key)
+            .text("fname", fname)
+            .file("file", file_path)?;
+
+        let response = self
+            .client
+            .build_request(HttpMethod::Post, upload_url, None)
+            .send_multipart(form)?;
+        self.client.response_to_json(response)
+    }
+
+    /// 从响应 JSON 中取出指定键的数组, 并返回数组首元素.
+    fn first_token_entry<'a>(json: &'a Value, key: &str, error: &str) -> MewResult<&'a Value> {
+        json.get(key)
+            .and_then(|v| v.as_array())
+            .and_then(|arr| arr.first())
+            .ok_or_else(|| MewError::Other(error.into()))
+    }
+
+    fn get_codemao_token(&self, file_path: &str) -> MewResult<UploadTokenInfo> {
         let response = self
             .client
             .build_request(
@@ -1540,14 +1497,9 @@ impl FileUploader {
             .send()?;
 
         let json = self.client.response_to_json(response)?;
-        let tokens = json["tokens"]
-            .as_array()
-            .ok_or_else(|| MewError::Other("No tokens array".into()))?;
-        let token_info = tokens
-            .first()
-            .ok_or_else(|| MewError::Other("No token".into()))?;
+        let token_info = Self::first_token_entry(&json, "tokens", "No tokens array")?;
 
-        Ok(CodeMaoTokenInfo {
+        Ok(UploadTokenInfo {
             token: token_info["token"].as_str().unwrap_or("").to_string(),
             file_path: token_info["file_path"].as_str().unwrap_or("").to_string(),
             upload_url: json["upload_url"].as_str().unwrap_or("").to_string(),
@@ -1555,7 +1507,7 @@ impl FileUploader {
         })
     }
 
-    fn get_codegame_token(&self, prefix: &str, file_path: &Path) -> MewResult<CodeGameTokenInfo> {
+    fn get_codegame_token(&self, prefix: &str, file_path: &Path) -> MewResult<UploadTokenInfo> {
         let extension = file_path
             .extension()
             .map(|ext| format!(".{}", ext.to_string_lossy()))
@@ -1574,35 +1526,24 @@ impl FileUploader {
             .send()?;
 
         let json = self.client.response_to_json(response)?;
-        let data = json["data"]
-            .as_array()
-            .ok_or_else(|| MewError::Other("No data array".into()))?;
-        let token_data = data
-            .first()
-            .ok_or_else(|| MewError::Other("No token data".into()))?;
+        let token_data = Self::first_token_entry(&json, "data", "No data array")?;
 
-        Ok(CodeGameTokenInfo {
+        Ok(UploadTokenInfo {
             token: token_data["token"].as_str().unwrap_or("").to_string(),
             file_path: token_data["filename"].as_str().unwrap_or("").to_string(),
-            pic_host: json["bucket_url"].as_str().unwrap_or("").to_string(),
             upload_url: "https://upload.qiniup.com".to_string(),
+            bucket_url: json["bucket_url"].as_str().unwrap_or("").to_string(),
         })
     }
 }
 
 // ==================== 内部数据结构 ====================
-struct CodeMaoTokenInfo {
+/// 七牛云上传令牌信息, codegame 与 codemao 共用.
+struct UploadTokenInfo {
     token: String,
     file_path: String,
     upload_url: String,
     bucket_url: String,
-}
-
-struct CodeGameTokenInfo {
-    token: String,
-    file_path: String,
-    pic_host: String,
-    upload_url: String,
 }
 
 // ==================== 辅助函数 ====================
