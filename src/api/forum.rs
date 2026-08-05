@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 // ==================== 枚举定义 ====================
 
-/// 帖子类型（我创建的 / 我回复的）
+/// 帖子类型（我创建的 / 我回复的）。
 #[derive(Debug, Clone, Copy)]
 pub enum PostType {
     Created,
@@ -22,7 +22,7 @@ impl PostType {
     }
 }
 
-/// 点赞项目类型（回帖 / 评论）
+/// 点赞项目类型（回帖 / 评论）。
 #[derive(Debug, Clone, Copy)]
 pub enum ItemType {
     Reply,
@@ -38,7 +38,7 @@ impl ItemType {
     }
 }
 
-/// 删除项目类型（回帖 / 评论 / 帖子）
+/// 删除项目类型（回帖 / 评论 / 帖子）。
 #[derive(Debug, Clone, Copy)]
 pub enum DeleteItemType {
     Reply,
@@ -56,7 +56,7 @@ impl DeleteItemType {
     }
 }
 
-/// 发布帖子目标类型（板块 / 工作室）
+/// 发布帖子目标类型（板块 / 工作室）。
 #[derive(Debug, Clone, Copy)]
 pub enum TargetType {
     Board,
@@ -72,7 +72,7 @@ impl TargetType {
     }
 }
 
-/// 回帖/评论举报原因 ID
+/// 回帖/评论举报原因 ID。
 #[derive(Debug, Clone, Copy)]
 pub enum ForumReportReasonId {
     Custom = 0,
@@ -86,7 +86,7 @@ pub enum ForumReportReasonId {
     Reason8 = 8,
 }
 
-/// 帖子举报原因 ID
+/// 帖子举报原因 ID。
 #[derive(Debug, Clone, Copy)]
 pub enum PostReportReasonId {
     Reason1 = 1,
@@ -99,7 +99,7 @@ pub enum PostReportReasonId {
     Reason8 = 8,
 }
 
-/// 论坛板块 ID
+/// 论坛板块 ID。
 #[derive(Debug, Clone, Copy)]
 pub enum BoardId {
     Board17 = 17,
@@ -131,7 +131,7 @@ impl ForumDataFetcher {
         }
     }
 
-    // ---------- 私有辅助 ----------
+    // ==================== 私有辅助 ====================
 
     /// 发送请求并将响应解析为 JSON。
     fn send_and_parse(
@@ -159,9 +159,9 @@ impl ForumDataFetcher {
             .with_limit(default_limit)
     }
 
-    // ---------- 公共方法 ----------
+    // ==================== 公共方法 ====================
 
-    /// 批量获取帖子详情（最多 19 个）
+    /// 批量获取帖子详情（最多 19 个）。
     pub fn fetch_posts_details(&self, post_ids: Vec<i32>) -> MewResult<Value> {
         if post_ids.len() >= 20 {
             return Err(MewError::Other("数据长度需小于 20".into()));
@@ -176,7 +176,7 @@ impl ForumDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取单个帖子详情
+    /// 获取单个帖子详情。
     pub fn fetch_single_post_details(&self, post_id: i32) -> MewResult<Value> {
         debug!("获取帖子详情: post_id={}", post_id);
         let endpoint = format!("/web/forums/posts/{}/details", post_id);
@@ -187,7 +187,7 @@ impl ForumDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 帖子回帖分页迭代器
+    /// 帖子回帖分页迭代器。
     pub fn fetch_post_replies_gen(
         &self,
         post_id: i32,
@@ -202,7 +202,7 @@ impl ForumDataFetcher {
             .with_total_key("total")
     }
 
-    /// 回帖评论分页迭代器
+    /// 回帖评论分页迭代器。
     pub fn fetch_reply_comments_gen(&self, reply_id: i32, limit: Option<usize>) -> PaginatedIter {
         let endpoint = format!("/web/forums/replies/{}/comments", reply_id);
         debug!("获取评论迭代器: reply_id={}", reply_id);
@@ -210,7 +210,7 @@ impl ForumDataFetcher {
         self.build_paginated(&endpoint, 10, limit.unwrap_or(10))
     }
 
-    /// 我的帖子（创建/回复）分页迭代器
+    /// 我的帖子（创建/回复）分页迭代器。
     pub fn fetch_my_posts_gen(&self, post_type: PostType, limit: Option<usize>) -> PaginatedIter {
         let endpoint = format!("/web/forums/posts/mine/{}", post_type.as_str());
         debug!("获取我的帖子迭代器: type={:?}", post_type);
@@ -218,7 +218,7 @@ impl ForumDataFetcher {
         self.build_paginated(&endpoint, 10, limit.unwrap_or(10))
     }
 
-    /// 获取我的帖子/回复数量
+    /// 获取我的帖子/回复数量。
     pub fn fetch_my_post_num(&self) -> MewResult<Value> {
         debug!("获取我的帖子数量");
         let response = self
@@ -228,7 +228,7 @@ impl ForumDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取所有板块简要信息
+    /// 获取所有板块简要信息。
     pub fn fetch_post_boards(&self) -> MewResult<Value> {
         debug!("获取所有板块信息");
         let response = self
@@ -238,7 +238,7 @@ impl ForumDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取单个板块详细信息
+    /// 获取单个板块详细信息。
     pub fn fetch_board_details(&self, board_id: i32) -> MewResult<Value> {
         debug!("获取板块详情: board_id={}", board_id);
         let endpoint = format!("/web/forums/boards/{}", board_id);
@@ -249,7 +249,7 @@ impl ForumDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取所有热门帖子 ID
+    /// 获取所有热门帖子 ID。
     pub fn fetch_hot_posts_ids(&self) -> MewResult<Value> {
         debug!("获取热门帖子ID");
         let response = self
@@ -259,7 +259,7 @@ impl ForumDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取顶部公告（默认 4 条）
+    /// 获取顶部公告（默认 4 条）。
     pub fn fetch_top_notices(&self, limit: Option<i32>) -> MewResult<Value> {
         debug!("获取顶部公告: limit={:?}", limit);
         let response = self
@@ -270,7 +270,7 @@ impl ForumDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取论坛精选内容
+    /// 获取论坛精选内容。
     pub fn fetch_key_content(&self, content_key: &str, limit: Option<i32>) -> MewResult<Value> {
         debug!("获取精选内容: key={}, limit={:?}", content_key, limit);
         let response = self
@@ -282,7 +282,7 @@ impl ForumDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取精品合集帖子
+    /// 获取精品合集帖子。
     pub fn fetch_selection_posts(
         &self,
         limit: Option<i32>,
@@ -298,7 +298,7 @@ impl ForumDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 获取帖子举报原因列表
+    /// 获取帖子举报原因列表。
     pub fn fetch_report_reasons(&self) -> MewResult<Value> {
         debug!("获取举报原因列表");
         let response = self
@@ -308,7 +308,7 @@ impl ForumDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 按标题搜索帖子分页迭代器
+    /// 按标题搜索帖子分页迭代器。
     pub fn search_posts_gen(&self, title: &str, limit: Option<usize>) -> PaginatedIter {
         debug!("搜索帖子: title={}", title);
 
@@ -316,7 +316,7 @@ impl ForumDataFetcher {
             .with_iter_param("title", title)
     }
 
-    /// 7 天内热门帖子分页迭代器
+    /// 7 天内热门帖子分页迭代器。
     pub fn fetch_7day_hot_posts_gen(
         &self,
         board_id: Option<i32>,
@@ -332,7 +332,7 @@ impl ForumDataFetcher {
             .with_total_key("total")
     }
 
-    /// 求助帖子分页迭代器
+    /// 求助帖子分页迭代器。
     pub fn fetch_ask_help_posts_gen(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取求助帖子迭代器");
 
@@ -360,9 +360,9 @@ impl ForumActionHandler {
         }
     }
 
-    // ---------- 私有辅助 ----------
+    // ==================== 私有辅助 ====================
 
-    /// 发送请求并返回 status == 预期状态码
+    /// 发送请求并返回 status == 预期状态码。
     fn check_status(
         &self,
         builder: crate::utils::acquire::KittyRequestBuilder,
@@ -372,7 +372,7 @@ impl ForumActionHandler {
         Ok(response.status() == expected as u16)
     }
 
-    /// 发送请求并根据 `return_data` 决定返回 JSON 数据或成功标志
+    /// 发送请求并根据 `return_data` 决定返回 JSON 数据或成功标志。
     fn send_maybe_parse(
         &self,
         builder: crate::utils::acquire::KittyRequestBuilder,
@@ -387,9 +387,9 @@ impl ForumActionHandler {
         }
     }
 
-    // ---------- 公共方法 ----------
+    // ==================== 公共方法 ====================
 
-    /// 回复帖子
+    /// 回复帖子。
     pub fn create_post_reply(
         &self,
         post_id: i32,
@@ -406,7 +406,7 @@ impl ForumActionHandler {
         self.send_maybe_parse(builder, return_data, HTTPStatus::Created)
     }
 
-    /// 回复评论（在回帖下评论）
+    /// 回复评论（在回帖下评论）。
     pub fn create_comment_reply(
         &self,
         reply_id: i32,
@@ -427,7 +427,7 @@ impl ForumActionHandler {
         self.send_maybe_parse(builder, return_data, HTTPStatus::Created)
     }
 
-    /// 点赞 / 取消点赞
+    /// 点赞或取消点赞，`action` 为 "like" 或 "unlike"。
     pub fn execute_toggle_like(
         &self,
         action: &str,
@@ -455,7 +455,7 @@ impl ForumActionHandler {
         self.check_status(builder, HTTPStatus::NoContent)
     }
 
-    /// 举报回帖或评论
+    /// 举报回帖或评论。
     pub fn report_item(
         &self,
         item_id: i32,
@@ -478,7 +478,7 @@ impl ForumActionHandler {
         self.send_maybe_parse(builder, return_data, HTTPStatus::Created)
     }
 
-    /// 举报帖子
+    /// 举报帖子。
     pub fn report_post(
         &self,
         post_id: i32,
@@ -499,7 +499,7 @@ impl ForumActionHandler {
         self.send_maybe_parse(builder, return_data, HTTPStatus::Created)
     }
 
-    /// 删除回帖 / 评论 / 帖子
+    /// 删除回帖 / 评论 / 帖子。
     pub fn delete_item(&self, item_id: i32, item_type: DeleteItemType) -> MewResult<bool> {
         let endpoint = match item_type {
             DeleteItemType::Reply => format!("/web/forums/replies/{}", item_id),
@@ -513,7 +513,7 @@ impl ForumActionHandler {
         self.check_status(builder, HTTPStatus::NoContent)
     }
 
-    /// 置顶 / 取消置顶回帖
+    /// 置顶 / 取消置顶回帖。
     pub fn execute_toggle_comment_top_status(
         &self,
         comment_id: i32,
@@ -533,7 +533,7 @@ impl ForumActionHandler {
         self.check_status(builder, HTTPStatus::NoContent)
     }
 
-    /// 发布帖子
+    /// 发布帖子。
     pub fn create_post(
         &self,
         target_type: TargetType,

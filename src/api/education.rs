@@ -61,17 +61,17 @@ impl EduUserAction {
         }
     }
 
-    // ---------- 私有辅助 ----------
+    // ==================== 私有辅助 ====================
 
-    /// 发送请求并返回 status == 预期状态码
+    /// 发送请求并返回 status == 预期状态码。
     fn check_status(&self, builder: KittyRequestBuilder, expected: HTTPStatus) -> MewResult<bool> {
         let response = builder.send()?;
         Ok(response.status() == expected as u16)
     }
 
-    // ---------- 公共方法 ----------
+    // ==================== 公共方法 ====================
 
-    /// 更新用户真实姓名
+    /// 更新用户真实姓名。
     pub fn update_user_real_name(&self, user_id: i32, real_name: &str) -> MewResult<bool> {
         debug!(
             "更新用户真实姓名: user_id={}, real_name={}",
@@ -91,7 +91,7 @@ impl EduUserAction {
         self.check_status(builder, HTTPStatus::Ok)
     }
 
-    /// 创建班级
+    /// 创建班级。
     pub fn create_class(&self, name: &str) -> MewResult<Value> {
         debug!("创建班级: name={}", name);
         let data = json!({ "name": name });
@@ -107,7 +107,7 @@ impl EduUserAction {
         self.client.response_to_json(response)
     }
 
-    /// 重命名班级
+    /// 重命名班级。
     pub fn rename_class(&self, class_id: i32, class_name: &str) -> MewResult<bool> {
         debug!("重命名班级: class_id={}, new_name={}", class_id, class_name);
         let timestamp = current_timestamp_13();
@@ -121,7 +121,7 @@ impl EduUserAction {
         self.check_status(builder, HTTPStatus::NoContent)
     }
 
-    /// 删除班级
+    /// 删除班级。
     pub fn delete_class(&self, class_id: i32) -> MewResult<bool> {
         debug!("删除班级: class_id={}", class_id);
         let timestamp = current_timestamp_13();
@@ -133,7 +133,7 @@ impl EduUserAction {
         self.check_status(builder, HTTPStatus::NoContent)
     }
 
-    /// 向班级添加学生
+    /// 向班级添加学生。
     pub fn add_students_to_class(&self, names: &[String], class_id: i32) -> MewResult<bool> {
         debug!("添加学生到班级: class_id={}, names={:?}", class_id, names);
         let data = json!({ "student_names": names });
@@ -148,7 +148,7 @@ impl EduUserAction {
         self.check_status(builder, HTTPStatus::Ok)
     }
 
-    /// 重置学生密码
+    /// 重置学生密码。
     pub fn reset_student_password(&self, stu_id: i32) -> MewResult<Value> {
         debug!("重置学生密码: stu_id={}", stu_id);
         let endpoint = format!(
@@ -163,7 +163,7 @@ impl EduUserAction {
         self.client.response_to_json(response)
     }
 
-    /// 批量重置学生密码
+    /// 批量重置学生密码。
     pub fn execute_bulk_reset_passwords(&self, stu_list: &[i32]) -> MewResult<Value> {
         debug!("批量重置密码: students={:?}", stu_list);
         let data = json!({ "student_id": stu_list });
@@ -179,7 +179,7 @@ impl EduUserAction {
         self.client.response_to_json(response)
     }
 
-    /// 从班级移除学生
+    /// 从班级移除学生。
     pub fn delete_student_from_class(&self, stu_id: i32) -> MewResult<bool> {
         debug!("从班级移除学生: stu_id={}", stu_id);
         let endpoint = format!(
@@ -193,7 +193,7 @@ impl EduUserAction {
         self.check_status(builder, HTTPStatus::Ok)
     }
 
-    /// 创建或更新自定义课程包
+    /// 创建或更新自定义课程包。
     pub fn create_or_update_lesson_package(
         &self,
         method: HttpMethod,
@@ -224,7 +224,7 @@ impl EduUserAction {
         }
     }
 
-    /// 删除作品
+    /// 删除作品。
     pub fn delete_work(&self, work_id: i32) -> MewResult<bool> {
         debug!("删除作品: work_id={}", work_id);
         let endpoint = format!(
@@ -238,7 +238,7 @@ impl EduUserAction {
         self.check_status(builder, HTTPStatus::Ok)
     }
 
-    /// 将学生转移到未分班
+    /// 将学生转移到未分班。
     pub fn execute_transfer_to_unassigned(&self, class_id: i32, stu_id: i32) -> MewResult<bool> {
         debug!("转移学生到未分班: class_id={}, stu_id={}", class_id, stu_id);
         let endpoint = format!(
@@ -252,7 +252,7 @@ impl EduUserAction {
         self.check_status(builder, HTTPStatus::NoContent)
     }
 
-    /// 获取活动包详情
+    /// 获取活动包详情。
     pub fn fetch_activity_package_details(&self, package_id: i32) -> MewResult<Value> {
         debug!("获取活动包详情: package_id={}", package_id);
         let data = json!({ "packageId": package_id });
@@ -268,7 +268,7 @@ impl EduUserAction {
         self.client.response_to_json(response)
     }
 
-    /// 获取活动包列表
+    /// 获取活动包列表。
     pub fn fetch_activity_packages(&self) -> MewResult<Value> {
         debug!("获取活动包列表");
         let response = self
@@ -283,7 +283,7 @@ impl EduUserAction {
         self.client.response_to_json(response)
     }
 
-    /// 标记所有消息为已读
+    /// 标记所有消息为已读。
     pub fn execute_mark_all_messages_as_read(&self) -> MewResult<bool> {
         debug!("标记所有消息为已读");
         let builder = self
@@ -297,7 +297,7 @@ impl EduUserAction {
         self.check_status(builder, HTTPStatus::Ok)
     }
 
-    /// 为学生作品评分
+    /// 为学生作品评分。
     pub fn execute_grade_student_work(&self, args: GradeStudentWorkArgs<'_>) -> MewResult<bool> {
         debug!(
             "评分作品: work_id={}, name={}",
@@ -323,7 +323,7 @@ impl EduUserAction {
         self.check_status(builder, HTTPStatus::NoContent)
     }
 
-    /// 邀请学生加入班级
+    /// 邀请学生加入班级。
     pub fn execute_invite_to_class(
         &self,
         class_id: i32,
@@ -347,7 +347,7 @@ impl EduUserAction {
         self.check_status(builder, HTTPStatus::Ok)
     }
 
-    /// 接受班级邀请
+    /// 接受班级邀请。
     pub fn execute_accept_class_invite(&self, message_id: i32) -> MewResult<bool> {
         debug!("接受班级邀请: message_id={}", message_id);
         let endpoint = format!(
@@ -361,7 +361,7 @@ impl EduUserAction {
         self.check_status(builder, HTTPStatus::Ok)
     }
 
-    /// 完善教师信息
+    /// 完善教师信息。
     pub fn execute_improve_teacher_info(
         &self,
         args: ImproveTeacherInfoArgs<'_>,
@@ -412,7 +412,7 @@ impl EduDataFetcher {
         }
     }
 
-    // ---------- 私有辅助 ----------
+    // ==================== 私有辅助 ====================
 
     /// 为请求构建器附加当前时间戳参数 `TIME`。
     fn add_timestamp_to_builder(builder: KittyRequestBuilder) -> KittyRequestBuilder {
@@ -449,9 +449,9 @@ impl EduDataFetcher {
             .with_limit(default_limit)
     }
 
-    // ---------- 公共方法 ----------
+    // ==================== 公共方法 ====================
 
-    /// 获取用户基本信息
+    /// 获取用户基本信息。
     pub fn fetch_user_profile(&self) -> MewResult<Value> {
         debug!("获取用户基本信息");
         let builder =
@@ -461,7 +461,7 @@ impl EduDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取账号角色
+    /// 获取账号角色。
     pub fn fetch_account_role(&self) -> MewResult<Value> {
         debug!("获取账号角色");
         let builder = self.client.build_request(
@@ -473,7 +473,7 @@ impl EduDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取未读消息数量
+    /// 获取未读消息数量。
     pub fn fetch_unread_message_count(&self) -> MewResult<Value> {
         debug!("获取未读消息数量");
         let builder = self.client.build_request(
@@ -485,7 +485,7 @@ impl EduDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 系统通知分页迭代器
+    /// 系统通知分页迭代器。
     pub fn fetch_notices_gen(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取系统通知迭代器");
         let mut paginated = self.build_paginated(
@@ -497,7 +497,7 @@ impl EduDataFetcher {
         paginated
     }
 
-    /// 教师提醒消息分页迭代器
+    /// 教师提醒消息分页迭代器。
     pub fn fetch_reminders_gen(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取教师提醒迭代器");
         let mut paginated = self.build_paginated(
@@ -509,7 +509,7 @@ impl EduDataFetcher {
         paginated
     }
 
-    /// 获取学校年级列表
+    /// 获取学校年级列表。
     pub fn fetch_school_categories(&self) -> MewResult<Value> {
         debug!("获取学校年级列表");
         let builder = self.client.build_request(
@@ -521,7 +521,7 @@ impl EduDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取班级简要列表
+    /// 获取班级简要列表。
     pub fn fetch_classrooms_simple(&self) -> MewResult<Value> {
         debug!("获取班级简要列表");
         let response = self
@@ -535,7 +535,7 @@ impl EduDataFetcher {
         self.client.response_to_json(response)
     }
 
-    /// 班级详细信息分页迭代器，可按名称搜索
+    /// 班级详细信息分页迭代器，可按名称搜索。
     pub fn fetch_classrooms_detail(
         &self,
         limit: Option<usize>,
@@ -556,7 +556,7 @@ impl EduDataFetcher {
         paginated
     }
 
-    /// 学生移除记录分页迭代器
+    /// 学生移除记录分页迭代器。
     pub fn fetch_student_removal_records_gen(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取学生移除记录迭代器");
         let mut paginated = self.build_paginated(
@@ -568,7 +568,7 @@ impl EduDataFetcher {
         paginated
     }
 
-    /// 班级学生列表分页迭代器（支持无效/有效筛选）
+    /// 班级学生列表分页迭代器（支持无效/有效筛选）。
     pub fn fetch_class_students_gen(&self, invalid: i32, limit: Option<usize>) -> PaginatedIter {
         debug!("获取班级学生迭代器: invalid={}", invalid);
         let data = json!({ "invalid": invalid });
@@ -585,7 +585,7 @@ impl EduDataFetcher {
             .with_limit(limit.unwrap_or(100))
     }
 
-    /// 获取导航菜单
+    /// 获取导航菜单。
     pub fn fetch_navigation_menus(&self) -> MewResult<Value> {
         debug!("获取导航菜单");
         let builder = self.client.build_request(
@@ -597,7 +597,7 @@ impl EduDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取教育平台 Banner
+    /// 获取教育平台 Banner。
     pub fn fetch_edu_banners(&self, type_id: i32) -> MewResult<Value> {
         debug!("获取教育Banner: type_id={}", type_id);
         let builder = self
@@ -612,7 +612,7 @@ impl EduDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取服务器时间
+    /// 获取服务器时间。
     pub fn fetch_server_time(&self) -> MewResult<Value> {
         debug!("获取服务器时间");
         let builder = self.client.build_request(
@@ -624,7 +624,7 @@ impl EduDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取课程包提醒状态
+    /// 获取课程包提醒状态。
     pub fn fetch_lesson_package_status(&self) -> MewResult<Value> {
         debug!("获取课程包提醒状态");
         let builder = self.client.build_request(
@@ -636,7 +636,7 @@ impl EduDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取通用配置
+    /// 获取通用配置。
     pub fn fetch_configuration(&self, tag: &str) -> MewResult<Value> {
         debug!("获取配置: tag={}", tag);
         let builder = self
@@ -651,7 +651,7 @@ impl EduDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取扩展用户资料
+    /// 获取扩展用户资料。
     pub fn fetch_extended_profile(&self) -> MewResult<Value> {
         debug!("获取扩展用户资料");
         let builder = self.client.build_request(
@@ -663,7 +663,7 @@ impl EduDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取操作日志
+    /// 获取操作日志。
     pub fn fetch_operation_logs(&self) -> MewResult<Value> {
         debug!("获取操作日志");
         let builder = self.client.build_request(
@@ -675,7 +675,7 @@ impl EduDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取教学提醒状态
+    /// 获取教学提醒状态。
     pub fn fetch_teaching_status(&self) -> MewResult<Value> {
         debug!("获取教学提醒状态");
         let builder = self.client.build_request(
@@ -687,7 +687,7 @@ impl EduDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取仪表盘统计数据
+    /// 获取仪表盘统计数据。
     pub fn fetch_dashboard_stats(&self) -> MewResult<Value> {
         debug!("获取仪表盘统计数据");
         let builder = self.client.build_request(
@@ -699,7 +699,7 @@ impl EduDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取工具箱菜单
+    /// 获取工具箱菜单。
     pub fn fetch_tool_menu(&self) -> MewResult<Value> {
         debug!("获取工具箱菜单");
         let builder = self.client.build_request(
@@ -711,7 +711,7 @@ impl EduDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 所有作品分页迭代器
+    /// 所有作品分页迭代器。
     pub fn fetch_all_works_gen(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取所有作品迭代器");
         let mut paginated = self
@@ -725,7 +725,7 @@ impl EduDataFetcher {
         paginated
     }
 
-    /// 管理作品分页迭代器
+    /// 管理作品分页迭代器。
     pub fn fetch_managed_works_gen(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取管理作品迭代器");
         let mut paginated = self
@@ -739,7 +739,7 @@ impl EduDataFetcher {
         paginated
     }
 
-    /// 个人作品分页迭代器
+    /// 个人作品分页迭代器。
     pub fn fetch_personal_works_gen(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取个人作品迭代器");
         let mut paginated = self
@@ -753,7 +753,7 @@ impl EduDataFetcher {
         paginated
     }
 
-    /// 作品统计分析
+    /// 作品统计分析。
     pub fn fetch_work_analytics(
         &self,
         class_id: Option<i32>,
@@ -780,7 +780,7 @@ impl EduDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 教学记录分页迭代器
+    /// 教学记录分页迭代器。
     pub fn fetch_teaching_records_gen(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取教学记录迭代器");
         let mut paginated = self.build_paginated(
@@ -792,7 +792,7 @@ impl EduDataFetcher {
         paginated
     }
 
-    /// 获取教师班级列表
+    /// 获取教师班级列表。
     pub fn fetch_teaching_classes(&self) -> MewResult<Value> {
         debug!("获取教师班级列表");
         let builder = self.client.build_request(
@@ -804,7 +804,7 @@ impl EduDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取学校信息
+    /// 获取学校信息。
     pub fn fetch_school_info(&self, unit_id: i32) -> MewResult<Value> {
         debug!("获取学校信息: unit_id={}", unit_id);
         let builder = self
@@ -819,7 +819,7 @@ impl EduDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 官方课程包分页迭代器
+    /// 官方课程包分页迭代器。
     pub fn fetch_official_lesson_packages_gen(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取官方课程包迭代器");
         let mut paginated = self
@@ -839,7 +839,7 @@ impl EduDataFetcher {
         paginated
     }
 
-    /// 获取课程主题列表
+    /// 获取课程主题列表。
     pub fn fetch_lesson_topics(&self) -> MewResult<Value> {
         debug!("获取课程主题");
         let builder = self
@@ -855,7 +855,7 @@ impl EduDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取课程标签列表
+    /// 获取课程标签列表。
     pub fn fetch_lesson_tags(&self) -> MewResult<Value> {
         debug!("获取课程标签");
         let builder = self
@@ -871,7 +871,7 @@ impl EduDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 自定义课程包分页迭代器
+    /// 自定义课程包分页迭代器。
     pub fn fetch_custom_lesson_packages_gen(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取自定义课程包迭代器");
         let mut paginated = self.build_paginated(
@@ -883,7 +883,7 @@ impl EduDataFetcher {
         paginated
     }
 
-    /// 获取或删除自定义课程包
+    /// 获取或删除自定义课程包。
     pub fn get_or_delete_custom_package(
         &self,
         package_id: i32,
@@ -907,7 +907,7 @@ impl EduDataFetcher {
         }
     }
 
-    /// 获取自定义课程包内容
+    /// 获取自定义课程包内容。
     pub fn fetch_custom_package_contents(&self, package_id: i32, limit: i32) -> MewResult<Value> {
         debug!(
             "获取自定义课程包内容: package_id={}, limit={}",
@@ -926,7 +926,7 @@ impl EduDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取班级邀请
+    /// 获取班级邀请。
     pub fn fetch_class_invites(&self) -> MewResult<Value> {
         debug!("获取班级邀请");
         let builder = self.client.build_request(
@@ -938,7 +938,7 @@ impl EduDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取即将过期的课程包
+    /// 获取即将过期的课程包。
     pub fn fetch_expiring_lessons(&self) -> MewResult<Value> {
         debug!("获取即将过期课程包");
         let builder = self.client.build_request(
@@ -950,7 +950,7 @@ impl EduDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取组织 ID 列表
+    /// 获取组织 ID 列表。
     pub fn fetch_organization_ids(&self) -> MewResult<Value> {
         debug!("获取组织ID列表");
         let timestamp = current_timestamp_13();
@@ -966,9 +966,9 @@ impl EduDataFetcher {
         self.client.response_to_json(response)
     }
 
-    // ---------- 数据分析相关 ----------
+    // ==================== 数据分析相关 ====================
 
-    /// 获取报告元数据
+    /// 获取报告元数据。
     pub fn fetch_report_metadata(&self) -> MewResult<Value> {
         debug!("获取报告元数据");
         let builder = self.client.build_request(
@@ -980,7 +980,7 @@ impl EduDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取课程分析
+    /// 获取课程分析。
     pub fn fetch_course_analytics(&self) -> MewResult<Value> {
         debug!("获取课程分析");
         let builder = self.client.build_request(
@@ -992,7 +992,7 @@ impl EduDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取课程包分析
+    /// 获取课程包分析。
     pub fn fetch_lesson_package_analytics(&self) -> MewResult<Value> {
         debug!("获取课程包分析");
         let builder = self.client.build_request(
@@ -1004,7 +1004,7 @@ impl EduDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取班级分析
+    /// 获取班级分析。
     pub fn fetch_classroom_analytics(&self) -> MewResult<Value> {
         debug!("获取班级分析");
         let builder = self.client.build_request(
@@ -1016,7 +1016,7 @@ impl EduDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取作品表现
+    /// 获取作品表现。
     pub fn fetch_work_performance(&self) -> MewResult<Value> {
         debug!("获取作品表现");
         let builder = self.client.build_request(
@@ -1028,7 +1028,7 @@ impl EduDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取作品评分分布
+    /// 获取作品评分分布。
     pub fn fetch_work_ratings(&self) -> MewResult<Value> {
         debug!("获取作品评分分布");
         let builder = self.client.build_request(
@@ -1040,7 +1040,7 @@ impl EduDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取技能评估维度
+    /// 获取技能评估维度。
     pub fn fetch_skill_assessment(&self) -> MewResult<Value> {
         debug!("获取技能评估维度");
         let builder = self.client.build_request(
@@ -1052,7 +1052,7 @@ impl EduDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取技能雷达图
+    /// 获取技能雷达图。
     pub fn fetch_skill_radar(&self) -> MewResult<Value> {
         debug!("获取技能雷达图");
         let builder = self.client.build_request(
@@ -1064,7 +1064,7 @@ impl EduDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取艺术技能维度
+    /// 获取艺术技能维度。
     pub fn fetch_art_skills(&self) -> MewResult<Value> {
         debug!("获取艺术技能维度");
         let builder = self.client.build_request(
@@ -1076,7 +1076,7 @@ impl EduDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取逻辑技能维度
+    /// 获取逻辑技能维度。
     pub fn fetch_logic_skills(&self) -> MewResult<Value> {
         debug!("获取逻辑技能维度");
         let builder = self.client.build_request(
@@ -1088,7 +1088,7 @@ impl EduDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取编程技能维度
+    /// 获取编程技能维度。
     pub fn fetch_coding_skills(&self) -> MewResult<Value> {
         debug!("获取编程技能维度");
         let builder = self.client.build_request(

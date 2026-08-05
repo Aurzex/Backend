@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 // ==================== 用户相关枚举 ====================
 
-/// 作品类型
+/// 作品类型。
 #[derive(Debug, Clone, Copy)]
 pub enum WorkType {
     Kitten = 1,
@@ -24,7 +24,7 @@ impl WorkType {
     }
 }
 
-/// 作品列表类型
+/// 作品列表类型。
 #[derive(Debug, Clone, Copy)]
 pub enum WorksListType {
     Newest,
@@ -40,7 +40,7 @@ impl WorksListType {
     }
 }
 
-/// 平台类型
+/// 平台类型。
 #[derive(Debug, Clone, Copy)]
 pub enum PlatformMethod {
     Web,
@@ -56,7 +56,7 @@ impl PlatformMethod {
     }
 }
 
-/// 云端作品类型
+/// 云端作品类型。
 #[derive(Debug, Clone, Copy)]
 pub enum CloudWorkType {
     Nemo,
@@ -72,7 +72,7 @@ impl CloudWorkType {
     }
 }
 
-/// 作品发布状态
+/// 作品发布状态。
 #[derive(Debug, Clone, Copy)]
 pub enum PublishStatus {
     Published,
@@ -90,7 +90,7 @@ impl PublishStatus {
     }
 }
 
-/// Kitten 版本
+/// Kitten 版本。
 #[derive(Debug, Clone, Copy)]
 pub enum KittenVersion {
     V4,
@@ -106,7 +106,7 @@ impl KittenVersion {
     }
 }
 
-/// 作品显示状态
+/// 作品显示状态。
 #[derive(Debug, Clone, Copy)]
 pub enum WorkShowStatus {
     Show,
@@ -120,14 +120,14 @@ impl WorkShowStatus {
     }
 }
 
-/// 性别
+/// 性别。
 #[derive(Debug, Clone, Copy)]
 pub enum Gender {
     Female = 0,
     Male = 1,
 }
 
-/// 头像框 ID
+/// 头像框 ID。
 #[derive(Debug, Clone, Copy)]
 pub enum AvatarFrameId {
     Lv2 = 2,
@@ -149,7 +149,7 @@ impl UserDataFetcher {
         }
     }
 
-    // ---------- 私有辅助 ----------
+    // ==================== 私有辅助 ====================
 
     /// 发送请求并将响应解析为 JSON。
     fn send_and_parse(
@@ -173,9 +173,9 @@ impl UserDataFetcher {
             .with_limit(default_limit)
     }
 
-    // ---------- 公共方法 ----------
+    // ==================== 公共方法 ====================
 
-    /// 获取用户详细信息
+    /// 获取用户详细信息。
     pub fn fetch_user_profile(&self, user_id: i32) -> MewResult<Value> {
         debug!("获取用户详细信息: user_id={}", user_id);
         let endpoint = format!("/api/user/info/detail/{}", user_id);
@@ -183,7 +183,7 @@ impl UserDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取用户 Tiger 信息
+    /// 获取用户 Tiger 信息。
     pub fn fetch_user_tiger(&self, user_id: i32) -> MewResult<Value> {
         debug!("获取用户Tiger信息: user_id={}", user_id);
         let endpoint = format!("/tiger/user/{}", user_id);
@@ -191,7 +191,7 @@ impl UserDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取用户 info 信息
+    /// 获取用户 info 信息。
     pub fn fetch_user_info(&self, user_id: i32) -> MewResult<Value> {
         debug!("获取用户info信息: user_id={}", user_id);
         let endpoint = format!("/web/api/user/info/detail/{}", user_id);
@@ -199,7 +199,7 @@ impl UserDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取用户荣誉信息
+    /// 获取用户荣誉信息。
     pub fn fetch_user_honors(&self, user_id: i32) -> MewResult<Value> {
         debug!("获取用户荣誉信息: user_id={}", user_id);
         let builder = self
@@ -213,7 +213,7 @@ impl UserDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取用户业务数据指标
+    /// 获取用户业务数据指标。
     pub fn fetch_user_metrics(&self, user_id: i32) -> MewResult<Value> {
         debug!("获取用户业务指标: user_id={}", user_id);
         let builder = self
@@ -223,7 +223,7 @@ impl UserDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取用户基本信息
+    /// 获取用户基本信息。
     pub fn fetch_user_intro(&self, user_id: i32) -> MewResult<Value> {
         debug!("获取用户基本信息: user_id={}", user_id);
         let builder = self
@@ -233,7 +233,7 @@ impl UserDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取用户动态信息
+    /// 获取用户动态信息。
     pub fn fetch_user_dynamic(&self, user_id: i32) -> MewResult<Value> {
         debug!("获取用户动态: user_id={}", user_id);
         let endpoint = format!("/api/user/dynamic/{}", user_id);
@@ -241,7 +241,7 @@ impl UserDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取用户加入的工作室信息
+    /// 获取用户加入的工作室信息。
     pub fn fetch_user_studio(&self, user_id: i32) -> MewResult<Value> {
         debug!("获取用户工作室: user_id={}", user_id);
         let endpoint = format!("/web/work-shops/{}/participators", user_id);
@@ -249,7 +249,7 @@ impl UserDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取用户年度总结
+    /// 获取用户年度总结。
     pub fn fetch_user_annual_summary(&self, user_id: i32) -> MewResult<Value> {
         debug!("获取用户年度总结: user_id={}", user_id);
         let builder = self
@@ -259,7 +259,7 @@ impl UserDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取账户简要信息
+    /// 获取账户简要信息。
     pub fn get_account_info(&self) -> MewResult<Value> {
         debug!("获取账户简要信息");
         let builder = self
@@ -268,7 +268,7 @@ impl UserDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取当前账号详细信息
+    /// 获取当前账号详细信息。
     pub fn fetch_account_details(&self) -> MewResult<Value> {
         debug!("获取当前账号详细信息");
         let builder = self
@@ -277,7 +277,7 @@ impl UserDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取平台账号资料
+    /// 获取平台账号资料。
     pub fn fetch_account_platform_profile(&self, method: PlatformMethod) -> MewResult<Value> {
         debug!("获取平台账号资料: method={:?}", method);
         let endpoint = format!("/tiger/v3/{}/accounts/profile", method.as_str());
@@ -285,7 +285,7 @@ impl UserDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取账号隐私设置
+    /// 获取账号隐私设置。
     pub fn fetch_account_privacy(&self) -> MewResult<Value> {
         debug!("获取账号隐私设置");
         let builder =
@@ -294,7 +294,7 @@ impl UserDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取 Tiger 账号信息
+    /// 获取 Tiger 账号信息。
     pub fn fetch_account_tiger(&self) -> MewResult<Value> {
         debug!("获取Tiger账号信息");
         let builder = self
@@ -303,7 +303,7 @@ impl UserDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取用户评分数据
+    /// 获取用户评分数据。
     pub fn fetch_account_scores(&self) -> MewResult<Value> {
         debug!("获取用户评分数据");
         let builder =
@@ -312,7 +312,7 @@ impl UserDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取用户等级信息
+    /// 获取用户等级信息。
     pub fn fetch_account_level(&self) -> MewResult<Value> {
         debug!("获取用户等级信息");
         let builder = self
@@ -321,7 +321,7 @@ impl UserDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取用户动态信息
+    /// 获取用户动态信息。
     pub fn fetch_account_dynamic(&self) -> MewResult<Value> {
         debug!("获取用户动态信息");
         let builder = self
@@ -330,7 +330,7 @@ impl UserDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取用户作品列表
+    /// 获取用户作品列表。
     pub fn fetch_account_works(&self) -> MewResult<Value> {
         debug!("获取用户作品列表");
         let builder = self
@@ -339,7 +339,7 @@ impl UserDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取用户注册时间
+    /// 获取用户注册时间。
     pub fn fetch_account_register_time(&self) -> MewResult<Value> {
         debug!("获取用户注册时间");
         let builder =
@@ -348,7 +348,7 @@ impl UserDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取课程账号信息
+    /// 获取课程账号信息。
     pub fn fetch_account_lesson_info(&self) -> MewResult<Value> {
         debug!("获取课程账号信息");
         let builder =
@@ -357,7 +357,7 @@ impl UserDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 用户作品列表分页迭代器（Web 端）
+    /// 用户作品列表分页迭代器（Web 端）。
     pub fn fetch_user_works_web_gen(
         &self,
         user_id: i32,
@@ -377,7 +377,7 @@ impl UserDataFetcher {
             .with_limit(limit.unwrap_or(5))
     }
 
-    /// 搜索用户作品（Nemo 端）
+    /// 搜索用户作品（Nemo 端）。
     pub fn search_user_works_nemo(
         &self,
         query: &str,
@@ -399,7 +399,7 @@ impl UserDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取用户云端作品
+    /// 获取用户云端作品。
     pub fn fetch_cloud_works(
         &self,
         types: CloudWorkType,
@@ -416,7 +416,7 @@ impl UserDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取用户证书信息
+    /// 获取用户证书信息。
     pub fn fetch_user_certificate(&self, user_id: i32) -> MewResult<Value> {
         debug!("获取用户证书: user_id={}", user_id);
         let builder = self
@@ -430,7 +430,7 @@ impl UserDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 用户已发布 Nemo 作品分页迭代器
+    /// 用户已发布 Nemo 作品分页迭代器。
     pub fn fetch_published_nemo_works_gen(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取已发布Nemo作品迭代器");
         self.build_paginated(
@@ -440,7 +440,7 @@ impl UserDataFetcher {
         )
     }
 
-    /// 用户 KN 作品分页迭代器
+    /// 用户 KN 作品分页迭代器。
     pub fn fetch_kn_works_gen(
         &self,
         method: PublishStatus,
@@ -463,7 +463,7 @@ impl UserDataFetcher {
         paginated
     }
 
-    /// 用户 Kitten 作品分页迭代器
+    /// 用户 Kitten 作品分页迭代器。
     pub fn fetch_kitten_works_gen(
         &self,
         version: KittenVersion,
@@ -488,7 +488,7 @@ impl UserDataFetcher {
             .with_limit(limit.unwrap_or(30))
     }
 
-    /// 用户 Nemo 作品分页迭代器
+    /// 用户 Nemo 作品分页迭代器。
     pub fn fetch_nemo_works_gen(
         &self,
         status: PublishStatus,
@@ -502,7 +502,7 @@ impl UserDataFetcher {
             .with_limit(limit.unwrap_or(30))
     }
 
-    /// 用户海龟编辑器作品分页迭代器
+    /// 用户海龟编辑器作品分页迭代器。
     pub fn fetch_wood_works_gen(
         &self,
         status: PublishStatus,
@@ -527,7 +527,7 @@ impl UserDataFetcher {
             .with_limit(limit.unwrap_or(30))
     }
 
-    /// 用户 Box 作品分页迭代器
+    /// 用户 Box 作品分页迭代器。
     pub fn fetch_box_works_gen(
         &self,
         status: PublishStatus,
@@ -547,7 +547,7 @@ impl UserDataFetcher {
             .with_limit(limit.unwrap_or(30))
     }
 
-    /// 用户小说分页迭代器
+    /// 用户小说分页迭代器。
     pub fn fetch_fanfics_gen(
         &self,
         fiction_status: Option<WorkShowStatus>,
@@ -564,7 +564,7 @@ impl UserDataFetcher {
             .with_limit(limit.unwrap_or(30))
     }
 
-    /// 用户 Coco 作品分页迭代器
+    /// 用户 Coco 作品分页迭代器。
     pub fn fetch_coco_works_gen(
         &self,
         status: Option<i32>,
@@ -590,7 +590,7 @@ impl UserDataFetcher {
         paginated
     }
 
-    /// 获取用户所有 Coco 作品
+    /// 获取用户所有 Coco 作品。
     pub fn fetch_coco_all_works(&self, limit: Option<i32>) -> MewResult<Value> {
         debug!("获取所有Coco作品: limit={:?}", limit);
         let builder = self
@@ -604,7 +604,7 @@ impl UserDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 用户粉丝列表分页迭代器
+    /// 用户粉丝列表分页迭代器。
     pub fn fetch_followers_gen(&self, user_id: i32, limit: Option<usize>) -> PaginatedIter {
         debug!("获取粉丝迭代器: user_id={}", user_id);
         self.client
@@ -615,7 +615,7 @@ impl UserDataFetcher {
             .with_limit(limit.unwrap_or(15))
     }
 
-    /// 用户关注列表分页迭代器
+    /// 用户关注列表分页迭代器。
     pub fn fetch_following_gen(&self, user_id: i32, limit: Option<usize>) -> PaginatedIter {
         debug!("获取关注迭代器: user_id={}", user_id);
         self.client
@@ -626,7 +626,7 @@ impl UserDataFetcher {
             .with_limit(limit.unwrap_or(15))
     }
 
-    /// 获取用户已发布作品
+    /// 获取用户已发布作品。
     pub fn fetch_published_works(
         &self,
         user_id: i32,
@@ -644,7 +644,7 @@ impl UserDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取用户关注列表
+    /// 获取用户关注列表。
     pub fn fetch_user_attention(&self, user_id: i32) -> MewResult<Value> {
         debug!("获取关注列表: user_id={}", user_id);
         let builder = self
@@ -654,7 +654,7 @@ impl UserDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取用户粉丝列表
+    /// 获取用户粉丝列表。
     pub fn fetch_user_followers(&self, user_id: i32) -> MewResult<Value> {
         debug!("获取粉丝列表: user_id={}", user_id);
         let builder = self
@@ -664,7 +664,7 @@ impl UserDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取用户收藏的作品
+    /// 获取用户收藏的作品。
     pub fn fetch_user_collections(
         &self,
         user_id: i32,
@@ -682,7 +682,7 @@ impl UserDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 用户收藏作品分页迭代器
+    /// 用户收藏作品分页迭代器。
     pub fn fetch_collections_gen(&self, user_id: i32, limit: Option<usize>) -> PaginatedIter {
         debug!("获取收藏作品迭代器: user_id={}", user_id);
         self.client
@@ -693,7 +693,7 @@ impl UserDataFetcher {
             .with_limit(limit.unwrap_or(5))
     }
 
-    /// 获取用户头像框列表
+    /// 获取用户头像框列表。
     pub fn fetch_avatar_frames(&self) -> MewResult<Value> {
         debug!("获取头像框列表");
         let builder = self.client.build_request(
@@ -704,7 +704,7 @@ impl UserDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 检查用户是否为新用户
+    /// 检查用户是否为新用户。
     pub fn check_new_user_status(&self) -> MewResult<Value> {
         debug!("检查新用户状态");
         let builder = self.client.build_request(
@@ -747,7 +747,7 @@ impl UserManager {
         }
     }
 
-    // ---------- 私有辅助 ----------
+    // ==================== 私有辅助 ====================
 
     /// 发送请求并返回 status == 预期状态码。
     fn check_status(
@@ -783,9 +783,9 @@ impl UserManager {
         }
     }
 
-    // ---------- 公共方法 ----------
+    // ==================== 公共方法 ====================
 
-    /// 更新用户状态（动态 / 头像）
+    /// 更新用户状态（动态/头像）。
     pub fn update_status(&self, doing: Option<&str>, avatar: Option<&str>) -> MewResult<bool> {
         debug!("更新用户状态: doing={:?}, avatar={:?}", doing, avatar);
         let payload = json!({
@@ -799,7 +799,7 @@ impl UserManager {
         self.check_status(builder, HTTPStatus::Ok)
     }
 
-    /// 验证手机号码是否一致
+    /// 验证手机号码是否一致。
     pub fn validate_phone_number(&self, phone_num: i32) -> MewResult<Value> {
         debug!("验证手机号: phone_num={}", phone_num);
         let builder = self
@@ -813,7 +813,7 @@ impl UserManager {
         self.send_and_parse(builder)
     }
 
-    /// 修改密码
+    /// 修改密码。
     pub fn update_password(&self, old_password: &str, new_password: &str) -> MewResult<bool> {
         debug!("修改密码");
         let payload = json!({
@@ -828,7 +828,7 @@ impl UserManager {
         self.check_status(builder, HTTPStatus::NoContent)
     }
 
-    /// 请求更换手机号验证码
+    /// 请求更换手机号验证码。
     pub fn execute_request_phone_change_verification(
         &self,
         old_phonenum: i32,
@@ -853,7 +853,7 @@ impl UserManager {
         self.check_status(builder, HTTPStatus::NoContent)
     }
 
-    /// 更新手机号码
+    /// 更新手机号码。
     pub fn update_phone_number(&self, captcha: i32, phonenum: i32) -> MewResult<Value> {
         debug!("更新手机号: phonenum={}", phonenum);
         let payload = json!({
@@ -871,7 +871,7 @@ impl UserManager {
         self.send_and_parse(builder)
     }
 
-    /// 移除头像框
+    /// 移除头像框。
     pub fn delete_avatar_frame(&self) -> MewResult<bool> {
         debug!("移除头像框");
         let builder = self.client.build_request(
@@ -882,7 +882,7 @@ impl UserManager {
         self.check_status(builder, HTTPStatus::Ok)
     }
 
-    /// 应用头像框
+    /// 应用头像框。
     pub fn execute_apply_avatar_frame(&self, frame_id: AvatarFrameId) -> MewResult<bool> {
         debug!("应用头像框: frame_id={:?}", frame_id);
         let endpoint = format!("/creation-tools/v1/user/avatar-frame/{}", frame_id as i32);
@@ -890,7 +890,7 @@ impl UserManager {
         self.check_status(builder, HTTPStatus::Ok)
     }
 
-    /// 更新个人资料详细信息
+    /// 更新个人资料详细信息。
     pub fn update_profile_details(&self, args: UpdateProfileDetailsArgs<'_>) -> MewResult<bool> {
         debug!("更新个人资料: nickname={}", args.nickname);
         let payload = json!({
@@ -909,7 +909,7 @@ impl UserManager {
         self.check_status(builder, HTTPStatus::NoContent)
     }
 
-    /// 更新个人主页封面
+    /// 更新个人主页封面。
     pub fn update_profile_cover(&self, cover_url: &str) -> MewResult<bool> {
         debug!("更新个人主页封面: cover_url={}", cover_url);
         let payload = json!({ "preview": cover_url });
@@ -920,7 +920,7 @@ impl UserManager {
         self.check_status(builder, HTTPStatus::Ok)
     }
 
-    /// 注销用户
+    /// 注销用户。
     pub fn delete_user(&self, reason: &str, return_data: bool) -> MewResult<Value> {
         debug!("注销用户: reason={}", reason);
         let payload = json!({ "closeReason": reason });

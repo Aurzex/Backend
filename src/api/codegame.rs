@@ -2,7 +2,7 @@ use crate::utils::acquire::{CodeMaoClient, HTTPStatus, HttpMethod, MewResult};
 use log::debug;
 use serde_json::{Value, json};
 
-/// 海外平台数据访问客户端
+/// 海外平台数据访问客户端。
 ///
 /// 提供获取 Tiger 账号信息和平台配置的能力。
 pub struct OverseaDataClient {
@@ -58,7 +58,7 @@ impl Default for OverseaDataClient {
     }
 }
 
-/// 语言类型枚举（当前仅支持英语）
+/// 语言类型枚举（当前仅支持英语）。
 #[derive(Debug, Clone, Copy, Default)]
 pub enum Language {
     #[default]
@@ -74,7 +74,7 @@ impl Language {
     }
 }
 
-/// 用户操作处理器
+/// 用户操作处理器。
 ///
 /// 负责海外平台的注册与登录功能。
 pub struct UserActionHandler {

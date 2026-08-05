@@ -35,14 +35,14 @@ pub enum DataQueryError {
     External(MewError),
 }
 
-/// 使得可以直接将 `MewError` 转换成 `DataQueryError`，内部直接使用 `?` 传播
+/// 使得可以直接将 `MewError` 转换成 `DataQueryError`，内部直接使用 `?` 传播。
 impl From<MewError> for DataQueryError {
     fn from(e: MewError) -> Self {
         DataQueryError::External(e)
     }
 }
 
-/// 字符串解析错误也可转换为 `DataQueryError`
+/// 字符串解析错误也可转换为 `DataQueryError`。
 impl From<serde_json::Error> for DataQueryError {
     fn from(e: serde_json::Error) -> Self {
         DataQueryError::ParseError(e.to_string())
@@ -51,7 +51,7 @@ impl From<serde_json::Error> for DataQueryError {
 
 // ==================== 枚举定义 ====================
 
-/// 评论来源类型
+/// 评论来源类型。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CommentSource {
     Work,  // 作品评论
@@ -81,7 +81,7 @@ impl std::str::FromStr for CommentSource {
     }
 }
 
-/// 通知类型分类
+/// 通知类型分类。
 #[derive(Debug, Clone, Copy)]
 pub enum NotificationCategory {
     LikeFork,     // 点赞/收藏
@@ -175,7 +175,7 @@ fn build_compact_reply(
 
 // ==================== 评论查询构建器 ====================
 
-/// 评论查询构建器（纯惰性流式）
+/// 评论查询构建器（纯惰性流式）。
 pub struct CommentQueryBuilder {
     source: Option<CommentSource>,
     target_id: Option<i32>,
@@ -212,7 +212,7 @@ impl CommentQueryBuilder {
         self
     }
 
-    /// 构建基础评论流（原始 `JsonValue`）
+    /// 构建基础评论流（原始 `JsonValue`）。
     fn build_raw_stream(
         &self,
     ) -> Result<Box<dyn Iterator<Item = Result<JsonValue, DataQueryError>>>, DataQueryError> {
@@ -282,14 +282,14 @@ impl CommentQueryBuilder {
         }
     }
 
-    /// 惰性获取评论原始数据流
+    /// 惰性获取评论原始数据流。
     pub fn stream_raw_comments(
         self,
     ) -> Result<Box<dyn Iterator<Item = Result<JsonValue, DataQueryError>>>, DataQueryError> {
         self.build_raw_stream()
     }
 
-    /// 惰性获取去重后的用户ID流
+    /// 惰性获取去重后的用户ID流。
     pub fn stream_user_ids(
         self,
     ) -> Result<Box<dyn Iterator<Item = Result<String, DataQueryError>>>, DataQueryError> {
@@ -351,7 +351,7 @@ impl CommentQueryBuilder {
         }))
     }
 
-    /// 惰性获取去重后的评论ID流（格式："主评论ID" 或 "主评论ID.回复ID"）
+    /// 惰性获取去重后的评论ID流，格式为 "主评论ID" 或 "主评论ID.回复ID"。
     pub fn stream_comment_ids(
         self,
     ) -> Result<Box<dyn Iterator<Item = Result<String, DataQueryError>>>, DataQueryError> {
@@ -392,7 +392,7 @@ impl CommentQueryBuilder {
         }))
     }
 
-    /// 惰性获取详细评论数据流（每个元素为一个精简的 `JsonObject`，包含其下所有回复）
+    /// 惰性获取详细评论数据流，每个元素为一个精简的 `JsonObject`，包含其下所有回复。
     pub fn stream_detailed_comments(
         self,
     ) -> Result<Box<dyn Iterator<Item = Result<JsonObject, DataQueryError>>>, DataQueryError> {
@@ -475,7 +475,7 @@ impl CommentQueryBuilder {
 
 // ==================== 数据查询主结构体 ====================
 
-/// 数据查询与统计入口
+/// 数据查询与统计入口。
 pub struct DataQuery;
 
 impl DataQuery {
@@ -483,12 +483,12 @@ impl DataQuery {
         DataQuery
     }
 
-    /// 创建评论查询构建器
+    /// 创建评论查询构建器。
     pub fn query_comments(&self) -> CommentQueryBuilder {
         CommentQueryBuilder::new()
     }
 
-    /// 惰性原始评论流
+    /// 惰性原始评论流。
     pub fn stream_comments_raw(
         &self,
         source: CommentSource,
@@ -502,7 +502,7 @@ impl DataQuery {
             .stream_raw_comments()
     }
 
-    /// 惰性用户ID流（已去重）
+    /// 惰性用户ID流，已去重。
     pub fn stream_user_ids(
         &self,
         source: CommentSource,
@@ -516,7 +516,7 @@ impl DataQuery {
             .stream_user_ids()
     }
 
-    /// 惰性评论ID流（已去重，格式 "主ID" 或 "主ID.回复ID"）
+    /// 惰性评论ID流，已去重，格式为 "主ID" 或 "主ID.回复ID"。
     pub fn stream_comment_ids(
         &self,
         source: CommentSource,
@@ -530,7 +530,7 @@ impl DataQuery {
             .stream_comment_ids()
     }
 
-    /// 惰性详细评论流
+    /// 惰性详细评论流。
     pub fn stream_detailed_comments(
         &self,
         source: CommentSource,
@@ -544,7 +544,7 @@ impl DataQuery {
             .stream_detailed_comments()
     }
 
-    /// 构造分页迭代器并获取元数据中的总数
+    /// 构造分页迭代器并获取元数据中的总数。
     fn paginated_total(
         client: &CodeMaoClient,
         endpoint: String,
@@ -556,7 +556,7 @@ impl DataQuery {
         Ok(paginated.total_items().unwrap_or(0) as i32)
     }
 
-    /// 获取评论总数
+    /// 获取评论总数。
     pub fn count_comments(
         &self,
         source: CommentSource,
@@ -608,7 +608,7 @@ impl DataQuery {
         }
     }
 
-    /// 合并 Nemo 和 Web 来源的作品数据流
+    /// 合并 Nemo 和 Web 来源的作品数据流。
     pub fn stream_works_from_both_sources(
         &self,
         limit: i32,
@@ -679,7 +679,7 @@ impl DataQuery {
         Box::new(nemo_stream.chain(web_stream))
     }
 
-    /// 流式聚合：从新作品中收集用户评论并统计（无预先收集所有作品）
+    /// 流式聚合：从新作品中收集用户评论并统计，无需预先收集所有作品。
     pub fn aggregate_user_comments_from_works(
         &self,
         work_limit: i32,
@@ -745,7 +745,7 @@ impl DataQuery {
         Ok(result)
     }
 
-    /// 获取管理员举报处理统计
+    /// 获取管理员举报处理统计。
     pub fn compute_admin_report_stats(&self) -> Result<AdminReportStatistics, DataQueryError> {
         let admins = [
             (220, "石榴 Grant"),
@@ -830,7 +830,7 @@ impl DataQuery {
         })
     }
 
-    /// 获取粉丝统计（基于点赞数阈值）
+    /// 获取粉丝统计（基于点赞数阈值）。
     ///
     /// 注意：为每个符合条件的粉丝单独查询荣誉数据（N+1 请求），需评估性能影响。
     pub fn compute_fans_by_like_threshold(
@@ -901,7 +901,7 @@ impl DataQuery {
         })
     }
 
-    /// 获取教育账号流（切换身份、重置密码）
+    /// 获取教育账号流（切换身份、重置密码）。
     ///
     /// 为防止一次性加载过多学生造成 OOM，会限制最大学生数（默认 2000）。
     /// 保持原始顺序，不再进行随机打乱。
@@ -953,7 +953,7 @@ impl DataQuery {
         Box::new(stream)
     }
 
-    /// 获取社区新回复流（惰性迭代器）
+    /// 获取社区新回复流（惰性迭代器）。
     pub fn stream_new_replies(
         &self,
         reply_type: ReplyTypes,
@@ -986,7 +986,7 @@ impl Default for DataQuery {
 
 // ==================== 辅助数据结构 ====================
 
-/// 管理员举报统计条目
+/// 管理员举报统计条目。
 #[derive(Debug, Clone)]
 pub struct AdminReportStatsEntry {
     pub admin_id: i32,
@@ -997,7 +997,7 @@ pub struct AdminReportStatsEntry {
     pub percentage: f64,
 }
 
-/// 管理员举报统计汇总
+/// 管理员举报统计汇总。
 #[derive(Debug, Clone)]
 pub struct AdminReportStatistics {
     pub total_admins: i32,
@@ -1007,7 +1007,7 @@ pub struct AdminReportStatistics {
     pub statistics: Vec<AdminReportStatsEntry>,
 }
 
-/// 粉丝点赞统计
+/// 粉丝点赞统计。
 #[derive(Debug, Clone)]
 pub struct FanByLikesStatistics {
     pub target_user_id: i32,
@@ -1019,7 +1019,7 @@ pub struct FanByLikesStatistics {
 
 // ==================== 辅助迭代器实现 ====================
 
-/// 社区新回复分页流（健壮版，不再依赖总数）
+/// 社区新回复分页流（健壮版，不再依赖总数）。
 struct CommunityReplyStream {
     reply_type: ReplyTypes,
     remaining: i32, // 剩余待取数量（i32::MAX 表示无上限）

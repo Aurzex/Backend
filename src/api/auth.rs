@@ -32,7 +32,7 @@ impl LoginMethod {
         }
     }
 
-    /// 判断该登录方法是否属于普通用户
+    /// 判断该登录方法是否属于普通用户。
     pub fn is_user_method(&self) -> bool {
         matches!(
             self,
@@ -43,7 +43,7 @@ impl LoginMethod {
         )
     }
 
-    /// 判断该登录方法是否属于管理员
+    /// 判断该登录方法是否属于管理员。
     pub fn is_admin_method(&self) -> bool {
         matches!(self, LoginMethod::AdminToken | LoginMethod::AdminPassword)
     }
@@ -88,7 +88,7 @@ impl UserRole {
     }
 }
 
-/// 账号状态 / 类型（普通、评审、教育）
+/// 账号状态/类型（普通、评审、教育）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccountStatus {
     Judgement,
@@ -114,7 +114,7 @@ impl AccountStatus {
         }
     }
 
-    /// 映射为身份枚举 `Catsona`
+    /// 映射为身份枚举 `Catsona`。
     pub fn to_identity(self) -> Catsona {
         match self {
             AccountStatus::Judgement => Catsona::Judge,
@@ -413,7 +413,8 @@ impl AuthProcessor {
         client.response_to_json(response)
     }
 
-    /// 获取管理员验证码图片，并保存到文件。
+    /// 获取管理员验证码图片并保存到文件。
+    ///
     /// 返回时间戳，供后续登录使用。
     pub fn fetch_admin_captcha(&self) -> MewResult<i64> {
         let timestamp = SystemTime::now()

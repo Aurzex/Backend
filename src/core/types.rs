@@ -101,7 +101,7 @@ pub fn value_to_i64(v: &serde_json::Value) -> Option<i64> {
     }
 }
 
-/// 将 UNIX 时间戳转换为 UTC 格式 "YYYY-MM-DD HH:MM:SS"
+/// 将时间戳转换为字符串表示。
 pub fn timestamp_to_string(ts: &serde_json::Value) -> String {
     if let Some(secs) = ts.as_i64()
         && secs > 0
@@ -145,7 +145,7 @@ pub struct ActionConfig {
 }
 
 impl ActionConfig {
-    /// 由动作键构造配置（名称与状态取自内置映射）
+    /// 由动作键构造配置（名称与状态取自内置映射）。
     fn simple(key: &str) -> Self {
         let (name, status) = match key {
             "D" => ("删除", "DELETE"),
@@ -167,7 +167,7 @@ impl ActionConfig {
     }
 }
 
-/// 按给定动作键列表批量构造动作配置
+/// 按给定动作键列表批量构造动作配置。
 fn actions(keys: &[&str]) -> Vec<ActionConfig> {
     keys.iter().map(|k| ActionConfig::simple(k)).collect()
 }
@@ -312,7 +312,7 @@ impl ReportTypeRegistry {
         self.registry.keys().cloned().collect()
     }
 
-    /// 返回可用动作的引用，避免克隆整个 ActionConfig
+    /// 返回可用动作的引用，避免克隆整个 ActionConfig。
     pub fn get_available_actions(&self, report_type: &str) -> Vec<&ActionConfig> {
         self.get_config(report_type)
             .map(|config| {
@@ -334,7 +334,7 @@ impl ReportTypeRegistry {
         format!("选择操作:{}", parts.join(","))
     }
 
-    /// 返回全局静态的状态映射引用
+    /// 返回全局静态的状态映射引用。
     pub fn get_status_mapping(&self) -> &'static HashMap<&'static str, &'static str> {
         status_mapping()
     }
@@ -347,7 +347,7 @@ impl ReportTypeRegistry {
 }
 
 // ==================== 举报获取器 ====================
-/// 举报状态字段中表示“待处理”的值
+/// 举报状态字段中表示“待处理”的值。
 const TO_BE_DONE_STATUS: &str = "TOBEDONE";
 
 pub struct ReportFetcher {
@@ -364,8 +364,7 @@ impl ReportFetcher {
     pub fn new() -> Self {
         let mut registry = ReportTypeRegistry::new();
 
-        // ---------- shop_comment ----------
-        // ---------- shop_comment ----------
+        // ==================== shop_comment ====================
         {
             let mut cfg = SourceConfig::base(
                 "工作室评论举报",
@@ -418,7 +417,7 @@ impl ReportFetcher {
             registry.register("shop_comment", cfg);
         }
 
-        // ---------- work_work ----------
+        // ==================== work_work ====================
         {
             let mut cfg = SourceConfig::base(
                 "作品举报",
@@ -464,7 +463,7 @@ impl ReportFetcher {
             registry.register("work_work", cfg);
         }
 
-        // ---------- forum_post ----------
+        // ==================== forum_post ====================
         {
             let mut cfg = SourceConfig::base(
                 "帖子举报",
@@ -506,7 +505,7 @@ impl ReportFetcher {
             registry.register("forum_post", cfg);
         }
 
-        // ---------- forum_discussion ----------
+        // ==================== forum_discussion ====================
         {
             let mut cfg = SourceConfig::base(
                 "讨论举报",

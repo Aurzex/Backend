@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use thiserror::Error;
 
-// ========================= 错误定义 =========================
+// ==================== 错误定义 ====================
 #[derive(Error, Debug)]
 pub enum DecompilerError {
     #[error("IO错误: {0}")]
@@ -50,7 +50,7 @@ pub enum DecompilerError {
 
 pub type Result<T> = std::result::Result<T, DecompilerError>;
 
-// ========================= 错误上下文扩展 =========================
+// ==================== 错误上下文扩展 ====================
 pub trait ResultExt<T> {
     fn with_context<F: FnOnce() -> String>(self, f: F) -> Result<T>;
 }
@@ -64,7 +64,7 @@ impl<T> ResultExt<T> for Result<T> {
     }
 }
 
-// ========================= Value 扩展 =========================
+// ==================== Value 扩展 ====================
 pub trait ValueExt {
     fn get_str(&self, key: &str) -> Result<&str>;
     fn get_i64(&self, key: &str) -> Result<i64>;
@@ -145,7 +145,7 @@ impl ValueExt for Value {
     }
 }
 
-// ========================= 阴影模板 =========================
+// ==================== 阴影模板 ====================
 #[derive(Debug, Clone)]
 pub struct ShadowTemplate {
     pub editable: bool,
@@ -169,7 +169,7 @@ impl Default for ShadowTemplate {
     }
 }
 
-// ========================= 配置 =========================
+// ==================== 配置 ====================
 #[derive(Debug, Clone)]
 pub struct DecompilerConfig {
     pub base_url: String,
@@ -553,7 +553,7 @@ impl Default for DecompilerConfig {
     }
 }
 
-// ========================= 作品类型 =========================
+// ==================== 作品类型 ====================
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WorkType {
     Kitten2,
@@ -624,7 +624,7 @@ impl WorkType {
     }
 }
 
-// ========================= 作品信息 =========================
+// ==================== 作品信息 ====================
 #[derive(Debug, Clone)]
 pub struct WorkInfo {
     pub id: i64,
@@ -666,7 +666,7 @@ impl WorkInfo {
     }
 }
 
-// ========================= 文件服务 =========================
+// ==================== 文件服务 ====================
 #[derive(Clone)]
 pub struct FileService {
     config: Arc<DecompilerConfig>,
@@ -713,7 +713,7 @@ impl FileService {
     }
 }
 
-// ========================= 新 ID 生成器（方案一风格） =========================
+// ==================== 新 ID 生成器（方案一风格） ====================
 #[derive(Clone)]
 pub struct IdGenerator {
     chars: Vec<char>,
@@ -743,7 +743,7 @@ impl Default for IdGenerator {
     }
 }
 
-// ========================= 加密服务 =========================
+// ==================== 加密服务 ====================
 #[derive(Clone)]
 pub struct CryptoService {
     salt: Vec<u8>,
@@ -835,7 +835,7 @@ impl BCMKNDecryptor {
     }
 }
 
-// ========================= 阴影构建器 =========================
+// ==================== 阴影构建器 ====================
 #[derive(Clone)]
 pub struct ShadowBuilder {
     pub(crate) config: Arc<DecompilerConfig>,
@@ -977,7 +977,7 @@ impl ShadowBuilder {
     }
 }
 
-// ========================= 积木行为 =========================
+// ==================== 积木行为 ====================
 pub trait BlockDecompilerBehavior: Send + Sync {
     fn get_child_input_name(&self, index: usize, conditions_count: usize) -> String;
 }
@@ -1008,7 +1008,7 @@ impl BlockDecompilerBehavior for BlockBehavior {
     }
 }
 
-// ========================= 积木上下文 =========================
+// ==================== 积木上下文 ====================
 #[derive(Clone)]
 pub struct BlockContext {
     pub actor_data: Value,
@@ -1069,7 +1069,7 @@ impl BlockContext {
     }
 }
 
-// ========================= 积木反编译核心 =========================
+// ==================== 积木反编译核心 ====================
 
 pub struct BlockDecompilerCore<'a> {
     compiled: &'a Value,
@@ -1419,7 +1419,7 @@ impl<'a> BlockDecompilerCore<'a> {
     }
 }
 
-// ========================= 反编译器上下文 =========================
+// ==================== 反编译器上下文 ====================
 pub struct DecompilerContext {
     pub work_info: WorkInfo,
     pub http_client: Box<dyn HttpClient>,
@@ -1428,7 +1428,7 @@ pub struct DecompilerContext {
     pub config: Arc<DecompilerConfig>,
 }
 
-// ========================= Context Builder =========================
+// ==================== Context Builder ====================
 pub struct DecompilerContextBuilder {
     work_info: Option<WorkInfo>,
     http_client: Option<Box<dyn HttpClient>>,
@@ -1499,7 +1499,7 @@ impl DecompilerContextBuilder {
     }
 }
 
-// ========================= 结果类型与 Trait =========================
+// ==================== 结果类型与 Trait ====================
 #[derive(Debug)]
 pub enum DecompileResult {
     Json(Value),
@@ -1528,7 +1528,7 @@ pub trait WorkDecompiler: Send + Sync {
     ) -> Result<String>;
 }
 
-// ========================= NEKO =========================
+// ==================== NEKO ====================
 pub struct NekoFetcher {
     http_client: Box<dyn HttpClient>,
     config: Arc<DecompilerConfig>,
@@ -1633,7 +1633,7 @@ impl WorkDecompiler for NekoDecompiler {
     }
 }
 
-// ========================= KITTEN =========================
+// ==================== KITTEN ====================
 pub struct KittenFetcher {
     http_client: Box<dyn HttpClient>,
     config: Arc<DecompilerConfig>,
@@ -2084,10 +2084,11 @@ impl KittenDecompiler {
     }
 }
 
-// ========================= Kitten2/3 blocksXML 序列化器 =========================
-/// Kitten2/3 编辑版（如春风得意）以 Blockly XML 字符串（blocksXML）存储积木，
-/// 与 Kitten4 的 block_data_json（blocks/connections）不同。
-/// 本组件负责把编译块树序列化为 Blockly XML，独立成组件便于单独测试与复用。
+// ==================== Kitten2/3 blocksXML 序列化器 ====================
+/// Kitten2/3 编辑版（如春风得意）以 Blockly XML 字符串（blocksXML）存储积木。
+///
+/// 与 Kitten4 的 block_data_json（blocks/connections）不同，本组件负责把编译块树
+/// 序列化为 Blockly XML，独立成组件便于单独测试与复用。
 pub struct XmlBlockWriter<'a> {
     config: &'a DecompilerConfig,
 }
@@ -2097,7 +2098,7 @@ impl<'a> XmlBlockWriter<'a> {
         Self { config }
     }
 
-    /// 生成 actor/场景的 blocksXML（`<variables></variables>` + 各根块）
+    /// 生成 actor/场景的 blocksXML（`<variables></variables>` + 各根块）。
     pub fn write_blocks(&self, actor_compiled: &Value) -> Result<String> {
         let mut xml = String::from("<variables></variables>");
         let compiled_blocks = actor_compiled
@@ -2145,7 +2146,7 @@ impl<'a> XmlBlockWriter<'a> {
         Ok(xml)
     }
 
-    /// 将编译块树的单个块渲染为 Blockly XML
+    /// 将编译块树的单个块渲染为 Blockly XML。
     fn block_xml(&self, compiled: &Value, is_root: bool, y: f64) -> String {
         let bt = compiled.get_str_or("type", "");
         let bid = compiled.get_str_or("id", "");
@@ -2237,7 +2238,7 @@ impl<'a> XmlBlockWriter<'a> {
         s
     }
 
-    /// value 插槽内容：shadow 类型渲染为 `<shadow>`，否则递归为 `<block>`
+    /// value 插槽内容：shadow 类型渲染为 `<shadow>`，否则递归为 `<block>`。
     fn value_xml(&self, v: &Value) -> String {
         let vt = v.get_str_or("type", "");
         let vid = v.get_str_or("id", "");
@@ -2261,7 +2262,7 @@ impl<'a> XmlBlockWriter<'a> {
         }
     }
 
-    /// XML 转义
+    /// XML 转义。
     fn escape_text(s: &str) -> String {
         s.replace('&', "&amp;")
             .replace('<', "&lt;")
@@ -2444,7 +2445,7 @@ impl WorkDecompiler for KittenDecompiler {
     }
 }
 
-// ========================= NEMO =========================
+// ==================== NEMO ====================
 pub struct NemoResourceConfig<'a> {
     pub http_client: &'a dyn HttpClient,
     pub file_service: &'a FileService,
@@ -2731,7 +2732,7 @@ impl<'a> NemoResourceManager<'a> {
     }
 }
 
-// ========================= WOOD =========================
+// ==================== WOOD ====================
 pub struct WoodResourceConfig<'a> {
     pub http_client: &'a dyn HttpClient,
     pub file_service: &'a FileService,
@@ -2940,7 +2941,7 @@ impl<'a> WoodResourceManager<'a> {
     }
 }
 
-// ========================= COCO =========================
+// ==================== COCO ====================
 pub struct CocoFetcher {
     http_client: Box<dyn HttpClient>,
     config: Arc<DecompilerConfig>,
@@ -3174,7 +3175,7 @@ impl WorkDecompiler for CocoDecompiler {
     }
 }
 
-// ========================= 积木反编译器 trait 与具体实现 =========================
+// ==================== 积木反编译器 trait 与具体实现 ====================
 pub trait BlockDecompiler<'a>: Send + Sync {
     fn decompile(&mut self, context: &mut BlockContext) -> Result<Value>;
 }
@@ -3645,8 +3646,9 @@ impl<'a> BlockDecompiler<'a> for MutationDecompiler<'a> {
     }
 }
 
-// ========================= 积木反编译器工厂 =========================
+// ==================== 积木反编译器工厂 ====================
 /// 按块类型分派专用反编译器。
+///
 /// 树内递归（process_next/children/conditions/params）也使用本函数，
 /// 否则嵌套的 procedures_2_callnoreturn / controls_if 等不会走专用反编译器，
 /// 导致 NAME/mutation/ARG 参数块/if-else 结构缺失。
@@ -3697,7 +3699,7 @@ impl<'a> BlockDecompilerFactory<'a> {
     }
 }
 
-// ========================= HTTP 客户端 =========================
+// ==================== HTTP 客户端 ====================
 pub trait HttpClient: Send + Sync {
     fn get_json(&self, url: &str, headers: Option<Vec<(String, String)>>) -> Result<Value>;
     fn get_binary(&self, url: &str) -> Result<Vec<u8>>;
@@ -3763,15 +3765,15 @@ impl HttpClient for CodeMaoHttpClient {
     }
 }
 
-// ========================= 反编译选项（构建器） =========================
+// ==================== 反编译选项（构建器） ====================
 /// 反编译调用配置，供外部通过链式方法定制（门面模式的参数对象）。
 #[derive(Debug, Clone)]
 pub struct DecompileOptions {
-    /// 输出目录；`None` 时使用 `DecompilerConfig::default_output_dir`
+    /// 输出目录；`None` 时使用 `DecompilerConfig::default_output_dir`。
     output_dir: Option<PathBuf>,
-    /// 是否保存原始（未反编译）数据到 `output_dir/raw/`，默认 true
+    /// 是否保存原始（未反编译）数据到 `output_dir/raw/`，默认 true。
     save_raw: bool,
-    /// 批处理并发数（≥1），默认 1
+    /// 批处理并发数（≥1），默认 1。
     batch_concurrency: usize,
 }
 
@@ -3790,34 +3792,35 @@ impl DecompileOptions {
         }
     }
 
-    /// 指定输出目录
+    /// 指定输出目录。
     pub fn output_dir(mut self, dir: impl Into<PathBuf>) -> Self {
         self.output_dir = Some(dir.into());
         self
     }
 
-    /// 是否保存原始数据（默认 true）
+    /// 是否保存原始数据（默认 true）。
     pub fn save_raw(mut self, on: bool) -> Self {
         self.save_raw = on;
         self
     }
 
-    /// 批处理并发数（默认 1）
+    /// 批处理并发数（默认 1）。
     pub fn batch_concurrency(mut self, n: usize) -> Self {
         self.batch_concurrency = n.max(1);
         self
     }
 }
 
-// ========================= 作品处理器注册表（注册表模式） =========================
-/// fetcher 构造器：按作品类型创建对应的 `WorkFetcher`
+// ==================== 作品处理器注册表（注册表模式） ====================
+/// fetcher 构造器：按作品类型创建对应的 `WorkFetcher`。
 pub type FetcherFactory =
     Box<dyn Fn(Box<dyn HttpClient>, Arc<DecompilerConfig>) -> Box<dyn WorkFetcher> + Send + Sync>;
-/// decompiler 构造器：按作品类型创建对应的 `WorkDecompiler`
+/// decompiler 构造器：按作品类型创建对应的 `WorkDecompiler`。
 pub type DecompilerFactory =
     Box<dyn Fn(&Arc<DecompilerConfig>) -> Box<dyn WorkDecompiler> + Send + Sync>;
 
 /// 作品类型 → 处理器（fetcher/decompiler）的注册表。
+///
 /// 新增作品类型时只需 `register`，无需修改门面代码（开闭原则）。
 pub struct WorkProcessorRegistry {
     fetchers: HashMap<WorkType, FetcherFactory>,
@@ -3832,7 +3835,7 @@ impl WorkProcessorRegistry {
         }
     }
 
-    /// 注册某一作品类型的 fetcher 与 decompiler 构造器
+    /// 注册某一作品类型的 fetcher 与 decompiler 构造器。
     pub fn register(
         &mut self,
         work_type: WorkType,
@@ -3843,7 +3846,7 @@ impl WorkProcessorRegistry {
         self.decompilers.insert(work_type, decompiler);
     }
 
-    /// 按作品类型创建 fetcher
+    /// 按作品类型创建 fetcher。
     pub fn fetcher_for(
         &self,
         work_type: &WorkType,
@@ -3856,7 +3859,7 @@ impl WorkProcessorRegistry {
             .map(|factory| factory(client, config))
     }
 
-    /// 按作品类型创建 decompiler
+    /// 按作品类型创建 decompiler。
     pub fn decompiler_for(
         &self,
         work_type: &WorkType,
@@ -3868,7 +3871,7 @@ impl WorkProcessorRegistry {
             .map(|factory| factory(config))
     }
 
-    /// 内置全部作品类型的默认注册
+    /// 内置全部作品类型的默认注册。
     fn with_defaults() -> Self {
         let mut registry = Self::new();
         // Kitten2/3/4 共用 KittenFetcher / KittenDecompiler
@@ -3909,7 +3912,7 @@ impl Default for WorkProcessorRegistry {
     }
 }
 
-// ========================= 主入口 =========================
+// ==================== 主入口 ====================
 pub struct CodemaoDecompiler {
     config: Arc<DecompilerConfig>,
     client: Arc<CodeMaoClient>,
@@ -3928,7 +3931,8 @@ impl CodemaoDecompiler {
         }
     }
 
-    /// 全局单例门面：复用全局 HTTP 客户端与默认注册表，
+    /// 全局单例门面：复用全局 HTTP 客户端与默认注册表。
+    ///
     /// 多次反编译不重复创建客户端（性能优化）。
     pub fn global() -> &'static Self {
         static GLOBAL: OnceLock<CodemaoDecompiler> = OnceLock::new();
@@ -3937,7 +3941,7 @@ impl CodemaoDecompiler {
             Self::new(None, client)
         })
     }
-    /// 反编译单个作品（默认选项，向后兼容）
+    /// 反编译单个作品（默认选项，向后兼容）。
     pub fn decompile(&self, work_id: i64, output_dir: Option<&Path>) -> Result<String> {
         let mut options = DecompileOptions::new();
         if let Some(dir) = output_dir {
@@ -3946,7 +3950,7 @@ impl CodemaoDecompiler {
         self.decompile_with_options(work_id, options)
     }
 
-    /// 使用自定义选项反编译单个作品
+    /// 使用自定义选项反编译单个作品。
     pub fn decompile_with_options(
         &self,
         work_id: i64,
@@ -3955,7 +3959,7 @@ impl CodemaoDecompiler {
         self.decompile_inner(work_id, &options)
     }
 
-    /// 批处理反编译多个作品，返回与输入顺序一致的 `Vec<Result>`
+    /// 批处理反编译多个作品，返回与输入顺序一致的 `Vec<Result>`。
     pub fn decompile_batch(
         &self,
         work_ids: &[i64],
@@ -3994,8 +3998,9 @@ impl CodemaoDecompiler {
         results
     }
 
-    /// 反编译主流程（模板方法）：获取信息 → 创建处理器 → 取原始数据 →
-    /// （可选）保存原始数据 → 反编译 → 保存结果
+    /// 反编译主流程（模板方法）。
+    ///
+    /// 流程为：获取信息 → 创建处理器 → 取原始数据 → （可选）保存原始数据 → 反编译 → 保存结果。
     fn decompile_inner(&self, work_id: i64, options: &DecompileOptions) -> Result<String> {
         info!("开始反编译作品 [work_id={}]", work_id);
         let http_client = Box::new(CodeMaoHttpClient::new(self.client.clone()));
@@ -4043,7 +4048,8 @@ impl CodemaoDecompiler {
         info!("作品 [work_id={}] 反编译完成，保存至: {}", work_id, saved);
         Ok(saved)
     }
-    /// 将获取到的未编译原始数据保存到 `output_dir/raw/` 目录下，
+    /// 将获取到的未编译原始数据保存到 `output_dir/raw/` 目录下。
+    ///
     /// 文件名格式为 `raw-{作品名称}.{扩展名}`，其中名称经过安全过滤。
     fn save_raw_data(
         &self,
@@ -4093,17 +4099,17 @@ impl CodemaoDecompiler {
     }
 }
 
-/// 便捷反编译函数：使用全局单例门面（复用 HTTP 客户端），功能与之前一致
+/// 便捷反编译函数：使用全局单例门面（复用 HTTP 客户端），功能与之前一致。
 pub fn decompile_work(work_id: i64, output_dir: Option<&Path>) -> Result<String> {
     CodemaoDecompiler::global().decompile(work_id, output_dir)
 }
 
-/// 便捷反编译函数：使用自定义选项
+/// 便捷反编译函数：使用自定义选项。
 pub fn decompile_work_with(work_id: i64, options: DecompileOptions) -> Result<String> {
     CodemaoDecompiler::global().decompile_with_options(work_id, options)
 }
 
-/// 便捷批量反编译函数：返回与输入顺序一致的 `Vec<Result<String>>`
+/// 便捷批量反编译函数：返回与输入顺序一致的 `Vec<Result<String>>`。
 pub fn decompile_works(work_ids: &[i64], options: DecompileOptions) -> Vec<Result<String>> {
     CodemaoDecompiler::global().decompile_batch(work_ids, options)
 }

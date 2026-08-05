@@ -23,7 +23,7 @@ fn current_timestamp_13() -> u128 {
 
 // ==================== 举报相关枚举 ====================
 
-/// 作品来源类型
+/// 作品来源类型。
 #[derive(Debug, Clone, Copy)]
 pub enum WorkSourceType {
     Kitten,
@@ -41,7 +41,7 @@ impl WorkSourceType {
     }
 }
 
-/// 评论来源类型
+/// 评论来源类型。
 #[derive(Debug, Clone, Copy)]
 pub enum CommentSourceType {
     All,
@@ -65,7 +65,7 @@ impl CommentSourceType {
     }
 }
 
-/// 举报状态
+/// 举报状态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReportStatus {
     ToBeDone,
@@ -83,7 +83,7 @@ impl ReportStatus {
     }
 }
 
-/// 作品举报过滤类型
+/// 作品举报过滤类型。
 #[derive(Debug, Clone, Copy)]
 pub enum WorkReportFilterType {
     Admin,
@@ -101,7 +101,7 @@ impl WorkReportFilterType {
     }
 }
 
-/// 评论举报过滤类型
+/// 评论举报过滤类型。
 #[derive(Debug, Clone, Copy)]
 pub enum CommentReportFilterType {
     Admin,
@@ -119,7 +119,7 @@ impl CommentReportFilterType {
     }
 }
 
-/// 帖子举报过滤类型
+/// 帖子举报过滤类型。
 #[derive(Debug, Clone, Copy)]
 pub enum PostReportFilterType {
     PostId,
@@ -133,7 +133,7 @@ impl PostReportFilterType {
     }
 }
 
-/// 处理决议
+/// 处理决议。
 #[derive(Debug, Clone, Copy)]
 pub enum Resolution {
     Pass,
@@ -171,7 +171,7 @@ impl WhaleReportFetcher {
         }
     }
 
-    // ---------- 私有辅助 ----------
+    // ==================== 私有辅助 ====================
 
     /// 为请求构建器附加当前时间戳参数 `TIME`。
     fn add_timestamp_to_builder(builder: KittyRequestBuilder) -> KittyRequestBuilder {
@@ -209,9 +209,9 @@ impl WhaleReportFetcher {
         }
     }
 
-    // ---------- 公共方法 ----------
+    // ==================== 公共方法 ====================
 
-    /// 作品举报分页迭代器
+    /// 作品举报分页迭代器。
     pub fn fetch_work_reports_gen(
         &self,
         source_type: WorkSourceType,
@@ -235,7 +235,7 @@ impl WhaleReportFetcher {
         paginated
     }
 
-    /// 评论举报分页迭代器
+    /// 评论举报分页迭代器。
     pub fn fetch_comment_reports_gen(
         &self,
         source_type: CommentSourceType,
@@ -259,7 +259,7 @@ impl WhaleReportFetcher {
         paginated
     }
 
-    /// 帖子举报分页迭代器
+    /// 帖子举报分页迭代器。
     pub fn fetch_post_reports_gen(
         &self,
         status: ReportStatus,
@@ -283,7 +283,7 @@ impl WhaleReportFetcher {
         paginated
     }
 
-    /// 讨论区举报分页迭代器
+    /// 讨论区举报分页迭代器。
     pub fn fetch_discussion_reports_gen(
         &self,
         status: ReportStatus,
@@ -331,7 +331,7 @@ impl ReportHandler {
         }
     }
 
-    // ---------- 私有辅助 ----------
+    // ==================== 私有辅助 ====================
 
     /// 发送 PATCH 请求处理举报，并检查状态码是否为 204。
     fn process_report(&self, endpoint: &str, admin_id: i32, resolution: &str) -> MewResult<bool> {
@@ -347,9 +347,9 @@ impl ReportHandler {
         Ok(response.status() == HTTPStatus::NoContent as u16)
     }
 
-    // ---------- 公共方法 ----------
+    // ==================== 公共方法 ====================
 
-    /// 处理帖子举报
+    /// 处理帖子举报。
     pub fn execute_process_post_report(
         &self,
         report_id: i32,
@@ -364,7 +364,7 @@ impl ReportHandler {
         self.process_report(&endpoint, admin_id, resolution.as_str())
     }
 
-    /// 处理讨论区举报
+    /// 处理讨论区举报。
     pub fn execute_process_discussion_report(
         &self,
         report_id: i32,
@@ -379,7 +379,7 @@ impl ReportHandler {
         self.process_report(&endpoint, admin_id, resolution.as_str())
     }
 
-    /// 处理评论举报
+    /// 处理评论举报。
     pub fn execute_process_comment_report(
         &self,
         report_id: i32,
@@ -394,7 +394,7 @@ impl ReportHandler {
         self.process_report(&endpoint, admin_id, resolution.as_str())
     }
 
-    /// 处理作品举报（仅支持 Pass / Delete / Unload / Tobedone）
+    /// 处理作品举报（仅支持 Pass/Delete/Unload/Tobedone）。
     pub fn execute_process_work_report(
         &self,
         report_id: i32,
