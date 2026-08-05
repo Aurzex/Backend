@@ -221,8 +221,7 @@ impl CommunityDataFetcher {
 
     /// 获取回复的分页迭代器.
     pub fn fetch_replies_gen(&self, types: ReplyTypes, limit: Option<usize>) -> PaginatedIter {
-        self
-            .client
+        self.client
             .paginated("/web/message-record")
             .with_iter_param("query_type", types.as_str())
             .with_iter_method(HttpMethod::Get)
@@ -568,8 +567,7 @@ impl CommunityDataFetcher {
 
     /// KN 公开课分页迭代器.
     pub fn fetch_public_courses_gen(&self, limit: Option<usize>) -> PaginatedIter {
-        self
-            .client
+        self.client
             .paginated("/neko/course/publish/list")
             .with_page_size(10)
             .with_total_key("total_course")
@@ -623,8 +621,7 @@ impl CommunityDataFetcher {
 
     /// Nemo 端教程合集分页迭代器.
     pub fn fetch_course_packages_gen(&self, platform: i32, limit: Option<usize>) -> PaginatedIter {
-        self
-            .client
+        self.client
             .paginated("/creation-tools/v1/course/package/list")
             .with_page_size(50)
             .with_iter_param("platform", platform.to_string())
@@ -637,8 +634,7 @@ impl CommunityDataFetcher {
         course_package_id: i32,
         limit: Option<usize>,
     ) -> PaginatedIter {
-        self
-            .client
+        self.client
             .paginated("/creation-tools/v1/course/list/search")
             .with_iter_param("course_package_id", course_package_id.to_string())
             .with_page_size(50)
@@ -679,8 +675,7 @@ impl CommunityDataFetcher {
 
     /// 活动帖子分页迭代器.
     pub fn fetch_studio_posts_gen(&self, studio_id: i32, limit: Option<usize>) -> PaginatedIter {
-        self
-            .client
+        self.client
             .paginated("/web/forums/posts")
             .with_page_size(50)
             .with_iter_param("studio_id", studio_id.to_string())
@@ -691,8 +686,7 @@ impl CommunityDataFetcher {
     /// 活动教程分页迭代器.
     pub fn fetch_studio_courses_gen(&self, studio_id: i32, limit: Option<usize>) -> PaginatedIter {
         let endpoint = format!("/web/studios/{}/courses", studio_id);
-        self
-            .client
+        self.client
             .paginated(&endpoint)
             .with_page_size(50)
             .with_limit(limit.unwrap_or(100))
@@ -701,8 +695,7 @@ impl CommunityDataFetcher {
     /// 活动作品分页迭代器.
     pub fn fetch_studio_works_gen(&self, studio_id: i32, limit: Option<usize>) -> PaginatedIter {
         let endpoint = format!("/web/studios/{}/works", studio_id);
-        self
-            .client
+        self.client
             .paginated(&endpoint)
             .with_page_size(50)
             .with_iter_param("sort", "-n_likes")
@@ -716,8 +709,7 @@ impl CommunityDataFetcher {
         limit: Option<usize>,
     ) -> PaginatedIter {
         let endpoint = format!("/web/studios/{}/participators", studio_id);
-        self
-            .client
+        self.client
             .paginated(&endpoint)
             .with_page_size(50)
             .with_limit(limit.unwrap_or(24))
@@ -905,8 +897,7 @@ impl UserAction {
         limit: Option<usize>,
         read_status: ReadStatus,
     ) -> PaginatedIter {
-        self
-            .client
+        self.client
             .paginated("/web/message-record/broadcast")
             .with_page_size(1)
             .with_iter_param("read_status", read_status.as_str())
