@@ -418,7 +418,7 @@ impl EduDataFetcher {
         default_limit: usize,
     ) -> PaginatedIter {
         self.client
-            .paginated(endpoint)
+            .build_paginated(endpoint)
             .with_iter_param("page", "1")
             .with_page_size(page_size)
             .with_pagination_method(PaginationMethod::Page)
@@ -552,7 +552,7 @@ impl EduDataFetcher {
         let data = json!({ "invalid": invalid });
 
         self.client
-            .paginated("https://eduzone.codemao.cn/edu/zone/students")
+            .build_paginated("https://eduzone.codemao.cn/edu/zone/students")
             .with_iter_param("page", "1")
             .with_page_size(100)
             .with_iter_payload(data)
@@ -802,7 +802,7 @@ impl EduDataFetcher {
         debug!("获取官方课程包迭代器");
         let mut paginated = self
             .client
-            .paginated("https://eduzone.codemao.cn/edu/zone/lesson/offical/packages")
+            .build_paginated("https://eduzone.codemao.cn/edu/zone/lesson/offical/packages")
             .with_iter_param("pacakgeEntryType", "0")
             .with_iter_param("topicType", "all")
             .with_iter_param("topicId", "all")

@@ -916,7 +916,7 @@ impl CodeMaoClient {
     }
 
     /// 创建分页迭代器
-    pub fn paginated(&self, endpoint: impl Into<String>) -> PaginatedIter {
+    pub fn build_paginated(&self, endpoint: impl Into<String>) -> PaginatedIter {
         PaginatedIter::new(self.clone(), endpoint)
     }
 

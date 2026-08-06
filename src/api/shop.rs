@@ -122,7 +122,7 @@ impl WorkshopDataFetcher {
         let endpoint = format!("/web/shops/{}/users", workshop_id);
         debug!("获取工作室成员迭代器: workshop_id={}", workshop_id);
         self.client
-            .paginated(&endpoint)
+            .build_paginated(&endpoint)
             .with_page_size(40)
             .with_total_key("total")
             .with_limit(limit.unwrap_or(40))
@@ -171,7 +171,7 @@ impl WorkshopDataFetcher {
         let endpoint = format!("/web/discussions/{}/comments", shop_id);
         debug!("获取工作室讨论迭代器: shop_id={}", shop_id);
         self.client
-            .paginated(&endpoint)
+            .build_paginated(&endpoint)
             .with_iter_param("source", source.unwrap_or(Source::WorkShop).as_str())
             .with_iter_param("sort", sort.unwrap_or_else(|| "-created_at".to_string()))
             .with_page_size(20)
@@ -192,7 +192,7 @@ impl WorkshopDataFetcher {
             workshop_id, user_id
         );
         self.client
-            .paginated(&endpoint)
+            .build_paginated(&endpoint)
             .with_page_size(20)
             .with_iter_param(
                 "sort",
@@ -218,7 +218,7 @@ impl WorkshopDataFetcher {
         let endpoint = format!("/web/works/subjects/labels/{}/posts", label_id);
         debug!("获取工作室帖子迭代器: label_id={}", label_id);
         self.client
-            .paginated(&endpoint)
+            .build_paginated(&endpoint)
             .with_page_size(20)
             .with_limit(limit.unwrap_or(20))
     }

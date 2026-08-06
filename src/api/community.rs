@@ -222,7 +222,7 @@ impl CommunityDataFetcher {
     /// 获取回复的分页迭代器
     pub fn fetch_replies_gen(&self, types: ReplyTypes, limit: Option<usize>) -> PaginatedIter {
         self.client
-            .paginated("/web/message-record")
+            .build_paginated("/web/message-record")
             .with_iter_param("query_type", types.as_str())
             .with_iter_method(HttpMethod::Get)
             .with_pagination_method(PaginationMethod::Offset)
@@ -568,7 +568,7 @@ impl CommunityDataFetcher {
     /// KN 公开课分页迭代器
     pub fn fetch_public_courses_gen(&self, limit: Option<usize>) -> PaginatedIter {
         self.client
-            .paginated("/neko/course/publish/list")
+            .build_paginated("/neko/course/publish/list")
             .with_page_size(10)
             .with_total_key("total_course")
             .with_data_key("course_page.items")
@@ -622,7 +622,7 @@ impl CommunityDataFetcher {
     /// Nemo 端教程合集分页迭代器
     pub fn fetch_course_packages_gen(&self, platform: i32, limit: Option<usize>) -> PaginatedIter {
         self.client
-            .paginated("/creation-tools/v1/course/package/list")
+            .build_paginated("/creation-tools/v1/course/package/list")
             .with_page_size(50)
             .with_iter_param("platform", platform.to_string())
             .with_limit(limit.unwrap_or(50))
@@ -635,7 +635,7 @@ impl CommunityDataFetcher {
         limit: Option<usize>,
     ) -> PaginatedIter {
         self.client
-            .paginated("/creation-tools/v1/course/list/search")
+            .build_paginated("/creation-tools/v1/course/list/search")
             .with_iter_param("course_package_id", course_package_id.to_string())
             .with_page_size(50)
             .with_data_key("course_page.items")
@@ -646,7 +646,7 @@ impl CommunityDataFetcher {
     pub fn fetch_teaching_plans_gen(&self, limit: usize) -> PaginatedIter {
         debug!("获取教学计划迭代器, limit={}", limit);
         self.client
-            .paginated("/neko/teaching-plan/list/team")
+            .build_paginated("/neko/teaching-plan/list/team")
             .with_limit(limit)
             .with_base_key(BaseKey::Creation)
     }
@@ -676,7 +676,7 @@ impl CommunityDataFetcher {
     /// 活动帖子分页迭代器
     pub fn fetch_studio_posts_gen(&self, studio_id: i32, limit: Option<usize>) -> PaginatedIter {
         self.client
-            .paginated("/web/forums/posts")
+            .build_paginated("/web/forums/posts")
             .with_page_size(50)
             .with_iter_param("studio_id", studio_id.to_string())
             .with_iter_param("sort", "-created_at")
@@ -687,7 +687,7 @@ impl CommunityDataFetcher {
     pub fn fetch_studio_courses_gen(&self, studio_id: i32, limit: Option<usize>) -> PaginatedIter {
         let endpoint = format!("/web/studios/{}/courses", studio_id);
         self.client
-            .paginated(&endpoint)
+            .build_paginated(&endpoint)
             .with_page_size(50)
             .with_limit(limit.unwrap_or(100))
     }
@@ -696,7 +696,7 @@ impl CommunityDataFetcher {
     pub fn fetch_studio_works_gen(&self, studio_id: i32, limit: Option<usize>) -> PaginatedIter {
         let endpoint = format!("/web/studios/{}/works", studio_id);
         self.client
-            .paginated(&endpoint)
+            .build_paginated(&endpoint)
             .with_page_size(50)
             .with_iter_param("sort", "-n_likes")
             .with_limit(limit.unwrap_or(24))
@@ -710,7 +710,7 @@ impl CommunityDataFetcher {
     ) -> PaginatedIter {
         let endpoint = format!("/web/studios/{}/participators", studio_id);
         self.client
-            .paginated(&endpoint)
+            .build_paginated(&endpoint)
             .with_page_size(50)
             .with_limit(limit.unwrap_or(24))
     }
@@ -898,7 +898,7 @@ impl UserAction {
         read_status: ReadStatus,
     ) -> PaginatedIter {
         self.client
-            .paginated("/web/message-record/broadcast")
+            .build_paginated("/web/message-record/broadcast")
             .with_page_size(1)
             .with_iter_param("read_status", read_status.as_str())
             .with_iter_param("sort", "-created_at")

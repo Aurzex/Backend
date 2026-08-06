@@ -159,7 +159,7 @@ impl UserDataFetcher {
         default_limit: usize,
     ) -> PaginatedIter {
         self.client
-            .paginated(endpoint)
+            .build_paginated(endpoint)
             .with_page_size(page_size)
             .with_limit(default_limit)
     }
@@ -360,7 +360,7 @@ impl UserDataFetcher {
             user_id, types
         );
         self.client
-            .paginated("/creation-tools/v2/user/center/work-list")
+            .build_paginated("/creation-tools/v2/user/center/work-list")
             .with_iter_param("type", types.unwrap_or(WorksListType::Newest).as_str())
             .with_iter_param("user_id", user_id.to_string())
             .with_page_size(5)
@@ -467,7 +467,7 @@ impl UserDataFetcher {
             version, status
         );
         self.client
-            .paginated("/kitten/common/work/list2")
+            .build_paginated("/kitten/common/work/list2")
             .with_page_size(30)
             .with_iter_param("version_no", version.as_str())
             .with_iter_param(
@@ -487,7 +487,7 @@ impl UserDataFetcher {
     ) -> PaginatedIter {
         debug!("获取Nemo作品迭代器: status={:?}", status);
         self.client
-            .paginated("/creation-tools/v1/works/list")
+            .build_paginated("/creation-tools/v1/works/list")
             .with_page_size(30)
             .with_iter_param("published_status", status.as_str())
             .with_limit(limit.unwrap_or(30))
@@ -506,7 +506,7 @@ impl UserDataFetcher {
             status, language_type
         );
         self.client
-            .paginated("/wood/comm/work/list")
+            .build_paginated("/wood/comm/work/list")
             .with_page_size(30)
             .with_iter_param("language_type", language_type.unwrap_or(0).to_string())
             .with_iter_param(
@@ -527,7 +527,7 @@ impl UserDataFetcher {
     ) -> PaginatedIter {
         debug!("获取Box作品迭代器: status={:?}", status);
         self.client
-            .paginated("/box/v2/work/list")
+            .build_paginated("/box/v2/work/list")
             .with_page_size(30)
             .with_iter_param(
                 "work_status",
@@ -546,7 +546,7 @@ impl UserDataFetcher {
     ) -> PaginatedIter {
         debug!("获取小说迭代器");
         self.client
-            .paginated("/web/fanfic/my/new")
+            .build_paginated("/web/fanfic/my/new")
             .with_page_size(30)
             .with_iter_param(
                 "fiction_status",
@@ -568,7 +568,7 @@ impl UserDataFetcher {
         );
         let mut paginated = self
             .client
-            .paginated("/coconut/web/work/list")
+            .build_paginated("/coconut/web/work/list")
             .with_page_size(30)
             .with_iter_param("status", status.unwrap_or(1).to_string())
             .with_data_key("data.items")
@@ -599,7 +599,7 @@ impl UserDataFetcher {
     pub fn fetch_followers_gen(&self, user_id: i32, limit: Option<usize>) -> PaginatedIter {
         debug!("获取粉丝迭代器: user_id={}", user_id);
         self.client
-            .paginated("/creation-tools/v1/user/fans")
+            .build_paginated("/creation-tools/v1/user/fans")
             .with_iter_param("user_id", user_id.to_string())
             .with_page_size(15)
             .with_total_key("total")
@@ -610,7 +610,7 @@ impl UserDataFetcher {
     pub fn fetch_following_gen(&self, user_id: i32, limit: Option<usize>) -> PaginatedIter {
         debug!("获取关注迭代器: user_id={}", user_id);
         self.client
-            .paginated("/creation-tools/v1/user/followers")
+            .build_paginated("/creation-tools/v1/user/followers")
             .with_iter_param("user_id", user_id.to_string())
             .with_page_size(15)
             .with_total_key("total")
@@ -677,7 +677,7 @@ impl UserDataFetcher {
     pub fn fetch_collections_gen(&self, user_id: i32, limit: Option<usize>) -> PaginatedIter {
         debug!("获取收藏作品迭代器: user_id={}", user_id);
         self.client
-            .paginated("/creation-tools/v2/user/center/collect/list")
+            .build_paginated("/creation-tools/v2/user/center/collect/list")
             .with_iter_param("user_id", user_id.to_string())
             .with_page_size(5)
             .with_total_key("total")

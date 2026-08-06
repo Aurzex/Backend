@@ -172,7 +172,7 @@ impl WhaleReportFetcher {
     /// 构建基础举报分页迭代器
     fn build_report_paginated(&self, endpoint: &str, default_limit: usize) -> PaginatedIter {
         self.client
-            .paginated(endpoint)
+            .build_paginated(endpoint)
             .with_base_key(BaseKey::Whale)
             .with_page_size(15)
             .with_pagination_method(PaginationMethod::Offset)

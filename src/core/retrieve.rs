@@ -548,7 +548,7 @@ impl DataQuery {
         total_key: &str,
         configure: impl FnOnce(PaginatedIter) -> PaginatedIter,
     ) -> Result<i32, DataQueryError> {
-        let mut paginated = configure(client.paginated(endpoint).with_total_key(total_key));
+        let mut paginated = configure(client.build_paginated(endpoint).with_total_key(total_key));
         paginated.fetch_metadata().map_err(DataQueryError::from)?;
         Ok(paginated.total_items().unwrap_or(0) as i32)
     }

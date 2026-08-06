@@ -927,7 +927,7 @@ impl CocoWorkManager {
         debug!("获取Coco自定义控件迭代器");
         let timestamp = current_timestamp_13();
         self.client
-            .paginated("/coconut/web/widget/list")
+            .build_paginated("/coconut/web/widget/list")
             .with_iter_param("TIME", timestamp.to_string())
             .with_iter_param("current_page", "1")
             .with_iter_param("page_size", "100")
@@ -1116,7 +1116,7 @@ impl CollaborationManager {
             work_id
         );
         self.client
-            .paginated(&endpoint)
+            .build_paginated(&endpoint)
             .with_iter_param("TIME", timestamp.to_string())
             .with_iter_param("current_page", "1")
             .with_iter_param("page_size", "100")
@@ -1172,7 +1172,7 @@ impl CollaborationManager {
         debug!("获取协作Coco作品迭代器");
         let timestamp = current_timestamp_13();
         self.client
-            .paginated("https://socketcoll.codemao.cn/coll/coco/coll_works")
+            .build_paginated("https://socketcoll.codemao.cn/coll/coco/coll_works")
             .with_iter_param("TIME", timestamp.to_string())
             .with_iter_param("current_page", "1")
             .with_iter_param("page_size", "40")
@@ -1658,7 +1658,7 @@ impl WorkDataFetcher {
     ) -> PaginatedIter {
         let timestamp = current_timestamp_13();
         self.client
-            .paginated(endpoint)
+            .build_paginated(endpoint)
             .with_iter_param("TIME", timestamp.to_string())
             .with_page_size(page_size)
             .with_limit(default_limit)

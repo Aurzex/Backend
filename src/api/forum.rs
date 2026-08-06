@@ -142,7 +142,7 @@ impl ForumDataFetcher {
         default_limit: usize,
     ) -> PaginatedIter {
         self.client
-            .paginated(endpoint)
+            .build_paginated(endpoint)
             .with_iter_param("page", "1")
             .with_page_size(page_size)
             .with_pagination_method(PaginationMethod::Page)
