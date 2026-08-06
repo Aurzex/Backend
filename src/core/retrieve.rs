@@ -204,9 +204,7 @@ impl CommentQueryBuilder {
     }
 
     /// 构建基础评论流(原始 `JsonValue`)
-    fn build_raw_stream(
-        &self,
-    ) -> Result<JsonValueIter, DataQueryError> {
+    fn build_raw_stream(&self) -> Result<JsonValueIter, DataQueryError> {
         let source = self
             .source
             .ok_or_else(|| DataQueryError::InvalidSource("未设置来源".into()))?;
@@ -273,16 +271,12 @@ impl CommentQueryBuilder {
     }
 
     /// 惰性获取评论原始数据流
-    pub fn stream_raw_comments(
-        self,
-    ) -> Result<JsonValueIter, DataQueryError> {
+    pub fn stream_raw_comments(self) -> Result<JsonValueIter, DataQueryError> {
         self.build_raw_stream()
     }
 
     /// 惰性获取去重后的用户ID流
-    pub fn stream_user_ids(
-        self,
-    ) -> Result<JsonStrIter, DataQueryError> {
+    pub fn stream_user_ids(self) -> Result<JsonStrIter, DataQueryError> {
         let source = self
             .source
             .ok_or_else(|| DataQueryError::InvalidSource("未设置来源".into()))?;
@@ -342,9 +336,7 @@ impl CommentQueryBuilder {
     }
 
     /// 惰性获取去重后的评论ID流,格式为 "主评论ID" 或 "主评论ID.回复ID"
-    pub fn stream_comment_ids(
-        self,
-    ) -> Result<JsonStrIter, DataQueryError> {
+    pub fn stream_comment_ids(self) -> Result<JsonStrIter, DataQueryError> {
         let source = self
             .source
             .ok_or_else(|| DataQueryError::InvalidSource("未设置来源".into()))?;
@@ -385,9 +377,7 @@ impl CommentQueryBuilder {
     }
 
     /// 惰性获取详细评论数据流,每个元素为一个精简的 `JsonObject`,包含其下所有回复
-    pub fn stream_detailed_comments(
-        self,
-    ) -> Result<JsonObjIter, DataQueryError> {
+    pub fn stream_detailed_comments(self) -> Result<JsonObjIter, DataQueryError> {
         let source = self
             .source
             .ok_or_else(|| DataQueryError::InvalidSource("未设置来源".into()))?;
@@ -606,10 +596,7 @@ impl DataQuery {
     }
 
     /// 合并 Nemo 和 Web 来源的作品数据流
-    pub fn stream_works_from_both_sources(
-        &self,
-        limit: i32,
-    ) -> JsonObjIter {
+    pub fn stream_works_from_both_sources(&self, limit: i32) -> JsonObjIter {
         let per_source_limit = Some(limit / 2);
 
         let nemo_field_mapping: HashMap<&str, &str> = [
@@ -662,8 +649,7 @@ impl DataQuery {
                         Ok(mapped_obj)
                     })
                     .collect();
-                Box::new(mapped.into_iter())
-                    as JsonObjIter
+                Box::new(mapped.into_iter()) as JsonObjIter
             }
             Err(e) => Box::new(std::iter::once::<Result<JsonObject, DataQueryError>>(Err(
                 DataQueryError::from(e),
@@ -900,10 +886,7 @@ impl DataQuery {
     /// 获取教育账号流(切换身份,重置密码)
     /// 为防止一次性加载过多学生造成 OOM,会限制最大学生数(默认 2000)
     /// 保持原始顺序,不再进行随机打乱
-    pub fn stream_edu_accounts_with_reset_passwords(
-        &self,
-        limit: Option<usize>,
-    ) -> JsonPairIter {
+    pub fn stream_edu_accounts_with_reset_passwords(&self, limit: Option<usize>) -> JsonPairIter {
         const MAX_EDU_STUDENTS: usize = 2000;
 
         if let Err(e) = CodeMaoClient::global().switch_identity(Catsona::Scholar) {
@@ -949,11 +932,7 @@ impl DataQuery {
     }
 
     /// 获取社区新回复流(惰性迭代器)
-    pub fn stream_new_replies(
-        &self,
-        reply_type: ReplyTypes,
-        limit: i32,
-    ) -> JsonObjIter {
+    pub fn stream_new_replies(&self, reply_type: ReplyTypes, limit: i32) -> JsonObjIter {
         let total = match CommunityDataFetcher::new()
             .fetch_message_count(MessageMethod::Web)
             .map_err(DataQueryError::from)

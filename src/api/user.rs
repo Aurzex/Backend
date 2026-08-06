@@ -414,8 +414,8 @@ impl UserDataFetcher {
             .client
             .build_request(
                 HttpMethod::Get,
-                "https://api-wechatsbp-codemaster.codemao.cn/user/info/certificate",
-                None,
+                "/user/info/certificate",
+                Some(BaseKey::WeChatSbp),
             )
             .with_param("user_id", user_id.to_string());
         self.send_and_parse(builder)

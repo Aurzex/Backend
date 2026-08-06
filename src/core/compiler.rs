@@ -2426,8 +2426,7 @@ impl WorkDecompiler for KittenDecompiler {
         }
 
         // 写回处理后的 scenes
-        if had_scenes
-            && let Some(theatre) = work.get_mut("theatre").and_then(|t| t.as_object_mut())
+        if had_scenes && let Some(theatre) = work.get_mut("theatre").and_then(|t| t.as_object_mut())
         {
             theatre.insert("scenes".to_string(), Value::Object(scenes));
         }

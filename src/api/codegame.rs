@@ -1,4 +1,4 @@
-use crate::utils::acquire::{CodeMaoClient, HTTPStatus, HttpMethod, MewResult};
+use crate::utils::acquire::{BaseKey, CodeMaoClient, HTTPStatus, HttpMethod, MewResult};
 use log::debug;
 use serde_json::{Value, json};
 
@@ -21,11 +21,7 @@ impl OverseaDataClient {
         debug!("获取海外 Tiger 账号信息");
         let response = self
             .client
-            .build_request(
-                HttpMethod::Get,
-                "https://oversea-api.code.game/tiger/accounts",
-                None,
-            )
+            .build_request(HttpMethod::Get, "/tiger/accounts", Some(BaseKey::CodeGame))
             .send()?;
         self.client.response_to_json(response)
     }
@@ -35,11 +31,7 @@ impl OverseaDataClient {
         debug!("获取海外平台配置");
         let response = self
             .client
-            .build_request(
-                HttpMethod::Get,
-                "https://oversea-api.code.game/config",
-                None,
-            )
+            .build_request(HttpMethod::Get, "/config", Some(BaseKey::CodeGame))
             .send()?;
         self.client.response_to_json(response)
     }
@@ -109,8 +101,8 @@ impl UserActionHandler {
             .client
             .build_request(
                 HttpMethod::Post,
-                "https://oversea-api.code.game/tiger/accounts/register/email",
-                None,
+                "/tiger/accounts/register/email",
+                Some(BaseKey::CodeGame),
             )
             .with_payload(payload)
             .send()?;
@@ -137,8 +129,8 @@ impl UserActionHandler {
             .client
             .build_request(
                 HttpMethod::Post,
-                "https://oversea-api.code.game/tiger/accounts/login",
-                None,
+                "/tiger/accounts/login",
+                Some(BaseKey::CodeGame),
             )
             .with_payload(payload)
             .send()?;

@@ -1,5 +1,5 @@
 use crate::utils::acquire::{
-    ClientAccess, CodeMaoClient, HTTPStatus, HttpMethod, KittyRequestBuilder, MewResult,
+    BaseKey, ClientAccess, CodeMaoClient, HTTPStatus, HttpMethod, KittyRequestBuilder, MewResult,
     PaginatedIter, PaginationMethod, current_timestamp_13,
 };
 use log::debug;
@@ -60,8 +60,8 @@ impl EduUserAction {
             .client
             .build_request(
                 HttpMethod::Get,
-                "https://eduzone.codemao.cn/edu/zone/account/updateName",
-                None,
+                "/edu/zone/account/updateName",
+                Some(BaseKey::Education),
             )
             .with_param("TIME", timestamp.to_string())
             .with_param("userId", user_id.to_string())
@@ -77,8 +77,8 @@ impl EduUserAction {
             .client
             .build_request(
                 HttpMethod::Post,
-                "https://eduzone.codemao.cn/edu/zone/class",
-                None,
+                "/edu/zone/class",
+                Some(BaseKey::Education),
             )
             .with_payload(data)
             .send()?;
@@ -90,10 +90,10 @@ impl EduUserAction {
         debug!("重命名班级: class_id={}, new_name={}", class_id, class_name);
         let timestamp = current_timestamp_13();
         let data = json!({ "name": class_name });
-        let endpoint = format!("https://eduzone.codemao.cn/edu/zone/class/{}", class_id);
+        let endpoint = format!("/edu/zone/class/{}", class_id);
         let builder = self
             .client
-            .build_request(HttpMethod::Patch, &endpoint, None)
+            .build_request(HttpMethod::Patch, &endpoint, Some(BaseKey::Education))
             .with_param("TIME", timestamp.to_string())
             .with_payload(data);
         self.check_status(builder, HTTPStatus::NoContent)
@@ -103,10 +103,10 @@ impl EduUserAction {
     pub fn delete_class(&self, class_id: i32) -> MewResult<bool> {
         debug!("删除班级: class_id={}", class_id);
         let timestamp = current_timestamp_13();
-        let endpoint = format!("https://eduzone.codemao.cn/edu/zone/class/{}", class_id);
+        let endpoint = format!("/edu/zone/class/{}", class_id);
         let builder = self
             .client
-            .build_request(HttpMethod::Delete, &endpoint, None)
+            .build_request(HttpMethod::Delete, &endpoint, Some(BaseKey::Education))
             .with_param("TIME", timestamp.to_string());
         self.check_status(builder, HTTPStatus::NoContent)
     }
@@ -115,13 +115,10 @@ impl EduUserAction {
     pub fn add_students_to_class(&self, names: &[String], class_id: i32) -> MewResult<bool> {
         debug!("添加学生到班级: class_id={}, names={:?}", class_id, names);
         let data = json!({ "student_names": names });
-        let endpoint = format!(
-            "https://eduzone.codemao.cn/edu/zone/class/{}/students",
-            class_id
-        );
+        let endpoint = format!("/edu/zone/class/{}/students", class_id);
         let builder = self
             .client
-            .build_request(HttpMethod::Post, &endpoint, None)
+            .build_request(HttpMethod::Post, &endpoint, Some(BaseKey::Education))
             .with_payload(data);
         self.check_status(builder, HTTPStatus::Ok)
     }
@@ -129,13 +126,10 @@ impl EduUserAction {
     /// 重置学生密码
     pub fn reset_student_password(&self, stu_id: i32) -> MewResult<Value> {
         debug!("重置学生密码: stu_id={}", stu_id);
-        let endpoint = format!(
-            "https://eduzone.codemao.cn/edu/zone/students/{}/password",
-            stu_id
-        );
+        let endpoint = format!("/edu/zone/students/{}/password", stu_id);
         let response = self
             .client
-            .build_request(HttpMethod::Patch, &endpoint, None)
+            .build_request(HttpMethod::Patch, &endpoint, Some(BaseKey::Education))
             .with_payload(json!({}))
             .send()?;
         self.client.response_to_json(response)
@@ -149,8 +143,8 @@ impl EduUserAction {
             .client
             .build_request(
                 HttpMethod::Patch,
-                "https://eduzone.codemao.cn/edu/zone/students/password",
-                None,
+                "/edu/zone/students/password",
+                Some(BaseKey::Education),
             )
             .with_payload(data)
             .send()?;
@@ -160,13 +154,10 @@ impl EduUserAction {
     /// 从班级移除学生
     pub fn delete_student_from_class(&self, stu_id: i32) -> MewResult<bool> {
         debug!("从班级移除学生: stu_id={}", stu_id);
-        let endpoint = format!(
-            "https://eduzone.codemao.cn/edu/zone/student/remove/{}",
-            stu_id
-        );
+        let endpoint = format!("/edu/zone/student/remove/{}", stu_id);
         let builder = self
             .client
-            .build_request(HttpMethod::Post, &endpoint, None)
+            .build_request(HttpMethod::Post, &endpoint, Some(BaseKey::Education))
             .with_payload(json!({}));
         self.check_status(builder, HTTPStatus::Ok)
     }
@@ -190,8 +181,8 @@ impl EduUserAction {
             .client
             .build_request(
                 method,
-                "https://eduzone.codemao.cn/edu/zone/lesson/customized/packages",
-                None,
+                "/edu/zone/lesson/customized/packages",
+                Some(BaseKey::Education),
             )
             .with_payload(data)
             .send()?;
@@ -205,13 +196,10 @@ impl EduUserAction {
     /// 删除作品
     pub fn delete_work(&self, work_id: i32) -> MewResult<bool> {
         debug!("删除作品: work_id={}", work_id);
-        let endpoint = format!(
-            "https://eduzone.codemao.cn/edu/zone/work/{}/delete",
-            work_id
-        );
+        let endpoint = format!("/edu/zone/work/{}/delete", work_id);
         let builder = self
             .client
-            .build_request(HttpMethod::Post, &endpoint, None)
+            .build_request(HttpMethod::Post, &endpoint, Some(BaseKey::Education))
             .with_payload(json!({}));
         self.check_status(builder, HTTPStatus::Ok)
     }
@@ -219,13 +207,10 @@ impl EduUserAction {
     /// 将学生转移到未分班
     pub fn execute_transfer_to_unassigned(&self, class_id: i32, stu_id: i32) -> MewResult<bool> {
         debug!("转移学生到未分班: class_id={}, stu_id={}", class_id, stu_id);
-        let endpoint = format!(
-            "https://eduzone.codemao.cn/edu/zone/class/{}/students",
-            class_id
-        );
+        let endpoint = format!("/edu/zone/class/{}/students", class_id);
         let builder = self
             .client
-            .build_request(HttpMethod::Delete, &endpoint, None)
+            .build_request(HttpMethod::Delete, &endpoint, Some(BaseKey::Education))
             .with_param("student_ids[]", stu_id.to_string());
         self.check_status(builder, HTTPStatus::NoContent)
     }
@@ -238,8 +223,8 @@ impl EduUserAction {
             .client
             .build_request(
                 HttpMethod::Post,
-                "https://eduzone.codemao.cn/edu/zone/activity/open/package",
-                None,
+                "/edu/zone/activity/open/package",
+                Some(BaseKey::Education),
             )
             .with_payload(data)
             .send()?;
@@ -253,8 +238,8 @@ impl EduUserAction {
             .client
             .build_request(
                 HttpMethod::Post,
-                "https://eduzone.codemao.cn/edu/zone/activity/list/activity/package",
-                None,
+                "/edu/zone/activity/list/activity/package",
+                Some(BaseKey::Education),
             )
             .with_payload(json!({}))
             .send()?;
@@ -268,8 +253,8 @@ impl EduUserAction {
             .client
             .build_request(
                 HttpMethod::Post,
-                "https://eduzone.codemao.cn/edu/zone/invite/message/all/read",
-                None,
+                "/edu/zone/invite/message/all/read",
+                Some(BaseKey::Education),
             )
             .with_payload(json!({}));
         self.check_status(builder, HTTPStatus::Ok)
@@ -294,8 +279,8 @@ impl EduUserAction {
             .client
             .build_request(
                 HttpMethod::Patch,
-                "https://eduzone.codemao.cn/edu/zone/work/manager/works/scores",
-                None,
+                "/edu/zone/work/manager/works/scores",
+                Some(BaseKey::Education),
             )
             .with_payload(data);
         self.check_status(builder, HTTPStatus::NoContent)
@@ -314,13 +299,10 @@ impl EduUserAction {
             "type": types,
             "classId": class_id
         });
-        let endpoint = format!(
-            "https://eduzone.codemao.cn/edu/zone/class/{}/students/invite",
-            class_id
-        );
+        let endpoint = format!("/edu/zone/class/{}/students/invite", class_id);
         let builder = self
             .client
-            .build_request(HttpMethod::Post, &endpoint, None)
+            .build_request(HttpMethod::Post, &endpoint, Some(BaseKey::Education))
             .with_payload(data);
         self.check_status(builder, HTTPStatus::Ok)
     }
@@ -328,13 +310,10 @@ impl EduUserAction {
     /// 接受班级邀请
     pub fn execute_accept_class_invite(&self, message_id: i32) -> MewResult<bool> {
         debug!("接受班级邀请: message_id={}", message_id);
-        let endpoint = format!(
-            "https://eduzone.codemao.cn/edu/zone/invite/student/message/{}/accept",
-            message_id
-        );
+        let endpoint = format!("/edu/zone/invite/student/message/{}/accept", message_id);
         let builder = self
             .client
-            .build_request(HttpMethod::Post, &endpoint, None)
+            .build_request(HttpMethod::Post, &endpoint, Some(BaseKey::Education))
             .with_payload(json!({}));
         self.check_status(builder, HTTPStatus::Ok)
     }
@@ -362,8 +341,8 @@ impl EduUserAction {
             .client
             .build_request(
                 HttpMethod::Post,
-                "https://eduzone.codemao.cn/edu/zone/sign/login/teacher/info/improve",
-                None,
+                "/edu/zone/sign/login/teacher/info/improve",
+                Some(BaseKey::Education),
             )
             .with_payload(data);
         self.check_status(builder, HTTPStatus::Ok)
@@ -419,6 +398,7 @@ impl EduDataFetcher {
     ) -> PaginatedIter {
         self.client
             .build_paginated(endpoint)
+            .with_base_key(BaseKey::Education)
             .with_iter_param("page", "1")
             .with_page_size(page_size)
             .with_pagination_method(PaginationMethod::Page)
@@ -434,7 +414,7 @@ impl EduDataFetcher {
         debug!("获取用户基本信息");
         let builder =
             self.client
-                .build_request(HttpMethod::Get, "https://eduzone.codemao.cn/edu/zone", None);
+                .build_request(HttpMethod::Get, "/edu/zone", Some(BaseKey::Education));
         let builder = Self::add_timestamp_to_builder(builder);
         self.send_and_parse(builder)
     }
@@ -444,8 +424,8 @@ impl EduDataFetcher {
         debug!("获取账号角色");
         let builder = self.client.build_request(
             HttpMethod::Get,
-            "https://eduzone.codemao.cn/api/home/account",
-            None,
+            "/api/home/account",
+            Some(BaseKey::Education),
         );
         let builder = Self::add_timestamp_to_builder(builder);
         self.send_and_parse(builder)
@@ -456,8 +436,8 @@ impl EduDataFetcher {
         debug!("获取未读消息数量");
         let builder = self.client.build_request(
             HttpMethod::Get,
-            "https://eduzone.codemao.cn/edu/zone/system/message/unread/num",
-            None,
+            "/edu/zone/system/message/unread/num",
+            Some(BaseKey::Education),
         );
         let builder = Self::add_timestamp_to_builder(builder);
         self.send_and_parse(builder)
@@ -466,11 +446,8 @@ impl EduDataFetcher {
     /// 系统通知分页迭代器
     pub fn fetch_notices_gen(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取系统通知迭代器");
-        let mut paginated = self.build_paginated(
-            "https://eduzone.codemao.cn/edu/zone/system/message/list",
-            10,
-            limit.unwrap_or(10),
-        );
+        let mut paginated =
+            self.build_paginated("/edu/zone/system/message/list", 10, limit.unwrap_or(10));
         paginated = Self::add_timestamp_to_paginated(paginated);
         paginated
     }
@@ -478,11 +455,8 @@ impl EduDataFetcher {
     /// 教师提醒消息分页迭代器
     pub fn fetch_reminders_gen(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取教师提醒迭代器");
-        let mut paginated = self.build_paginated(
-            "https://eduzone.codemao.cn/edu/zone/invite/teacher/messages",
-            10,
-            limit.unwrap_or(10),
-        );
+        let mut paginated =
+            self.build_paginated("/edu/zone/invite/teacher/messages", 10, limit.unwrap_or(10));
         paginated = Self::add_timestamp_to_paginated(paginated);
         paginated
     }
@@ -492,8 +466,8 @@ impl EduDataFetcher {
         debug!("获取学校年级列表");
         let builder = self.client.build_request(
             HttpMethod::Get,
-            "https://eduzone.codemao.cn/edu/zone/school/open/grade/list",
-            None,
+            "/edu/zone/school/open/grade/list",
+            Some(BaseKey::Education),
         );
         let builder = Self::add_timestamp_to_builder(builder);
         self.send_and_parse(builder)
@@ -506,8 +480,8 @@ impl EduDataFetcher {
             .client
             .build_request(
                 HttpMethod::Get,
-                "https://eduzone.codemao.cn/edu/zone/classes/simple",
-                None,
+                "/edu/zone/classes/simple",
+                Some(BaseKey::Education),
             )
             .send()?;
         self.client.response_to_json(response)
@@ -522,7 +496,7 @@ impl EduDataFetcher {
         debug!("获取班级详细迭代器: class_name={:?}", class_name);
         let mut paginated = self
             .build_paginated(
-                "https://eduzone.codemao.cn/edu/zone/classes/",
+                "/edu/zone/classes/",
                 20, // 默认页面大小 20
                 limit.unwrap_or(20),
             )
@@ -537,11 +511,8 @@ impl EduDataFetcher {
     /// 学生移除记录分页迭代器
     pub fn fetch_student_removal_records_gen(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取学生移除记录迭代器");
-        let mut paginated = self.build_paginated(
-            "https://eduzone.codemao.cn/edu/zone/student/remove/record",
-            10,
-            limit.unwrap_or(10),
-        );
+        let mut paginated =
+            self.build_paginated("/edu/zone/student/remove/record", 10, limit.unwrap_or(10));
         paginated = Self::add_timestamp_to_paginated(paginated);
         paginated
     }
@@ -552,7 +523,8 @@ impl EduDataFetcher {
         let data = json!({ "invalid": invalid });
 
         self.client
-            .build_paginated("https://eduzone.codemao.cn/edu/zone/students")
+            .build_paginated("/edu/zone/students")
+            .with_base_key(BaseKey::Education)
             .with_iter_param("page", "1")
             .with_page_size(100)
             .with_iter_payload(data)
@@ -568,8 +540,8 @@ impl EduDataFetcher {
         debug!("获取导航菜单");
         let builder = self.client.build_request(
             HttpMethod::Get,
-            "https://eduzone.codemao.cn/api/home/eduzone/menus",
-            None,
+            "/api/home/eduzone/menus",
+            Some(BaseKey::Education),
         );
         let builder = Self::add_timestamp_to_builder(builder);
         self.send_and_parse(builder)
@@ -582,8 +554,8 @@ impl EduDataFetcher {
             .client
             .build_request(
                 HttpMethod::Get,
-                "https://eduzone.codemao.cn/api/home/banners",
-                None,
+                "/api/home/banners",
+                Some(BaseKey::Education),
             )
             .with_param("type_id", type_id.to_string());
         let builder = Self::add_timestamp_to_builder(builder);
@@ -595,8 +567,8 @@ impl EduDataFetcher {
         debug!("获取服务器时间");
         let builder = self.client.build_request(
             HttpMethod::Get,
-            "https://eduzone.codemao.cn/edu/base/server/time",
-            None,
+            "/edu/base/server/time",
+            Some(BaseKey::Education),
         );
         let builder = Self::add_timestamp_to_builder(builder);
         self.send_and_parse(builder)
@@ -607,8 +579,8 @@ impl EduDataFetcher {
         debug!("获取课程包提醒状态");
         let builder = self.client.build_request(
             HttpMethod::Get,
-            "https://eduzone.codemao.cn/edu/zone/lessons/person/package/remind/status",
-            None,
+            "/edu/zone/lessons/person/package/remind/status",
+            Some(BaseKey::Education),
         );
         let builder = Self::add_timestamp_to_builder(builder);
         self.send_and_parse(builder)
@@ -621,8 +593,8 @@ impl EduDataFetcher {
             .client
             .build_request(
                 HttpMethod::Get,
-                "https://eduzone.codemao.cn/edu/base/general/conf",
-                None,
+                "/edu/base/general/conf",
+                Some(BaseKey::Education),
             )
             .with_param("tag", tag);
         let builder = Self::add_timestamp_to_builder(builder);
@@ -634,8 +606,8 @@ impl EduDataFetcher {
         debug!("获取扩展用户资料");
         let builder = self.client.build_request(
             HttpMethod::Get,
-            "https://eduzone.codemao.cn/edu/zone/user-extend/info",
-            None,
+            "/edu/zone/user-extend/info",
+            Some(BaseKey::Education),
         );
         let builder = Self::add_timestamp_to_builder(builder);
         self.send_and_parse(builder)
@@ -646,8 +618,8 @@ impl EduDataFetcher {
         debug!("获取操作日志");
         let builder = self.client.build_request(
             HttpMethod::Get,
-            "https://eduzone.codemao.cn/edu/zone/operation/records",
-            None,
+            "/edu/zone/operation/records",
+            Some(BaseKey::Education),
         );
         let builder = Self::add_timestamp_to_builder(builder);
         self.send_and_parse(builder)
@@ -658,8 +630,8 @@ impl EduDataFetcher {
         debug!("获取教学提醒状态");
         let builder = self.client.build_request(
             HttpMethod::Get,
-            "https://eduzone.codemao.cn/edu/zone/teaching/class/remind",
-            None,
+            "/edu/zone/teaching/class/remind",
+            Some(BaseKey::Education),
         );
         let builder = Self::add_timestamp_to_builder(builder);
         self.send_and_parse(builder)
@@ -670,8 +642,8 @@ impl EduDataFetcher {
         debug!("获取仪表盘统计数据");
         let builder = self.client.build_request(
             HttpMethod::Get,
-            "https://eduzone.codemao.cn/edu/zone/homepage/statistic",
-            None,
+            "/edu/zone/homepage/statistic",
+            Some(BaseKey::Education),
         );
         let builder = Self::add_timestamp_to_builder(builder);
         self.send_and_parse(builder)
@@ -682,8 +654,8 @@ impl EduDataFetcher {
         debug!("获取工具箱菜单");
         let builder = self.client.build_request(
             HttpMethod::Get,
-            "https://eduzone.codemao.cn/edu/zone/homepage/menus",
-            None,
+            "/edu/zone/homepage/menus",
+            Some(BaseKey::Education),
         );
         let builder = Self::add_timestamp_to_builder(builder);
         self.send_and_parse(builder)
@@ -694,7 +666,7 @@ impl EduDataFetcher {
         debug!("获取所有作品迭代器");
         let mut paginated = self
             .build_paginated(
-                "https://eduzone.codemao.cn/edu/zone/work/manager/student/works",
+                "/edu/zone/work/manager/student/works",
                 50,
                 limit.unwrap_or(50),
             )
@@ -707,11 +679,7 @@ impl EduDataFetcher {
     pub fn fetch_managed_works_gen(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取管理作品迭代器");
         let mut paginated = self
-            .build_paginated(
-                "https://eduzone.codemao.cn/edu/zone/work/manager/works",
-                50,
-                limit.unwrap_or(50),
-            )
+            .build_paginated("/edu/zone/work/manager/works", 50, limit.unwrap_or(50))
             .with_response_amount_key("limit");
         paginated = Self::add_timestamp_to_paginated(paginated);
         paginated
@@ -721,11 +689,7 @@ impl EduDataFetcher {
     pub fn fetch_personal_works_gen(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取个人作品迭代器");
         let mut paginated = self
-            .build_paginated(
-                "https://eduzone.codemao.cn/edu/zone/work/manager/self/works",
-                50,
-                limit.unwrap_or(50),
-            )
+            .build_paginated("/edu/zone/work/manager/self/works", 50, limit.unwrap_or(50))
             .with_response_amount_key("limit");
         paginated = Self::add_timestamp_to_paginated(paginated);
         paginated
@@ -746,8 +710,8 @@ impl EduDataFetcher {
             .client
             .build_request(
                 HttpMethod::Get,
-                "https://eduzone.codemao.cn/edu/zone/work/manager/works/statistics",
-                None,
+                "/edu/zone/work/manager/works/statistics",
+                Some(BaseKey::Education),
             )
             .with_param("year", year.to_string())
             .with_param("month", format!("{:02}", month));
@@ -761,11 +725,8 @@ impl EduDataFetcher {
     /// 教学记录分页迭代器
     pub fn fetch_teaching_records_gen(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取教学记录迭代器");
-        let mut paginated = self.build_paginated(
-            "https://eduzone.codemao.cn/edu/zone/teaching/record/list",
-            10,
-            limit.unwrap_or(10),
-        );
+        let mut paginated =
+            self.build_paginated("/edu/zone/teaching/record/list", 10, limit.unwrap_or(10));
         paginated = Self::add_timestamp_to_paginated(paginated);
         paginated
     }
@@ -775,8 +736,8 @@ impl EduDataFetcher {
         debug!("获取教师班级列表");
         let builder = self.client.build_request(
             HttpMethod::Get,
-            "https://eduzone.codemao.cn/edu/zone/teaching/class/teacher/list",
-            None,
+            "/edu/zone/teaching/class/teacher/list",
+            Some(BaseKey::Education),
         );
         let builder = Self::add_timestamp_to_builder(builder);
         self.send_and_parse(builder)
@@ -789,8 +750,8 @@ impl EduDataFetcher {
             .client
             .build_request(
                 HttpMethod::Get,
-                "https://eduzone.codemao.cn/edu/zone/school/info",
-                None,
+                "/edu/zone/school/info",
+                Some(BaseKey::Education),
             )
             .with_param("unitId", unit_id.to_string());
         let builder = Self::add_timestamp_to_builder(builder);
@@ -802,7 +763,8 @@ impl EduDataFetcher {
         debug!("获取官方课程包迭代器");
         let mut paginated = self
             .client
-            .build_paginated("https://eduzone.codemao.cn/edu/zone/lesson/offical/packages")
+            .build_paginated("/edu/zone/lesson/offical/packages")
+            .with_base_key(BaseKey::Education)
             .with_iter_param("pacakgeEntryType", "0")
             .with_iter_param("topicType", "all")
             .with_iter_param("topicId", "all")
@@ -824,8 +786,8 @@ impl EduDataFetcher {
             .client
             .build_request(
                 HttpMethod::Get,
-                "https://eduzone.codemao.cn/edu/zone/lessons/official/packages/topics",
-                None,
+                "/edu/zone/lessons/official/packages/topics",
+                Some(BaseKey::Education),
             )
             .with_param("pacakgeEntryType", "0")
             .with_param("topicType", "all");
@@ -840,8 +802,8 @@ impl EduDataFetcher {
             .client
             .build_request(
                 HttpMethod::Get,
-                "https://eduzone.codemao.cn/edu/zone/lessons/official/packages/topics/all/tags",
-                None,
+                "/edu/zone/lessons/official/packages/topics/all/tags",
+                Some(BaseKey::Education),
             )
             .with_param("pacakgeEntryType", "0")
             .with_param("topicType", "all");
@@ -853,7 +815,7 @@ impl EduDataFetcher {
     pub fn fetch_custom_lesson_packages_gen(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取自定义课程包迭代器");
         let mut paginated = self.build_paginated(
-            "https://eduzone.codemao.cn/edu/zone/lesson/offical/packages",
+            "/edu/zone/lesson/offical/packages",
             100,
             limit.unwrap_or(100),
         );
@@ -871,11 +833,10 @@ impl EduDataFetcher {
             "获取/删除自定义课程包: package_id={}, method={:?}",
             package_id, method
         );
-        let endpoint = format!(
-            "https://eduzone.codemao.cn/edu/zone/lesson/customized/packages/{}",
-            package_id
-        );
-        let builder = self.client.build_request(method, &endpoint, None);
+        let endpoint = format!("/edu/zone/lesson/customized/packages/{}", package_id);
+        let builder = self
+            .client
+            .build_request(method, &endpoint, Some(BaseKey::Education));
         let builder = Self::add_timestamp_to_builder(builder);
         let response = builder.send()?;
         if method == HttpMethod::Get {
@@ -895,8 +856,8 @@ impl EduDataFetcher {
             .client
             .build_request(
                 HttpMethod::Get,
-                "https://eduzone.codemao.cn/edu/zone/lesson/customized/package/lessons",
-                None,
+                "/edu/zone/lesson/customized/package/lessons",
+                Some(BaseKey::Education),
             )
             .with_param("limit", limit.to_string())
             .with_param("package_id", package_id.to_string());
@@ -909,8 +870,8 @@ impl EduDataFetcher {
         debug!("获取班级邀请");
         let builder = self.client.build_request(
             HttpMethod::Get,
-            "https://eduzone.codemao.cn/edu/zone/invite/student/message/next",
-            None,
+            "/edu/zone/invite/student/message/next",
+            Some(BaseKey::Education),
         );
         let builder = Self::add_timestamp_to_builder(builder);
         self.send_and_parse(builder)
@@ -921,8 +882,8 @@ impl EduDataFetcher {
         debug!("获取即将过期课程包");
         let builder = self.client.build_request(
             HttpMethod::Get,
-            "https://eduzone.codemao.cn/edu/zone/lesson/offical/packages/expired",
-            None,
+            "/edu/zone/lesson/offical/packages/expired",
+            Some(BaseKey::Education),
         );
         let builder = Self::add_timestamp_to_builder(builder);
         self.send_and_parse(builder)
@@ -937,7 +898,7 @@ impl EduDataFetcher {
             .build_request(
                 HttpMethod::Get,
                 "https://static.codemao.cn/teacher-edu/organization_ids.json",
-                None,
+                Some(BaseKey::Education),
             )
             .with_param("CMTIME", timestamp.to_string())
             .send()?;
@@ -951,8 +912,8 @@ impl EduDataFetcher {
         debug!("获取报告元数据");
         let builder = self.client.build_request(
             HttpMethod::Get,
-            "https://eduzone.codemao.cn/edu/zone/analysis/report/info",
-            None,
+            "/edu/zone/analysis/report/info",
+            Some(BaseKey::Education),
         );
         let builder = Self::add_timestamp_to_builder(builder);
         self.send_and_parse(builder)
@@ -963,8 +924,8 @@ impl EduDataFetcher {
         debug!("获取课程分析");
         let builder = self.client.build_request(
             HttpMethod::Get,
-            "https://eduzone.codemao.cn/edu/zone/analysis/student/course",
-            None,
+            "/edu/zone/analysis/student/course",
+            Some(BaseKey::Education),
         );
         let builder = Self::add_timestamp_to_builder(builder);
         self.send_and_parse(builder)
@@ -975,8 +936,8 @@ impl EduDataFetcher {
         debug!("获取课程包分析");
         let builder = self.client.build_request(
             HttpMethod::Get,
-            "https://eduzone.codemao.cn/edu/zone/analysis/student/packages",
-            None,
+            "/edu/zone/analysis/student/packages",
+            Some(BaseKey::Education),
         );
         let builder = Self::add_timestamp_to_builder(builder);
         self.send_and_parse(builder)
@@ -987,8 +948,8 @@ impl EduDataFetcher {
         debug!("获取班级分析");
         let builder = self.client.build_request(
             HttpMethod::Get,
-            "https://eduzone.codemao.cn/edu/zone/analysis/student/class/info",
-            None,
+            "/edu/zone/analysis/student/class/info",
+            Some(BaseKey::Education),
         );
         let builder = Self::add_timestamp_to_builder(builder);
         self.send_and_parse(builder)
@@ -999,8 +960,8 @@ impl EduDataFetcher {
         debug!("获取作品表现");
         let builder = self.client.build_request(
             HttpMethod::Get,
-            "https://eduzone.codemao.cn/edu/zone/analysis/student/works/situations",
-            None,
+            "/edu/zone/analysis/student/works/situations",
+            Some(BaseKey::Education),
         );
         let builder = Self::add_timestamp_to_builder(builder);
         self.send_and_parse(builder)
@@ -1011,8 +972,8 @@ impl EduDataFetcher {
         debug!("获取作品评分分布");
         let builder = self.client.build_request(
             HttpMethod::Get,
-            "https://eduzone.codemao.cn/edu/zone/analysis/student/works/star/info",
-            None,
+            "/edu/zone/analysis/student/works/star/info",
+            Some(BaseKey::Education),
         );
         let builder = Self::add_timestamp_to_builder(builder);
         self.send_and_parse(builder)
@@ -1023,8 +984,8 @@ impl EduDataFetcher {
         debug!("获取技能评估维度");
         let builder = self.client.build_request(
             HttpMethod::Get,
-            "https://eduzone.codemao.cn/edu/zone/analysis/student/ability/dimensions",
-            None,
+            "/edu/zone/analysis/student/ability/dimensions",
+            Some(BaseKey::Education),
         );
         let builder = Self::add_timestamp_to_builder(builder);
         self.send_and_parse(builder)
@@ -1035,8 +996,8 @@ impl EduDataFetcher {
         debug!("获取技能雷达图");
         let builder = self.client.build_request(
             HttpMethod::Get,
-            "https://eduzone.codemao.cn/edu/zone/analysis/student/ability/radars",
-            None,
+            "/edu/zone/analysis/student/ability/radars",
+            Some(BaseKey::Education),
         );
         let builder = Self::add_timestamp_to_builder(builder);
         self.send_and_parse(builder)
@@ -1047,8 +1008,8 @@ impl EduDataFetcher {
         debug!("获取艺术技能维度");
         let builder = self.client.build_request(
             HttpMethod::Get,
-            "https://eduzone.codemao.cn/edu/zone/analysis/student/ability/artistic/dimensions",
-            None,
+            "/edu/zone/analysis/student/ability/artistic/dimensions",
+            Some(BaseKey::Education),
         );
         let builder = Self::add_timestamp_to_builder(builder);
         self.send_and_parse(builder)
@@ -1059,8 +1020,8 @@ impl EduDataFetcher {
         debug!("获取逻辑技能维度");
         let builder = self.client.build_request(
             HttpMethod::Get,
-            "https://eduzone.codemao.cn/edu/zone/analysis/student/ability/logical/dimensions",
-            None,
+            "/edu/zone/analysis/student/ability/logical/dimensions",
+            Some(BaseKey::Education),
         );
         let builder = Self::add_timestamp_to_builder(builder);
         self.send_and_parse(builder)
@@ -1071,8 +1032,8 @@ impl EduDataFetcher {
         debug!("获取编程技能维度");
         let builder = self.client.build_request(
             HttpMethod::Get,
-            "https://eduzone.codemao.cn/edu/zone/analysis/student/ability/programming/dimensions",
-            None,
+            "/edu/zone/analysis/student/ability/programming/dimensions",
+            Some(BaseKey::Education),
         );
         let builder = Self::add_timestamp_to_builder(builder);
         self.send_and_parse(builder)

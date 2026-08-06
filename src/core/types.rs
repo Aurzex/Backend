@@ -333,7 +333,9 @@ impl ReportTypeRegistry {
     }
 
     pub fn is_action_available(&self, report_type: &str, action_key: &str) -> bool {
-        self.action_options(report_type).valid_keys.contains(action_key)
+        self.action_options(report_type)
+            .valid_keys
+            .contains(action_key)
     }
 }
 
@@ -399,7 +401,8 @@ impl ReportFetcher {
                     ))
                 },
             );
-            set_config_fields!(cfg,
+            set_config_fields!(
+                cfg,
                 admin_username_field = "admin_user_name",
                 available_actions = actions(&["D", "S", "T", "P", "F", "J"]),
                 content_field = "comment_content",
@@ -449,7 +452,8 @@ impl ReportFetcher {
                     ))
                 },
             );
-            set_config_fields!(cfg,
+            set_config_fields!(
+                cfg,
                 admin_username_field = "admin_username",
                 available_actions = actions(&["D", "P", "U", "J"]),
                 content_field = "work_name",
@@ -474,13 +478,10 @@ impl ReportFetcher {
                 "帖子举报",
                 "execute_process_post_report",
                 |status| {
-                    total_from(WhaleReportFetcher::new().fetch_post_reports_gen(
-                        status,
-                        None,
-                        None,
-                        None,
-                        None,
-                    ))
+                    total_from(
+                        WhaleReportFetcher::new()
+                            .fetch_post_reports_gen(status, None, None, None, None),
+                    )
                 },
                 |status| {
                     gen_from(WhaleReportFetcher::new().fetch_post_reports_gen(
@@ -492,7 +493,8 @@ impl ReportFetcher {
                     ))
                 },
             );
-            set_config_fields!(cfg,
+            set_config_fields!(
+                cfg,
                 admin_username_field = "admin_username",
                 available_actions = actions(&["D", "S", "T", "P", "F", "J"]),
                 content_field = "post_title",
@@ -518,13 +520,10 @@ impl ReportFetcher {
                 "讨论举报",
                 "execute_process_discussion_report",
                 |status| {
-                    total_from(WhaleReportFetcher::new().fetch_discussion_reports_gen(
-                        status,
-                        None,
-                        None,
-                        None,
-                        None,
-                    ))
+                    total_from(
+                        WhaleReportFetcher::new()
+                            .fetch_discussion_reports_gen(status, None, None, None, None),
+                    )
                 },
                 |status| {
                     gen_from(WhaleReportFetcher::new().fetch_discussion_reports_gen(
@@ -536,7 +535,8 @@ impl ReportFetcher {
                     ))
                 },
             );
-            set_config_fields!(cfg,
+            set_config_fields!(
+                cfg,
                 admin_username_field = "admin_username",
                 available_actions = actions(&["D", "S", "T", "P", "F", "J"]),
                 content_field = "discussion_content",

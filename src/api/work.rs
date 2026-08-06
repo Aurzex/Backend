@@ -1067,11 +1067,10 @@ impl CollaborationManager {
             "获取Kitten协作邀请码: work_id={}, method={:?}",
             work_id, method
         );
-        let endpoint = format!(
-            "https://socketcoll.codemao.cn/coll/kitten/collaborator/code/{}",
-            work_id
-        );
-        let builder = self.client.build_request(method, &endpoint, None);
+        let endpoint = format!("/coll/kitten/collaborator/code/{}", work_id);
+        let builder = self
+            .client
+            .build_request(method, &endpoint, Some(BaseKey::Collaboration));
         self.send_and_parse(builder)
     }
 
@@ -1086,10 +1085,7 @@ impl CollaborationManager {
             work_id, permission
         );
         let timestamp = current_timestamp_13();
-        let endpoint = format!(
-            "https://socketcoll.codemao.cn/coll/coco/collaborator/code/{}",
-            work_id
-        );
+        let endpoint = format!("/coll/coco/collaborator/code/{}", work_id);
         let builder = self
             .client
             .build_request(HttpMethod::Get, &endpoint, None)
@@ -1110,13 +1106,10 @@ impl CollaborationManager {
             work_type, work_id
         );
         let timestamp = current_timestamp_13();
-        let endpoint = format!(
-            "https://socketcoll.codemao.cn/coll/{}/collaborator/{}",
-            work_type.as_str(),
-            work_id
-        );
+        let endpoint = format!("/coll/{}/collaborator/{}", work_type.as_str(), work_id);
         self.client
             .build_paginated(&endpoint)
+            .with_base_key(BaseKey::Collaboration)
             .with_iter_param("TIME", timestamp.to_string())
             .with_iter_param("current_page", "1")
             .with_iter_param("page_size", "100")
@@ -1155,14 +1148,10 @@ impl CollaborationManager {
         work_type: CollabWorkType,
     ) -> MewResult<bool> {
         debug!("启用协作: work_id={}, type={:?}", work_id, work_type);
-        let endpoint = format!(
-            "https://socketcoll.codemao.cn/coll/{}/{}",
-            work_type.as_str(),
-            work_id
-        );
+        let endpoint = format!("/coll/{}/{}", work_type.as_str(), work_id);
         let builder = self
             .client
-            .build_request(HttpMethod::Post, &endpoint, None)
+            .build_request(HttpMethod::Post, &endpoint, Some(BaseKey::Collaboration))
             .with_payload(json!({}));
         self.check_status(builder, HTTPStatus::Ok)
     }
@@ -1172,7 +1161,8 @@ impl CollaborationManager {
         debug!("获取协作Coco作品迭代器");
         let timestamp = current_timestamp_13();
         self.client
-            .build_paginated("https://socketcoll.codemao.cn/coll/coco/coll_works")
+            .build_paginated("/coll/coco/coll_works")
+            .with_base_key(BaseKey::Collaboration)
             .with_iter_param("TIME", timestamp.to_string())
             .with_iter_param("current_page", "1")
             .with_iter_param("page_size", "40")
@@ -2315,11 +2305,10 @@ impl WorkDataFetcher {
     /// 获取 KN 作品变量列表
     pub fn fetch_kn_variables(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取KN变量: work_id={}", work_id);
-        let endpoint = format!(
-            "https://socketcv.codemao.cn/neko/cv/list/variables/{}",
-            work_id
-        );
-        let builder = self.client.build_request(HttpMethod::Get, &endpoint, None);
+        let endpoint = format!("/neko/cv/list/variables/{}", work_id);
+        let builder =
+            self.client
+                .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::SocketCV));
         self.send_and_parse(builder)
     }
 

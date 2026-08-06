@@ -319,11 +319,7 @@ impl AuthProcessor {
         let client = self.client();
         let cookie_str = format!("authorization={}", token);
         let response = client
-            .build_request(
-                HttpMethod::Get,
-                "https://api.codemao.cn/web/users/details",
-                None,
-            )
+            .build_request(HttpMethod::Get, "/web/users/details", None)
             .with_header("Cookie", cookie_str)
             .send()?;
         client.response_to_json(response)
@@ -349,8 +345,8 @@ impl AuthProcessor {
         let response = client
             .build_request(
                 HttpMethod::Post,
-                "https://open-service.codemao.cn/captcha/rule/v3",
-                None,
+                "/captcha/rule/v3",
+                Some(BaseKey::OpenService),
             )
             .with_payload(payload)
             .send()?;
@@ -375,7 +371,7 @@ impl AuthProcessor {
         let response = client
             .build_request(
                 HttpMethod::Post,
-                "https://api.codemao.cn/tiger/v3/web/accounts/login/security",
+                "/tiger/v3/web/accounts/login/security",
                 None,
             )
             .with_header("x-captcha-ticket", ticket)

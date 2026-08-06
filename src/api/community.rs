@@ -258,11 +258,7 @@ impl CommunityDataFetcher {
         debug!("获取点个猫更新");
         let response = self
             .client
-            .build_request(
-                HttpMethod::Get,
-                "https://update.codemao.cn/updatev2/appsdk",
-                None,
-            )
+            .build_request(HttpMethod::Get, "/updatev2/appsdk", Some(BaseKey::Update))
             .send()?;
         self.client.response_to_json(response)
     }
@@ -277,8 +273,8 @@ impl CommunityDataFetcher {
             .client
             .build_request(
                 HttpMethod::Get,
-                "https://kn-cdn.codemao.cn/kitten4/application/kitten4_update_info.json",
-                None,
+                "/kitten4/application/kitten4_update_info.json",
+                Some(BaseKey::KnCdn),
             )
             .with_param("TIME", &time_value)
             .send()?;
@@ -295,8 +291,8 @@ impl CommunityDataFetcher {
             .client
             .build_request(
                 HttpMethod::Get,
-                "https://kn-cdn.codemao.cn/application/kitten_update_info.json",
-                None,
+                "/application/kitten_update_info.json",
+                Some(BaseKey::KnCdn),
             )
             .with_param("timeStamp", &time_value)
             .send()?;
@@ -349,11 +345,7 @@ impl CommunityDataFetcher {
         debug!("获取13位时间戳");
         let response = self
             .client
-            .build_request(
-                HttpMethod::Get,
-                "https://time.codemao.cn/time/current",
-                None,
-            )
+            .build_request(HttpMethod::Get, "/time/current", Some(BaseKey::Time))
             .send()?;
         self.client.response_to_json(response)
     }
@@ -427,7 +419,7 @@ impl CommunityDataFetcher {
         debug!("获取Nemo配置");
         let response = self
             .client
-            .build_request(HttpMethod::Get, "https://nemo.codemao.cn/config", None)
+            .build_request(HttpMethod::Get, "/config", Some(BaseKey::Nemo))
             .send()?;
         self.client.response_to_json(response)
     }
@@ -437,7 +429,7 @@ impl CommunityDataFetcher {
         debug!("获取社区配置");
         let response = self
             .client
-            .build_request(HttpMethod::Get, "https://c.codemao.cn/config", None)
+            .build_request(HttpMethod::Get, "/config", Some(BaseKey::C))
             .send()?;
         self.client.response_to_json(response)
     }
@@ -449,8 +441,8 @@ impl CommunityDataFetcher {
             .client
             .build_request(
                 HttpMethod::Get,
-                "https://player.codemao.cn/new/client_config.json",
-                None,
+                "/new/client_config.json",
+                Some(BaseKey::Player),
             )
             .send()?;
         self.client.response_to_json(response)

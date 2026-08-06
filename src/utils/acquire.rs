@@ -44,6 +44,17 @@ pub enum BaseKey {
     Creation,
     Whale,
     Education,
+    CodeGame,
+    Collaboration,
+    SocketCV,
+    OpenService,
+    Nemo,
+    C,
+    Player,
+    Time,
+    Update,
+    KnCdn,
+    WeChatSbp,
 }
 
 impl BaseKey {
@@ -54,15 +65,37 @@ impl BaseKey {
             BaseKey::Creation => "creation",
             BaseKey::Whale => "whale",
             BaseKey::Education => "education",
+            BaseKey::CodeGame => "codegame",
+            BaseKey::Collaboration => "collaboration",
+            BaseKey::SocketCV => "socketcv",
+            BaseKey::OpenService => "open_service",
+            BaseKey::Nemo => "nemo",
+            BaseKey::C => "c",
+            BaseKey::Player => "player",
+            BaseKey::Time => "time",
+            BaseKey::Update => "update",
+            BaseKey::KnCdn => "kn_cdn",
+            BaseKey::WeChatSbp => "wechat_sbp",
         }
     }
 
     /// 所有可用的基础键
-    pub const ALL: [BaseKey; 4] = [
+    pub const ALL: [BaseKey; 15] = [
         BaseKey::Default,
         BaseKey::Creation,
         BaseKey::Whale,
         BaseKey::Education,
+        BaseKey::CodeGame,
+        BaseKey::Collaboration,
+        BaseKey::SocketCV,
+        BaseKey::OpenService,
+        BaseKey::Nemo,
+        BaseKey::C,
+        BaseKey::Player,
+        BaseKey::Time,
+        BaseKey::Update,
+        BaseKey::KnCdn,
+        BaseKey::WeChatSbp,
     ];
 
     /// 根据枚举值获取对应的基础 URL
@@ -72,6 +105,17 @@ impl BaseKey {
             BaseKey::Creation => "https://api-creation.codemao.cn",
             BaseKey::Whale => "https://api-whale.codemao.cn",
             BaseKey::Education => "https://eduzone.codemao.cn",
+            BaseKey::CodeGame => "https://oversea-api.code.game",
+            BaseKey::Collaboration => "https://socketcoll.codemao.cn",
+            BaseKey::SocketCV => "https://socketcv.codemao.cn",
+            BaseKey::OpenService => "https://open-service.codemao.cn",
+            BaseKey::Nemo => "https://nemo.codemao.cn",
+            BaseKey::C => "https://c.codemao.cn",
+            BaseKey::Player => "https://player.codemao.cn",
+            BaseKey::Time => "https://time.codemao.cn",
+            BaseKey::Update => "https://update.codemao.cn",
+            BaseKey::KnCdn => "https://kn-cdn.codemao.cn",
+            BaseKey::WeChatSbp => "https://api-wechatsbp-codemaster.codemao.cn",
         }
     }
 }
@@ -84,6 +128,17 @@ impl FromStr for BaseKey {
             "creation" => Ok(BaseKey::Creation),
             "whale" => Ok(BaseKey::Whale),
             "education" => Ok(BaseKey::Education),
+            "codegame" => Ok(BaseKey::CodeGame),
+            "collaboration" => Ok(BaseKey::Collaboration),
+            "socketcv" => Ok(BaseKey::SocketCV),
+            "open_service" => Ok(BaseKey::OpenService),
+            "nemo" => Ok(BaseKey::Nemo),
+            "c" => Ok(BaseKey::C),
+            "player" => Ok(BaseKey::Player),
+            "time" => Ok(BaseKey::Time),
+            "update" => Ok(BaseKey::Update),
+            "kn_cdn" => Ok(BaseKey::KnCdn),
+            "wechat_sbp" => Ok(BaseKey::WeChatSbp),
             _ => Err(MewError::Other(format!("invalid base key: {}", s))),
         }
     }
@@ -1512,8 +1567,8 @@ impl FileUploader {
             .client
             .build_request(
                 HttpMethod::Get,
-                "https://open-service.codemao.cn/cdn/qi-niu/tokens/uploading",
-                Some(BaseKey::Default),
+                "/cdn/qi-niu/tokens/uploading",
+                Some(BaseKey::OpenService),
             )
             .with_param("projectName", "community_frontend")
             .with_param("filePaths", file_path)
@@ -1544,8 +1599,8 @@ impl FileUploader {
             .client
             .build_request(
                 HttpMethod::Get,
-                "https://oversea-api.code.game/tiger/kitten/cdn/token/1",
-                Some(BaseKey::Default),
+                "/tiger/kitten/cdn/token/1",
+                Some(BaseKey::CodeGame),
             )
             .with_param("prefix", prefix)
             .with_param("bucket", "static")
@@ -1756,11 +1811,7 @@ pub trait ClientAccess {
     fn client(&self) -> &CodeMaoClient;
 
     /// 发送请求并检查响应状态码是否为预期值
-    fn check_status(
-        &self,
-        builder: KittyRequestBuilder,
-        expected: HTTPStatus,
-    ) -> MewResult<bool> {
+    fn check_status(&self, builder: KittyRequestBuilder, expected: HTTPStatus) -> MewResult<bool> {
         let response = builder.send()?;
         Ok(response.status() == expected as u16)
     }

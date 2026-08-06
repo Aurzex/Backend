@@ -1310,16 +1310,16 @@ impl ViolationChecker {
             )));
         }
         let source = parts[0].to_string();
-        let source_id: i64 = parts[1]
-            .parse()
-            .map_err(|_| ProcessorError::Processing(format!("违规标识符 source_id 解析失败: {}", parts[1])))?;
+        let source_id: i64 = parts[1].parse().map_err(|_| {
+            ProcessorError::Processing(format!("违规标识符 source_id 解析失败: {}", parts[1]))
+        })?;
         let violation_type = parts[2].to_string();
-        let parent_id: i32 = parts[3]
-            .parse()
-            .map_err(|_| ProcessorError::Processing(format!("违规标识符 parent_id 解析失败: {}", parts[3])))?;
-        let content_id: i32 = parts[4]
-            .parse()
-            .map_err(|_| ProcessorError::Processing(format!("违规标识符 content_id 解析失败: {}", parts[4])))?;
+        let parent_id: i32 = parts[3].parse().map_err(|_| {
+            ProcessorError::Processing(format!("违规标识符 parent_id 解析失败: {}", parts[3]))
+        })?;
+        let content_id: i32 = parts[4].parse().map_err(|_| {
+            ProcessorError::Processing(format!("违规标识符 content_id 解析失败: {}", parts[4]))
+        })?;
         Ok((source, source_id, violation_type, parent_id, content_id))
     }
 

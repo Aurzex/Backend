@@ -238,7 +238,7 @@ impl WorkshopDataFetcher {
             .client
             .build_request(
                 HttpMethod::Get,
-                "https://api.codemao.cn/web/work_shops/users/unaudited/list",
+                "/web/work_shops/users/unaudited/list",
                 None,
             )
             .with_param("limit", limit.unwrap_or(40).to_string())

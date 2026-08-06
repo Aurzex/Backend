@@ -1140,8 +1140,7 @@ impl CloudConnection {
             .unwrap()
             .clone()
             .ok_or(CloudError::NotConnected)?;
-        tx.send(Message::text(payload))
-            .map_err(CloudError::from)
+        tx.send(Message::text(payload)).map_err(CloudError::from)
     }
 
     fn reset_state(&self) {
@@ -2196,8 +2195,7 @@ fn send_inner_text(inner: &Arc<CloudInner>, payload: &str) -> Result<()> {
         .unwrap()
         .clone()
         .ok_or(CloudError::NotConnected)?;
-    tx.send(Message::text(payload))
-        .map_err(CloudError::from)
+    tx.send(Message::text(payload)).map_err(CloudError::from)
 }
 
 fn emit_online_users_change(inner: &Arc<CloudInner>, old: i64, new: i64) {

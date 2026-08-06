@@ -483,8 +483,7 @@ impl ChatClient {
             .unwrap()
             .clone()
             .ok_or(ChatError::NotConnected)?;
-        tx.send(Message::text(payload))
-            .map_err(ChatError::from)
+        tx.send(Message::text(payload)).map_err(ChatError::from)
     }
 }
 
@@ -784,8 +783,7 @@ fn send_event_on(inner: &Arc<ChatInner>, name: &str, payload: &Value) -> Result<
         .unwrap()
         .clone()
         .ok_or(ChatError::NotConnected)?;
-    tx.send(Message::text(frame))
-        .map_err(ChatError::from)
+    tx.send(Message::text(frame)).map_err(ChatError::from)
 }
 
 // 帧处理
@@ -820,8 +818,7 @@ fn send_raw(inner: &Arc<ChatInner>, payload: &str) -> Result<()> {
         .unwrap()
         .clone()
         .ok_or(ChatError::NotConnected)?;
-    tx.send(Message::text(payload))
-        .map_err(ChatError::from)
+    tx.send(Message::text(payload)).map_err(ChatError::from)
 }
 
 // 连接建立与读循环
