@@ -3,16 +3,16 @@ use crate::utils::acquire::{
     KittyRequestBuilder, MewResult, PaginatedIter, PaginationMethod, current_timestamp_13,
 };
 
-/// 萌新盒子套餐列表接口的单页上限.
+/// 萌新盒子套餐列表接口的单页上限
 const NEKO_PACKAGE_PAGE_SIZE: usize = 16;
 use log::debug;
 use serde_json::{Value, json};
 
-// ==================== 工具函数 ====================
+// 工具函数
 
-// ==================== 作品相关枚举 ====================
+// 作品相关枚举
 
-/// HTTP 方法选择(POST / DELETE).
+/// HTTP 方法选择(POST / DELETE)
 #[derive(Debug, Clone, Copy)]
 pub enum SelectMethod {
     Post,
@@ -28,7 +28,7 @@ impl SelectMethod {
     }
 }
 
-/// 发布状态.
+/// 发布状态
 #[derive(Debug, Clone, Copy)]
 pub enum PublishStatus {
     Published,
@@ -44,7 +44,7 @@ impl PublishStatus {
     }
 }
 
-/// 作品类型.
+/// 作品类型
 #[derive(Debug, Clone, Copy)]
 pub enum WorkType {
     Kitten = 1,
@@ -52,7 +52,7 @@ pub enum WorkType {
     CodeGame = 5,
 }
 
-/// Kitten 版本.
+/// Kitten 版本
 #[derive(Debug, Clone, Copy)]
 pub enum KittenVersion {
     V3,
@@ -68,7 +68,7 @@ impl KittenVersion {
     }
 }
 
-/// 协作作品类型.
+/// 协作作品类型
 #[derive(Debug, Clone, Copy)]
 pub enum CollabWorkType {
     Kitten,
@@ -84,7 +84,7 @@ impl CollabWorkType {
     }
 }
 
-/// 协作权限.
+/// 协作权限
 #[derive(Debug, Clone, Copy)]
 pub enum CollabPermission {
     Edit,
@@ -100,7 +100,7 @@ impl CollabPermission {
     }
 }
 
-/// Nemo 作品类型.
+/// Nemo 作品类型
 #[derive(Debug, Clone, Copy)]
 pub enum NemoWorkType {
     CourseWork,
@@ -120,7 +120,7 @@ impl NemoWorkType {
     }
 }
 
-/// 资源包类型.
+/// 资源包类型
 #[derive(Debug, Clone, Copy)]
 pub enum ResourcePackType {
     Block,
@@ -136,9 +136,9 @@ impl ResourcePackType {
     }
 }
 
-// ==================== 基础操作类 ====================
+// 基础操作类
 
-/// 基础作品操作接口(关注,收藏,点赞,再创作,分享,举报,重命名).
+/// 基础作品操作接口(关注,收藏,点赞,再创作,分享,举报,重命名)
 pub struct BaseWorkOperations {
     client: &'static CodeMaoClient,
 }
@@ -150,7 +150,7 @@ impl BaseWorkOperations {
         }
     }
 
-    /// 关注或取消关注用户.
+    /// 关注或取消关注用户
     pub fn execute_toggle_follow(&self, user_id: i32, method: SelectMethod) -> MewResult<bool> {
         debug!("切换关注状态: user_id={}, method={:?}", user_id, method);
         let endpoint = format!("/nemo/v2/user/{}/follow", user_id);
@@ -161,7 +161,7 @@ impl BaseWorkOperations {
         self.check_status(builder, HTTPStatus::NoContent)
     }
 
-    /// 收藏或取消收藏作品.
+    /// 收藏或取消收藏作品
     pub fn execute_toggle_collection(&self, work_id: i32, method: SelectMethod) -> MewResult<bool> {
         debug!("切换收藏状态: work_id={}, method={:?}", work_id, method);
         let endpoint = format!("/nemo/v2/works/{}/collection", work_id);
@@ -172,7 +172,7 @@ impl BaseWorkOperations {
         self.check_status(builder, HTTPStatus::Ok)
     }
 
-    /// 点赞或取消点赞作品.
+    /// 点赞或取消点赞作品
     pub fn execute_toggle_like(&self, work_id: i32, method: SelectMethod) -> MewResult<bool> {
         debug!("切换点赞状态: work_id={}, method={:?}", work_id, method);
         let endpoint = format!("/nemo/v2/works/{}/like", work_id);
@@ -183,7 +183,7 @@ impl BaseWorkOperations {
         self.check_status(builder, HTTPStatus::Ok)
     }
 
-    /// 再创作作品.
+    /// 再创作作品
     pub fn execute_fork_work(&self, work_id: i32) -> MewResult<bool> {
         debug!("再创作作品: work_id={}", work_id);
         let endpoint = format!("/nemo/v2/works/{}/fork", work_id);
@@ -194,7 +194,7 @@ impl BaseWorkOperations {
         self.check_status(builder, HTTPStatus::Ok)
     }
 
-    /// 分享作品.
+    /// 分享作品
     pub fn execute_share_work(&self, work_id: i32) -> MewResult<bool> {
         debug!("分享作品: work_id={}", work_id);
         let endpoint = format!("/nemo/v2/works/{}/share", work_id);
@@ -205,7 +205,7 @@ impl BaseWorkOperations {
         self.check_status(builder, HTTPStatus::Ok)
     }
 
-    /// 举报作品.
+    /// 举报作品
     pub fn execute_report_work(
         &self,
         work_id: i32,
@@ -225,7 +225,7 @@ impl BaseWorkOperations {
         self.check_status(builder, HTTPStatus::Ok)
     }
 
-    /// 重命名作品.
+    /// 重命名作品
     pub fn update_work_name(
         &self,
         work_id: i32,
@@ -255,9 +255,9 @@ impl Default for BaseWorkOperations {
     }
 }
 
-// ==================== 评论操作类 ====================
+// 评论操作类
 
-/// 作品评论操作接口.
+/// 作品评论操作接口
 pub struct CommentOperations {
     client: &'static CodeMaoClient,
 }
@@ -269,7 +269,7 @@ impl CommentOperations {
         }
     }
 
-    /// 添加作品评论.
+    /// 添加作品评论
     pub fn create_work_comment(
         &self,
         work_id: i32,
@@ -290,7 +290,7 @@ impl CommentOperations {
         self.send_maybe_parse(builder, return_data, HTTPStatus::Created)
     }
 
-    /// 回复作品评论.
+    /// 回复作品评论
     pub fn create_comment_reply(
         &self,
         comment: &str,
@@ -318,7 +318,7 @@ impl CommentOperations {
         self.send_maybe_parse(builder, return_data, HTTPStatus::Created)
     }
 
-    /// 删除作品评论.
+    /// 删除作品评论
     pub fn delete_comment(&self, work_id: i32, comment_id: i32) -> MewResult<bool> {
         debug!("删除评论: work_id={}, comment_id={}", work_id, comment_id);
         let endpoint = format!(
@@ -331,7 +331,7 @@ impl CommentOperations {
         self.check_status(builder, HTTPStatus::NoContent)
     }
 
-    /// 置顶或取消置顶评论.
+    /// 置顶或取消置顶评论
     pub fn execute_toggle_comment_pin(
         &self,
         method: HttpMethod,
@@ -353,7 +353,7 @@ impl CommentOperations {
         self.check_status(builder, HTTPStatus::NoContent)
     }
 
-    /// 点赞或取消点赞评论.
+    /// 点赞或取消点赞评论
     pub fn execute_toggle_comment_like(
         &self,
         work_id: i32,
@@ -375,7 +375,7 @@ impl CommentOperations {
         self.check_status(builder, HTTPStatus::Created)
     }
 
-    /// 举报作品评论.
+    /// 举报作品评论
     pub fn execute_report_comment(
         &self,
         work_id: i32,
@@ -405,9 +405,9 @@ impl Default for CommentOperations {
     }
 }
 
-// ==================== KITTEN 作品管理类 ====================
+// KITTEN 作品管理类
 
-/// 创建 Kitten 作品的参数.
+/// 创建 Kitten 作品的参数
 pub struct CreateKittenWorkArgs<'a> {
     pub name: &'a str,
     pub work_url: &'a str,
@@ -419,7 +419,7 @@ pub struct CreateKittenWorkArgs<'a> {
     pub save_type: Option<i32>,
 }
 
-/// 发布 Kitten 作品的参数.
+/// 发布 Kitten 作品的参数
 pub struct PublishKittenWorkArgs<'a> {
     pub work_id: i32,
     pub name: &'a str,
@@ -436,7 +436,7 @@ pub struct PublishKittenWorkArgs<'a> {
     pub user_labels: Option<Vec<Value>>,
 }
 
-/// Kitten 作品管理接口(创建,发布,删除,回收站等).
+/// Kitten 作品管理接口(创建,发布,删除,回收站等)
 pub struct KittenWorkManager {
     client: &'static CodeMaoClient,
     pub operations: BaseWorkOperations,
@@ -452,7 +452,7 @@ impl KittenWorkManager {
         }
     }
 
-    /// 创建 Kitten 作品.
+    /// 创建 Kitten 作品
     pub fn create_kitten_work(&self, args: CreateKittenWorkArgs<'_>) -> MewResult<Value> {
         debug!(
             "创建Kitten作品: name={}, version={}",
@@ -475,7 +475,7 @@ impl KittenWorkManager {
         self.send_and_parse(builder)
     }
 
-    /// 发布 Kitten 作品.
+    /// 发布 Kitten 作品
     pub fn execute_publish_kitten_work(&self, args: PublishKittenWorkArgs<'_>) -> MewResult<bool> {
         debug!(
             "发布Kitten作品: work_id={}, name={}",
@@ -503,7 +503,7 @@ impl KittenWorkManager {
         self.check_status(builder, HTTPStatus::Ok)
     }
 
-    /// 删除未发布的 Kitten 作品草稿.
+    /// 删除未发布的 Kitten 作品草稿
     pub fn delete_kitten_draft(&self, work_id: i32) -> MewResult<bool> {
         debug!("删除Kitten草稿: work_id={}", work_id);
         let endpoint = format!("/kitten/common/work/{}/temporarily", work_id);
@@ -513,7 +513,7 @@ impl KittenWorkManager {
         self.check_status(builder, HTTPStatus::Ok)
     }
 
-    /// 取消发布作品.
+    /// 取消发布作品
     pub fn execute_unpublish_work(&self, work_id: i32) -> MewResult<bool> {
         debug!("取消发布作品: work_id={}", work_id);
         let endpoint = format!("/tiger/work/{}/unpublish", work_id);
@@ -524,7 +524,7 @@ impl KittenWorkManager {
         self.check_status(builder, HTTPStatus::NoContent)
     }
 
-    /// 通过 Web 端取消发布作品.
+    /// 通过 Web 端取消发布作品
     pub fn execute_unpublish_work_web(&self, work_id: i32) -> MewResult<bool> {
         debug!("Web端取消发布作品: work_id={}", work_id);
         let endpoint = format!("/web/works/r2/unpublish/{}", work_id);
@@ -535,7 +535,7 @@ impl KittenWorkManager {
         self.check_status(builder, HTTPStatus::Ok)
     }
 
-    /// 清空 Kitten 作品回收站.
+    /// 清空 Kitten 作品回收站
     pub fn execute_empty_kitten_trash(&self) -> MewResult<bool> {
         debug!("清空Kitten回收站");
         let builder = self.client.build_request(
@@ -546,7 +546,7 @@ impl KittenWorkManager {
         self.check_status(builder, HTTPStatus::NoContent)
     }
 
-    /// 翻译 Kitten 作品.
+    /// 翻译 Kitten 作品
     pub fn translate_kitten_work(&self, data: Value) -> MewResult<Value> {
         debug!("翻译Kitten作品");
         let builder = self
@@ -567,9 +567,9 @@ impl Default for KittenWorkManager {
     }
 }
 
-// ==================== NEKO(Kitten N)作品管理类 ====================
+// NEKO(Kitten N)作品管理类
 
-/// 创建 KN 作品的参数.
+/// 创建 KN 作品的参数
 pub struct CreateKnWorkArgs<'a> {
     pub name: &'a str,
     pub work_url: &'a str,
@@ -583,7 +583,7 @@ pub struct CreateKnWorkArgs<'a> {
     pub pic_need_check_file_url: Option<&'a str>,
 }
 
-/// 发布 KN 作品的参数.
+/// 发布 KN 作品的参数
 pub struct PublishKnWorkArgs<'a> {
     pub work_id: i32,
     pub name: &'a str,
@@ -598,7 +598,7 @@ pub struct PublishKnWorkArgs<'a> {
     pub cover_url: Option<&'a str>,
 }
 
-/// KN 作品管理接口.
+/// KN 作品管理接口
 pub struct NekoWorkManager {
     client: &'static CodeMaoClient,
     pub operations: BaseWorkOperations,
@@ -614,7 +614,7 @@ impl NekoWorkManager {
         }
     }
 
-    /// 创建 KN 作品.
+    /// 创建 KN 作品
     pub fn create_kn_work(&self, args: CreateKnWorkArgs<'_>) -> MewResult<Value> {
         debug!("创建KN作品: name={}", args.name);
         let payload = json!({
@@ -636,7 +636,7 @@ impl NekoWorkManager {
         self.send_and_parse(builder)
     }
 
-    /// 发布 KN 作品.
+    /// 发布 KN 作品
     pub fn execute_publish_kn_work(&self, args: PublishKnWorkArgs<'_>) -> MewResult<bool> {
         debug!("发布KN作品: work_id={}, name={}", args.work_id, args.name);
         let endpoint = format!("/neko/community/work/publish/{}", args.work_id);
@@ -659,7 +659,7 @@ impl NekoWorkManager {
         self.check_status(builder, HTTPStatus::Ok)
     }
 
-    /// 删除未发布的 KN 作品草稿.
+    /// 删除未发布的 KN 作品草稿
     pub fn delete_kn_draft(&self, work_id: i32, force: i32) -> MewResult<bool> {
         debug!("删除KN草稿: work_id={}, force={}", work_id, force);
         let timestamp = current_timestamp_13();
@@ -672,7 +672,7 @@ impl NekoWorkManager {
         self.check_status(builder, HTTPStatus::Ok)
     }
 
-    /// 取消发布 KN 作品.
+    /// 取消发布 KN 作品
     pub fn execute_unpublish_kn_work(&self, work_id: i32) -> MewResult<bool> {
         debug!("取消发布KN作品: work_id={}", work_id);
         let endpoint = format!("/neko/community/work/unpublish/{}", work_id);
@@ -682,7 +682,7 @@ impl NekoWorkManager {
         self.check_status(builder, HTTPStatus::Ok)
     }
 
-    /// 清空 KN 作品回收站.
+    /// 清空 KN 作品回收站
     pub fn execute_empty_kn_trash(&self) -> MewResult<bool> {
         debug!("清空KN回收站");
         let builder = self.client.build_request(
@@ -693,7 +693,7 @@ impl NekoWorkManager {
         self.check_status(builder, HTTPStatus::Ok)
     }
 
-    /// 恢复 KN 回收站作品.
+    /// 恢复 KN 回收站作品
     pub fn execute_recover_kn_trash(&self, work_id: i32) -> MewResult<bool> {
         debug!("恢复KN回收站作品: work_id={}", work_id);
         let endpoint = format!("/neko/works/{}/recover", work_id);
@@ -703,7 +703,7 @@ impl NekoWorkManager {
         self.check_status(builder, HTTPStatus::Ok)
     }
 
-    /// 保存教师作品.
+    /// 保存教师作品
     pub fn save_teacher_work(&self, data: Value) -> MewResult<Value> {
         debug!("保存教师作品");
         let builder = self
@@ -717,7 +717,7 @@ impl NekoWorkManager {
         self.send_and_parse(builder)
     }
 
-    /// 复制作品.
+    /// 复制作品
     pub fn copy_work(&self, work_id: i32) -> MewResult<Value> {
         debug!("复制作品: work_id={}", work_id);
         let data = json!({ "work_id": work_id });
@@ -732,7 +732,7 @@ impl NekoWorkManager {
         self.send_and_parse(builder)
     }
 
-    /// 作品图片故障排查.
+    /// 作品图片故障排查
     pub fn troubleshoot_work_pics(&self, work_id: i32) -> MewResult<Value> {
         debug!("作品图片故障排查: work_id={}", work_id);
         let endpoint = format!("/neko/works/pic-troubleshoot/{}", work_id);
@@ -749,9 +749,9 @@ impl Default for NekoWorkManager {
     }
 }
 
-// ==================== WOOD(海龟编辑器)作品管理类 ====================
+// WOOD(海龟编辑器)作品管理类
 
-/// 创建海龟编辑器作品的参数.
+/// 创建海龟编辑器作品的参数
 pub struct CreateWoodProjectArgs<'a> {
     pub work_name: Option<&'a str>,
     pub language_type: Option<i32>,
@@ -764,7 +764,7 @@ pub struct CreateWoodProjectArgs<'a> {
     pub update_time: Option<i32>,
 }
 
-/// 海龟编辑器作品管理接口.
+/// 海龟编辑器作品管理接口
 pub struct WoodWorkManager {
     client: &'static CodeMaoClient,
 }
@@ -776,7 +776,7 @@ impl WoodWorkManager {
         }
     }
 
-    /// 获取海龟编辑器项目信息.
+    /// 获取海龟编辑器项目信息
     pub fn fetch_wood_project(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取海龟编辑器项目: work_id={}", work_id);
         let timestamp = current_timestamp_13();
@@ -788,7 +788,7 @@ impl WoodWorkManager {
         self.send_and_parse(builder)
     }
 
-    /// 创建海龟编辑器作品.
+    /// 创建海龟编辑器作品
     pub fn create_wood_project(&self, args: CreateWoodProjectArgs<'_>) -> MewResult<Value> {
         debug!("创建海龟编辑器作品: name={:?}", args.work_name);
         let payload = json!({
@@ -813,7 +813,7 @@ impl WoodWorkManager {
         self.send_and_parse(builder)
     }
 
-    /// 删除海龟编辑器草稿.
+    /// 删除海龟编辑器草稿
     pub fn delete_wood_draft(&self, work_id: i32) -> MewResult<bool> {
         debug!("删除海龟编辑器草稿: work_id={}", work_id);
         let endpoint = format!("/wood/project/{}/temporarily", work_id);
@@ -823,7 +823,7 @@ impl WoodWorkManager {
         self.check_status(builder, HTTPStatus::Ok)
     }
 
-    /// 搜索用户的 Wood 作品.
+    /// 搜索用户的 Wood 作品
     pub fn search_user_wood_projects(
         &self,
         query: Option<&str>,
@@ -848,7 +848,7 @@ impl WoodWorkManager {
         self.send_and_parse(builder)
     }
 
-    /// 在海龟编辑器作品中创建文件.
+    /// 在海龟编辑器作品中创建文件
     pub fn create_wood_file(
         &self,
         work_id: i32,
@@ -897,9 +897,9 @@ impl Default for WoodWorkManager {
     }
 }
 
-// ==================== COCO(Coconut)平台管理类 ====================
+// COCO(Coconut)平台管理类
 
-/// Coco 平台管理接口.
+/// Coco 平台管理接口
 pub struct CocoWorkManager {
     client: &'static CodeMaoClient,
 }
@@ -911,7 +911,7 @@ impl CocoWorkManager {
         }
     }
 
-    /// 获取 Coco 平台的主要课程列表.
+    /// 获取 Coco 平台的主要课程列表
     pub fn fetch_coco_primary_courses(&self) -> MewResult<Value> {
         debug!("获取Coco主要课程");
         let builder = self.client.build_request(
@@ -922,7 +922,7 @@ impl CocoWorkManager {
         self.send_and_parse(builder)
     }
 
-    /// 获取 Coco 的自定义控件列表分页迭代器.
+    /// 获取 Coco 的自定义控件列表分页迭代器
     pub fn fetch_custom_widgets_gen(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取Coco自定义控件迭代器");
         let timestamp = current_timestamp_13();
@@ -940,7 +940,7 @@ impl CocoWorkManager {
             .with_limit(limit.unwrap_or(100))
     }
 
-    /// 获取 Coco 的示范教程列表.
+    /// 获取 Coco 的示范教程列表
     pub fn fetch_demo_courses(&self) -> MewResult<Value> {
         debug!("获取Coco示范教程");
         let builder = self.client.build_request(
@@ -951,7 +951,7 @@ impl CocoWorkManager {
         self.send_and_parse(builder)
     }
 
-    /// 获取 Coco 的白名单作品链接.
+    /// 获取 Coco 的白名单作品链接
     pub fn fetch_whitelisted_works(&self) -> MewResult<Value> {
         debug!("获取Coco白名单作品");
         let builder = self.client.build_request(
@@ -962,7 +962,7 @@ impl CocoWorkManager {
         self.send_and_parse(builder)
     }
 
-    /// 获取 Coco 的 web 控件.
+    /// 获取 Coco 的 web 控件
     pub fn fetch_web_widget(&self, page: Option<i32>, page_size: Option<i32>) -> MewResult<Value> {
         debug!("获取Coco web控件: page={:?}", page);
         let timestamp = current_timestamp_13();
@@ -979,7 +979,7 @@ impl CocoWorkManager {
         self.send_and_parse(builder)
     }
 
-    /// 更新 Coco 作品.
+    /// 更新 Coco 作品
     pub fn execute_update_coco_work(
         &self,
         work_id: i32,
@@ -1009,7 +1009,7 @@ impl CocoWorkManager {
         self.send_and_parse(builder)
     }
 
-    /// 发布 Coco 作品.
+    /// 发布 Coco 作品
     pub fn execute_publish_coco_work(
         &self,
         work_id: i32,
@@ -1043,9 +1043,9 @@ impl Default for CocoWorkManager {
     }
 }
 
-// ==================== 协作功能管理类 ====================
+// 协作功能管理类
 
-/// 作品协作功能接口.
+/// 作品协作功能接口
 pub struct CollaborationManager {
     client: &'static CodeMaoClient,
 }
@@ -1057,7 +1057,7 @@ impl CollaborationManager {
         }
     }
 
-    /// 获取或删除 Kitten 协作邀请码.
+    /// 获取或删除 Kitten 协作邀请码
     pub fn fetch_kitten_collaboration_code(
         &self,
         work_id: i32,
@@ -1075,7 +1075,7 @@ impl CollaborationManager {
         self.send_and_parse(builder)
     }
 
-    /// 获取 Coco 协作邀请码.
+    /// 获取 Coco 协作邀请码
     pub fn fetch_coco_collaboration_code(
         &self,
         work_id: i32,
@@ -1098,7 +1098,7 @@ impl CollaborationManager {
         self.send_and_parse(builder)
     }
 
-    /// 获取协作者列表分页迭代器.
+    /// 获取协作者列表分页迭代器
     pub fn fetch_collaborators_gen(
         &self,
         work_type: CollabWorkType,
@@ -1128,7 +1128,7 @@ impl CollaborationManager {
             .with_limit(limit.unwrap_or(100))
     }
 
-    /// 获取协作状态.
+    /// 获取协作状态
     pub fn fetch_collaboration_status(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取协作状态: work_id={}", work_id);
         let endpoint = format!("/collaboration/user/{}", work_id);
@@ -1138,7 +1138,7 @@ impl CollaborationManager {
         self.send_and_parse(builder)
     }
 
-    /// 获取协作用户.
+    /// 获取协作用户
     pub fn fetch_collaboration_user(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取协作用户: work_id={}", work_id);
         let endpoint = format!("/collaboration/user/edited/{}", work_id);
@@ -1148,7 +1148,7 @@ impl CollaborationManager {
         self.send_and_parse(builder)
     }
 
-    /// 启用 Kitten/Coco 作品协作功能.
+    /// 启用 Kitten/Coco 作品协作功能
     pub fn execute_enable_collaboration(
         &self,
         work_id: i32,
@@ -1167,7 +1167,7 @@ impl CollaborationManager {
         self.check_status(builder, HTTPStatus::Ok)
     }
 
-    /// 获取协作的 Coco 作品分页迭代器.
+    /// 获取协作的 Coco 作品分页迭代器
     pub fn fetch_collaboration_coco_works_gen(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取协作Coco作品迭代器");
         let timestamp = current_timestamp_13();
@@ -1191,9 +1191,9 @@ impl Default for CollaborationManager {
     }
 }
 
-// ==================== AI 服务类 ====================
+// AI 服务类
 
-/// AI 绘画等服务接口.
+/// AI 绘画等服务接口
 pub struct AIServices {
     client: &'static CodeMaoClient,
 }
@@ -1205,7 +1205,7 @@ impl AIServices {
         }
     }
 
-    /// 获取文生图提示词.
+    /// 获取文生图提示词
     pub fn fetch_text2img_prompt(&self) -> MewResult<Value> {
         debug!("获取文生图提示词");
         let builder = self.client.build_request(
@@ -1216,7 +1216,7 @@ impl AIServices {
         self.send_and_parse(builder)
     }
 
-    /// 获取 AI 绘画模板.
+    /// 获取 AI 绘画模板
     pub fn fetch_ai_painting_templates(&self, template_type: &str) -> MewResult<Value> {
         debug!("获取AI绘画模板: type={}", template_type);
         let timestamp = current_timestamp_13();
@@ -1232,7 +1232,7 @@ impl AIServices {
         self.send_and_parse(builder)
     }
 
-    /// AI 绘画匹配.
+    /// AI 绘画匹配
     pub fn match_ai_painting(&self, data: Value) -> MewResult<Value> {
         debug!("AI绘画匹配");
         let builder = self
@@ -1246,7 +1246,7 @@ impl AIServices {
         self.send_and_parse(builder)
     }
 
-    /// 添加到灵感池.
+    /// 添加到灵感池
     pub fn add_to_inspiration_pool(
         &self,
         img_url: &str,
@@ -1281,9 +1281,9 @@ impl Default for AIServices {
     }
 }
 
-// ==================== 教学计划管理类 ====================
+// 教学计划管理类
 
-/// 教学计划管理接口.
+/// 教学计划管理接口
 pub struct TeachingPlanManager {
     client: &'static CodeMaoClient,
 }
@@ -1295,7 +1295,7 @@ impl TeachingPlanManager {
         }
     }
 
-    /// 保存团队作品(教学计划).
+    /// 保存团队作品(教学计划)
     pub fn save_team_work(&self, data: Value) -> MewResult<Value> {
         debug!("保存团队作品");
         let builder = self
@@ -1309,7 +1309,7 @@ impl TeachingPlanManager {
         self.send_and_parse(builder)
     }
 
-    /// 获取教学计划操作日志.
+    /// 获取教学计划操作日志
     pub fn fetch_teaching_plan_logs(
         &self,
         work_id: i32,
@@ -1331,7 +1331,7 @@ impl TeachingPlanManager {
         self.send_and_parse(builder)
     }
 
-    /// 添加教学计划操作日志.
+    /// 添加教学计划操作日志
     pub fn add_teaching_plan_log(&self, data: Value) -> MewResult<Value> {
         debug!("添加教学计划操作日志");
         let builder = self
@@ -1345,7 +1345,7 @@ impl TeachingPlanManager {
         self.send_and_parse(builder)
     }
 
-    /// 获取作品编辑状态.
+    /// 获取作品编辑状态
     pub fn fetch_work_editing_status(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取作品编辑状态: work_id={}", work_id);
         let endpoint = format!("/neko/teaching-plan/work/editing-status/{}", work_id);
@@ -1355,7 +1355,7 @@ impl TeachingPlanManager {
         self.send_and_parse(builder)
     }
 
-    /// 设置作品编辑状态.
+    /// 设置作品编辑状态
     pub fn set_work_editing_status(&self, data: Value) -> MewResult<Value> {
         debug!("设置作品编辑状态");
         let builder = self
@@ -1369,7 +1369,7 @@ impl TeachingPlanManager {
         self.send_and_parse(builder)
     }
 
-    /// 更新课程进度.
+    /// 更新课程进度
     pub fn update_course_progress(&self, data: Value) -> MewResult<Value> {
         debug!("更新课程进度");
         let builder = self
@@ -1383,7 +1383,7 @@ impl TeachingPlanManager {
         self.send_and_parse(builder)
     }
 
-    /// 提交课程作品.
+    /// 提交课程作品
     pub fn submit_course_work(&self, data: Value) -> MewResult<Value> {
         debug!("提交课程作品");
         let builder = self
@@ -1397,7 +1397,7 @@ impl TeachingPlanManager {
         self.send_and_parse(builder)
     }
 
-    /// 保存教师课程邀请链接.
+    /// 保存教师课程邀请链接
     pub fn save_teacher_course_invite_url(&self, data: Value) -> MewResult<Value> {
         debug!("保存教师课程邀请链接");
         let builder = self
@@ -1418,9 +1418,9 @@ impl Default for TeachingPlanManager {
     }
 }
 
-// ==================== 图像分类管理类 ====================
+// 图像分类管理类
 
-/// 图像分类管理接口.
+/// 图像分类管理接口
 pub struct ImageClassifyManager {
     client: &'static CodeMaoClient,
 }
@@ -1432,7 +1432,7 @@ impl ImageClassifyManager {
         }
     }
 
-    /// 获取图像分类列表.
+    /// 获取图像分类列表
     pub fn fetch_image_classify_list(
         &self,
         limit: Option<i32>,
@@ -1452,7 +1452,7 @@ impl ImageClassifyManager {
         self.send_and_parse(builder)
     }
 
-    /// 提交图像分类.
+    /// 提交图像分类
     pub fn submit_image_classify(&self, data: Value) -> MewResult<Value> {
         debug!("提交图像分类");
         let builder = self
@@ -1466,7 +1466,7 @@ impl ImageClassifyManager {
         self.send_and_parse(builder)
     }
 
-    /// 更新图像分类.
+    /// 更新图像分类
     pub fn update_image_classify(&self, classify_id: &str, data: Value) -> MewResult<Value> {
         debug!("更新图像分类: classify_id={}", classify_id);
         let endpoint = format!("/neko/image-classify/{}", classify_id);
@@ -1477,7 +1477,7 @@ impl ImageClassifyManager {
         self.send_and_parse(builder)
     }
 
-    /// 删除图像分类.
+    /// 删除图像分类
     pub fn delete_image_classify(&self, classify_id: &str) -> MewResult<Value> {
         debug!("删除图像分类: classify_id={}", classify_id);
         let endpoint = format!("/neko/image-classify/{}", classify_id);
@@ -1494,9 +1494,9 @@ impl Default for ImageClassifyManager {
     }
 }
 
-// ==================== 包管理类 ====================
+// 包管理类
 
-/// 包管理接口.
+/// 包管理接口
 pub struct PackageManager {
     client: &'static CodeMaoClient,
 }
@@ -1508,7 +1508,7 @@ impl PackageManager {
         }
     }
 
-    /// 获取包列表.
+    /// 获取包列表
     pub fn fetch_package_list(
         &self,
         package_type: &str,
@@ -1533,7 +1533,7 @@ impl PackageManager {
         self.send_and_parse(builder)
     }
 
-    /// 创建包.
+    /// 创建包
     pub fn create_package(&self, data: Value) -> MewResult<Value> {
         debug!("创建包");
         let builder = self
@@ -1543,7 +1543,7 @@ impl PackageManager {
         self.send_and_parse(builder)
     }
 
-    /// 更新包信息.
+    /// 更新包信息
     pub fn update_package(
         &self,
         package_id: &str,
@@ -1563,7 +1563,7 @@ impl PackageManager {
         self.send_and_parse(builder)
     }
 
-    /// 删除包.
+    /// 删除包
     pub fn delete_package(&self, package_id: &str) -> MewResult<Value> {
         debug!("删除包: package_id={}", package_id);
         let endpoint = format!("/neko/package/{}", package_id);
@@ -1580,9 +1580,9 @@ impl Default for PackageManager {
     }
 }
 
-// ==================== 示例管理类 ====================
+// 示例管理类
 
-/// 示例管理接口.
+/// 示例管理接口
 pub struct SampleManager {
     client: &'static CodeMaoClient,
 }
@@ -1594,7 +1594,7 @@ impl SampleManager {
         }
     }
 
-    /// 获取 Kitten N 示例详情.
+    /// 获取 Kitten N 示例详情
     pub fn fetch_sample_detail(&self, params: Vec<(String, String)>) -> MewResult<Value> {
         debug!("获取示例详情: params={:?}", params);
         let timestamp = current_timestamp_13();
@@ -1612,7 +1612,7 @@ impl SampleManager {
         self.send_and_parse(builder)
     }
 
-    /// 获取示例列表.
+    /// 获取示例列表
     pub fn fetch_sample_list(&self, subject_id: &str) -> MewResult<Value> {
         debug!("获取示例列表: subject_id={}", subject_id);
         let timestamp = current_timestamp_13();
@@ -1635,9 +1635,9 @@ impl Default for SampleManager {
     }
 }
 
-// ==================== 作品数据获取类 ====================
+// 作品数据获取类
 
-/// 作品数据查询接口(详情,评论,源代码,推荐,搜索等).
+/// 作品数据查询接口(详情,评论,源代码,推荐,搜索等)
 pub struct WorkDataFetcher {
     client: &'static CodeMaoClient,
 }
@@ -1649,7 +1649,7 @@ impl WorkDataFetcher {
         }
     }
 
-    /// 构建带时间戳的基础分页迭代器.
+    /// 构建带时间戳的基础分页迭代器
     fn build_paginated(
         &self,
         endpoint: &str,
@@ -1664,9 +1664,9 @@ impl WorkDataFetcher {
             .with_limit(default_limit)
     }
 
-    // ==================== 作品详情 ====================
+    // 作品详情
 
-    /// 获取作品详细信息.
+    /// 获取作品详细信息
     pub fn fetch_work_details(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取作品详情: work_id={}", work_id);
         let endpoint = format!("/creation-tools/v1/works/{}", work_id);
@@ -1674,7 +1674,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取 Kitten 作品详细信息.
+    /// 获取 Kitten 作品详细信息
     pub fn fetch_kitten_work_details(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取Kitten作品详情: work_id={}", work_id);
         let endpoint = format!("/kitten/work/detail/{}", work_id);
@@ -1684,7 +1684,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取 KN 作品详细信息.
+    /// 获取 KN 作品详细信息
     pub fn fetch_kn_work_details(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取KN作品详情: work_id={}", work_id);
         let endpoint = format!("/neko/works/{}", work_id);
@@ -1694,7 +1694,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取 Coco 作品信息.
+    /// 获取 Coco 作品信息
     pub fn fetch_coco_work_info(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取Coco作品信息: work_id={}", work_id);
         let endpoint = format!("/coconut/web/work/{}/info", work_id);
@@ -1704,7 +1704,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取 KN 作品发布状态.
+    /// 获取 KN 作品发布状态
     pub fn fetch_kn_publish_status(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取KN作品发布状态: work_id={}", work_id);
         let endpoint = format!("/neko/community/work/detail/{}", work_id);
@@ -1714,7 +1714,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取 KN 作品状态.
+    /// 获取 KN 作品状态
     pub fn fetch_kn_work_state(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取KN作品状态: work_id={}", work_id);
         let endpoint = format!("/neko/works/status/{}", work_id);
@@ -1724,7 +1724,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取 KN 作品详情.
+    /// 获取 KN 作品详情
     pub fn fetch_kn_work_detail(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取KN作品详情: work_id={}", work_id);
         let endpoint = format!("/neko/community/player/published-work-detail/{}", work_id);
@@ -1734,7 +1734,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取玩家作品详情.
+    /// 获取玩家作品详情
     pub fn fetch_player_work_detail(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取玩家作品详情: work_id={}", work_id);
         let endpoint = format!("/neko/works/player/work-detail/{}", work_id);
@@ -1744,7 +1744,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 通过课程代码获取作品.
+    /// 通过课程代码获取作品
     pub fn fetch_work_by_course_code(&self, course_code: &str) -> MewResult<Value> {
         debug!("通过课程代码获取作品: course_code={}", course_code);
         let timestamp = current_timestamp_13();
@@ -1760,7 +1760,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取作品状态.
+    /// 获取作品状态
     pub fn fetch_work_status(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取作品状态: work_id={}", work_id);
         let endpoint = format!("/neko/works/status/{}", work_id);
@@ -1770,7 +1770,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取作品参加的活动信息.
+    /// 获取作品参加的活动信息
     pub fn fetch_work_activity(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取作品活动信息: work_id={}", work_id);
         let endpoint = format!("/web/works/activity/info/{}", work_id);
@@ -1778,7 +1778,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 检查用户操作状态.
+    /// 检查用户操作状态
     pub fn check_user_operation_status(&self, work_id: i32) -> MewResult<Value> {
         debug!("检查用户操作状态: work_id={}", work_id);
         let endpoint = format!("/neko/community/check-user-opr-work-status/{}", work_id);
@@ -1788,9 +1788,9 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    // ==================== 评论相关 ====================
+    // 评论相关
 
-    /// 获取作品评论分页迭代器.
+    /// 获取作品评论分页迭代器
     pub fn fetch_work_comments_gen(&self, work_id: i32, limit: Option<usize>) -> PaginatedIter {
         debug!("获取作品评论迭代器: work_id={}", work_id);
         let endpoint = format!("/creation-tools/v1/works/{}/comments", work_id);
@@ -1798,9 +1798,9 @@ impl WorkDataFetcher {
             .with_total_key("page_total")
     }
 
-    // ==================== 源代码 ====================
+    // 源代码
 
-    /// 获取作品源代码.
+    /// 获取作品源代码
     pub fn fetch_work_source_code(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取作品源代码: work_id={}", work_id);
         let endpoint = format!("/creation-tools/v1/works/{}/source/public", work_id);
@@ -1808,7 +1808,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取 Kitten 作品源代码.
+    /// 获取 Kitten 作品源代码
     pub fn fetch_kitten_source_code(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取Kitten源代码: work_id={}", work_id);
         let endpoint = format!("/kitten/work/ide/load/{}", work_id);
@@ -1818,7 +1818,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取游玩端 Kitten 作品代码.
+    /// 获取游玩端 Kitten 作品代码
     pub fn fetch_kitten_player_code(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取Kitten播放器代码: work_id={}", work_id);
         let endpoint = format!("/kitten/r2/work/player/load/{}", work_id);
@@ -1828,7 +1828,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取 Coco 作品源代码.
+    /// 获取 Coco 作品源代码
     pub fn fetch_coco_source_code(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取Coco源代码: work_id={}", work_id);
         let endpoint = format!("/coconut/web/work/{}/content", work_id);
@@ -1838,7 +1838,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取游玩端 Coco 作品代码.
+    /// 获取游玩端 Coco 作品代码
     pub fn fetch_coco_player_code(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取Coco播放器代码: work_id={}", work_id);
         let endpoint = format!("/coconut/web/work/{}/load", work_id);
@@ -1848,7 +1848,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取游玩端 Wood 作品代码.
+    /// 获取游玩端 Wood 作品代码
     pub fn fetch_wood_player_code(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取Wood播放器代码: work_id={}", work_id);
         let timestamp = current_timestamp_13();
@@ -1861,7 +1861,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取 KN 作品历史版本.
+    /// 获取 KN 作品历史版本
     pub fn fetch_kn_work_versions(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取KN作品历史版本: work_id={}", work_id);
         let endpoint = format!("/neko/works/archive/{}", work_id);
@@ -1871,9 +1871,9 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    // ==================== 作品列表和推荐 ====================
+    // 作品列表和推荐
 
-    /// 获取 Web 端相关作品推荐.
+    /// 获取 Web 端相关作品推荐
     pub fn fetch_web_recommendations(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取Web端推荐: work_id={}", work_id);
         let endpoint = format!("/nemo/v2/works/web/{}/recommended", work_id);
@@ -1881,7 +1881,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取 Nemo 端相关作品推荐.
+    /// 获取 Nemo 端相关作品推荐
     pub fn fetch_nemo_recommendations(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取Nemo端推荐: work_id={}", work_id);
         let timestamp = current_timestamp_13();
@@ -1897,7 +1897,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取 Web 端最新作品.
+    /// 获取 Web 端最新作品
     pub fn fetch_new_works_web(
         &self,
         limit: Option<i32>,
@@ -1921,7 +1921,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取 Web 端主题作品.
+    /// 获取 Web 端主题作品
     pub fn fetch_themed_works_web(
         &self,
         limit: i32,
@@ -1949,7 +1949,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取 Nemo 端发现页作品.
+    /// 获取 Nemo 端发现页作品
     pub fn fetch_nemo_discover(&self) -> MewResult<Value> {
         debug!("获取Nemo端发现页作品");
         let builder =
@@ -1958,7 +1958,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取 Nemo 端最新作品.
+    /// 获取 Nemo 端最新作品
     pub fn fetch_new_works_nemo(
         &self,
         types: NemoWorkType,
@@ -1976,7 +1976,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取动态作品.
+    /// 获取动态作品
     pub fn fetch_activity_feed(&self, limit: Option<i32>, offset: Option<i32>) -> MewResult<Value> {
         debug!("获取动态作品: limit={:?}", limit);
         let timestamp = current_timestamp_13();
@@ -1988,7 +1988,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取动态推荐用户.
+    /// 获取动态推荐用户
     pub fn fetch_recommended_users(&self) -> MewResult<Value> {
         debug!("获取推荐用户");
         let builder = self.client.build_request(
@@ -1999,9 +1999,9 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    // ==================== 主题相关 ====================
+    // 主题相关
 
-    /// 获取随机作品主题 ID 列表.
+    /// 获取随机作品主题 ID 列表
     pub fn fetch_random_subjects(&self) -> MewResult<Value> {
         debug!("获取随机主题");
         let builder =
@@ -2010,7 +2010,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取主题详细信息.
+    /// 获取主题详细信息
     pub fn fetch_subject_details(&self, ids: i32) -> MewResult<Value> {
         debug!("获取主题详情: ids={}", ids);
         let endpoint = format!("/nemo/v3/work-subject/{}/info", ids);
@@ -2018,7 +2018,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取主题下作品.
+    /// 获取主题下作品
     pub fn fetch_subject_works(
         &self,
         ids: i32,
@@ -2036,7 +2036,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取所有主题作品.
+    /// 获取所有主题作品
     pub fn fetch_all_subject_works(
         &self,
         limit: Option<i32>,
@@ -2052,9 +2052,9 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    // ==================== 作品谱系 ====================
+    // 作品谱系
 
-    /// 获取 Web 端作品谱系.
+    /// 获取 Web 端作品谱系
     pub fn fetch_work_lineage_web(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取Web端作品谱系: work_id={}", work_id);
         let endpoint = format!("/tiger/work/tree/{}", work_id);
@@ -2062,7 +2062,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取 Nemo 端作品谱系.
+    /// 获取 Nemo 端作品谱系
     pub fn fetch_work_lineage_nemo(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取Nemo端作品谱系: work_id={}", work_id);
         let endpoint = format!("/nemo/v2/works/root/{}", work_id);
@@ -2070,9 +2070,9 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    // ==================== 回收站 ====================
+    // 回收站
 
-    /// 获取 Kitten 回收站作品分页迭代器.
+    /// 获取 Kitten 回收站作品分页迭代器
     pub fn fetch_kitten_trash_gen(
         &self,
         version: KittenVersion,
@@ -2086,7 +2086,7 @@ impl WorkDataFetcher {
             .with_base_key(BaseKey::Creation)
     }
 
-    /// 获取海龟编辑器回收站作品分页迭代器.
+    /// 获取海龟编辑器回收站作品分页迭代器
     pub fn fetch_wood_trash_gen(
         &self,
         language_type: Option<i32>,
@@ -2102,7 +2102,7 @@ impl WorkDataFetcher {
             .with_base_key(BaseKey::Creation)
     }
 
-    /// 获取代码岛回收站作品分页迭代器.
+    /// 获取代码岛回收站作品分页迭代器
     pub fn fetch_box_trash_gen(
         &self,
         work_status: Option<&str>,
@@ -2114,7 +2114,7 @@ impl WorkDataFetcher {
             .with_base_key(BaseKey::Creation)
     }
 
-    /// 获取小说回收站分页迭代器.
+    /// 获取小说回收站分页迭代器
     pub fn fetch_fiction_trash_gen(
         &self,
         fiction_status: Option<&str>,
@@ -2125,7 +2125,7 @@ impl WorkDataFetcher {
             .with_iter_param("fiction_status", fiction_status.unwrap_or("CYCLED"))
     }
 
-    /// 获取 KN 回收站作品分页迭代器.
+    /// 获取 KN 回收站作品分页迭代器
     pub fn fetch_kn_trash_gen(
         &self,
         name: Option<&str>,
@@ -2143,9 +2143,9 @@ impl WorkDataFetcher {
             .with_base_key(BaseKey::Creation)
     }
 
-    // ==================== 搜索 ====================
+    // 搜索
 
-    /// 搜索 KN 作品分页迭代器.
+    /// 搜索 KN 作品分页迭代器
     pub fn search_kn_works_gen(
         &self,
         name: &str,
@@ -2164,7 +2164,7 @@ impl WorkDataFetcher {
             .with_base_key(BaseKey::Creation)
     }
 
-    /// 搜索已发布 KN 作品分页迭代器.
+    /// 搜索已发布 KN 作品分页迭代器
     pub fn search_published_kn_works_gen(
         &self,
         name: &str,
@@ -2181,7 +2181,7 @@ impl WorkDataFetcher {
             .with_base_key(BaseKey::Creation)
     }
 
-    /// 通过名称搜索作品(Web 端).
+    /// 通过名称搜索作品(Web 端)
     pub fn search_works_by_name_web(
         &self,
         name: &str,
@@ -2199,7 +2199,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 通过名称搜索作品(Nemo 端).
+    /// 通过名称搜索作品(Nemo 端)
     pub fn search_works_by_name_nemo(
         &self,
         name: &str,
@@ -2217,9 +2217,9 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    // ==================== 标签和元数据 ====================
+    // 标签和元数据
 
-    /// 获取作品元数据.
+    /// 获取作品元数据
     pub fn fetch_work_metadata(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取作品元数据: work_id={}", work_id);
         let endpoint = format!("/api/work/info/{}", work_id);
@@ -2227,7 +2227,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取作品标签.
+    /// 获取作品标签
     pub fn fetch_work_tags(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取作品标签: work_id={}", work_id);
         let timestamp = current_timestamp_13();
@@ -2243,7 +2243,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取所有 Kitten 作品标签.
+    /// 获取所有 Kitten 作品标签
     pub fn fetch_kitten_tags(&self) -> MewResult<Value> {
         debug!("获取Kitten标签");
         let builder = self.client.build_request(
@@ -2254,7 +2254,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取 Kitten 默认封面.
+    /// 获取 Kitten 默认封面
     pub fn fetch_kitten_default_covers(&self) -> MewResult<Value> {
         debug!("获取Kitten默认封面");
         let builder = self.client.build_request(
@@ -2265,7 +2265,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取作品最近使用的封面.
+    /// 获取作品最近使用的封面
     pub fn fetch_recent_covers(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取作品最近封面: work_id={}", work_id);
         let endpoint = format!("/kitten/work/cover/{}/recentCovers", work_id);
@@ -2275,7 +2275,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 验证作品名称是否可用.
+    /// 验证作品名称是否可用
     pub fn validate_work_name(&self, name: &str, work_id: i32) -> MewResult<Value> {
         debug!("验证作品名称: name={}, work_id={}", name, work_id);
         let timestamp = current_timestamp_13();
@@ -2288,9 +2288,9 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    // ==================== 作者相关 ====================
+    // 作者相关
 
-    /// 获取作者作品集.
+    /// 获取作者作品集
     pub fn fetch_author_portfolio(&self, user_id: i32) -> MewResult<Value> {
         debug!("获取作者作品集: user_id={}", user_id);
         let endpoint = format!("/web/works/users/{}", user_id);
@@ -2298,9 +2298,9 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    // ==================== 其他 ====================
+    // 其他
 
-    /// 根据喵口令获取作品数据.
+    /// 根据喵口令获取作品数据
     pub fn fetch_work_by_miao_code(&self, token: &str) -> MewResult<Value> {
         debug!("根据喵口令获取作品: token={}", token);
         let timestamp = current_timestamp_13();
@@ -2312,7 +2312,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取 KN 作品变量列表.
+    /// 获取 KN 作品变量列表
     pub fn fetch_kn_variables(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取KN变量: work_id={}", work_id);
         let endpoint = format!(
@@ -2323,7 +2323,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取积木或角色资源包.
+    /// 获取积木或角色资源包
     pub fn fetch_resource_pack(
         &self,
         types: ResourcePackType,
@@ -2345,7 +2345,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取素材分类.
+    /// 获取素材分类
     pub fn fetch_material_categories(&self, material_type: &str) -> MewResult<Value> {
         debug!("获取素材分类: type={}", material_type);
         let timestamp = current_timestamp_13();
@@ -2361,7 +2361,7 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取素材列表.
+    /// 获取素材列表
     pub fn fetch_material_list(
         &self,
         second_id: &str,
@@ -2390,7 +2390,7 @@ impl Default for WorkDataFetcher {
     }
 }
 
-// ==================== 共享请求辅助(ClientAccess) ====================
+// 共享请求辅助(ClientAccess)
 
 impl ClientAccess for BaseWorkOperations {
     fn client(&self) -> &CodeMaoClient {

@@ -4,9 +4,9 @@ use crate::utils::acquire::{
 use log::debug;
 use serde_json::{Value, json};
 
-// ==================== 工作室相关枚举 ====================
+// 工作室相关枚举
 
-/// 内容来源.
+/// 内容来源
 #[derive(Debug, Clone, Copy)]
 pub enum Source {
     WorkShop,
@@ -20,7 +20,7 @@ impl Source {
     }
 }
 
-/// 审核状态.
+/// 审核状态
 #[derive(Debug, Clone, Copy)]
 pub enum AuditStatus {
     Unaccepted,
@@ -36,7 +36,7 @@ impl AuditStatus {
     }
 }
 
-/// 工作室举报原因 ID.
+/// 工作室举报原因 ID
 #[derive(Debug, Clone, Copy)]
 pub enum WorkShopReportReasonId {
     Custom = 0,
@@ -50,9 +50,9 @@ pub enum WorkShopReportReasonId {
     Reason8 = 8,
 }
 
-// ==================== 工作室数据获取器 ====================
+// 工作室数据获取器
 
-/// 工作室相关数据查询接口.
+/// 工作室相关数据查询接口
 pub struct WorkshopDataFetcher {
     client: &'static CodeMaoClient,
 }
@@ -64,11 +64,11 @@ impl WorkshopDataFetcher {
         }
     }
 
-    // ==================== 私有辅助 ====================
+    // 私有辅助
 
-    // ==================== 公共方法 ====================
+    // 公共方法
 
-    /// 获取工作室简要信息(需登录工作室成员账号).
+    /// 获取工作室简要信息(需登录工作室成员账号)
     pub fn fetch_workshop_info(&self) -> MewResult<Value> {
         debug!("获取工作室简要信息");
         let builder = self
@@ -77,7 +77,7 @@ impl WorkshopDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取工作室详细信息.
+    /// 获取工作室详细信息
     pub fn fetch_workshop_details(&self, workshop_id: &str) -> MewResult<Value> {
         debug!("获取工作室详情: workshop_id={}", workshop_id);
         let endpoint = format!("/web/shops/{}", workshop_id);
@@ -85,7 +85,7 @@ impl WorkshopDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 搜索工作室列表.
+    /// 搜索工作室列表
     pub fn fetch_workshops(
         &self,
         level: Option<i32>,
@@ -113,7 +113,7 @@ impl WorkshopDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 工作室成员列表分页迭代器.
+    /// 工作室成员列表分页迭代器
     pub fn fetch_workshop_members_gen(
         &self,
         workshop_id: i32,
@@ -128,7 +128,7 @@ impl WorkshopDataFetcher {
             .with_limit(limit.unwrap_or(40))
     }
 
-    /// 获取工作室详情列表(含成员和作品).
+    /// 获取工作室详情列表(含成员和作品)
     pub fn fetch_workshop_details_list(
         &self,
         levels: Option<Vec<i32>>,
@@ -160,7 +160,7 @@ impl WorkshopDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 工作室讨论分页迭代器.
+    /// 工作室讨论分页迭代器
     pub fn fetch_workshop_discussions_gen(
         &self,
         shop_id: i32,
@@ -178,7 +178,7 @@ impl WorkshopDataFetcher {
             .with_limit(limit.unwrap_or(15))
     }
 
-    /// 工作室投稿作品分页迭代器.
+    /// 工作室投稿作品分页迭代器
     pub fn fetch_workshop_works_gen(
         &self,
         workshop_id: i32,
@@ -203,7 +203,7 @@ impl WorkshopDataFetcher {
             .with_limit(limit.unwrap_or(20))
     }
 
-    /// 获取与工作室的关系.
+    /// 获取与工作室的关系
     pub fn fetch_workshop_relation(&self, relation_id: i32) -> MewResult<Value> {
         debug!("获取工作室关系: relation_id={}", relation_id);
         let builder = self
@@ -213,7 +213,7 @@ impl WorkshopDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 工作室讨论区帖子分页迭代器.
+    /// 工作室讨论区帖子分页迭代器
     pub fn fetch_workshop_posts_gen(&self, label_id: i32, limit: Option<usize>) -> PaginatedIter {
         let endpoint = format!("/web/works/subjects/labels/{}/posts", label_id);
         debug!("获取工作室帖子迭代器: label_id={}", label_id);
@@ -223,7 +223,7 @@ impl WorkshopDataFetcher {
             .with_limit(limit.unwrap_or(20))
     }
 
-    /// 获取工作室待审核成员列表.
+    /// 获取工作室待审核成员列表
     pub fn fetch_workshop_unaudited_member(
         &self,
         workshop_id: i32,
@@ -260,9 +260,9 @@ impl ClientAccess for WorkshopDataFetcher {
     }
 }
 
-// ==================== 工作室操作处理器 ====================
+// 工作室操作处理器
 
-/// 举报讨论区评论的参数.
+/// 举报讨论区评论的参数
 pub struct ReportCommentArgs<'a> {
     pub comment_id: i32,
     pub reason_content: &'a str,
@@ -273,7 +273,7 @@ pub struct ReportCommentArgs<'a> {
     pub description: Option<&'a str>,
 }
 
-/// 工作室相关操作接口(创建,投稿,评论,审核等).
+/// 工作室相关操作接口(创建,投稿,评论,审核等)
 pub struct WorkshopActionHandler {
     client: &'static CodeMaoClient,
 }
@@ -285,11 +285,11 @@ impl WorkshopActionHandler {
         }
     }
 
-    // ==================== 私有辅助 ====================
+    // 私有辅助
 
-    // ==================== 公共方法 ====================
+    // 公共方法
 
-    /// 更新工作室简介.
+    /// 更新工作室简介
     pub fn update_workshop_details(
         &self,
         description: &str,
@@ -311,7 +311,7 @@ impl WorkshopActionHandler {
         self.check_status(builder, HTTPStatus::Ok)
     }
 
-    /// 创建工作室.
+    /// 创建工作室
     pub fn create_workshop(
         &self,
         name: &str,
@@ -332,7 +332,7 @@ impl WorkshopActionHandler {
         self.client.response_to_json(response)
     }
 
-    /// 解散工作室.
+    /// 解散工作室
     pub fn delete_workshop(&self, workshop_id: i32) -> MewResult<bool> {
         debug!("解散工作室: workshop_id={}", workshop_id);
         let payload = json!({ "id": workshop_id });
@@ -343,7 +343,7 @@ impl WorkshopActionHandler {
         self.check_status(builder, HTTPStatus::Ok)
     }
 
-    /// 向工作室投稿作品.
+    /// 向工作室投稿作品
     pub fn create_work_contribution(&self, workshop_id: i32, work_id: i32) -> MewResult<bool> {
         debug!("投稿作品: workshop_id={}, work_id={}", workshop_id, work_id);
         let payload = json!({
@@ -357,7 +357,7 @@ impl WorkshopActionHandler {
         self.check_status(builder, HTTPStatus::Ok)
     }
 
-    /// 从工作室移除作品.
+    /// 从工作室移除作品
     pub fn delete_workshop_work(&self, workshop_id: i32, work_id: i32) -> MewResult<bool> {
         debug!("移除作品: workshop_id={}, work_id={}", workshop_id, work_id);
         let payload = json!({
@@ -371,7 +371,7 @@ impl WorkshopActionHandler {
         self.check_status(builder, HTTPStatus::Ok)
     }
 
-    /// 申请加入工作室.
+    /// 申请加入工作室
     pub fn execute_apply_to_join(&self, workshop_id: i32, qq: Option<&str>) -> MewResult<bool> {
         debug!("申请加入工作室: workshop_id={}", workshop_id);
         let payload = json!({
@@ -385,7 +385,7 @@ impl WorkshopActionHandler {
         self.check_status(builder, HTTPStatus::Ok)
     }
 
-    /// 审核加入工作室的申请.
+    /// 审核加入工作室的申请
     pub fn execute_review_join_application(
         &self,
         workshop_id: i32,
@@ -408,7 +408,7 @@ impl WorkshopActionHandler {
         self.check_status(builder, HTTPStatus::Ok)
     }
 
-    /// 举报讨论区下的评论.
+    /// 举报讨论区下的评论
     pub fn execute_report_comment(&self, args: ReportCommentArgs<'_>) -> MewResult<bool> {
         debug!(
             "举报评论: comment_id={}, reason_id={:?}",
@@ -430,7 +430,7 @@ impl WorkshopActionHandler {
         self.check_status(builder, HTTPStatus::Created)
     }
 
-    /// 回复评论.
+    /// 回复评论
     pub fn create_comment_reply(
         &self,
         workshop_id: i32,
@@ -460,7 +460,7 @@ impl WorkshopActionHandler {
         self.send_maybe_parse(builder, return_data, HTTPStatus::Created)
     }
 
-    /// 删除回复.
+    /// 删除回复
     pub fn delete_reply(&self, comment_id: i32, source: Option<Source>) -> MewResult<bool> {
         debug!("删除回复: comment_id={}", comment_id);
         let endpoint = format!("/web/discussions/replies/{}", comment_id);
@@ -471,7 +471,7 @@ impl WorkshopActionHandler {
         self.check_status(builder, HTTPStatus::NoContent)
     }
 
-    /// 发表评论.
+    /// 发表评论
     pub fn create_comment(
         &self,
         workshop_id: i32,
@@ -494,7 +494,7 @@ impl WorkshopActionHandler {
         self.send_maybe_parse(builder, return_data, HTTPStatus::Created)
     }
 
-    /// 删除评论.
+    /// 删除评论
     pub fn delete_comment(&self, comment_id: i32, source: Option<Source>) -> MewResult<bool> {
         debug!("删除评论: comment_id={}", comment_id);
         let endpoint = format!("/web/discussions/comments/{}", comment_id);

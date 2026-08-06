@@ -9,9 +9,9 @@ use sha2::{Digest, Sha256};
 use std::sync::{Arc, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-// ==================== 枚举定义 ====================
+// 枚举定义
 
-/// 登录方式枚举,涵盖用户与管理员的各种登录途径.
+/// 登录方式枚举,涵盖用户与管理员的各种登录途径
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoginMethod {
     PasswordV0,
@@ -34,7 +34,7 @@ impl LoginMethod {
         }
     }
 
-    /// 判断该登录方法是否属于普通用户.
+    /// 判断该登录方法是否属于普通用户
     pub fn is_user_method(&self) -> bool {
         matches!(
             self,
@@ -45,7 +45,7 @@ impl LoginMethod {
         )
     }
 
-    /// 判断该登录方法是否属于管理员.
+    /// 判断该登录方法是否属于管理员
     pub fn is_admin_method(&self) -> bool {
         matches!(self, LoginMethod::AdminToken | LoginMethod::AdminPassword)
     }
@@ -90,7 +90,7 @@ impl UserRole {
     }
 }
 
-/// 账号状态/类型(普通,评审,教育).
+/// 账号状态/类型(普通,评审,教育)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccountStatus {
     Judgement,
@@ -116,7 +116,7 @@ impl AccountStatus {
         }
     }
 
-    /// 映射为身份枚举 `Catsona`.
+    /// 映射为身份枚举 `Catsona`
     pub fn to_identity(self) -> Catsona {
         match self {
             AccountStatus::Judgement => Catsona::Judge,
@@ -126,9 +126,9 @@ impl AccountStatus {
     }
 }
 
-// ==================== 数据结构 ====================
+// 数据结构
 
-/// 登录凭据,聚合身份,密码,令牌,状态等信息.
+/// 登录凭据,聚合身份,密码,令牌,状态等信息
 #[derive(Debug, Clone)]
 pub struct LoginCredentials {
     pub identity: String,
@@ -156,7 +156,7 @@ impl Default for LoginCredentials {
     }
 }
 
-/// 登录结果,包含成功标志,登录方式,令牌等信息.
+/// 登录结果,包含成功标志,登录方式,令牌等信息
 #[derive(Debug, Clone)]
 pub struct LoginResult {
     pub success: bool,
@@ -195,9 +195,9 @@ impl LoginResult {
     }
 }
 
-// ==================== 客户端提供者特质 ====================
+// 客户端提供者特质
 
-/// 抽象客户端提供者,便于依赖注入和测试.
+/// 抽象客户端提供者,便于依赖注入和测试
 pub trait ClientProvider: Send + Sync + std::fmt::Debug {
     fn client(&self) -> &CodeMaoClient;
     fn clone_box(&self) -> Box<dyn ClientProvider>;
@@ -234,7 +234,7 @@ impl Default for GlobalClientProvider {
     }
 }
 
-// ==================== 全局单例 ====================
+// 全局单例
 
 static GLOBAL_AUTH_MANAGER: OnceLock<Arc<AuthManager>> = OnceLock::new();
 
@@ -244,9 +244,9 @@ pub fn global_auth_manager() -> Arc<AuthManager> {
         .clone()
 }
 
-// ==================== 辅助函数 ====================
+// 辅助函数
 
-/// 通过任意 `ClientProvider` 获取服务器当前时间戳(毫秒).
+/// 通过任意 `ClientProvider` 获取服务器当前时间戳(毫秒)
 pub fn fetch_current_timestamp_with_provider(provider: &dyn ClientProvider) -> MewResult<i64> {
     let client = provider.client();
     let response = client
@@ -256,12 +256,12 @@ pub fn fetch_current_timestamp_with_provider(provider: &dyn ClientProvider) -> M
     Ok(json["data"].as_i64().unwrap_or(0))
 }
 
-/// 使用全局客户端获取当前时间戳.
+/// 使用全局客户端获取当前时间戳
 pub fn fetch_current_timestamp() -> MewResult<i64> {
     fetch_current_timestamp_with_provider(&GlobalClientProvider::new())
 }
 
-/// 根据提供的令牌,身份,密码自动推断普通用户登录方式.
+/// 根据提供的令牌,身份,密码自动推断普通用户登录方式
 fn determine_user_login_method(
     token: Option<&str>,
     identity: Option<&str>,
@@ -276,7 +276,7 @@ fn determine_user_login_method(
     Err(MewError::Auth("缺少必要的登录凭据".into()))
 }
 
-/// 根据提供的令牌,身份,密码自动推断管理员登录方式.
+/// 根据提供的令牌,身份,密码自动推断管理员登录方式
 fn determine_admin_login_method(
     token: Option<&str>,
     identity: Option<&str>,
@@ -291,9 +291,9 @@ fn determine_admin_login_method(
     Err(MewError::Auth("缺少必要的管理员登录凭据".into()))
 }
 
-// ==================== 认证处理器 ====================
+// 认证处理器
 
-/// 处理原始 HTTP 认证请求,如获取 ticket,验证码,登录接口调用.
+/// 处理原始 HTTP 认证请求,如获取 ticket,验证码,登录接口调用
 #[derive(Clone, Debug)]
 pub struct AuthProcessor {
     client_provider: Box<dyn ClientProvider>,
@@ -314,7 +314,7 @@ impl AuthProcessor {
         self.client_provider.client()
     }
 
-    /// 根据令牌获取用户详细信息.
+    /// 根据令牌获取用户详细信息
     pub fn fetch_auth_details(&self, token: &str) -> MewResult<Value> {
         let client = self.client();
         let cookie_str = format!("authorization={}", token);
@@ -329,7 +329,7 @@ impl AuthProcessor {
         client.response_to_json(response)
     }
 
-    /// 获取管理员后台信息(需已设置管理员令牌).
+    /// 获取管理员后台信息(需已设置管理员令牌)
     pub fn fetch_admin_details(&self) -> MewResult<Value> {
         let client = self.client();
         let response = client
@@ -338,7 +338,7 @@ impl AuthProcessor {
         client.response_to_json(response)
     }
 
-    /// 获取登录 ticket(用于新版登录流程).
+    /// 获取登录 ticket(用于新版登录流程)
     pub fn get_login_ticket(&self, identity: &str, timestamp: i64, pid: &str) -> MewResult<Value> {
         let client = self.client();
         let payload = json!({
@@ -357,7 +357,7 @@ impl AuthProcessor {
         client.response_to_json(response)
     }
 
-    /// 发送安全登录请求(v2 密码登录).
+    /// 发送安全登录请求(v2 密码登录)
     pub fn get_login_security_info(
         &self,
         identity: &str,
@@ -393,7 +393,7 @@ impl AuthProcessor {
         Ok(serde_json::from_str(&body)?)
     }
 
-    /// 管理员用户名密码认证.
+    /// 管理员用户名密码认证
     pub fn authenticate_admin_user(
         &self,
         username: &str,
@@ -415,9 +415,9 @@ impl AuthProcessor {
         client.response_to_json(response)
     }
 
-    /// 获取管理员验证码图片并保存到文件.
+    /// 获取管理员验证码图片并保存到文件
     ///
-    /// 返回时间戳,供后续登录使用.
+    /// 返回时间戳,供后续登录使用
     pub fn fetch_admin_captcha(&self) -> MewResult<i64> {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -444,7 +444,7 @@ impl AuthProcessor {
         }
     }
 
-    /// v0 密码登录请求.
+    /// v0 密码登录请求
     pub fn handle_password_v0(
         &self,
         identity: &str,
@@ -464,7 +464,7 @@ impl AuthProcessor {
         client.response_to_json(response)
     }
 
-    /// v1 密码登录请求.
+    /// v1 密码登录请求
     pub fn handle_password_v1(
         &self,
         identity: &str,
@@ -484,7 +484,7 @@ impl AuthProcessor {
         client.response_to_json(response)
     }
 
-    /// v2 密码登录(带 ticket 的安全流程).
+    /// v2 密码登录(带 ticket 的安全流程)
     pub fn handle_password_v2(
         &self,
         identity: &str,
@@ -510,9 +510,9 @@ impl Default for AuthProcessor {
     }
 }
 
-// ==================== 登录处理器 ====================
+// 登录处理器
 
-/// 负责编排具体登录流程,调用 `AuthProcessor` 完成请求并设置令牌.
+/// 负责编排具体登录流程,调用 `AuthProcessor` 完成请求并设置令牌
 #[derive(Debug)]
 pub struct LoginHandler {
     processor: AuthProcessor,
@@ -533,14 +533,14 @@ impl LoginHandler {
         self.processor.client()
     }
 
-    /// 将令牌设置到客户端,并切换到对应身份.
+    /// 将令牌设置到客户端,并切换到对应身份
     fn set_token_and_identity(&self, token: &str, identity: Catsona) -> MewResult<()> {
         self.client().set_token(identity, token)?;
         self.client().switch_identity(identity)?;
         Ok(())
     }
 
-    /// v0 密码登录处理.
+    /// v0 密码登录处理
     pub fn handle_password_v0(
         &self,
         identity: &str,
@@ -568,7 +568,7 @@ impl LoginHandler {
         }
     }
 
-    /// v1 密码登录处理.
+    /// v1 密码登录处理
     pub fn handle_password_v1(
         &self,
         identity: &str,
@@ -600,7 +600,7 @@ impl LoginHandler {
         }
     }
 
-    /// v2 密码登录处理.
+    /// v2 密码登录处理
     pub fn handle_password_v2(
         &self,
         identity: &str,
@@ -632,7 +632,7 @@ impl LoginHandler {
         }
     }
 
-    /// Token 登录处理(普通用户).
+    /// Token 登录处理(普通用户)
     pub fn handle_token(&self, token: &str, status: AccountStatus) -> MewResult<LoginResult> {
         if token.trim().is_empty() {
             return Err(MewError::Auth("Token 不能为空".into()));
@@ -645,7 +645,7 @@ impl LoginHandler {
             .with_auth_details(auth_details))
     }
 
-    /// 管理员 Token 登录(所有参数通过传参获取).
+    /// 管理员 Token 登录(所有参数通过传参获取)
     pub fn handle_admin_token(&self, token: &str) -> MewResult<LoginResult> {
         if token.trim().is_empty() {
             return Err(MewError::Auth("管理员 Token 不能为空".into()));
@@ -674,10 +674,10 @@ impl LoginHandler {
         }
     }
 
-    /// 管理员用户名密码登录(完全由参数驱动,不再交互与重试).
+    /// 管理员用户名密码登录(完全由参数驱动,不再交互与重试)
     ///
     /// 需要调用者先通过 `AuthProcessor::fetch_admin_captcha` 获取 `timestamp` 和验证码图片,
-    /// 然后将用户识别的验证码字符串传入.
+    /// 然后将用户识别的验证码字符串传入
     pub fn handle_admin_password(
         &self,
         username: &str,
@@ -738,11 +738,11 @@ impl Default for LoginHandler {
     }
 }
 
-// ==================== 认证管理器 ====================
+// 认证管理器
 
-/// 认证管理器,整合登录,登出,凭据管理等功能.
+/// 认证管理器,整合登录,登出,凭据管理等功能
 ///
-/// 可通过 `new()` 创建默认实例,或使用 `new_with_provider` 注入自定义客户端.
+/// 可通过 `new()` 创建默认实例,或使用 `new_with_provider` 注入自定义客户端
 #[derive(Debug)]
 pub struct AuthManager {
     client_provider: Box<dyn ClientProvider>,
@@ -771,9 +771,9 @@ impl AuthManager {
         self.client_provider.client()
     }
 
-    /// 执行登录,自动根据角色和凭据选择登录方式.
+    /// 执行登录,自动根据角色和凭据选择登录方式
     ///
-    /// `prefer_method` 可强制指定登录方式,但需与角色匹配.
+    /// `prefer_method` 可强制指定登录方式,但需与角色匹配
     pub fn login(
         &mut self,
         credentials: &LoginCredentials,
@@ -788,7 +788,7 @@ impl AuthManager {
         }
     }
 
-    /// 验证登录参数是否与指定方式匹配.
+    /// 验证登录参数是否与指定方式匹配
     fn validate_login_parameters(
         &self,
         credentials: &LoginCredentials,
@@ -835,7 +835,7 @@ impl AuthManager {
         Ok(())
     }
 
-    /// 自动推断或确认普通用户的登录方法.
+    /// 自动推断或确认普通用户的登录方法
     fn get_user_login_method(
         &self,
         credentials: &LoginCredentials,
@@ -869,7 +869,7 @@ impl AuthManager {
         )
     }
 
-    /// 自动推断或确认管理员的登录方法.
+    /// 自动推断或确认管理员的登录方法
     fn get_admin_login_method(
         &self,
         credentials: &LoginCredentials,
@@ -983,7 +983,7 @@ impl AuthManager {
         Ok(result)
     }
 
-    /// v0 登出.
+    /// v0 登出
     pub fn execute_logout_v0(&self) -> MewResult<bool> {
         let client = self.client();
         let response = client
@@ -993,7 +993,7 @@ impl AuthManager {
         Ok(response.status() == 204)
     }
 
-    /// v1/v2 登出,`method` 为 "web" 或 "mobile".
+    /// v1/v2 登出,`method` 为 "web" 或 "mobile"
     pub fn execute_logout_v12(&self, method: &str) -> MewResult<bool> {
         let client = self.client();
         let endpoint = format!("/tiger/v3/{}/accounts/logout", method);
@@ -1004,7 +1004,7 @@ impl AuthManager {
         Ok(response.status() == 204)
     }
 
-    /// 管理员登出.
+    /// 管理员登出
     pub fn admin_logout(&self) -> MewResult<bool> {
         let client = self.client();
         let response = client
@@ -1013,7 +1013,7 @@ impl AuthManager {
         Ok(response.status() == 204)
     }
 
-    /// 手动配置认证令牌(不经过登录流程).
+    /// 手动配置认证令牌(不经过登录流程)
     pub fn configure_authentication_token(
         &self,
         token: &str,
@@ -1025,7 +1025,7 @@ impl AuthManager {
         Ok(())
     }
 
-    /// 获取当前缓存的凭据(成功登录后存在).
+    /// 获取当前缓存的凭据(成功登录后存在)
     pub fn get_current_credentials(&self) -> Option<&LoginCredentials> {
         self.current_credentials.as_ref()
     }
@@ -1037,11 +1037,11 @@ impl Default for AuthManager {
     }
 }
 
-// ==================== 云服务认证器 ====================
+// 云服务认证器
 
-/// 用于生成云端请求所需的 `x-device-auth` 签名头.
+/// 用于生成云端请求所需的 `x-device-auth` 签名头
 ///
-/// 自动校准本地时间与服务器时间的差值.
+/// 自动校准本地时间与服务器时间的差值
 pub struct CloudAuthenticator {
     client_provider: Box<dyn ClientProvider>,
     authorization_token: Option<String>,
@@ -1083,7 +1083,7 @@ impl CloudAuthenticator {
             .collect()
     }
 
-    /// 获取校准后的时间戳(秒),首次调用会计算时差.
+    /// 获取校准后的时间戳(秒),首次调用会计算时差
     pub fn get_calibrated_timestamp(&mut self) -> MewResult<i64> {
         if self.time_difference == 0 {
             let server_time = fetch_current_timestamp_with_provider(&*self.client_provider)?;
@@ -1100,7 +1100,7 @@ impl CloudAuthenticator {
         Ok(now - self.time_difference)
     }
 
-    /// 生成 `x-device-auth` 头所需的 JSON 字符串.
+    /// 生成 `x-device-auth` 头所需的 JSON 字符串
     pub fn generate_x_device_auth(&mut self) -> MewResult<String> {
         let timestamp = self.get_calibrated_timestamp()?;
         let sign_str = format!("{}{}{}", Self::CLIENT_SECRET, timestamp, self.client_id);
@@ -1117,7 +1117,7 @@ impl CloudAuthenticator {
         Ok(serde_json::to_string(&auth_json)?)
     }
 
-    /// 获取当前的授权令牌(优先返回手动设置的,否则从客户端身份中获取).
+    /// 获取当前的授权令牌(优先返回手动设置的,否则从客户端身份中获取)
     pub fn authorization_token(&self) -> Option<String> {
         if let Some(ref token) = self.authorization_token
             && !token.is_empty()
@@ -1132,9 +1132,9 @@ impl CloudAuthenticator {
     }
 }
 
-// ==================== 链式调用构建器 ====================
+// 链式调用构建器
 
-/// 登录构建器,支持链式设置参数后执行.
+/// 登录构建器,支持链式设置参数后执行
 #[derive(Debug)]
 pub struct LoginBuilder {
     auth_manager: AuthManager,

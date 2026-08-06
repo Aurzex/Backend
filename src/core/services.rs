@@ -18,14 +18,14 @@ use super::types::{
 use crate::api::whale::{ReportStatus, Resolution};
 use crate::utils::acquire::{FileUploader, KittyFactory};
 
-/// 批量分组的键:(分组类型, 分组键).
+/// 批量分组的键:(分组类型, 分组键)
 type GroupKey = (String, String);
 
-// ==================== 文件处理器 ====================
+// 文件处理器
 pub struct FileProcessor;
 
 impl FileProcessor {
-    /// 上传单个文件,返回上传后的 URL.
+    /// 上传单个文件,返回上传后的 URL
     pub fn handle_file_upload(
         file_path: &Path,
         save_path: &str,
@@ -114,7 +114,7 @@ fn visit_dir(
     Ok(())
 }
 
-// ==================== 主举报处理器 ====================
+// 主举报处理器
 pub struct ReportProcessor {
     pub fetcher: ReportFetcher,
     pub pipeline_factory: Arc<ReportTypeRegistry>,
@@ -130,12 +130,12 @@ impl Default for ReportProcessor {
 }
 
 impl ReportProcessor {
-    /// 使用默认配置构造.
+    /// 使用默认配置构造
     pub fn new() -> Self {
         Self::new_with_config(CheckConfig::default())
     }
 
-    /// 使用自定义配置构造.
+    /// 使用自定义配置构造
     pub fn new_with_config(config: CheckConfig) -> Self {
         let fetcher = ReportFetcher::new();
         let registry = Arc::new(fetcher.registry.clone());
@@ -214,7 +214,7 @@ impl ReportProcessor {
         Ok(total_processed)
     }
 
-    /// 分块更新并处理已达阈值的组.
+    /// 分块更新并处理已达阈值的组
     fn update_and_handle_pending_groups(
         &self,
         chunk: &[Value],
@@ -310,7 +310,7 @@ impl ReportProcessor {
         Ok(())
     }
 
-    /// 无保存动作时,通过管道交互询问组内第一条记录的处理动作,并保存该动作.
+    /// 无保存动作时,通过管道交互询问组内第一条记录的处理动作,并保存该动作
     fn ask_first_record_action(
         &self,
         group: &BatchGroup,
@@ -354,7 +354,7 @@ impl ReportProcessor {
         Ok(action)
     }
 
-    /// 将批量动作应用到一批记录:仅对动作可用的记录执行,成功才标记已处理,失败仅记录日志.
+    /// 将批量动作应用到一批记录:仅对动作可用的记录执行,成功才标记已处理,失败仅记录日志
     fn apply_action_to_records(
         &self,
         chunk: &[Value],
@@ -437,7 +437,7 @@ impl ReportProcessor {
         Ok(processed)
     }
 
-    /// 创建默认处理管道,复用注入的注册表,批量管理器与配置.
+    /// 创建默认处理管道,复用注入的注册表,批量管理器与配置
     fn create_pipeline(&self) -> ProcessingPipeline {
         ProcessingPipeline::create_default(
             self.pipeline_factory.clone(),
@@ -446,13 +446,13 @@ impl ReportProcessor {
         )
     }
 
-    /// 重置批量处理状态,清空已处理记录与跨 chunk 待分组.
+    /// 重置批量处理状态,清空已处理记录与跨 chunk 待分组
     fn reset_batch_state(&self) {
         self.batch_manager.lock().unwrap().clear_processed_records();
         self.pending_groups.lock().unwrap().clear();
     }
 
-    /// 从举报记录中提取 report_id 字符串.
+    /// 从举报记录中提取 report_id 字符串
     fn extract_record_id(&self, item: &Value, config: &SourceConfig) -> String {
         item.get(&config.report_id_field)
             .map(value_to_string)
@@ -529,7 +529,7 @@ impl ReportProcessor {
         Ok(count)
     }
 
-    /// 推断举报类型,返回字符串引用以减少分配.
+    /// 推断举报类型,返回字符串引用以减少分配
     fn infer_report_type<'a>(&self, item: &'a Value) -> Option<&'a str> {
         if let Some(t) = item.get("_report_type").and_then(|v| v.as_str()) {
             return Some(t);

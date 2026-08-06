@@ -16,34 +16,34 @@ use tungstenite::http::HeaderValue;
 use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{WebSocket, connect};
 
-/// WebSocket 流类型别名(tungstenite + rustls).
+/// WebSocket 流类型别名(tungstenite + rustls)
 type WsStream = MaybeTlsStream<TcpStream>;
 type Ws = WebSocket<WsStream>;
 
-// ==================== 常量配置 ====================
+// 常量配置
 
-/// CodeMao AI 聊天 WebSocket 服务器地址.
+/// CodeMao AI 聊天 WebSocket 服务器地址
 pub const CHAT_WS_BASE_URL: &str = "wss://cr-aichat.codemao.cn/aichat/";
-/// 默认请求头(与 Python `CodeMaoConfig.HEADERS` 一致).
+/// 默认请求头(与 Python `CodeMaoConfig.HEADERS` 一致)
 pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 Edg/140.0.0.0";
 
-/// Socket.IO 帧前缀.
+/// Socket.IO 帧前缀
 const HANDSHAKE_PREFIX: &str = "0";
 const CONNECTED_MESSAGE: &str = "40";
 const EVENT_MESSAGE_PREFIX: &str = "42";
 const PING_MESSAGE: &str = "2";
 const PONG_MESSAGE: &str = "3";
 
-/// 等待 AI 开始回复的默认超时.
+/// 等待 AI 开始回复的默认超时
 pub const DEFAULT_RESPONSE_START_TIMEOUT: Duration = Duration::from_secs(10);
-/// 等待回复完成的默认超时.
+/// 等待回复完成的默认超时
 pub const DEFAULT_RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
-/// 连接建立等待超时.
+/// 连接建立等待超时
 pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
-// ==================== 错误类型 ====================
+// 错误类型
 
-/// AI 对话操作错误.
+/// AI 对话操作错误
 #[derive(Debug, Error)]
 pub enum ChatError {
     #[error("WebSocket 错误: {0}")]
@@ -74,25 +74,25 @@ impl From<tungstenite::Error> for ChatError {
     }
 }
 
-/// 本模块统一的 `Result` 别名.
+/// 本模块统一的 `Result` 别名
 pub type Result<T> = std::result::Result<T, ChatError>;
 
-// ==================== 基础类型 ====================
+// 基础类型
 
-/// 流式回复事件类型.
+/// 流式回复事件类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChatEventType {
-    /// 开始接收回复.
+    /// 开始接收回复
     Start,
-    /// 增量文本.
+    /// 增量文本
     Text,
-    /// 回复结束(载荷为完整回复).
+    /// 回复结束(载荷为完整回复)
     End,
-    /// 错误.
+    /// 错误
     Error,
 }
 
-/// 对话消息角色.
+/// 对话消息角色
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Role {
@@ -100,7 +100,7 @@ pub enum Role {
     Assistant,
 }
 
-/// 单条对话历史消息.
+/// 单条对话历史消息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HistoryMessage {
     pub role: Role,
@@ -123,26 +123,26 @@ impl HistoryMessage {
     }
 }
 
-/// 用户配额信息.
+/// 用户配额信息
 #[derive(Debug, Clone, Default)]
 pub struct UserInfo {
     pub user_id: Option<i64>,
-    /// 剩余对话次数.
+    /// 剩余对话次数
     pub chat_count: Option<i64>,
-    /// 剩余图片生成次数.
+    /// 剩余图片生成次数
     pub remaining_image_times: Option<i64>,
 }
 
-/// 回调句柄,用于取消注册回调.
+/// 回调句柄,用于取消注册回调
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CallbackHandle(pub(crate) usize);
 
 // 回调类型别名
 type StreamCallback = Box<dyn Fn(&str, ChatEventType) + Send + Sync>;
 
-// ==================== 事件存储 ====================
+// 事件存储
 
-/// 泛型回调存储.
+/// 泛型回调存储
 struct CallbackStore<T> {
     next_id: usize,
     items: Vec<(usize, T)>,
@@ -183,7 +183,7 @@ impl<T> CallbackStore<T> {
     }
 }
 
-/// 条件变量通知器.
+/// 条件变量通知器
 #[derive(Default)]
 struct Notify {
     lock: Mutex<()>,
@@ -191,7 +191,7 @@ struct Notify {
 }
 
 impl Notify {
-    /// 持锁设置状态并通知等待者,避免 Condvar 丢失唤醒.
+    /// 持锁设置状态并通知等待者,避免 Condvar 丢失唤醒
     fn notify_with<R>(&self, f: impl FnOnce() -> R) -> R {
         let _guard = self.lock.lock().unwrap();
         let result = f();
@@ -200,23 +200,23 @@ impl Notify {
     }
 }
 
-// ==================== 连接核心 ====================
+// 连接核心
 
-/// AI 对话共享内部状态.
+/// AI 对话共享内部状态
 struct ChatInner {
     token: String,
     user_agent: String,
     stopping: AtomicBool,
     connected: AtomicBool,
-    /// 是否正在接收流式回复.
+    /// 是否正在接收流式回复
     receiving: AtomicBool,
-    /// JOIN 消息已发送标记(防止重复 join 被服务器拒绝).
+    /// JOIN 消息已发送标记(防止重复 join 被服务器拒绝)
     join_sent: AtomicBool,
-    /// 当前待接收回复的回合编号(每次发送消息时递增).
+    /// 当前待接收回复的回合编号(每次发送消息时递增)
     pending_round: AtomicU64,
-    /// 已收到 Begin 的最大回合编号(用于快速回复场景下避免状态竞态).
+    /// 已收到 Begin 的最大回合编号(用于快速回复场景下避免状态竞态)
     completed_round: AtomicU64,
-    /// 发送端(读线程独占 WebSocket).
+    /// 发送端(读线程独占 WebSocket)
     tx: Mutex<Option<mpsc::Sender<Message>>>,
     read_join: Mutex<Option<JoinHandle<()>>>,
     session_id: Mutex<Option<String>>,
@@ -230,7 +230,7 @@ struct ChatInner {
     notify: Notify,
 }
 
-/// AI 对话客户端句柄:线程安全,可克隆共享.
+/// AI 对话客户端句柄:线程安全,可克隆共享
 #[derive(Clone)]
 pub struct ChatClient {
     inner: Arc<ChatInner>,
@@ -246,7 +246,7 @@ impl std::fmt::Debug for ChatClient {
     }
 }
 
-/// 建造者模式:链式配置后构造 [`ChatClient`].
+/// 建造者模式:链式配置后构造 [`ChatClient`]
 #[derive(Debug, Clone)]
 pub struct ChatBuilder {
     token: String,
@@ -254,7 +254,7 @@ pub struct ChatBuilder {
 }
 
 impl ChatBuilder {
-    /// 以授权 token 创建建造者.
+    /// 以授权 token 创建建造者
     pub fn new(token: impl Into<String>) -> Self {
         Self {
             token: token.into(),
@@ -262,13 +262,13 @@ impl ChatBuilder {
         }
     }
 
-    /// 自定义 User-Agent 请求头.
+    /// 自定义 User-Agent 请求头
     pub fn user_agent(mut self, user_agent: impl Into<String>) -> Self {
         self.user_agent = user_agent.into();
         self
     }
 
-    /// 构建客户端(尚未连接,需调用 [`ChatClient::connect`]).
+    /// 构建客户端(尚未连接,需调用 [`ChatClient::connect`])
     pub fn build(self) -> ChatClient {
         let inner = ChatInner {
             token: self.token,
@@ -298,7 +298,7 @@ impl ChatBuilder {
 }
 
 impl ChatClient {
-    /// 建立与 AI 服务器的 WebSocket 连接,并等待 Socket.IO 层就绪.
+    /// 建立与 AI 服务器的 WebSocket 连接,并等待 Socket.IO 层就绪
     pub fn connect(&self) -> Result<bool> {
         if self.inner.token.is_empty() {
             return Err(ChatError::MissingToken);
@@ -311,14 +311,14 @@ impl ChatClient {
         Ok(self.wait_for_connection(DEFAULT_CONNECT_TIMEOUT))
     }
 
-    /// 等待 WebSocket 层连接建立(超时返回 false).
+    /// 等待 WebSocket 层连接建立(超时返回 false)
     pub fn wait_for_connection(&self, timeout: Duration) -> bool {
         wait_flag(&self.inner.notify, timeout, || {
             self.inner.connected.load(Ordering::Acquire)
         })
     }
 
-    /// 发送聊天消息(用户消息自动进入历史记录).
+    /// 发送聊天消息(用户消息自动进入历史记录)
     pub fn send_message(&self, message: &str, include_history: bool) -> Result<()> {
         if !self.inner.connected.load(Ordering::Acquire) {
             return Err(ChatError::NotConnected);
@@ -345,10 +345,10 @@ impl ChatClient {
         Ok(())
     }
 
-    /// 等待 AI 开始回复(超时返回 false).
+    /// 等待 AI 开始回复(超时返回 false)
     ///
     /// 通过回合编号判定:即使 AI 在调用前已完成整轮快速回复,
-    /// 也不会误报超时.
+    /// 也不会误报超时
     pub fn wait_for_response_start(&self, timeout: Duration) -> bool {
         let target = self.inner.pending_round.load(Ordering::Acquire);
         wait_flag(&self.inner.notify, timeout, || {
@@ -360,14 +360,14 @@ impl ChatClient {
         })
     }
 
-    /// 等待当前回复完成(超时返回 false).
+    /// 等待当前回复完成(超时返回 false)
     pub fn wait_for_response(&self, timeout: Duration) -> bool {
         wait_flag(&self.inner.notify, timeout, || {
             !self.inner.receiving.load(Ordering::Acquire)
         })
     }
 
-    /// 发送消息并等待回复完成,返回完整回复文本.
+    /// 发送消息并等待回复完成,返回完整回复文本
     pub fn send_and_wait(
         &self,
         message: &str,
@@ -384,7 +384,7 @@ impl ChatClient {
         Ok(self.current_response())
     }
 
-    /// 注册流式回复回调(内容,事件类型).
+    /// 注册流式回复回调(内容,事件类型)
     pub fn add_stream_callback(
         &self,
         cb: impl Fn(&str, ChatEventType) + Send + Sync + 'static,
@@ -392,17 +392,17 @@ impl ChatClient {
         self.inner.callbacks.lock().unwrap().add(Box::new(cb))
     }
 
-    /// 移除流式回复回调.
+    /// 移除流式回复回调
     pub fn remove_stream_callback(&self, handle: CallbackHandle) {
         self.inner.callbacks.lock().unwrap().remove(handle);
     }
 
-    /// 当前已累积的回复内容.
+    /// 当前已累积的回复内容
     pub fn current_response(&self) -> String {
         self.inner.current_response.lock().unwrap().clone()
     }
 
-    /// 获取用户配额信息.
+    /// 获取用户配额信息
     pub fn get_user_info(&self) -> UserInfo {
         let user_info = self.inner.user_info.lock().unwrap();
         let chat_count = user_info.get("chat_count").and_then(Value::as_i64);
@@ -417,19 +417,19 @@ impl ChatClient {
         }
     }
 
-    /// 创建新对话(清空历史并生成新会话 ID).
+    /// 创建新对话(清空历史并生成新会话 ID)
     pub fn new_conversation(&self) {
         *self.inner.conversation_id.lock().unwrap() = generate_session_id();
         self.inner.history.lock().unwrap().clear();
         info!("新对话已创建");
     }
 
-    /// 获取当前对话历史快照.
+    /// 获取当前对话历史快照
     pub fn conversation_history(&self) -> Vec<HistoryMessage> {
         self.inner.history.lock().unwrap().clone()
     }
 
-    /// 获取当前对话轮数(用户消息条数).
+    /// 获取当前对话轮数(用户消息条数)
     pub fn conversation_count(&self) -> usize {
         self.inner
             .history
@@ -448,7 +448,7 @@ impl ChatClient {
         self.inner.receiving.load(Ordering::Acquire)
     }
 
-    /// 关闭连接.
+    /// 关闭连接
     pub fn close(&self) {
         let inner = &self.inner;
         inner.stopping.store(true, Ordering::Release);
@@ -466,7 +466,7 @@ impl ChatClient {
         info!("AI 对话连接已关闭");
     }
 
-    // ==================== 内部发送 ====================
+    // 内部发送
 
     pub(crate) fn send_event(&self, name: &str, payload: &Value) -> Result<()> {
         let frame = format!(
@@ -489,9 +489,9 @@ impl ChatClient {
     }
 }
 
-// ==================== 帧构造与解析 ====================
+// 帧构造与解析
 
-/// 构建 `chat` 事件帧:`42["chat",{...}]`(可测).
+/// 构建 `chat` 事件帧:`42["chat",{...}]`(可测)
 pub fn build_chat_frame(session_id: &str, messages: &[HistoryMessage]) -> Result<String> {
     let payload = json!({
         "session_id": session_id,
@@ -506,19 +506,19 @@ pub fn build_chat_frame(session_id: &str, messages: &[HistoryMessage]) -> Result
     Ok(frame)
 }
 
-/// 解析后的 Socket.IO 帧.
+/// 解析后的 Socket.IO 帧
 #[derive(Debug, Clone, PartialEq)]
 pub enum Frame {
     Handshake(Value),
     Connected,
     Ping,
     Pong,
-    /// 事件帧:事件名 + 载荷.
+    /// 事件帧:事件名 + 载荷
     Event(String, Value),
     Unknown(String),
 }
 
-/// 纯函数:解析 Socket.IO 文本帧(可测).
+/// 纯函数:解析 Socket.IO 文本帧(可测)
 pub fn parse_frame(text: &str) -> Frame {
     if text == PING_MESSAGE {
         return Frame::Ping;
@@ -545,7 +545,7 @@ pub fn parse_frame(text: &str) -> Frame {
     Frame::Unknown(text.to_string())
 }
 
-/// 流式回复事件(由 `chat_ack` 载荷解析).
+/// 流式回复事件(由 `chat_ack` 载荷解析)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StreamEvent {
     Begin,
@@ -553,7 +553,7 @@ pub enum StreamEvent {
     End(String),
 }
 
-/// 纯函数:解析 `chat_ack` 载荷为流式事件(可测).
+/// 纯函数:解析 `chat_ack` 载荷为流式事件(可测)
 pub fn parse_chat_ack(payload: &Value) -> Option<StreamEvent> {
     if payload.get("code").and_then(Value::as_i64) != Some(1) {
         return None;
@@ -578,7 +578,7 @@ pub fn parse_chat_ack(payload: &Value) -> Option<StreamEvent> {
     }
 }
 
-/// 生成 8 位会话/客户端 ID(与 Python `_generate_session_id` 一致).
+/// 生成 8 位会话/客户端 ID(与 Python `_generate_session_id` 一致)
 fn generate_session_id() -> String {
     const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
     (0..8)
@@ -586,16 +586,16 @@ fn generate_session_id() -> String {
         .collect()
 }
 
-// ==================== 事件处理策略 ====================
+// 事件处理策略
 
-/// 事件处理策略接口:每种事件一个处理器.
+/// 事件处理策略接口:每种事件一个处理器
 trait ChatEventHandler: Send + Sync {
     fn handle(&self, inner: &Arc<ChatInner>, payload: &Value);
 }
 
-/// `on_connect_ack`:记录连接确认信息(剩余对话次数),并发送 JOIN.
+/// `on_connect_ack`:记录连接确认信息(剩余对话次数),并发送 JOIN
 ///
-/// JOIN 在收到连接确认后发送(服务器就绪),与 Python 的时序一致.
+/// JOIN 在收到连接确认后发送(服务器就绪),与 Python 的时序一致
 struct ConnectAckHandler;
 
 impl ChatEventHandler for ConnectAckHandler {
@@ -620,7 +620,7 @@ impl ChatEventHandler for ConnectAckHandler {
     }
 }
 
-/// `join_ack`:记录用户信息并发送预设消息.
+/// `join_ack`:记录用户信息并发送预设消息
 struct JoinAckHandler;
 
 impl ChatEventHandler for JoinAckHandler {
@@ -661,7 +661,7 @@ impl ChatEventHandler for JoinAckHandler {
     }
 }
 
-/// `preset_chat_message_ack`:预设消息确认.
+/// `preset_chat_message_ack`:预设消息确认
 struct PresetAckHandler;
 
 impl ChatEventHandler for PresetAckHandler {
@@ -670,7 +670,7 @@ impl ChatEventHandler for PresetAckHandler {
     }
 }
 
-/// `get_text2Img_remaining_times_ack`:剩余图片生成次数.
+/// `get_text2Img_remaining_times_ack`:剩余图片生成次数
 struct RemainingTimesHandler;
 
 impl ChatEventHandler for RemainingTimesHandler {
@@ -689,7 +689,7 @@ impl ChatEventHandler for RemainingTimesHandler {
     }
 }
 
-/// `chat_ack`:处理流式回复.
+/// `chat_ack`:处理流式回复
 struct ChatAckHandler;
 
 impl ChatEventHandler for ChatAckHandler {
@@ -726,8 +726,8 @@ impl ChatEventHandler for ChatAckHandler {
                 inner.notify.notify_with(|| {
                     inner.receiving.store(false, Ordering::Release);
                 });
-                // 先落历史,再发 End 事件:End 回调中可读到完整对话.
-                // 保留克隆而非 take:current_response 需在 End 后仍可被 send_and_wait 读取.
+                // 先落历史,再发 End 事件:End 回调中可读到完整对话
+                // 保留克隆而非 take:current_response 需在 End 后仍可被 send_and_wait 读取
                 let full = inner.current_response.lock().unwrap().clone();
                 if !full.is_empty() {
                     inner
@@ -742,7 +742,7 @@ impl ChatEventHandler for ChatAckHandler {
     }
 }
 
-/// 事件分派(策略注册表).
+/// 事件分派(策略注册表)
 fn dispatch_event(inner: &Arc<ChatInner>, name: &str, payload: &Value) {
     debug!(
         "收到 AI 事件: {name}, 载荷: {}",
@@ -760,7 +760,7 @@ fn dispatch_event(inner: &Arc<ChatInner>, name: &str, payload: &Value) {
     }
 }
 
-/// 触发流式回调.
+/// 触发流式回调
 fn emit_stream(inner: &Arc<ChatInner>, content: &str, event: ChatEventType) {
     let callbacks = {
         let mut store = inner.callbacks.lock().unwrap();
@@ -774,7 +774,7 @@ fn emit_stream(inner: &Arc<ChatInner>, content: &str, event: ChatEventType) {
     inner.callbacks.lock().unwrap().items.extend(callbacks);
 }
 
-/// 在 `ChatInner` 上发送事件(供读线程内使用).
+/// 在 `ChatInner` 上发送事件(供读线程内使用)
 fn send_event_on(inner: &Arc<ChatInner>, name: &str, payload: &Value) -> Result<()> {
     let frame = format!(
         "{EVENT_MESSAGE_PREFIX} {}",
@@ -790,7 +790,7 @@ fn send_event_on(inner: &Arc<ChatInner>, name: &str, payload: &Value) -> Result<
         .map_err(ChatError::from)
 }
 
-// ==================== 帧处理 ====================
+// 帧处理
 
 fn handle_frame(inner: &Arc<ChatInner>, text: &str) -> Result<()> {
     match parse_frame(text) {
@@ -826,9 +826,9 @@ fn send_raw(inner: &Arc<ChatInner>, payload: &str) -> Result<()> {
         .map_err(ChatError::from)
 }
 
-// ==================== 连接建立与读循环 ====================
+// 连接建立与读循环
 
-/// 建立连接并启动读线程.
+/// 建立连接并启动读线程
 fn establish(inner: &Arc<ChatInner>) -> Result<()> {
     // 与 Python build_websocket_url 一致(token 经 URL 编码)
     let mut url =
@@ -882,7 +882,7 @@ fn establish(inner: &Arc<ChatInner>) -> Result<()> {
     Ok(())
 }
 
-/// 读线程:独占 WebSocket,转发写消息,解析帧并分发.
+/// 读线程:独占 WebSocket,转发写消息,解析帧并分发
 fn read_loop(inner: Arc<ChatInner>, mut ws: Ws, rx: mpsc::Receiver<Message>) {
     'outer: loop {
         if inner.stopping.load(Ordering::Acquire) {
@@ -944,7 +944,7 @@ fn read_loop(inner: Arc<ChatInner>, mut ws: Ws, rx: mpsc::Receiver<Message>) {
     }
 }
 
-/// 设置 WebSocket 底层流的读取超时(Plain 或 rustls 两种形态).
+/// 设置 WebSocket 底层流的读取超时(Plain 或 rustls 两种形态)
 fn set_stream_read_timeout(stream: &mut WsStream, timeout: Duration) -> std::io::Result<()> {
     match stream {
         MaybeTlsStream::Plain(s) => s.set_read_timeout(Some(timeout)),
@@ -953,9 +953,9 @@ fn set_stream_read_timeout(stream: &mut WsStream, timeout: Duration) -> std::io:
     }
 }
 
-// ==================== 工具 ====================
+// 工具
 
-/// 基于条件变量的超时等待.
+/// 基于条件变量的超时等待
 fn wait_flag(notify: &Notify, timeout: Duration, flag: impl Fn() -> bool) -> bool {
     let deadline = Instant::now() + timeout;
     let guard = notify.lock.lock().unwrap();
@@ -971,7 +971,7 @@ fn wait_flag(notify: &Notify, timeout: Duration, flag: impl Fn() -> bool) -> boo
     true
 }
 
-/// 日志截断.
+/// 日志截断
 fn truncate(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
         text.to_string()

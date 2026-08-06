@@ -18,35 +18,35 @@ use tungstenite::{WebSocket, connect};
 
 use crate::api::auth::CloudAuthenticator;
 
-/// WebSocket 流类型别名(tungstenite + rustls).
+/// WebSocket 流类型别名(tungstenite + rustls)
 type WsStream = MaybeTlsStream<TcpStream>;
 type Ws = WebSocket<WsStream>;
 
-// ==================== 常量配置 ====================
+// 常量配置
 
-/// 云存储 WebSocket 服务器地址.
+/// 云存储 WebSocket 服务器地址
 pub const CLOUD_WS_BASE_URL: &str = "wss://socketcv.codemao.cn:9096/cloudstorage/";
-/// Socket.IO 帧前缀.
+/// Socket.IO 帧前缀
 const HANDSHAKE_PREFIX: &str = "0";
 const CONNECTED_MESSAGE: &str = "40";
 const SERVER_CLOSE_PREFIX: &str = "41";
 const EVENT_MESSAGE_PREFIX: &str = "42";
 const PING_MESSAGE: &str = "2";
 const PONG_MESSAGE: &str = "3";
-/// 批量上传合并间隔.
+/// 批量上传合并间隔
 const DEFAULT_FLUSH_INTERVAL: Duration = Duration::from_millis(100);
-/// 默认重连间隔与最大次数.
+/// 默认重连间隔与最大次数
 const DEFAULT_RECONNECT_INTERVAL: Duration = Duration::from_secs(8);
 const DEFAULT_MAX_RECONNECT_ATTEMPTS: usize = 5;
-/// 排行榜限制范围.
+/// 排行榜限制范围
 pub const MIN_RANKING_LIMIT: i64 = 1;
 pub const MAX_RANKING_LIMIT: i64 = 31;
 pub const ASCENDING_ORDER: i64 = 1;
 pub const DESCENDING_ORDER: i64 = -1;
 
-// ==================== 错误类型 ====================
+// 错误类型
 
-/// 云存储操作错误.
+/// 云存储操作错误
 #[derive(Debug, Error)]
 pub enum CloudError {
     #[error("WebSocket 错误: {0}")]
@@ -77,12 +77,12 @@ impl From<tungstenite::Error> for CloudError {
     }
 }
 
-/// 本模块统一的 `Result` 别名.
+/// 本模块统一的 `Result` 别名
 pub type Result<T> = std::result::Result<T, CloudError>;
 
-// ==================== 基础类型 ====================
+// 基础类型
 
-/// 编辑器类型,决定 WebSocket 查询参数.
+/// 编辑器类型,决定 WebSocket 查询参数
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EditorType {
     #[default]
@@ -93,7 +93,7 @@ pub enum EditorType {
 }
 
 impl EditorType {
-    /// 返回 `(authorization_type, stag)` 查询参数.
+    /// 返回 `(authorization_type, stag)` 查询参数
     pub fn query_params(self) -> (&'static str, &'static str) {
         match self {
             EditorType::Nemo => ("5", "2"),
@@ -103,7 +103,7 @@ impl EditorType {
     }
 }
 
-/// 云数据值类型:整数或字符串(与 Python `CloudValueType` 对应).
+/// 云数据值类型:整数或字符串(与 Python `CloudValueType` 对应)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum CloudValue {
@@ -112,7 +112,7 @@ pub enum CloudValue {
 }
 
 impl CloudValue {
-    /// 云协议要求的 `param_type`.
+    /// 云协议要求的 `param_type`
     pub fn param_type(&self) -> &'static str {
         match self {
             CloudValue::Number(_) => "number",
@@ -120,7 +120,7 @@ impl CloudValue {
         }
     }
 
-    /// 从 JSON 值转换(布尔/浮点按 Python 语义尽量转整数,否则转为文本).
+    /// 从 JSON 值转换(布尔/浮点按 Python 语义尽量转整数,否则转为文本)
     pub fn from_json(v: &Value) -> CloudValue {
         match v {
             Value::Number(n) => n
@@ -161,16 +161,16 @@ impl From<&str> for CloudValue {
     }
 }
 
-/// 回调句柄,用于取消注册回调.
+/// 回调句柄,用于取消注册回调
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CallbackHandle(pub(crate) usize);
 
-/// 变量/列表变更来源.
+/// 变量/列表变更来源
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChangeSource {
-    /// 本地操作产生.
+    /// 本地操作产生
     Local,
-    /// 云端推送产生.
+    /// 云端推送产生
     Cloud,
 }
 
@@ -183,7 +183,7 @@ impl ChangeSource {
     }
 }
 
-/// 连接事件(供 `on_connection` 回调使用).
+/// 连接事件(供 `on_connection` 回调使用)
 #[derive(Debug, Clone)]
 pub enum ConnectionEvent {
     Opened,
@@ -192,7 +192,7 @@ pub enum ConnectionEvent {
     ServerClosed(String),
 }
 
-/// 排行榜条目中的用户信息.
+/// 排行榜条目中的用户信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RankingUser {
     pub id: i64,
@@ -200,14 +200,14 @@ pub struct RankingUser {
     pub avatar_url: String,
 }
 
-/// 排行榜条目.
+/// 排行榜条目
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RankingItem {
     pub value: CloudValue,
     pub user: RankingUser,
 }
 
-/// 一次排行榜查询结果.
+/// 一次排行榜查询结果
 #[derive(Debug, Clone, Default)]
 pub struct RankingData {
     pub cvid: String,
@@ -224,24 +224,24 @@ type ReadyCallback = Box<dyn Fn() + Send + Sync>;
 type OnlineUsersCallback = Box<dyn Fn(i64, i64) + Send + Sync>;
 type ConnectionCallback = Box<dyn Fn(ConnectionEvent) + Send + Sync>;
 
-// ==================== 命令模式 + 工厂 ====================
+// 命令模式 + 工厂
 
-/// 云数据更新命令(命令模式:请求对象化,可排队,批量执行).
+/// 云数据更新命令(命令模式:请求对象化,可排队,批量执行)
 ///
-/// 由 [`CommandFactory`] 创建.
+/// 由 [`CommandFactory`] 创建
 #[derive(Debug, Clone)]
 pub enum CloudCommand {
-    /// 变量更新:私有/公有.
+    /// 变量更新:私有/公有
     Variable { private: bool, data: Value },
-    /// 列表更新:cvid + 操作序列.
+    /// 列表更新:cvid + 操作序列
     List { cvid: String, ops: Vec<Value> },
 }
 
-/// 命令工厂:集中创建云数据更新命令.
+/// 命令工厂:集中创建云数据更新命令
 pub struct CommandFactory;
 
 impl CommandFactory {
-    /// 创建私有变量更新命令.
+    /// 创建私有变量更新命令
     pub fn update_private_variable(cvid: &str, value: &CloudValue) -> CloudCommand {
         CloudCommand::Variable {
             private: true,
@@ -253,7 +253,7 @@ impl CommandFactory {
         }
     }
 
-    /// 创建公有变量更新命令.
+    /// 创建公有变量更新命令
     pub fn update_public_variable(cvid: &str, value: &CloudValue) -> CloudCommand {
         CloudCommand::Variable {
             private: false,
@@ -266,7 +266,7 @@ impl CommandFactory {
         }
     }
 
-    /// 创建列表更新命令.
+    /// 创建列表更新命令
     pub fn update_list(cvid: &str, ops: Vec<Value>) -> CloudCommand {
         CloudCommand::List {
             cvid: cvid.to_string(),
@@ -275,7 +275,7 @@ impl CommandFactory {
     }
 }
 
-/// 批量合并后的上传载荷.
+/// 批量合并后的上传载荷
 #[derive(Debug, Default)]
 pub struct BatchedUploads {
     pub private_updates: Vec<Value>,
@@ -284,13 +284,20 @@ pub struct BatchedUploads {
 }
 
 /// 将待上传命令合并为最少次数的网络请求:
-/// 私有/公有变量各合并为一条消息,列表按 cvid 合并操作序列.
+/// 私有/公有变量各合并为一条消息,列表按 cvid 合并操作序列
+/// 合并一批待上传命令为少量 Socket.IO 事件帧
+/// 目的: 把高频的逐条命令(如列表连续 push 多元素)压缩成单个 update 事件,
+/// 减少 WebSocket 帧数量与网络往返
+/// 变量命令按 data 中的 action 分流到公有/私有两个通道,
+/// 列表命令按 cvid 归并,同一列表的连续操作合并进同一帧
 pub fn merge_commands(commands: Vec<CloudCommand>) -> BatchedUploads {
     let mut out = BatchedUploads::default();
     for cmd in commands {
         match cmd {
             CloudCommand::Variable { data, .. } => {
                 // 通过 data 是否含 "action":"set" 区分公有/私有
+                // 公有变量走 update_vars 事件,私有变量走 update_private_vars 事件,
+                // 两者是服务端不同的同步通道,不可混帧
                 let is_public = data.get("action").and_then(Value::as_str) == Some("set");
                 if is_public {
                     out.public_updates.push(data);
@@ -299,6 +306,8 @@ pub fn merge_commands(commands: Vec<CloudCommand>) -> BatchedUploads {
                 }
             }
             CloudCommand::List { cvid, ops } => {
+                // 同一 cvid 的列表操作合并:服务端按顺序执行一个帧内的全部操作,
+                // 合并能显著减少命令队列积压(如批量 append 100 个元素只需 1 帧)
                 if let Some((_, existing)) = out
                     .list_updates
                     .iter_mut()
@@ -314,16 +323,16 @@ pub fn merge_commands(commands: Vec<CloudCommand>) -> BatchedUploads {
     out
 }
 
-// ==================== 数据模型 ====================
+// 数据模型
 
-/// 变量种类.
+/// 变量种类
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VarKind {
     Private,
     Public,
 }
 
-/// 单个云变量(内部存储 + 回调).
+/// 单个云变量(内部存储 + 回调)
 struct VariableData {
     cvid: String,
     name: String,
@@ -346,7 +355,7 @@ impl VariableData {
     }
 }
 
-/// 单个云列表(内部存储 + 回调).
+/// 单个云列表(内部存储 + 回调)
 struct ListData {
     cvid: String,
     name: String,
@@ -392,7 +401,7 @@ impl std::fmt::Debug for ListData {
     }
 }
 
-/// 云数据存储:按名字索引,另维护 cvid → 名字 映射以支持数字 id 查询.
+/// 云数据存储:按名字索引,另维护 cvid → 名字 映射以支持数字 id 查询
 #[derive(Default)]
 struct DataStore {
     private_vars: HashMap<String, VariableData>,
@@ -512,9 +521,9 @@ impl std::fmt::Debug for DataStore {
     }
 }
 
-// ==================== 事件存储 ====================
+// 事件存储
 
-/// 泛型回调存储:支持按句柄增删,触发时整体取出.
+/// 泛型回调存储:支持按句柄增删,触发时整体取出
 struct CallbackStore<T> {
     next_id: usize,
     items: Vec<(usize, T)>,
@@ -550,13 +559,13 @@ impl<T> CallbackStore<T> {
         self.items.retain(|(id, _)| *id != handle.0);
     }
 
-    /// 取出全部回调(锁外执行后由调用方放回).
+    /// 取出全部回调(锁外执行后由调用方放回)
     fn take_all(&mut self) -> Vec<(usize, T)> {
         std::mem::take(&mut self.items)
     }
 }
 
-/// 连接级事件回调集合.
+/// 连接级事件回调集合
 #[derive(Default)]
 struct Events {
     data_ready: CallbackStore<ReadyCallback>,
@@ -576,7 +585,7 @@ impl std::fmt::Debug for Events {
     }
 }
 
-/// 条件变量通知器,供 `wait_for_*` 使用.
+/// 条件变量通知器,供 `wait_for_*` 使用
 #[derive(Default)]
 struct Notify {
     lock: Mutex<()>,
@@ -585,7 +594,7 @@ struct Notify {
 
 impl Notify {
     /// 持锁设置状态并通知等待者,避免 Condvar 丢失唤醒(与 [`wait_flag`] 的
-    /// 检查-等待原子性配合,消除状态型等待的竞态窗口).
+    /// 检查-等待原子性配合,消除状态型等待的竞态窗口)
     fn notify_with<R>(&self, f: impl FnOnce() -> R) -> R {
         let _guard = self.lock.lock().unwrap();
         let result = f();
@@ -594,9 +603,9 @@ impl Notify {
     }
 }
 
-// ==================== 连接核心 ====================
+// 连接核心
 
-/// 云连接共享内部状态.
+/// 云连接共享内部状态
 struct CloudInner {
     work_id: i64,
     editor: EditorType,
@@ -608,17 +617,17 @@ struct CloudInner {
     stopping: AtomicBool,
     connected: AtomicBool,
     data_ready: AtomicBool,
-    /// Socket.IO 握手已完成(收到 40),flush 线程据此判断可安全发送.
+    /// Socket.IO 握手已完成(收到 40),flush 线程据此判断可安全发送
     io_ready: AtomicBool,
     online_users: AtomicI64,
     reconnect_attempts: AtomicUsize,
-    /// JOIN 消息已发送标记(防止重复 join 被服务器拒绝).
+    /// JOIN 消息已发送标记(防止重复 join 被服务器拒绝)
     join_sent: AtomicBool,
-    /// 发送端:读线程持有 WebSocket 独占,写操作经 channel 转发.
+    /// 发送端:读线程持有 WebSocket 独占,写操作经 channel 转发
     tx: Mutex<Option<mpsc::Sender<Message>>>,
     read_join: Mutex<Option<JoinHandle<()>>>,
     flush_join: Mutex<Option<JoinHandle<()>>>,
-    /// 建立连接的互斥锁:防止 connect() 与自动重连并发执行 establish.
+    /// 建立连接的互斥锁:防止 connect() 与自动重连并发执行 establish
     connect_lock: Mutex<()>,
     commands: Mutex<VecDeque<CloudCommand>>,
     state: Mutex<DataStore>,
@@ -641,7 +650,7 @@ impl std::fmt::Debug for CloudInner {
     }
 }
 
-/// 云连接句柄:线程安全,可克隆共享.
+/// 云连接句柄:线程安全,可克隆共享
 #[derive(Clone)]
 pub struct CloudConnection {
     inner: Arc<CloudInner>,
@@ -659,7 +668,7 @@ impl std::fmt::Debug for CloudConnection {
     }
 }
 
-/// 建造者模式:链式配置后构造 [`CloudConnection`].
+/// 建造者模式:链式配置后构造 [`CloudConnection`]
 #[derive(Debug, Clone)]
 pub struct CloudBuilder {
     work_id: i64,
@@ -672,7 +681,7 @@ pub struct CloudBuilder {
 }
 
 impl CloudBuilder {
-    /// 以作品 ID 创建建造者.
+    /// 以作品 ID 创建建造者
     pub fn new(work_id: i64) -> Self {
         Self {
             work_id,
@@ -685,43 +694,43 @@ impl CloudBuilder {
         }
     }
 
-    /// 显式指定编辑器类型(缺省按作品推断为 Kitten).
+    /// 显式指定编辑器类型(缺省按作品推断为 Kitten)
     pub fn editor(mut self, editor: EditorType) -> Self {
         self.editor = Some(editor);
         self
     }
 
-    /// 设置授权令牌(写入 `Cookie: Authorization=...`).
+    /// 设置授权令牌(写入 `Cookie: Authorization=...`)
     pub fn authorization_token(mut self, token: impl Into<String>) -> Self {
         self.authorization_token = Some(token.into());
         self
     }
 
-    /// 是否自动重连(默认开启).
+    /// 是否自动重连(默认开启)
     pub fn auto_reconnect(mut self, enabled: bool) -> Self {
         self.auto_reconnect = enabled;
         self
     }
 
-    /// 最大重连次数(默认 5).
+    /// 最大重连次数(默认 5)
     pub fn max_reconnect_attempts(mut self, attempts: usize) -> Self {
         self.max_reconnect_attempts = attempts;
         self
     }
 
-    /// 重连基础间隔(指数退避,默认 8s).
+    /// 重连基础间隔(指数退避,默认 8s)
     pub fn reconnect_interval(mut self, interval: Duration) -> Self {
         self.reconnect_interval = interval;
         self
     }
 
-    /// 批量上传合并间隔(默认 100ms).
+    /// 批量上传合并间隔(默认 100ms)
     pub fn flush_interval(mut self, interval: Duration) -> Self {
         self.flush_interval = interval;
         self
     }
 
-    /// 构建云连接(尚未连接,需调用 [`CloudConnection::connect`]).
+    /// 构建云连接(尚未连接,需调用 [`CloudConnection::connect`])
     pub fn build(self) -> CloudConnection {
         let inner = CloudInner {
             work_id: self.work_id,
@@ -756,7 +765,7 @@ impl CloudBuilder {
 }
 
 impl CloudConnection {
-    /// 建立云存储 WebSocket 连接(后台读线程 + 批量上传线程).
+    /// 建立云存储 WebSocket 连接(后台读线程 + 批量上传线程)
     pub fn connect(&self) -> Result<()> {
         if self.inner.connected.load(Ordering::Acquire) {
             return Ok(());
@@ -780,21 +789,21 @@ impl CloudConnection {
         Ok(())
     }
 
-    /// 等待 WebSocket 层连接建立(超时返回 false).
+    /// 等待 WebSocket 层连接建立(超时返回 false)
     pub fn wait_for_connection(&self, timeout: Duration) -> bool {
         wait_flag(&self.inner.notify, timeout, || {
             self.inner.connected.load(Ordering::Acquire)
         })
     }
 
-    /// 等待首轮云数据加载完成(超时返回 false).
+    /// 等待首轮云数据加载完成(超时返回 false)
     pub fn wait_for_data(&self, timeout: Duration) -> bool {
         wait_flag(&self.inner.notify, timeout, || {
             self.inner.data_ready.load(Ordering::Acquire)
         })
     }
 
-    /// 连接并等待数据就绪的便捷方法.
+    /// 连接并等待数据就绪的便捷方法
     pub fn connect_and_wait(
         &self,
         connect_timeout: Duration,
@@ -807,10 +816,10 @@ impl CloudConnection {
         Ok(self.wait_for_data(data_timeout))
     }
 
-    /// 关闭连接并清理资源.
+    /// 关闭连接并清理资源
     ///
     /// 注意:请勿在回调(如 `on_data_ready`)中调用本方法--回调在连接读线程内执行,
-    /// 调用 `close()` 会 join 自身线程导致死锁.
+    /// 调用 `close()` 会 join 自身线程导致死锁
     pub fn close(&self) {
         let inner = &self.inner;
         inner.stopping.store(true, Ordering::Release);
@@ -834,7 +843,7 @@ impl CloudConnection {
         info!("云存储连接已关闭: work_id={}", inner.work_id);
     }
 
-    // ==================== 状态查询 ====================
+    // 状态查询
 
     pub fn is_connected(&self) -> bool {
         self.inner.connected.load(Ordering::Acquire)
@@ -852,7 +861,7 @@ impl CloudConnection {
         self.inner.work_id
     }
 
-    /// 检查连接健康状态:连接存在且空闲未超过阈值.
+    /// 检查连接健康状态:连接存在且空闲未超过阈值
     pub fn check_connection_health(&self, max_inactivity: Duration) -> bool {
         if !self.is_connected() {
             return false;
@@ -865,9 +874,9 @@ impl CloudConnection {
         true
     }
 
-    // ==================== 事件监听(观察者模式) ====================
+    // 事件监听(观察者模式)
 
-    /// 注册数据就绪回调.
+    /// 注册数据就绪回调
     pub fn on_data_ready(&self, cb: impl Fn() + Send + Sync + 'static) -> CallbackHandle {
         self.inner
             .events
@@ -877,7 +886,7 @@ impl CloudConnection {
             .add(Box::new(cb))
     }
 
-    /// 注册在线用户数变更回调(旧值,新值).
+    /// 注册在线用户数变更回调(旧值,新值)
     pub fn on_online_users_change(
         &self,
         cb: impl Fn(i64, i64) + Send + Sync + 'static,
@@ -890,7 +899,7 @@ impl CloudConnection {
             .add(Box::new(cb))
     }
 
-    /// 注册排行榜数据接收回调.
+    /// 注册排行榜数据接收回调
     pub fn on_ranking_received(
         &self,
         cb: impl Fn(RankingData) + Send + Sync + 'static,
@@ -898,7 +907,7 @@ impl CloudConnection {
         self.inner.events.lock().unwrap().ranking.add(Box::new(cb))
     }
 
-    /// 注册连接生命周期事件回调.
+    /// 注册连接生命周期事件回调
     pub fn on_connection(
         &self,
         cb: impl Fn(ConnectionEvent) + Send + Sync + 'static,
@@ -911,7 +920,7 @@ impl CloudConnection {
             .add(Box::new(cb))
     }
 
-    /// 按句柄移除事件回调.
+    /// 按句柄移除事件回调
     pub fn remove_callback(&self, handle: CallbackHandle) {
         let mut events = self.inner.events.lock().unwrap();
         events.data_ready.remove(handle);
@@ -920,9 +929,9 @@ impl CloudConnection {
         events.connection.remove(handle);
     }
 
-    // ==================== 变量操作 ====================
+    // 变量操作
 
-    /// 获取私有变量句柄.
+    /// 获取私有变量句柄
     pub fn get_private_variable(&self, name: &str) -> Option<CloudVariable> {
         let store = self.inner.state.lock().unwrap();
         store
@@ -935,7 +944,7 @@ impl CloudConnection {
             })
     }
 
-    /// 获取公有变量句柄.
+    /// 获取公有变量句柄
     pub fn get_public_variable(&self, name: &str) -> Option<CloudVariable> {
         let store = self.inner.state.lock().unwrap();
         store
@@ -948,7 +957,7 @@ impl CloudConnection {
             })
     }
 
-    /// 获取云列表句柄.
+    /// 获取云列表句柄
     pub fn get_list(&self, name: &str) -> Option<CloudList> {
         let store = self.inner.state.lock().unwrap();
         store.list(name).map(|l| CloudList {
@@ -958,18 +967,18 @@ impl CloudConnection {
         })
     }
 
-    /// 设置私有变量值(本地更新 + 回调 + 批量上传).
+    /// 设置私有变量值(本地更新 + 回调 + 批量上传)
     pub fn set_private_variable(&self, name: &str, value: impl Into<CloudValue>) -> Result<()> {
         self.inner
             .set_variable(VarKind::Private, name, value.into())
     }
 
-    /// 设置公有变量值.
+    /// 设置公有变量值
     pub fn set_public_variable(&self, name: &str, value: impl Into<CloudValue>) -> Result<()> {
         self.inner.set_variable(VarKind::Public, name, value.into())
     }
 
-    /// 获取全部私有变量(名字 → 值).
+    /// 获取全部私有变量(名字 → 值)
     pub fn get_all_private_variables(&self) -> HashMap<String, CloudValue> {
         self.inner
             .state
@@ -981,7 +990,7 @@ impl CloudConnection {
             .collect()
     }
 
-    /// 获取全部公有变量(名字 → 值).
+    /// 获取全部公有变量(名字 → 值)
     pub fn get_all_public_variables(&self) -> HashMap<String, CloudValue> {
         self.inner
             .state
@@ -993,7 +1002,7 @@ impl CloudConnection {
             .collect()
     }
 
-    /// 获取全部云列表(名字 → 元素快照).
+    /// 获取全部云列表(名字 → 元素快照)
     pub fn get_all_lists(&self) -> HashMap<String, Vec<CloudValue>> {
         self.inner
             .state
@@ -1005,7 +1014,7 @@ impl CloudConnection {
             .collect()
     }
 
-    /// 获取私有变量排行榜(结果经 `on_ranking_received` 回调返回).
+    /// 获取私有变量排行榜(结果经 `on_ranking_received` 回调返回)
     pub fn get_ranking(&self, variable_name: &str, limit: i64, order: i64) -> Result<()> {
         if !(MIN_RANKING_LIMIT..=MAX_RANKING_LIMIT).contains(&limit) {
             return Err(CloudError::InvalidArgument(format!(
@@ -1043,7 +1052,7 @@ impl CloudConnection {
         Ok(())
     }
 
-    // ==================== 列表便捷操作 ====================
+    // 列表便捷操作
 
     pub fn list_push(&self, name: &str, value: impl Into<CloudValue>) -> Result<()> {
         self.inner
@@ -1113,9 +1122,9 @@ impl CloudConnection {
         self.inner.list_apply_local(name, ListAction::DeleteAll)
     }
 
-    // ==================== 内部发送 ====================
+    // 内部发送
 
-    /// 发送 Socket.IO 事件帧:`42["name",payload]`.
+    /// 发送 Socket.IO 事件帧:`42["name",payload]`
     pub(crate) fn send_event(&self, name: &str, payload: &Value) -> Result<()> {
         let frame = format!(
             "{EVENT_MESSAGE_PREFIX}{}",
@@ -1124,7 +1133,7 @@ impl CloudConnection {
         self.send_text(&frame)
     }
 
-    /// 发送原始文本帧.
+    /// 发送原始文本帧
     pub(crate) fn send_text(&self, payload: &str) -> Result<()> {
         let tx = self
             .inner
@@ -1149,9 +1158,9 @@ impl CloudConnection {
     }
 }
 
-// ==================== 云变量 / 云列表句柄 ====================
+// 云变量 / 云列表句柄
 
-/// 云变量句柄:提供取值,赋值与变更订阅.
+/// 云变量句柄:提供取值,赋值与变更订阅
 #[derive(Debug, Clone)]
 pub struct CloudVariable {
     inner: Arc<CloudInner>,
@@ -1173,7 +1182,7 @@ impl CloudVariable {
         self.kind
     }
 
-    /// 获取当前值.
+    /// 获取当前值
     pub fn get(&self) -> Option<CloudValue> {
         self.inner
             .state
@@ -1183,12 +1192,12 @@ impl CloudVariable {
             .map(|v| v.value.clone())
     }
 
-    /// 设置新值(本地生效,经批量队列上传云端).
+    /// 设置新值(本地生效,经批量队列上传云端)
     pub fn set(&self, value: impl Into<CloudValue>) -> Result<()> {
         self.inner.set_variable(self.kind, &self.name, value.into())
     }
 
-    /// 注册变更回调(旧值,新值,来源).
+    /// 注册变更回调(旧值,新值,来源)
     pub fn on_change(
         &self,
         cb: impl Fn(&CloudValue, &CloudValue, &str) + Send + Sync + 'static,
@@ -1207,7 +1216,7 @@ impl CloudVariable {
             .unwrap_or(CallbackHandle(usize::MAX))
     }
 
-    /// 移除变更回调.
+    /// 移除变更回调
     pub fn remove_change_callback(&self, handle: CallbackHandle) {
         if let Some(v) = self
             .inner
@@ -1220,7 +1229,7 @@ impl CloudVariable {
         }
     }
 
-    /// 注册排行榜数据回调(仅私有变量有效).
+    /// 注册排行榜数据回调(仅私有变量有效)
     pub fn on_ranking(&self, cb: impl Fn(RankingData) + Send + Sync + 'static) -> CallbackHandle {
         self.inner
             .state
@@ -1237,7 +1246,7 @@ impl CloudVariable {
     }
 }
 
-/// 云列表句柄:提供元素操作与订阅.
+/// 云列表句柄:提供元素操作与订阅
 #[derive(Debug, Clone)]
 pub struct CloudList {
     inner: Arc<CloudInner>,
@@ -1264,7 +1273,7 @@ impl CloudList {
             .unwrap_or(0)
     }
 
-    /// 返回元素快照.
+    /// 返回元素快照
     pub fn items(&self) -> Vec<CloudValue> {
         self.inner
             .state
@@ -1366,7 +1375,7 @@ impl CloudList {
         self.index_of(item).is_some()
     }
 
-    /// 将列表元素连接为字符串.
+    /// 将列表元素连接为字符串
     pub fn join(&self, separator: &str) -> String {
         self.inner
             .state
@@ -1383,7 +1392,7 @@ impl CloudList {
             .unwrap_or_default()
     }
 
-    /// 注册整表变更回调(旧列表,新列表,来源).
+    /// 注册整表变更回调(旧列表,新列表,来源)
     pub fn on_change(
         &self,
         cb: impl Fn(&[CloudValue], &[CloudValue], &str) + Send + Sync + 'static,
@@ -1402,7 +1411,7 @@ impl CloudList {
             .unwrap_or(CallbackHandle(usize::MAX))
     }
 
-    /// 注册列表操作回调(操作名,参数).
+    /// 注册列表操作回调(操作名,参数)
     pub fn on_operation(
         &self,
         operation: &str,
@@ -1425,7 +1434,7 @@ impl CloudList {
             .unwrap_or(CallbackHandle(usize::MAX))
     }
 
-    /// 按句柄移除列表回调.
+    /// 按句柄移除列表回调
     pub fn remove_callback(&self, handle: CallbackHandle) {
         if let Some(l) = self.inner.state.lock().unwrap().list_mut(&self.name) {
             l.change_callbacks.retain(|(id, _)| *id != handle.0);
@@ -1436,9 +1445,9 @@ impl CloudList {
     }
 }
 
-// ==================== 列表操作(策略式动作) ====================
+// 列表操作(策略式动作)
 
-/// 列表操作动作.
+/// 列表操作动作
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ListAction {
     Append(CloudValue),
@@ -1451,7 +1460,7 @@ pub enum ListAction {
     ReplaceAt(usize, CloudValue),
 }
 
-/// 一次列表操作的结果:操作名,回调参数,对应云协议操作 JSON.
+/// 一次列表操作的结果:操作名,回调参数,对应云协议操作 JSON
 #[derive(Debug)]
 struct ListOutcome {
     op: String,
@@ -1459,7 +1468,7 @@ struct ListOutcome {
     wire: Value,
 }
 
-/// 纯函数:对元素序列执行列表动作,返回结果(可测).
+/// 纯函数:对元素序列执行列表动作,返回结果(可测)
 fn execute_list_action(items: &mut Vec<CloudValue>, action: &ListAction) -> Option<ListOutcome> {
     match action {
         ListAction::Append(v) => {
@@ -1540,7 +1549,7 @@ fn execute_list_action(items: &mut Vec<CloudValue>, action: &ListAction) -> Opti
     }
 }
 
-/// 从云端操作 JSON 解析列表动作.
+/// 从云端操作 JSON 解析列表动作
 fn parse_list_action(op: &Value) -> Option<ListAction> {
     let action = op.get("action")?.as_str()?;
     let value = || op.get("value").map(CloudValue::from_json);
@@ -1580,7 +1589,7 @@ fn parse_list_action(op: &Value) -> Option<ListAction> {
 }
 
 impl CloudInner {
-    /// 本地列表操作:修改数据 + 触发回调 + 入队上传.
+    /// 本地列表操作:修改数据 + 触发回调 + 入队上传
     fn list_apply_local(&self, name: &str, action: ListAction) -> Result<()> {
         let (cvid, old_items, outcome) = {
             let mut store = self.state.lock().unwrap();
@@ -1604,7 +1613,7 @@ impl CloudInner {
         Ok(())
     }
 
-    /// 云端列表操作:修改数据 + 触发回调,不入队.
+    /// 云端列表操作:修改数据 + 触发回调,不入队
     fn list_apply_cloud(&self, cvid: &str, ops: &[Value]) {
         for op in ops {
             let Some(action) = parse_list_action(op) else {
@@ -1634,7 +1643,7 @@ impl CloudInner {
         }
     }
 
-    /// 触发列表操作回调与整表变更回调.
+    /// 触发列表操作回调与整表变更回调
     fn fire_list_outcome(
         &self,
         cvid: &str,
@@ -1692,7 +1701,7 @@ impl CloudInner {
         }
     }
 
-    /// 设置变量:本地更新 + 回调 + 入队.
+    /// 设置变量:本地更新 + 回调 + 入队
     fn set_variable(&self, kind: VarKind, name: &str, new_value: CloudValue) -> Result<()> {
         let (cvid, old_value) = {
             let mut store = self.state.lock().unwrap();
@@ -1716,7 +1725,7 @@ impl CloudInner {
     }
 }
 
-/// 触发变量变更回调(取走 → 锁外执行 → 放回).
+/// 触发变量变更回调(取走 → 锁外执行 → 放回)
 fn emit_variable_change(
     inner: &CloudInner,
     kind: VarKind,
@@ -1742,7 +1751,7 @@ fn emit_variable_change(
     }
 }
 
-/// 设置 WebSocket 底层流的读取超时(Plain 或 rustls 两种形态).
+/// 设置 WebSocket 底层流的读取超时(Plain 或 rustls 两种形态)
 fn set_stream_read_timeout(stream: &mut WsStream, timeout: Duration) -> std::io::Result<()> {
     match stream {
         MaybeTlsStream::Plain(s) => s.set_read_timeout(Some(timeout)),
@@ -1751,9 +1760,9 @@ fn set_stream_read_timeout(stream: &mut WsStream, timeout: Duration) -> std::io:
     }
 }
 
-// ==================== 消息帧解析 ====================
+// 消息帧解析
 
-/// 解析后的 Socket.IO 帧.
+/// 解析后的 Socket.IO 帧
 #[derive(Debug, Clone, PartialEq)]
 pub enum Frame {
     Handshake(Value),
@@ -1761,13 +1770,13 @@ pub enum Frame {
     Ping,
     Pong,
     ServerClose,
-    /// 事件帧:事件名 + 载荷.
+    /// 事件帧:事件名 + 载荷
     Event(String, Value),
-    /// 未知/无法解析的文本.
+    /// 未知/无法解析的文本
     Unknown(String),
 }
 
-/// 纯函数:解析 Socket.IO 文本帧(可测).
+/// 纯函数:解析 Socket.IO 文本帧(可测)
 pub fn parse_frame(text: &str) -> Frame {
     if text == PING_MESSAGE {
         return Frame::Ping;
@@ -1804,7 +1813,7 @@ pub fn parse_frame(text: &str) -> Frame {
     Frame::Unknown(text.to_string())
 }
 
-/// 处理单帧(错误仅记录日志,不中断连接).
+/// 处理单帧(错误仅记录日志,不中断连接)
 fn handle_frame(inner: &Arc<CloudInner>, text: &str) -> Result<()> {
     *inner.last_activity.lock().unwrap() = Instant::now();
     match parse_frame(text) {
@@ -1847,14 +1856,14 @@ fn handle_frame(inner: &Arc<CloudInner>, text: &str) -> Result<()> {
     }
 }
 
-// ==================== 消息处理策略 ====================
+// 消息处理策略
 
-/// 消息处理策略接口:每种消息类型一个处理器.
+/// 消息处理策略接口:每种消息类型一个处理器
 trait MessageHandler: Send + Sync {
     fn handle(&self, inner: &Arc<CloudInner>, payload: &Value) -> Result<()>;
 }
 
-/// `connect_done`:加入成功,请求全量数据.
+/// `connect_done`:加入成功,请求全量数据
 struct JoinHandler;
 
 impl MessageHandler for JoinHandler {
@@ -1864,7 +1873,7 @@ impl MessageHandler for JoinHandler {
     }
 }
 
-/// `list_variables_done`:创建数据项并标记就绪.
+/// `list_variables_done`:创建数据项并标记就绪
 struct AllDataHandler;
 
 impl MessageHandler for AllDataHandler {
@@ -1911,7 +1920,7 @@ impl MessageHandler for AllDataHandler {
     }
 }
 
-/// `update_private_vars_done`:云端私有变量更新.
+/// `update_private_vars_done`:云端私有变量更新
 struct UpdatePrivateVarHandler;
 
 impl MessageHandler for UpdatePrivateVarHandler {
@@ -1936,7 +1945,7 @@ impl MessageHandler for UpdatePrivateVarHandler {
     }
 }
 
-/// `update_vars_done`:云端公有变量更新(可能是列表或 "fail").
+/// `update_vars_done`:云端公有变量更新(可能是列表或 "fail")
 struct UpdatePublicVarHandler;
 
 impl MessageHandler for UpdatePublicVarHandler {
@@ -1974,7 +1983,7 @@ impl MessageHandler for UpdatePublicVarHandler {
     }
 }
 
-/// `update_lists_done`:云端列表操作序列.
+/// `update_lists_done`:云端列表操作序列
 struct UpdateListHandler;
 
 impl MessageHandler for UpdateListHandler {
@@ -1990,7 +1999,7 @@ impl MessageHandler for UpdateListHandler {
     }
 }
 
-/// `online_users_change`:在线用户数更新.
+/// `online_users_change`:在线用户数更新
 struct OnlineUsersHandler;
 
 impl MessageHandler for OnlineUsersHandler {
@@ -2003,7 +2012,7 @@ impl MessageHandler for OnlineUsersHandler {
     }
 }
 
-/// `list_ranking_done`:排行榜数据接收.
+/// `list_ranking_done`:排行榜数据接收
 struct RankingHandler;
 
 impl MessageHandler for RankingHandler {
@@ -2093,7 +2102,7 @@ impl MessageHandler for RankingHandler {
     }
 }
 
-/// `illegal_event_done`:非法事件提示.
+/// `illegal_event_done`:非法事件提示
 struct IllegalEventHandler;
 
 impl MessageHandler for IllegalEventHandler {
@@ -2103,7 +2112,7 @@ impl MessageHandler for IllegalEventHandler {
     }
 }
 
-/// 策略注册表:事件名 → 处理器.
+/// 策略注册表:事件名 → 处理器
 fn dispatch_message(inner: &Arc<CloudInner>, name: &str, payload: &Value) -> Result<()> {
     match name {
         "connect_done" => JoinHandler.handle(inner, payload),
@@ -2124,9 +2133,9 @@ fn dispatch_message(inner: &Arc<CloudInner>, name: &str, payload: &Value) -> Res
     }
 }
 
-// ==================== 数据项创建 ====================
+// 数据项创建
 
-/// 从数据项 JSON 创建变量或列表(云端类型:0 私有变量 / 1 公有变量 / 2 列表).
+/// 从数据项 JSON 创建变量或列表(云端类型:0 私有变量 / 1 公有变量 / 2 列表)
 fn create_data_item(inner: &Arc<CloudInner>, item: &Value) -> Result<()> {
     let Some(cvid) = item.get("cvid").and_then(Value::as_str) else {
         return Err(CloudError::InvalidArgument("数据项缺少 cvid".into()));
@@ -2170,9 +2179,9 @@ fn create_data_item(inner: &Arc<CloudInner>, item: &Value) -> Result<()> {
     Ok(())
 }
 
-// ==================== 事件触发辅助 ====================
+// 事件触发辅助
 
-/// 在 `CloudInner` 上发送事件帧(供读线程内使用).
+/// 在 `CloudInner` 上发送事件帧(供读线程内使用)
 fn send_inner_event(inner: &Arc<CloudInner>, name: &str, payload: &Value) -> Result<()> {
     let frame = format!(
         "{EVENT_MESSAGE_PREFIX}{}",
@@ -2181,7 +2190,7 @@ fn send_inner_event(inner: &Arc<CloudInner>, name: &str, payload: &Value) -> Res
     send_inner_text(inner, &frame)
 }
 
-/// 在 `CloudInner` 上发送原始文本帧.
+/// 在 `CloudInner` 上发送原始文本帧
 fn send_inner_text(inner: &Arc<CloudInner>, payload: &str) -> Result<()> {
     let tx = inner
         .tx
@@ -2231,7 +2240,7 @@ fn emit_connection_event(inner: &Arc<CloudInner>, event: ConnectionEvent) {
         .extend(callbacks);
 }
 
-/// 基于条件变量的超时等待.
+/// 基于条件变量的超时等待
 fn wait_flag(notify: &Notify, timeout: Duration, flag: impl Fn() -> bool) -> bool {
     let deadline = Instant::now() + timeout;
     let guard = notify.lock.lock().unwrap();
@@ -2247,7 +2256,7 @@ fn wait_flag(notify: &Notify, timeout: Duration, flag: impl Fn() -> bool) -> boo
     true
 }
 
-/// 日志截断.
+/// 日志截断
 fn truncate(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
         text.to_string()
@@ -2260,9 +2269,9 @@ fn truncate(text: &str, max: usize) -> String {
     }
 }
 
-// ==================== 连接建立与读循环 ====================
+// 连接建立与读循环
 
-/// 建立 WebSocket 连接并启动读线程.
+/// 建立 WebSocket 连接并启动读线程
 fn establish(inner: &Arc<CloudInner>) -> Result<()> {
     // 串行化建立过程,避免 connect() 与自动重连竞态产生双读线程
     let _connect_guard = inner.connect_lock.lock().unwrap();
@@ -2328,7 +2337,7 @@ fn establish(inner: &Arc<CloudInner>) -> Result<()> {
     Ok(())
 }
 
-/// 读线程:独占 WebSocket,转发写消息,解析帧并分发.
+/// 读线程:独占 WebSocket,转发写消息,解析帧并分发
 fn read_loop(inner: Arc<CloudInner>, mut ws: Ws, rx: mpsc::Receiver<Message>) {
     'outer: loop {
         if inner.stopping.load(Ordering::Acquire) {
@@ -2382,7 +2391,7 @@ fn read_loop(inner: Arc<CloudInner>, mut ws: Ws, rx: mpsc::Receiver<Message>) {
     on_connection_lost(inner);
 }
 
-/// 连接丢失后的清理与自动重连.
+/// 连接丢失后的清理与自动重连
 fn on_connection_lost(inner: Arc<CloudInner>) {
     let was_connected = inner.connected.load(Ordering::Acquire);
     inner.notify.notify_with(|| {
@@ -2397,7 +2406,7 @@ fn on_connection_lost(inner: Arc<CloudInner>) {
         return;
     }
     // 退避循环重试:establish 失败(如网络不通)不会再有新的连接丢失事件,
-    // 因此必须在循环内重试,直到成功,停止或达到最大次数.
+    // 因此必须在循环内重试,直到成功,停止或达到最大次数
     let mut attempts = 0;
     loop {
         attempts += 1;
@@ -2427,7 +2436,7 @@ fn on_connection_lost(inner: Arc<CloudInner>) {
     }
 }
 
-/// 批量上传线程:周期性地合并队列命令并发送.
+/// 批量上传线程:周期性地合并队列命令并发送
 fn flush_loop(inner: Arc<CloudInner>) {
     while !inner.stopping.load(Ordering::Acquire) {
         thread::sleep(inner.flush_interval);

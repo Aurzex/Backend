@@ -9,7 +9,7 @@ use crate::utils::acquire;
 
 use serde_json::{Value, json};
 
-// ==================== 自定义错误类型 ====================
+// 自定义错误类型
 #[derive(Debug, thiserror::Error)]
 pub enum ProcessorError {
     #[error("Processing error: {0}")]
@@ -22,12 +22,12 @@ pub enum ProcessorError {
     Mew(#[from] acquire::MewError),
 }
 
-// ==================== 评论配置 trait ====================
+// 评论配置 trait
 pub trait CommentConfig {
     fn get_comments(&self, item_id: i64) -> Option<&[Value]>;
 }
 
-// ==================== 交互工具 ====================
+// 交互工具
 pub fn prompt_input(prompt: &str) -> String {
     print!("{}", prompt);
     io::stdout().flush().unwrap();
@@ -46,7 +46,7 @@ pub fn get_valid_input(prompt: &str, valid_options: &HashSet<String>) -> String 
     }
 }
 
-// ==================== 辅助函数 ====================
+// 辅助函数
 pub fn value_to_string(v: &serde_json::Value) -> String {
     match v {
         serde_json::Value::String(s) => s.clone(),
@@ -63,7 +63,7 @@ pub fn value_to_i64(v: &serde_json::Value) -> Option<i64> {
     }
 }
 
-/// 将时间戳转换为字符串表示.
+/// 将时间戳转换为字符串表示
 pub fn timestamp_to_string(ts: &serde_json::Value) -> String {
     if let Some(secs) = ts.as_i64()
         && secs > 0
@@ -96,7 +96,7 @@ pub fn bytes_to_human(size_bytes: u64) -> String {
     }
 }
 
-// ==================== 举报类型配置 ====================
+// 举报类型配置
 #[derive(Debug, Clone)]
 pub struct ActionConfig {
     pub key: String,
@@ -107,7 +107,7 @@ pub struct ActionConfig {
 }
 
 impl ActionConfig {
-    /// 由动作键构造配置(名称与状态取自内置映射).
+    /// 由动作键构造配置(名称与状态取自内置映射)
     fn simple(key: &str) -> Self {
         let (name, status) = match key {
             "D" => ("删除", "DELETE"),
@@ -129,7 +129,7 @@ impl ActionConfig {
     }
 }
 
-/// 按给定动作键列表批量构造动作配置.
+/// 按给定动作键列表批量构造动作配置
 fn actions(keys: &[&str]) -> Vec<ActionConfig> {
     keys.iter().map(|k| ActionConfig::simple(k)).collect()
 }
@@ -176,10 +176,10 @@ pub struct SourceConfig {
 }
 
 impl SourceConfig {
-    /// 构造带公共默认字段名的配置;差异字段由调用方覆盖后再注册.
+    /// 构造带公共默认字段名的配置;差异字段由调用方覆盖后再注册
     ///
     /// 大部分举报类型的字段名高度一致(如 `report_id_field` 均为 "id"),
-    /// 通过"公共默认值 + 覆盖差异"大幅减少重复.
+    /// 通过"公共默认值 + 覆盖差异"大幅减少重复
     fn base(
         name: &str,
         handle_method: &str,
@@ -224,8 +224,8 @@ impl SourceConfig {
     }
 }
 
-// ==================== 举报类型注册表 ====================
-/// 按举报类型预计算的动作提示与合法键集合(注册表运行期不变).
+// 举报类型注册表
+/// 按举报类型预计算的动作提示与合法键集合(注册表运行期不变)
 pub(crate) struct ActionOptions {
     pub(crate) prompt: String,
     pub(crate) valid_keys: HashSet<String>,
@@ -238,7 +238,7 @@ pub struct ReportTypeRegistry {
 }
 
 impl Clone for ReportTypeRegistry {
-    /// 深拷贝注册表但清空动作缓存(缓存按需重建,无正确性影响).
+    /// 深拷贝注册表但清空动作缓存(缓存按需重建,无正确性影响)
     fn clone(&self) -> Self {
         ReportTypeRegistry {
             registry: self.registry.clone(),
@@ -292,7 +292,7 @@ impl ReportTypeRegistry {
         self.registry.keys().cloned().collect()
     }
 
-    /// 返回可用动作的引用,避免克隆整个 ActionConfig.
+    /// 返回可用动作的引用,避免克隆整个 ActionConfig
     pub fn get_available_actions(&self, report_type: &str) -> Vec<&ActionConfig> {
         self.get_config(report_type)
             .map(|config| {
@@ -305,7 +305,7 @@ impl ReportTypeRegistry {
             .unwrap_or_default()
     }
 
-    /// 获取(或按举报类型缓存)动作提示与合法键集合,避免交互处理时每记录重建.
+    /// 获取(或按举报类型缓存)动作提示与合法键集合,避免交互处理时每记录重建
     pub(crate) fn action_options(&self, report_type: &str) -> Arc<ActionOptions> {
         let mut cache = self.action_cache.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(cached) = cache.get(report_type) {
@@ -328,7 +328,7 @@ impl ReportTypeRegistry {
         self.action_options(report_type).prompt.clone()
     }
 
-    /// 返回全局静态的状态映射引用.
+    /// 返回全局静态的状态映射引用
     pub fn get_status_mapping(&self) -> &'static HashMap<&'static str, &'static str> {
         status_mapping()
     }
@@ -338,22 +338,22 @@ impl ReportTypeRegistry {
     }
 }
 
-// ==================== 举报获取器 ====================
+// 举报获取器
 
-/// 注册辅助:包装分页迭代器为"总数"闭包.
+/// 注册辅助:包装分页迭代器为"总数"闭包
 fn total_from(mut paginated: acquire::PaginatedIter) -> Result<Value, ProcessorError> {
     paginated.fetch_metadata()?;
     Ok(json!(paginated.total_items().unwrap_or(0) as i32))
 }
 
-/// 注册辅助:包装分页迭代器为"生成器"闭包.
+/// 注册辅助:包装分页迭代器为"生成器"闭包
 fn gen_from(
     paginated: acquire::PaginatedIter,
 ) -> Box<dyn Iterator<Item = Result<Value, ProcessorError>>> {
     Box::new(paginated.map(|r| r.map_err(ProcessorError::from)))
 }
 
-/// 批量设置 `SourceConfig` 的字符串/动作列表字段,减少逐行赋值样板.
+/// 批量设置 `SourceConfig` 的字符串/动作列表字段,减少逐行赋值样板
 macro_rules! set_config_fields {
     ($cfg:expr, $( $field:ident = $value:expr ),* $(,)?) => {
         $(
@@ -376,7 +376,7 @@ impl ReportFetcher {
     pub fn new() -> Self {
         let mut registry = ReportTypeRegistry::new();
 
-        // ==================== shop_comment ====================
+        // shop_comment
         {
             let mut cfg = SourceConfig::base(
                 "工作室评论举报",
@@ -426,7 +426,7 @@ impl ReportFetcher {
             registry.register("shop_comment", cfg);
         }
 
-        // ==================== work_work ====================
+        // work_work
         {
             let mut cfg = SourceConfig::base(
                 "作品举报",
@@ -469,7 +469,7 @@ impl ReportFetcher {
             registry.register("work_work", cfg);
         }
 
-        // ==================== forum_post ====================
+        // forum_post
         {
             let mut cfg = SourceConfig::base(
                 "帖子举报",
@@ -513,7 +513,7 @@ impl ReportFetcher {
             registry.register("forum_post", cfg);
         }
 
-        // ==================== forum_discussion ====================
+        // forum_discussion
         {
             let mut cfg = SourceConfig::base(
                 "讨论举报",

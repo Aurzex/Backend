@@ -5,9 +5,9 @@ use crate::utils::acquire::{
 use log::debug;
 use serde_json::json;
 
-// ==================== 举报相关枚举 ====================
+// 举报相关枚举
 
-/// 作品来源类型.
+/// 作品来源类型
 #[derive(Debug, Clone, Copy)]
 pub enum WorkSourceType {
     Kitten,
@@ -25,7 +25,7 @@ impl WorkSourceType {
     }
 }
 
-/// 评论来源类型.
+/// 评论来源类型
 #[derive(Debug, Clone, Copy)]
 pub enum CommentSourceType {
     All,
@@ -49,7 +49,7 @@ impl CommentSourceType {
     }
 }
 
-/// 举报状态.
+/// 举报状态
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReportStatus {
     ToBeDone,
@@ -67,7 +67,7 @@ impl ReportStatus {
     }
 }
 
-/// 作品举报过滤类型.
+/// 作品举报过滤类型
 #[derive(Debug, Clone, Copy)]
 pub enum WorkReportFilterType {
     Admin,
@@ -85,7 +85,7 @@ impl WorkReportFilterType {
     }
 }
 
-/// 评论举报过滤类型.
+/// 评论举报过滤类型
 #[derive(Debug, Clone, Copy)]
 pub enum CommentReportFilterType {
     Admin,
@@ -103,7 +103,7 @@ impl CommentReportFilterType {
     }
 }
 
-/// 帖子举报过滤类型.
+/// 帖子举报过滤类型
 #[derive(Debug, Clone, Copy)]
 pub enum PostReportFilterType {
     PostId,
@@ -117,7 +117,7 @@ impl PostReportFilterType {
     }
 }
 
-/// 处理决议.
+/// 处理决议
 #[derive(Debug, Clone, Copy)]
 pub enum Resolution {
     Pass,
@@ -141,9 +141,9 @@ impl Resolution {
     }
 }
 
-// ==================== 举报数据获取器 ====================
+// 举报数据获取器
 
-/// 管理员举报数据查询接口.
+/// 管理员举报数据查询接口
 pub struct WhaleReportFetcher {
     client: &'static CodeMaoClient,
 }
@@ -155,21 +155,21 @@ impl WhaleReportFetcher {
         }
     }
 
-    // ==================== 私有辅助 ====================
+    // 私有辅助
 
-    /// 为请求构建器附加当前时间戳参数 `TIME`.
+    /// 为请求构建器附加当前时间戳参数 `TIME`
     fn add_timestamp_to_builder(builder: KittyRequestBuilder) -> KittyRequestBuilder {
         let timestamp = current_timestamp_13();
         builder.with_param("TIME", timestamp.to_string())
     }
 
-    /// 为分页迭代器附加当前时间戳参数 `TIME`.
+    /// 为分页迭代器附加当前时间戳参数 `TIME`
     fn add_timestamp_to_paginated(paginated: PaginatedIter) -> PaginatedIter {
         let timestamp = current_timestamp_13();
         paginated.with_iter_param("TIME", timestamp.to_string())
     }
 
-    /// 构建基础举报分页迭代器.
+    /// 构建基础举报分页迭代器
     fn build_report_paginated(&self, endpoint: &str, default_limit: usize) -> PaginatedIter {
         self.client
             .paginated(endpoint)
@@ -181,7 +181,7 @@ impl WhaleReportFetcher {
             .with_limit(default_limit)
     }
 
-    /// 为分页迭代器添加可选的过滤参数.
+    /// 为分页迭代器添加可选的过滤参数
     fn apply_optional_filter(
         paginated: PaginatedIter,
         filter_type: Option<impl AsRef<str>>,
@@ -193,9 +193,9 @@ impl WhaleReportFetcher {
         }
     }
 
-    // ==================== 公共方法 ====================
+    // 公共方法
 
-    /// 作品举报分页迭代器.
+    /// 作品举报分页迭代器
     pub fn fetch_work_reports_gen(
         &self,
         source_type: WorkSourceType,
@@ -219,7 +219,7 @@ impl WhaleReportFetcher {
         paginated
     }
 
-    /// 评论举报分页迭代器.
+    /// 评论举报分页迭代器
     pub fn fetch_comment_reports_gen(
         &self,
         source_type: CommentSourceType,
@@ -243,7 +243,7 @@ impl WhaleReportFetcher {
         paginated
     }
 
-    /// 帖子举报分页迭代器.
+    /// 帖子举报分页迭代器
     pub fn fetch_post_reports_gen(
         &self,
         status: ReportStatus,
@@ -267,7 +267,7 @@ impl WhaleReportFetcher {
         paginated
     }
 
-    /// 讨论区举报分页迭代器.
+    /// 讨论区举报分页迭代器
     pub fn fetch_discussion_reports_gen(
         &self,
         status: ReportStatus,
@@ -301,9 +301,9 @@ impl Default for WhaleReportFetcher {
     }
 }
 
-// ==================== 举报处理器 ====================
+// 举报处理器
 
-/// 举报处理接口(处理作品,评论,帖子,讨论区举报).
+/// 举报处理接口(处理作品,评论,帖子,讨论区举报)
 pub struct ReportHandler {
     client: &'static CodeMaoClient,
 }
@@ -315,9 +315,9 @@ impl ReportHandler {
         }
     }
 
-    // ==================== 私有辅助 ====================
+    // 私有辅助
 
-    /// 发送 PATCH 请求处理举报,并检查状态码是否为 204.
+    /// 发送 PATCH 请求处理举报,并检查状态码是否为 204
     fn process_report(&self, endpoint: &str, admin_id: i32, resolution: &str) -> MewResult<bool> {
         let payload = json!({
             "admin_id": admin_id,
@@ -331,9 +331,9 @@ impl ReportHandler {
         Ok(response.status() == HTTPStatus::NoContent as u16)
     }
 
-    // ==================== 公共方法 ====================
+    // 公共方法
 
-    /// 处理帖子举报.
+    /// 处理帖子举报
     pub fn execute_process_post_report(
         &self,
         report_id: i32,
@@ -348,7 +348,7 @@ impl ReportHandler {
         self.process_report(&endpoint, admin_id, resolution.as_str())
     }
 
-    /// 处理讨论区举报.
+    /// 处理讨论区举报
     pub fn execute_process_discussion_report(
         &self,
         report_id: i32,
@@ -363,7 +363,7 @@ impl ReportHandler {
         self.process_report(&endpoint, admin_id, resolution.as_str())
     }
 
-    /// 处理评论举报.
+    /// 处理评论举报
     pub fn execute_process_comment_report(
         &self,
         report_id: i32,
@@ -378,7 +378,7 @@ impl ReportHandler {
         self.process_report(&endpoint, admin_id, resolution.as_str())
     }
 
-    /// 处理作品举报(仅支持 Pass/Delete/Unload/Tobedone).
+    /// 处理作品举报(仅支持 Pass/Delete/Unload/Tobedone)
     pub fn execute_process_work_report(
         &self,
         report_id: i32,

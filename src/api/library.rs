@@ -4,9 +4,9 @@ use crate::utils::acquire::{
 use log::debug;
 use serde_json::{Value, json};
 
-// ==================== 小说相关枚举 ====================
+// 小说相关枚举
 
-/// 小说列表类型.
+/// 小说列表类型
 #[derive(Debug, Clone, Copy)]
 pub enum NovelListType {
     All,
@@ -22,7 +22,7 @@ impl NovelListType {
     }
 }
 
-/// 小说排序方式.
+/// 小说排序方式
 #[derive(Debug, Clone, Copy)]
 pub enum NovelSortId {
     Default = 0,
@@ -31,7 +31,7 @@ pub enum NovelSortId {
     RecentlyUpdated = 3,
 }
 
-/// 小说分类 ID.
+/// 小说分类 ID
 #[derive(Debug, Clone, Copy)]
 pub enum NovelCategoryId {
     All = 0,
@@ -48,7 +48,7 @@ pub enum NovelCategoryId {
     Horror = 11,
 }
 
-/// 小说连载状态.
+/// 小说连载状态
 #[derive(Debug, Clone, Copy)]
 pub enum NovelStatus {
     All = 0,
@@ -56,9 +56,9 @@ pub enum NovelStatus {
     Completed = 2,
 }
 
-// ==================== 图鉴相关枚举 ====================
+// 图鉴相关枚举
 
-/// 图鉴星级.
+/// 图鉴星级
 #[derive(Debug, Clone, Copy)]
 pub enum BookStar {
     One = 1,
@@ -69,7 +69,7 @@ pub enum BookStar {
     Six = 6,
 }
 
-/// 图鉴属性 ID.
+/// 图鉴属性 ID
 #[derive(Debug, Clone, Copy)]
 pub enum BookAttributeId {
     Normal = 2,
@@ -85,9 +85,9 @@ pub enum BookAttributeId {
     Holy = 12,
 }
 
-// ==================== 漫画数据获取器 ====================
+// 漫画数据获取器
 
-/// 漫画相关数据查询接口.
+/// 漫画相关数据查询接口
 pub struct CartoonDataFetcher {
     client: &'static CodeMaoClient,
 }
@@ -99,7 +99,7 @@ impl CartoonDataFetcher {
         }
     }
 
-    /// 获取全部漫画列表.
+    /// 获取全部漫画列表
     pub fn fetch_all_cartoons(&self) -> MewResult<Value> {
         debug!("获取全部漫画");
         let builder = self
@@ -108,7 +108,7 @@ impl CartoonDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取指定漫画信息.
+    /// 获取指定漫画信息
     pub fn fetch_cartoon_info(&self, comic_id: i32) -> MewResult<Value> {
         debug!("获取漫画信息: comic_id={}", comic_id);
         let endpoint = format!("/api/comic/{}", comic_id);
@@ -116,7 +116,7 @@ impl CartoonDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取漫画指定章节内容(分页图片).
+    /// 获取漫画指定章节内容(分页图片)
     pub fn fetch_cartoon_chapter(&self, chapter_id: i32) -> MewResult<Value> {
         debug!("获取漫画章节: chapter_id={}", chapter_id);
         let endpoint = format!("/api/comic/page/list/{}", chapter_id);
@@ -137,9 +137,9 @@ impl ClientAccess for CartoonDataFetcher {
     }
 }
 
-// ==================== 小说数据获取器 ====================
+// 小说数据获取器
 
-/// 小说相关数据查询接口.
+/// 小说相关数据查询接口
 pub struct NovelDataFetcher {
     client: &'static CodeMaoClient,
 }
@@ -151,7 +151,7 @@ impl NovelDataFetcher {
         }
     }
 
-    /// 获取小说分类列表.
+    /// 获取小说分类列表
     pub fn fetch_novel_categories(&self) -> MewResult<Value> {
         debug!("获取小说分类");
         let builder = self
@@ -160,7 +160,7 @@ impl NovelDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取推荐小说.
+    /// 获取推荐小说
     pub fn fetch_recommend_novel(&self) -> MewResult<Value> {
         debug!("获取推荐小说");
         let builder =
@@ -169,7 +169,7 @@ impl NovelDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取小说列表(支持分类,排序,状态筛选).
+    /// 获取小说列表(支持分类,排序,状态筛选)
     pub fn fetch_novel_list(
         &self,
         list_type: NovelListType,
@@ -195,7 +195,7 @@ impl NovelDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取已收藏的小说列表.
+    /// 获取已收藏的小说列表
     pub fn fetch_favorite_novels(&self, page: Option<i32>, limit: Option<i32>) -> MewResult<Value> {
         debug!("获取收藏小说: page={:?}, limit={:?}", page, limit);
         let builder = self
@@ -206,7 +206,7 @@ impl NovelDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取小说详情.
+    /// 获取小说详情
     pub fn fetch_novel_details(&self, novel_id: i32) -> MewResult<Value> {
         debug!("获取小说详情: novel_id={}", novel_id);
         let endpoint = format!("/api/fanfic/{}", novel_id);
@@ -214,7 +214,7 @@ impl NovelDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取指定章节内容.
+    /// 获取指定章节内容
     pub fn fetch_chapter_details(&self, chapter_id: i32) -> MewResult<Value> {
         debug!("获取章节内容: chapter_id={}", chapter_id);
         let endpoint = format!("/api/fanfic/section/{}", chapter_id);
@@ -222,7 +222,7 @@ impl NovelDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取小说评论列表.
+    /// 获取小说评论列表
     pub fn fetch_novel_comments(
         &self,
         novel_id: i32,
@@ -242,7 +242,7 @@ impl NovelDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 搜索小说.
+    /// 搜索小说
     pub fn search_novels(
         &self,
         keyword: &str,
@@ -262,7 +262,7 @@ impl NovelDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取小说的所有章节.
+    /// 获取小说的所有章节
     pub fn fetch_all_chapters(
         &self,
         novel_id: i32,
@@ -282,7 +282,7 @@ impl NovelDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取我的小说列表.
+    /// 获取我的小说列表
     pub fn fetch_my_novels(&self, limit: Option<i32>, page: Option<i32>) -> MewResult<Value> {
         debug!("获取我的小说: limit={:?}, page={:?}", limit, page);
         let builder = self
@@ -293,7 +293,7 @@ impl NovelDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取已删除的章节.
+    /// 获取已删除的章节
     pub fn fetch_deleted_chapters(
         &self,
         limit: Option<i32>,
@@ -321,9 +321,9 @@ impl ClientAccess for NovelDataFetcher {
     }
 }
 
-// ==================== 小说操作处理器 ====================
+// 小说操作处理器
 
-/// 小说相关操作接口(收藏,评论,发布章节等).
+/// 小说相关操作接口(收藏,评论,发布章节等)
 pub struct NovelActionHandler {
     client: &'static CodeMaoClient,
 }
@@ -335,7 +335,7 @@ impl NovelActionHandler {
         }
     }
 
-    /// 收藏 / 取消收藏小说.
+    /// 收藏 / 取消收藏小说
     pub fn execute_toggle_novel_favorite(&self, novel_id: i32, favorite: bool) -> MewResult<Value> {
         let method = if favorite {
             HttpMethod::Post
@@ -348,7 +348,7 @@ impl NovelActionHandler {
         self.send_and_parse(builder)
     }
 
-    /// 发表小说评论.
+    /// 发表小说评论
     pub fn create_novel_comment(
         &self,
         content: &str,
@@ -365,7 +365,7 @@ impl NovelActionHandler {
         self.send_maybe_parse(builder, return_data, HTTPStatus::Ok)
     }
 
-    /// 点赞 / 取消点赞小说评论.
+    /// 点赞 / 取消点赞小说评论
     pub fn execute_toggle_comment_like(
         &self,
         comment_id: i32,
@@ -383,7 +383,7 @@ impl NovelActionHandler {
         self.send_maybe_parse(builder, return_data, HTTPStatus::Ok)
     }
 
-    /// 删除小说评论.
+    /// 删除小说评论
     pub fn delete_novel_comment(&self, comment_id: i32, return_data: bool) -> MewResult<Value> {
         debug!("删除评论: comment_id={}", comment_id);
         let endpoint = format!("/api/fanfic/comments/{}", comment_id);
@@ -393,7 +393,7 @@ impl NovelActionHandler {
         self.send_maybe_parse(builder, return_data, HTTPStatus::Ok)
     }
 
-    /// 更新章节内容.
+    /// 更新章节内容
     pub fn update_chapter(
         &self,
         chapter_id: i32,
@@ -415,7 +415,7 @@ impl NovelActionHandler {
         self.check_status(builder, HTTPStatus::NoContent)
     }
 
-    /// 发布章节.
+    /// 发布章节
     pub fn publish_chapter(&self, chapter_id: i32) -> MewResult<bool> {
         debug!("发布章节: chapter_id={}", chapter_id);
         let endpoint = format!("/web/fanfic/section/{}/publish", chapter_id);
@@ -426,7 +426,7 @@ impl NovelActionHandler {
         self.check_status(builder, HTTPStatus::NoContent)
     }
 
-    /// 更新小说信息.
+    /// 更新小说信息
     pub fn update_novel(
         &self,
         novel_id: i32,
@@ -451,7 +451,7 @@ impl NovelActionHandler {
         self.send_maybe_parse(builder, return_data, HTTPStatus::Ok)
     }
 
-    /// 创建新小说.
+    /// 创建新小说
     pub fn create_novel(
         &self,
         title: &str,
@@ -476,7 +476,7 @@ impl NovelActionHandler {
         self.send_maybe_parse(builder, return_data, HTTPStatus::Ok)
     }
 
-    /// 删除小说.
+    /// 删除小说
     pub fn delete_novel(&self, novel_id: i32) -> MewResult<bool> {
         debug!("删除小说: novel_id={}", novel_id);
         let endpoint = format!("/web/fanfic/{}", novel_id);
@@ -499,9 +499,9 @@ impl ClientAccess for NovelActionHandler {
     }
 }
 
-// ==================== 图鉴数据获取器 ====================
+// 图鉴数据获取器
 
-/// 图鉴相关数据查询接口.
+/// 图鉴相关数据查询接口
 pub struct BookDataFetcher {
     client: &'static CodeMaoClient,
 }
@@ -513,7 +513,7 @@ impl BookDataFetcher {
         }
     }
 
-    /// 获取全部图鉴.
+    /// 获取全部图鉴
     pub fn fetch_all_books(&self) -> MewResult<Value> {
         debug!("获取全部图鉴");
         let builder = self
@@ -522,7 +522,7 @@ impl BookDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取所有图鉴属性列表.
+    /// 获取所有图鉴属性列表
     pub fn fetch_all_attributes(&self) -> MewResult<Value> {
         debug!("获取图鉴属性列表");
         let builder = self
@@ -531,7 +531,7 @@ impl BookDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 按星级筛选图鉴.
+    /// 按星级筛选图鉴
     pub fn fetch_books_by_star(&self, star: BookStar) -> MewResult<Value> {
         debug!("按星级获取图鉴: star={:?}", star);
         let builder = self
@@ -541,7 +541,7 @@ impl BookDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 按属性筛选图鉴.
+    /// 按属性筛选图鉴
     pub fn fetch_books_by_attribute(&self, attribute_id: BookAttributeId) -> MewResult<Value> {
         debug!("按属性获取图鉴: attribute_id={:?}", attribute_id);
         let builder = self
@@ -551,7 +551,7 @@ impl BookDataFetcher {
         self.send_and_parse(builder)
     }
 
-    /// 获取指定图鉴详情.
+    /// 获取指定图鉴详情
     pub fn fetch_book_details(&self, book_id: i32) -> MewResult<Value> {
         debug!("获取图鉴详情: book_id={}", book_id);
         let endpoint = format!("/api/sprite/{}", book_id);
@@ -572,9 +572,9 @@ impl ClientAccess for BookDataFetcher {
     }
 }
 
-// ==================== 图鉴操作处理器 ====================
+// 图鉴操作处理器
 
-/// 图鉴相关操作接口(点赞等).
+/// 图鉴相关操作接口(点赞等)
 pub struct BookActionHandler {
     client: &'static CodeMaoClient,
 }
@@ -586,7 +586,7 @@ impl BookActionHandler {
         }
     }
 
-    /// 点赞 / 取消点赞图鉴.
+    /// 点赞 / 取消点赞图鉴
     pub fn execute_toggle_book_like(
         &self,
         book_id: i32,

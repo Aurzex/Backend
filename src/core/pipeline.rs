@@ -23,7 +23,7 @@ use crate::core::retrieve::{CommentSource, DataQuery, JsonObject};
 use crate::utils::acquire::{Catsona, KittyFactory};
 use crate::utils::data::PathConfig;
 
-// ==================== 配置结构体(依赖注入) ====================
+// 配置结构体(依赖注入)
 #[derive(Clone)]
 pub struct CheckConfig {
     pub official_ids: &'static [i64],
@@ -85,8 +85,8 @@ impl Default for CheckConfig {
     }
 }
 
-// ==================== 静态映射与注册表 ====================
-/// 来源类型映射.
+// 静态映射与注册表
+/// 来源类型映射
 static SOURCE_TYPE_MAP: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
 fn get_source_type_map() -> &'static HashMap<&'static str, &'static str> {
     SOURCE_TYPE_MAP.get_or_init(|| {
@@ -98,7 +98,7 @@ fn get_source_type_map() -> &'static HashMap<&'static str, &'static str> {
     })
 }
 
-// ==================== 公共工具函数 ====================
+// 公共工具函数
 fn title_preview_str(title: &str) -> String {
     if title.is_empty() {
         String::new()
@@ -182,7 +182,7 @@ impl ReportIdExt for SourceConfig {
     }
 }
 
-// ==================== 策略模式:评论违规检测 ====================
+// 策略模式:评论违规检测
 pub trait CommentProcessStrategy: Send + Sync {
     fn process(
         &self,
@@ -299,7 +299,7 @@ impl CommentProcessStrategy for DuplicatesStrategy {
     }
 }
 
-// ==================== 策略工厂 ====================
+// 策略工厂
 pub struct StrategyFactory {
     strategies: HashMap<String, Box<dyn CommentProcessStrategy>>,
 }
@@ -333,7 +333,7 @@ impl StrategyFactory {
     }
 }
 
-// ==================== 评论处理器 ====================
+// 评论处理器
 pub struct CommentProcessor {
     factory: StrategyFactory,
 }
@@ -351,7 +351,7 @@ impl CommentProcessor {
         }
     }
 
-    /// 处理单条评论的违规检测,参数较多,保留显式参数以保持调用清晰.
+    /// 处理单条评论的违规检测,参数较多,保留显式参数以保持调用清晰
     #[allow(clippy::too_many_arguments)]
     pub fn process_item(
         &self,
@@ -383,7 +383,7 @@ impl CommentProcessor {
     }
 }
 
-// ==================== 批量组与管理器 ====================
+// 批量组与管理器
 #[derive(Debug, Clone)]
 pub struct BatchGroup {
     pub group_type: String,
@@ -438,7 +438,7 @@ impl BatchActionManager {
     }
 }
 
-// ==================== 处理上下文(不可变记录 + 可变状态) ====================
+// 处理上下文(不可变记录 + 可变状态)
 #[derive(Debug, Clone)]
 pub struct ReportRecord {
     pub record_id: String,
@@ -482,7 +482,7 @@ impl ProcessingContext {
     }
 }
 
-// ==================== 处理器接口 ====================
+// 处理器接口
 pub trait Processor: Send + Sync {
     fn process(
         &self,
@@ -491,7 +491,7 @@ pub trait Processor: Send + Sync {
     ) -> Result<(), ProcessorError>;
 }
 
-// ==================== 动作注册表(静态函数表) ====================
+// 动作注册表(静态函数表)
 type ActionFn = fn(i32, i32, Resolution) -> Result<bool, ProcessorError>;
 
 pub struct ActionRegistry {
@@ -576,7 +576,7 @@ pub(crate) fn apply_action_by_method(
     global_action_registry().apply(method, report_id, admin_id, resolution_enum)
 }
 
-/// 依据动作键查找 resolution 并执行处理动作,动作键不在映射中时静默跳过.
+/// 依据动作键查找 resolution 并执行处理动作,动作键不在映射中时静默跳过
 fn apply_action_by_key(
     config: &SourceConfig,
     report_id: i32,
@@ -589,12 +589,12 @@ fn apply_action_by_key(
     Ok(())
 }
 
-// ==================== 详情展示(字段表驱动) ====================
+// 详情展示(字段表驱动)
 pub trait ReportDisplay: Send + Sync {
     fn display(&self, item: &Value, config: &SourceConfig);
 }
 
-/// 单个展示字段:标签,数据字段与可选格式化函数.
+/// 单个展示字段:标签,数据字段与可选格式化函数
 struct DisplayField<'a> {
     label: &'static str,
     field: &'a str,
@@ -602,7 +602,7 @@ struct DisplayField<'a> {
 }
 
 impl<'a> DisplayField<'a> {
-    /// 原样输出字符串字段.
+    /// 原样输出字符串字段
     fn raw(label: &'static str, field: &'a str) -> Self {
         DisplayField {
             label,
@@ -611,7 +611,7 @@ impl<'a> DisplayField<'a> {
         }
     }
 
-    /// 原样输出可选字段,为 None 时自动跳过.
+    /// 原样输出可选字段,为 None 时自动跳过
     fn optional_raw(label: &'static str, field: Option<&'a str>) -> Self {
         DisplayField {
             label,
@@ -620,7 +620,7 @@ impl<'a> DisplayField<'a> {
         }
     }
 
-    /// 格式化输出字段.
+    /// 格式化输出字段
     fn formatted(label: &'static str, field: &'a str, format: fn(&Value) -> String) -> Self {
         DisplayField {
             label,
@@ -642,7 +642,7 @@ fn html_content(v: &Value) -> String {
     html_to_text(v.as_str().unwrap_or(""))
 }
 
-/// 渲染单个字段,无格式化函数时仅输出字符串字段.
+/// 渲染单个字段,无格式化函数时仅输出字符串字段
 fn print_field(item: &Value, label: &str, field: &str, format: Option<fn(&Value) -> String>) {
     if let Some(val) = item.get(field) {
         let text = match format {
@@ -656,7 +656,7 @@ fn print_field(item: &Value, label: &str, field: &str, format: Option<fn(&Value)
     }
 }
 
-/// 渲染详情:统一遍历字段表,避免各 Display 重复宏定义.
+/// 渲染详情:统一遍历字段表,避免各 Display 重复宏定义
 fn render_details(item: &Value, config: &SourceConfig, fields: &[DisplayField<'_>]) {
     info!("=== {} 详情 ===", config.name);
     for f in fields {
@@ -706,7 +706,7 @@ impl ReportDisplay for ShopCommentDisplay {
     }
 }
 
-/// 拉取并展示帖子正文,论坛帖子举报需要额外请求.
+/// 拉取并展示帖子正文,论坛帖子举报需要额外请求
 fn print_forum_post_content(item: &Value, config: &SourceConfig) {
     if let Ok(post_id) = item
         .get(&config.source_id_field)
@@ -784,7 +784,7 @@ fn get_display_registry() -> &'static HashMap<&'static str, Box<dyn ReportDispla
     })
 }
 
-// ==================== 详情显示处理器 ====================
+// 详情显示处理器
 pub struct DetailDisplayProcessor;
 
 impl Processor for DetailDisplayProcessor {
@@ -819,7 +819,7 @@ impl Processor for DetailDisplayProcessor {
     }
 }
 
-// ==================== 官方账号检查处理器 ====================
+// 官方账号检查处理器
 pub struct OfficialCheckProcessor {
     config: CheckConfig,
 }
@@ -863,7 +863,7 @@ impl Processor for OfficialCheckProcessor {
     }
 }
 
-// ==================== 违规信息枚举 ====================
+// 违规信息枚举
 #[derive(Debug)]
 enum ViolationKind {
     Ad {
@@ -875,7 +875,7 @@ enum ViolationKind {
     },
 }
 
-// ==================== 违规检查器 ====================
+// 违规检查器
 pub struct ViolationChecker {
     pub comment_processor: CommentProcessor,
     config: CheckConfig,
@@ -898,7 +898,7 @@ impl ViolationChecker {
         }
     }
 
-    /// 构建违规标识符 "source:source_id:type:parent_id:content_id".
+    /// 构建违规标识符 "source:source_id:type:parent_id:content_id"
     fn violation_identifier(
         source_type: &str,
         source_id: i64,
@@ -916,7 +916,7 @@ impl ViolationChecker {
         )
     }
 
-    /// 处理单条评论,返回违规信息,仅在违规时构建标识符.
+    /// 处理单条评论,返回违规信息,仅在违规时构建标识符
     fn process_single_comment(
         item: &JsonObject,
         source_type: &str,
@@ -964,7 +964,7 @@ impl ViolationChecker {
         None
     }
 
-    /// 遍历评论与回复,收集违规候选.
+    /// 遍历评论与回复,收集违规候选
     fn collect_pending_violations(
         &self,
         comments: &[JsonObject],
@@ -1011,7 +1011,7 @@ impl ViolationChecker {
         pending
     }
 
-    /// 将违规候选分类为广告标识符与达到阈值的刷屏标识符.
+    /// 将违规候选分类为广告标识符与达到阈值的刷屏标识符
     fn classify_violations(pending: Vec<ViolationKind>, spam_threshold: usize) -> Vec<String> {
         let mut ads = Vec::new();
         let mut duplicate_counts: HashMap<(String, String), (usize, Vec<String>)> = HashMap::new();
@@ -1038,7 +1038,7 @@ impl ViolationChecker {
         ads
     }
 
-    /// 交互询问评论获取数量,无效输入回退默认值.
+    /// 交互询问评论获取数量,无效输入回退默认值
     fn prompt_comment_limit(&self) -> usize {
         let limit_str = prompt_input("输入要获取的评论数: ");
         limit_str
@@ -1046,7 +1046,7 @@ impl ViolationChecker {
             .unwrap_or(self.config.comment_fetch_default_limit)
     }
 
-    /// 流式获取详细评论,单条失败仅记录日志.
+    /// 流式获取详细评论,单条失败仅记录日志
     fn fetch_detailed_comments(
         &self,
         source: CommentSource,
@@ -1183,7 +1183,7 @@ impl ViolationChecker {
         Ok(())
     }
 
-    /// 轮询选择一个未达举报上限的账号索引,无可用账号时返回 None.
+    /// 轮询选择一个未达举报上限的账号索引,无可用账号时返回 None
     fn select_report_account(
         &self,
         accounts: &[(String, String)],
@@ -1205,7 +1205,7 @@ impl ViolationChecker {
         None
     }
 
-    /// 确保账号已登录,登录失败则移除该账号并返回 false.
+    /// 确保账号已登录,登录失败则移除该账号并返回 false
     fn ensure_account_login(
         &self,
         accounts: &mut Vec<(String, String)>,
@@ -1232,7 +1232,7 @@ impl ViolationChecker {
         }
     }
 
-    /// 用多账号轮流举报违规内容,返回成功数.
+    /// 用多账号轮流举报违规内容,返回成功数
     fn report_violations(
         &self,
         accounts: &mut Vec<(String, String)>,
@@ -1401,7 +1401,7 @@ impl ViolationChecker {
     }
 }
 
-// ==================== 动作选择处理器 ====================
+// 动作选择处理器
 pub struct ActionSelectionProcessor {
     pub registry: Arc<ReportTypeRegistry>,
     pub batch_manager: Arc<Mutex<BatchActionManager>>,
@@ -1544,7 +1544,7 @@ impl Processor for ActionSelectionProcessor {
     }
 }
 
-// ==================== 处理管道 ====================
+// 处理管道
 pub struct ProcessingPipeline {
     processors: Vec<Box<dyn Processor>>,
 }
@@ -1581,7 +1581,7 @@ impl ProcessingPipeline {
     }
 }
 
-// ==================== 多账号管理器 ====================
+// 多账号管理器
 pub struct MultiAccount {
     pub accounts: Vec<(String, String)>,
 }
@@ -1634,7 +1634,7 @@ impl MultiAccount {
     }
 }
 
-// ==================== 全局单例 ====================
+// 全局单例
 static COMMENT_PROCESSOR: OnceLock<CommentProcessor> = OnceLock::new();
 static VIOLATION_CHECKER: OnceLock<ViolationChecker> = OnceLock::new();
 
@@ -1646,7 +1646,7 @@ pub fn violation_checker() -> &'static ViolationChecker {
     VIOLATION_CHECKER.get_or_init(|| ViolationChecker::new(CheckConfig::default()))
 }
 
-// ==================== 为 Vec<Value> 实现 CommentConfig ====================
+// 为 Vec<Value> 实现 CommentConfig
 impl CommentConfig for Vec<Value> {
     fn get_comments(&self, _item_id: i64) -> Option<&[Value]> {
         Some(self.as_slice())
