@@ -52,6 +52,8 @@ pub enum ChatError {
     Handshake(String),
     #[error("JSON 错误: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("发送失败: {0}")]
+    Send(#[from] std::sync::mpsc::SendError<tungstenite::Message>),
     #[error("连接未就绪")]
     NotConnected,
     #[error("正在接收回复,请等待完成")]
@@ -483,7 +485,7 @@ impl ChatClient {
             .clone()
             .ok_or(ChatError::NotConnected)?;
         tx.send(Message::text(payload))
-            .map_err(|_| ChatError::NotConnected)
+            .map_err(ChatError::from)
     }
 }
 
@@ -610,8 +612,10 @@ impl ChatEventHandler for ConnectAckHandler {
             info!("连接确认 - 剩余对话次数: {chat_count}");
         }
         // 服务器可能重复确认,只发送一次 JOIN(帧格式与 Python 的 `42 ["join"]` 一致)
-        if !inner.join_sent.swap(true, Ordering::AcqRel) {
-            let _ = send_raw(inner, "42 [\"join\"]");
+        if !inner.join_sent.swap(true, Ordering::AcqRel)
+            && let Err(e) = send_raw(inner, "42 [\"join\"]")
+        {
+            warn!("发送 JOIN 失败: {e}");
         }
     }
 }
@@ -650,8 +654,10 @@ impl ChatEventHandler for JoinAckHandler {
                 "turn_count": 5,
                 "system_content_enum": "default",
             }),
-        );
-        let _ = send_event_on(inner, "get_text2Img_remaining_times", &Value::Null);
+        )
+        .inspect_err(|e| warn!("发送预设消息失败: {e}"));
+        send_event_on(inner, "get_text2Img_remaining_times", &Value::Null)
+            .inspect_err(|e| warn!("查询剩余生成次数失败: {e}"));
     }
 }
 
@@ -781,7 +787,7 @@ fn send_event_on(inner: &Arc<ChatInner>, name: &str, payload: &Value) -> Result<
         .clone()
         .ok_or(ChatError::NotConnected)?;
     tx.send(Message::text(frame))
-        .map_err(|_| ChatError::NotConnected)
+        .map_err(ChatError::from)
 }
 
 // ==================== 帧处理 ====================
@@ -817,7 +823,7 @@ fn send_raw(inner: &Arc<ChatInner>, payload: &str) -> Result<()> {
         .clone()
         .ok_or(ChatError::NotConnected)?;
     tx.send(Message::text(payload))
-        .map_err(|_| ChatError::NotConnected)
+        .map_err(ChatError::from)
 }
 
 // ==================== 连接建立与读循环 ====================

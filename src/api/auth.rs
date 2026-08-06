@@ -1,4 +1,6 @@
-use crate::utils::acquire::{BaseKey, Catsona, CodeMaoClient, HttpMethod, MewError, MewResult};
+use crate::utils::acquire::{
+    BaseKey, Catsona, CodeMaoClient, DEFAULT_PID, HttpMethod, MewError, MewResult,
+};
 use crate::utils::data::{CodeMaoFile, PathConfig};
 use log::{debug, warn};
 use serde_json::{Value, json};
@@ -145,7 +147,7 @@ impl Default for LoginCredentials {
             identity: String::new(),
             password: String::new(),
             token: String::new(),
-            pid: "65edCTyg".to_string(),
+            pid: DEFAULT_PID.to_string(),
             status: AccountStatus::Average,
             role: UserRole::User,
             timestamp: None,
@@ -1213,7 +1215,7 @@ impl LoginBuilder {
             identity: self.identity.unwrap_or_default(),
             password: self.password.unwrap_or_default(),
             token: self.token.unwrap_or_default(),
-            pid: self.pid.unwrap_or_else(|| "65edCTyg".to_string()),
+            pid: self.pid.unwrap_or_else(|| DEFAULT_PID.to_string()),
             status: self.status,
             role: self.role,
             timestamp: self.timestamp,

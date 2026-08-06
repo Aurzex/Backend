@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::io::{self, Write};
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, UNIX_EPOCH};
 
 use crate::api::whale::{CommentSourceType, ReportStatus, WhaleReportFetcher, WorkSourceType};
@@ -225,10 +225,27 @@ impl SourceConfig {
 }
 
 // ==================== 举报类型注册表 ====================
-#[derive(Clone)]
+/// 按举报类型预计算的动作提示与合法键集合(注册表运行期不变).
+pub(crate) struct ActionOptions {
+    pub(crate) prompt: String,
+    pub(crate) valid_keys: HashSet<String>,
+}
+
 pub struct ReportTypeRegistry {
     registry: HashMap<String, SourceConfig>,
     default_actions: Vec<ActionConfig>, // 保留用于构建默认动作,也可直接为静态
+    action_cache: Mutex<HashMap<String, Arc<ActionOptions>>>,
+}
+
+impl Clone for ReportTypeRegistry {
+    /// 深拷贝注册表但清空动作缓存(缓存按需重建,无正确性影响).
+    fn clone(&self) -> Self {
+        ReportTypeRegistry {
+            registry: self.registry.clone(),
+            default_actions: self.default_actions.clone(),
+            action_cache: Mutex::new(HashMap::new()),
+        }
+    }
 }
 
 // 静态状态映射(避免每次构建)
@@ -259,6 +276,7 @@ impl ReportTypeRegistry {
         ReportTypeRegistry {
             registry: HashMap::new(),
             default_actions,
+            action_cache: Mutex::new(HashMap::new()),
         }
     }
 
@@ -287,13 +305,27 @@ impl ReportTypeRegistry {
             .unwrap_or_default()
     }
 
-    pub fn get_action_prompt(&self, report_type: &str) -> String {
+    /// 获取(或按举报类型缓存)动作提示与合法键集合,避免交互处理时每记录重建.
+    pub(crate) fn action_options(&self, report_type: &str) -> Arc<ActionOptions> {
+        let mut cache = self.action_cache.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(cached) = cache.get(report_type) {
+            return Arc::clone(cached);
+        }
         let actions = self.get_available_actions(report_type);
         let parts: Vec<String> = actions
             .iter()
             .map(|a| format!("{}({})", a.key, a.name))
             .collect();
-        format!("选择操作:{}", parts.join(","))
+        let options = Arc::new(ActionOptions {
+            prompt: format!("选择操作:{}", parts.join(",")),
+            valid_keys: actions.iter().map(|a| a.key.clone()).collect(),
+        });
+        cache.insert(report_type.to_string(), Arc::clone(&options));
+        options
+    }
+
+    pub fn get_action_prompt(&self, report_type: &str) -> String {
+        self.action_options(report_type).prompt.clone()
     }
 
     /// 返回全局静态的状态映射引用.
@@ -302,9 +334,7 @@ impl ReportTypeRegistry {
     }
 
     pub fn is_action_available(&self, report_type: &str, action_key: &str) -> bool {
-        self.get_available_actions(report_type)
-            .iter()
-            .any(|a| a.key == action_key)
+        self.action_options(report_type).valid_keys.contains(action_key)
     }
 }
 

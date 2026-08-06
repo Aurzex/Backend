@@ -1298,17 +1298,29 @@ impl ViolationChecker {
         Ok(())
     }
 
-    fn parse_violation(&self, violation: &str) -> Option<(String, i64, String, i32, i32)> {
+    fn parse_violation(
+        &self,
+        violation: &str,
+    ) -> Result<(String, i64, String, i32, i32), ProcessorError> {
         let parts: Vec<&str> = violation.split(':').collect();
         if parts.len() != 5 {
-            return None;
+            return Err(ProcessorError::Processing(format!(
+                "违规标识符格式错误: 期望 5 段,实际 {} 段",
+                parts.len()
+            )));
         }
         let source = parts[0].to_string();
-        let source_id: i64 = parts[1].parse().ok()?;
+        let source_id: i64 = parts[1]
+            .parse()
+            .map_err(|_| ProcessorError::Processing(format!("违规标识符 source_id 解析失败: {}", parts[1])))?;
         let violation_type = parts[2].to_string();
-        let parent_id: i32 = parts[3].parse().ok()?;
-        let content_id: i32 = parts[4].parse().ok()?;
-        Some((source, source_id, violation_type, parent_id, content_id))
+        let parent_id: i32 = parts[3]
+            .parse()
+            .map_err(|_| ProcessorError::Processing(format!("违规标识符 parent_id 解析失败: {}", parts[3])))?;
+        let content_id: i32 = parts[4]
+            .parse()
+            .map_err(|_| ProcessorError::Processing(format!("违规标识符 content_id 解析失败: {}", parts[4])))?;
+        Ok((source, source_id, violation_type, parent_id, content_id))
     }
 
     fn execute_single_report(
@@ -1316,9 +1328,7 @@ impl ViolationChecker {
         violation: &str,
         reason_content: &str,
     ) -> Result<(), ProcessorError> {
-        let parsed = self
-            .parse_violation(violation)
-            .ok_or_else(|| ProcessorError::Processing("违规标识符格式错误".into()))?;
+        let parsed = self.parse_violation(violation)?;
         let (source, source_id, violation_type, parent_id, content_id) = parsed;
         match violation_type.as_str() {
             "post" => {
@@ -1489,12 +1499,13 @@ impl Processor for ActionSelectionProcessor {
             return Ok(());
         }
 
-        let actions = self.registry.get_available_actions(&record.report_type);
-        let valid_keys: HashSet<String> = actions.iter().map(|a| a.key.clone()).collect();
-        let prompt = self.registry.get_action_prompt(&record.report_type);
+        // 提示与合法键集合在注册表内缓存,避免每条记录重建
+        let options = self.registry.action_options(&record.report_type);
+        let prompt = &options.prompt;
+        let valid_keys = &options.valid_keys;
 
         loop {
-            let choice = get_valid_input(&prompt, &valid_keys);
+            let choice = get_valid_input(prompt, valid_keys);
             match choice.as_str() {
                 "D" | "S" | "T" | "P" | "U" => {
                     state.action = Some(choice.clone());

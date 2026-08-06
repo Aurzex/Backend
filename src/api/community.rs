@@ -1,5 +1,6 @@
 use crate::utils::acquire::{
-    BaseKey, CodeMaoClient, HTTPStatus, HttpMethod, MewResult, PaginatedIter, PaginationMethod,
+    BaseKey, CodeMaoClient, DEFAULT_PID, HTTPStatus, HttpMethod, MewResult, PaginatedIter,
+    PaginationMethod,
 };
 use log::{debug, warn};
 use serde_json::{Value, json};
@@ -857,7 +858,7 @@ impl UserAction {
         data.insert("password".to_string(), Value::String(password.to_string()));
         data.insert("captcha".to_string(), Value::String(captcha.to_string()));
 
-        let pid_value = pid.unwrap_or("65edCTyg");
+        let pid_value = pid.unwrap_or(DEFAULT_PID);
         data.insert("pid".to_string(), Value::String(pid_value.to_string()));
 
         let agreement_values = match agreement_ids {

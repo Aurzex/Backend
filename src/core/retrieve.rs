@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use log::warn;
 use serde_json::{Map, Value};
 use thiserror::Error;
 
@@ -419,7 +420,12 @@ impl CommentQueryBuilder {
             // 收集该评论的所有回复(此处回复数量通常较少,收集为 Vec 可以接受)
             let replies: Vec<JsonObject> = Self::reply_items(source, comment_id, comment_obj)
                 .into_iter()
-                .filter_map(|r| r.ok())
+                .filter_map(|r| {
+                    if let Err(e) = &r {
+                        warn!("拉取回复失败,已跳过: {e}");
+                    }
+                    r.ok()
+                })
                 .filter_map(|reply| build_compact_reply(&reply, user_field, &extract_reply_user_id))
                 .collect();
 

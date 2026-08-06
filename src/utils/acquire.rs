@@ -90,6 +90,15 @@ impl FromStr for BaseKey {
 }
 
 // ==================== 常量定义 ====================
+/// 默认分页大小(多数接口的单页上限).
+pub const DEFAULT_PAGE_SIZE: usize = 15;
+/// 默认单次拉取数量.
+pub const DEFAULT_LIMIT: usize = 20;
+/// 默认偏移量.
+pub const DEFAULT_OFFSET: usize = 0;
+/// 默认项目 ID(未指定时使用).
+pub const DEFAULT_PID: &str = "65edCTyg";
+
 /// 默认请求头静态切片(萌化命名).
 const KITTY_HEADERS: &[(&str, &str)] = &[
     ("Accept", "application/json, text/plain, */*"),
@@ -445,6 +454,24 @@ impl KittyRequestBuilder {
     /// 添加单个查询参数.
     pub fn with_param(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.params.push((key.into(), value.into()));
+        self
+    }
+
+    /// 批量添加 `limit`/`offset` 分页参数(offset 缺省为 `DEFAULT_OFFSET`,limit 缺省为 `default_limit`).
+    pub fn with_page(
+        mut self,
+        limit: Option<i32>,
+        offset: Option<i32>,
+        default_limit: usize,
+    ) -> Self {
+        self.params.push((
+            "limit".into(),
+            limit.unwrap_or(default_limit as i32).to_string(),
+        ));
+        self.params.push((
+            "offset".into(),
+            offset.unwrap_or(DEFAULT_OFFSET as i32).to_string(),
+        ));
         self
     }
 

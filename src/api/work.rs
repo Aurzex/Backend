@@ -1,7 +1,10 @@
 use crate::utils::acquire::{
-    BaseKey, ClientAccess, CodeMaoClient, HTTPStatus, HttpMethod, KittyRequestBuilder, MewResult,
-    PaginatedIter, PaginationMethod, current_timestamp_13,
+    BaseKey, ClientAccess, CodeMaoClient, DEFAULT_LIMIT, DEFAULT_PAGE_SIZE, HTTPStatus, HttpMethod,
+    KittyRequestBuilder, MewResult, PaginatedIter, PaginationMethod, current_timestamp_13,
 };
+
+/// 萌新盒子套餐列表接口的单页上限.
+const NEKO_PACKAGE_PAGE_SIZE: usize = 16;
 use log::debug;
 use serde_json::{Value, json};
 
@@ -1324,8 +1327,7 @@ impl TeachingPlanManager {
             )
             .with_param("TIME", timestamp.to_string())
             .with_param("work_id", work_id.to_string())
-            .with_param("offset", offset.unwrap_or(0).to_string())
-            .with_param("limit", limit.unwrap_or(20).to_string());
+            .with_page(limit, offset, DEFAULT_LIMIT);
         self.send_and_parse(builder)
     }
 
@@ -1446,8 +1448,7 @@ impl ImageClassifyManager {
                 Some(BaseKey::Creation),
             )
             .with_param("TIME", timestamp.to_string())
-            .with_param("limit", limit.unwrap_or(20).to_string())
-            .with_param("offset", offset.unwrap_or(0).to_string());
+            .with_page(limit, offset, DEFAULT_LIMIT);
         self.send_and_parse(builder)
     }
 
@@ -1528,8 +1529,7 @@ impl PackageManager {
             )
             .with_param("TIME", timestamp.to_string())
             .with_param("type", package_type)
-            .with_param("limit", limit.unwrap_or(20).to_string())
-            .with_param("offset", offset.unwrap_or(0).to_string());
+            .with_page(limit, offset, DEFAULT_LIMIT);
         self.send_and_parse(builder)
     }
 
@@ -1914,8 +1914,7 @@ impl WorkDataFetcher {
                 None,
             )
             .with_param("TIME", timestamp.to_string())
-            .with_param("limit", limit.unwrap_or(15).to_string())
-            .with_param("offset", offset.unwrap_or(0).to_string());
+            .with_page(limit, offset, DEFAULT_PAGE_SIZE);
         if origin {
             builder = builder.with_param("work_origin_type", "ORIGINAL_WORK");
         }
@@ -1973,8 +1972,7 @@ impl WorkDataFetcher {
             .client
             .build_request(HttpMethod::Get, &endpoint, None)
             .with_param("TIME", timestamp.to_string())
-            .with_param("limit", limit.unwrap_or(15).to_string())
-            .with_param("offset", offset.unwrap_or(0).to_string());
+            .with_page(limit, offset, DEFAULT_PAGE_SIZE);
         self.send_and_parse(builder)
     }
 
@@ -1986,8 +1984,7 @@ impl WorkDataFetcher {
             .client
             .build_request(HttpMethod::Get, "/nemo/v3/work/dynamic", None)
             .with_param("TIME", timestamp.to_string())
-            .with_param("limit", limit.unwrap_or(15).to_string())
-            .with_param("offset", offset.unwrap_or(0).to_string());
+            .with_page(limit, offset, DEFAULT_PAGE_SIZE);
         self.send_and_parse(builder)
     }
 
@@ -2035,8 +2032,7 @@ impl WorkDataFetcher {
             .client
             .build_request(HttpMethod::Get, &endpoint, None)
             .with_param("TIME", timestamp.to_string())
-            .with_param("limit", limit.unwrap_or(15).to_string())
-            .with_param("offset", offset.unwrap_or(0).to_string());
+            .with_page(limit, offset, DEFAULT_PAGE_SIZE);
         self.send_and_parse(builder)
     }
 
@@ -2052,8 +2048,7 @@ impl WorkDataFetcher {
             .client
             .build_request(HttpMethod::Get, "/nemo/v3/work-subject/home", None)
             .with_param("TIME", timestamp.to_string())
-            .with_param("limit", limit.unwrap_or(15).to_string())
-            .with_param("offset", offset.unwrap_or(0).to_string());
+            .with_page(limit, offset, DEFAULT_PAGE_SIZE);
         self.send_and_parse(builder)
     }
 
@@ -2200,8 +2195,7 @@ impl WorkDataFetcher {
             .build_request(HttpMethod::Get, "/nemo/community/work/name/search", None)
             .with_param("TIME", timestamp.to_string())
             .with_param("query", name)
-            .with_param("offset", offset.unwrap_or(0).to_string())
-            .with_param("limit", limit.unwrap_or(20).to_string());
+            .with_page(limit, offset, DEFAULT_LIMIT);
         self.send_and_parse(builder)
     }
 
@@ -2219,8 +2213,7 @@ impl WorkDataFetcher {
             .build_request(HttpMethod::Get, "/nemo/v2/work/name/search", None)
             .with_param("TIME", timestamp.to_string())
             .with_param("key", name)
-            .with_param("offset", offset.unwrap_or(0).to_string())
-            .with_param("limit", limit.unwrap_or(20).to_string());
+            .with_page(limit, offset, DEFAULT_LIMIT);
         self.send_and_parse(builder)
     }
 
@@ -2348,8 +2341,7 @@ impl WorkDataFetcher {
             )
             .with_param("TIME", timestamp.to_string())
             .with_param("type", types.as_value().to_string())
-            .with_param("limit", limit.unwrap_or(16).to_string())
-            .with_param("offset", offset.unwrap_or(0).to_string());
+            .with_page(limit, offset, NEKO_PACKAGE_PAGE_SIZE);
         self.send_and_parse(builder)
     }
 
@@ -2387,8 +2379,7 @@ impl WorkDataFetcher {
             )
             .with_param("TIME", timestamp.to_string())
             .with_param("second_id", second_id)
-            .with_param("limit", limit.unwrap_or(20).to_string())
-            .with_param("offset", offset.unwrap_or(0).to_string());
+            .with_page(limit, offset, DEFAULT_LIMIT);
         self.send_and_parse(builder)
     }
 }

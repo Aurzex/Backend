@@ -55,6 +55,8 @@ pub enum CloudError {
     Handshake(String),
     #[error("JSON 错误: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("发送失败: {0}")]
+    Send(#[from] std::sync::mpsc::SendError<tungstenite::Message>),
     #[error("连接未就绪")]
     NotConnected,
     #[error("变量未找到: {0}")]
@@ -1132,7 +1134,7 @@ impl CloudConnection {
             .clone()
             .ok_or(CloudError::NotConnected)?;
         tx.send(Message::text(payload))
-            .map_err(|_| CloudError::NotConnected)
+            .map_err(CloudError::from)
     }
 
     fn reset_state(&self) {
@@ -1585,14 +1587,19 @@ impl CloudInner {
             let list = store
                 .list_mut(name)
                 .ok_or_else(|| CloudError::ListNotFound(name.to_string()))?;
-            let old_items = list.items.clone();
+            // 仅在注册了整表变更回调时才克隆旧表,避免高频列表操作白拷贝整表
+            let old_items = if !list.change_callbacks.is_empty() {
+                Some(list.items.clone())
+            } else {
+                None
+            };
             let cvid = list.cvid.clone();
             let outcome = execute_list_action(&mut list.items, &action).ok_or_else(|| {
                 CloudError::InvalidArgument(format!("列表操作越界或非法: {action:?}"))
             })?;
             (cvid, old_items, outcome)
         };
-        self.fire_list_outcome(&cvid, &outcome, &old_items, ChangeSource::Local);
+        self.fire_list_outcome(&cvid, &outcome, old_items.as_deref(), ChangeSource::Local);
         self.queue(CommandFactory::update_list(&cvid, vec![outcome.wire]));
         Ok(())
     }
@@ -1610,7 +1617,12 @@ impl CloudInner {
                     warn!("收到未知 cvid 的列表更新: {cvid}");
                     continue;
                 };
-                let old_items = list.items.clone();
+                // 仅在注册了整表变更回调时才克隆旧表
+                let old_items = if !list.change_callbacks.is_empty() {
+                    Some(list.items.clone())
+                } else {
+                    None
+                };
                 let Some(outcome) = execute_list_action(&mut list.items, &action) else {
                     warn!("云端列表操作越界: cvid={cvid} op={op}");
                     continue;
@@ -1618,7 +1630,7 @@ impl CloudInner {
                 (old_items, outcome)
             };
             let (old_items, outcome) = outcome;
-            self.fire_list_outcome(cvid, &outcome, &old_items, ChangeSource::Cloud);
+            self.fire_list_outcome(cvid, &outcome, old_items.as_deref(), ChangeSource::Cloud);
         }
     }
 
@@ -1627,7 +1639,7 @@ impl CloudInner {
         &self,
         cvid: &str,
         outcome: &ListOutcome,
-        old_items: &[CloudValue],
+        old_items: Option<&[CloudValue]>,
         source: ChangeSource,
     ) {
         // 操作回调
@@ -1650,10 +1662,13 @@ impl CloudInner {
                 entry.extend(callbacks);
             }
         }
-        // 整表变更回调
+        // 整表变更回调:仅在存在变更回调时才克隆当前表,避免无回调场景整表拷贝
         let new_items = {
             let store = self.state.lock().unwrap();
-            store.list(cvid).map(|l| l.items.clone())
+            store
+                .list(cvid)
+                .filter(|l| !l.change_callbacks.is_empty())
+                .map(|l| l.items.clone())
         };
         let change_callbacks = {
             let mut store = self.state.lock().unwrap();
@@ -1664,7 +1679,7 @@ impl CloudInner {
         if let Some(callbacks) = change_callbacks {
             for (_, cb) in &callbacks {
                 if let Err(e) = catch_unwind(AssertUnwindSafe(|| {
-                    if let Some(new_items) = &new_items {
+                    if let (Some(old_items), Some(new_items)) = (old_items, &new_items) {
                         cb(old_items, new_items, source.as_str());
                     }
                 })) {
@@ -2175,7 +2190,7 @@ fn send_inner_text(inner: &Arc<CloudInner>, payload: &str) -> Result<()> {
         .clone()
         .ok_or(CloudError::NotConnected)?;
     tx.send(Message::text(payload))
-        .map_err(|_| CloudError::NotConnected)
+        .map_err(CloudError::from)
 }
 
 fn emit_online_users_change(inner: &Arc<CloudInner>, old: i64, new: i64) {
