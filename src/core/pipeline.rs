@@ -492,7 +492,7 @@ pub trait Processor: Send + Sync {
 }
 
 // ==================== 动作注册表(静态函数表) ====================
-type ActionFn = fn(i32, i32, Resolution) -> Result<bool, Box<dyn std::error::Error>>;
+type ActionFn = fn(i32, i32, Resolution) -> Result<bool, ProcessorError>;
 
 pub struct ActionRegistry {
     handlers: HashMap<&'static str, ActionFn>,
@@ -513,10 +513,10 @@ impl ActionRegistry {
                     |report_id: i32,
                      admin_id: i32,
                      resolution: Resolution|
-                     -> Result<bool, Box<dyn std::error::Error>> {
+                     -> Result<bool, ProcessorError> {
                         ReportHandler::new()
                             .$handler(report_id, admin_id, resolution)
-                            .map_err(|e| e.into())
+                            .map_err(ProcessorError::from)
                     },
                 );
             };
@@ -557,7 +557,6 @@ impl ActionRegistry {
             .ok_or_else(|| ProcessorError::Processing(format!("未知处理方法: {}", method)))?(
             report_id, admin_id, resolution,
         )
-        .map_err(ProcessorError::External)
     }
 }
 
@@ -931,11 +930,8 @@ impl ViolationChecker {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_lowercase();
-        let user_id_str = item
-            .get("user_id")
-            .and_then(|v| v.as_i64())
-            .map(|id| id.to_string())
-            .unwrap_or_default();
+        // 延迟到命中 Duplicate 分支才构造字符串,避免广告等高频场景白算
+        let user_id = item.get("user_id").and_then(|v| v.as_i64());
         let item_id = item.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
 
         if !content.is_empty() && ad_keywords.iter().any(|kw| content.contains(kw)) {
@@ -950,9 +946,11 @@ impl ViolationChecker {
             });
         }
 
-        if !user_id_str.is_empty() && !content.is_empty() {
+        if let Some(user_id) = user_id
+            && !content.is_empty()
+        {
             return Some(ViolationKind::Duplicate {
-                user_content: (user_id_str, content),
+                user_content: (user_id.to_string(), content),
                 sample_identifier: Self::violation_identifier(
                     source_type,
                     source_id,
@@ -1296,8 +1294,7 @@ impl ViolationChecker {
             .identity(username)
             .password(password)
             .status(crate::api::auth::AccountStatus::Edu)
-            .execute()
-            .map_err(|e| ProcessorError::External(e.into()))?;
+            .execute()?;
         Ok(())
     }
 
@@ -1335,12 +1332,12 @@ impl ViolationChecker {
                         reason_content,
                         false,
                     )
-                    .map_err(|e| ProcessorError::External(e.into()))?;
+                    .map_err(ProcessorError::from)?;
             }
             "work" => {
                 BaseWorkOperations::new()
                     .execute_report_work(content_id, reason_content, reason_content)
-                    .map_err(|e| ProcessorError::External(e.into()))?;
+                    .map_err(ProcessorError::from)?;
             }
             "comment" | "reply" => {
                 let is_reply = violation_type == "reply";
@@ -1348,7 +1345,7 @@ impl ViolationChecker {
                     "work" => {
                         CommentOperations::new()
                             .execute_report_comment(source_id as i32, content_id, reason_content)
-                            .map_err(|e| ProcessorError::External(e.into()))?;
+                            .map_err(ProcessorError::from)?;
                     }
                     "forum" => {
                         let item_type = if is_reply {
@@ -1364,7 +1361,7 @@ impl ViolationChecker {
                                 item_type,
                                 false,
                             )
-                            .map_err(|e| ProcessorError::External(e.into()))?;
+                            .map_err(ProcessorError::from)?;
                     }
                     "shop" => {
                         let reporter_id = fastrand::i32(10000..=199999999);
@@ -1378,7 +1375,7 @@ impl ViolationChecker {
                                 comment_parent_id: if is_reply { Some(parent_id) } else { None },
                                 description: Some(""),
                             })
-                            .map_err(|e| ProcessorError::External(e.into()))?;
+                            .map_err(ProcessorError::from)?;
                     }
                     _ => return Err(ProcessorError::Processing("不支持的来源".into())),
                 }

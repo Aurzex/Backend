@@ -1,25 +1,9 @@
 use crate::utils::acquire::{
     BaseKey, CodeMaoClient, HTTPStatus, HttpMethod, KittyRequestBuilder, MewError, MewResult,
-    PaginatedIter, PaginationMethod,
+    PaginatedIter, PaginationMethod, current_timestamp_13,
 };
-use log::{debug, warn};
+use log::debug;
 use serde_json::json;
-use std::time::{SystemTime, UNIX_EPOCH};
-
-// ==================== 工具函数 ====================
-
-/// 获取 13 位毫秒时间戳(本地时间).
-///
-/// 若系统时间异常(早于 Unix 纪元),则返回 0 并记录警告.
-fn current_timestamp_13() -> u128 {
-    match SystemTime::now().duration_since(UNIX_EPOCH) {
-        Ok(dur) => dur.as_millis(),
-        Err(_) => {
-            warn!("系统时间异常,无法获取时间戳,返回 0");
-            0
-        }
-    }
-}
 
 // ==================== 举报相关枚举 ====================
 
@@ -74,7 +58,7 @@ pub enum ReportStatus {
 }
 
 impl ReportStatus {
-    fn as_str(&self) -> &'static str {
+    pub(crate) fn as_str(&self) -> &'static str {
         match self {
             ReportStatus::ToBeDone => "TOBEDONE",
             ReportStatus::Done => "DONE",

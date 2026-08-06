@@ -18,6 +18,9 @@ use super::types::{
 use crate::api::whale::{ReportStatus, Resolution};
 use crate::utils::acquire::{FileUploader, KittyFactory};
 
+/// 批量分组的键:(分组类型, 分组键).
+type GroupKey = (String, String);
+
 // ==================== 文件处理器 ====================
 pub struct FileProcessor;
 
@@ -49,9 +52,7 @@ impl FileProcessor {
 
         let client = KittyFactory::global_client().clone();
         let uploader = FileUploader::new(client);
-        let url = uploader
-            .upload(file_path, method, save_path)
-            .map_err(|e| ProcessorError::External(e.into()))?;
+        let url = uploader.upload(file_path, method, save_path)?;
 
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -118,7 +119,7 @@ pub struct ReportProcessor {
     pub fetcher: ReportFetcher,
     pub pipeline_factory: Arc<ReportTypeRegistry>,
     pub batch_manager: Arc<Mutex<BatchActionManager>>,
-    pending_groups: Mutex<HashMap<(String, String), Vec<String>>>,
+    pending_groups: Mutex<HashMap<GroupKey, Vec<String>>>,
     config: CheckConfig, // 注入配置,包含批量识别阈值等
 }
 
@@ -233,8 +234,8 @@ impl ReportProcessor {
                     self.config.batch_content_threshold
                 };
                 if entry.len() >= threshold {
-                    ready_groups.push(BatchGroup::new(&key.0, &key.1, entry.clone()));
-                    pending.remove(&key);
+                    let ids = pending.remove(&key).unwrap();
+                    ready_groups.push(BatchGroup::new(&key.0, &key.1, ids));
                 }
             }
         }
@@ -247,7 +248,7 @@ impl ReportProcessor {
         Ok(())
     }
 
-    fn extract_group_key(&self, item: &Value) -> Option<((String, String), String)> {
+    fn extract_group_key(&self, item: &Value) -> Option<(GroupKey, String)> {
         let rt = self.infer_report_type(item)?;
         let config = self.fetcher.registry.get_config(rt)?;
         let record_id = item.get(&config.report_id_field).map(value_to_string)?;

@@ -23,30 +23,12 @@ use crate::utils::acquire::{
 pub enum DataQueryError {
     #[error("无效的来源类型: {0}")]
     InvalidSource(String),
-    #[error("无效的查询方法: {0}")]
-    InvalidMethod(String),
     #[error("数据解析失败: {0}")]
     ParseError(String),
-    #[error("未找到请求的资源")]
-    NotFound,
-    #[error("内部错误: {0}")]
-    Internal(String),
+    #[error("JSON 解析失败: {0}")]
+    Json(#[from] serde_json::Error),
     #[error("外部错误: {0}")]
-    External(MewError),
-}
-
-/// 使得可以直接将 `MewError` 转换成 `DataQueryError`,内部直接使用 `?` 传播.
-impl From<MewError> for DataQueryError {
-    fn from(e: MewError) -> Self {
-        DataQueryError::External(e)
-    }
-}
-
-/// 字符串解析错误也可转换为 `DataQueryError`.
-impl From<serde_json::Error> for DataQueryError {
-    fn from(e: serde_json::Error) -> Self {
-        DataQueryError::ParseError(e.to_string())
-    }
+    External(#[from] MewError),
 }
 
 // ==================== 枚举定义 ====================
@@ -103,6 +85,14 @@ impl NotificationCategory {
 
 pub type JsonValue = Value;
 pub type JsonObject = Map<String, Value>;
+/// 惰性值流(统一迭代器特征对象签名).
+pub type JsonValueIter = Box<dyn Iterator<Item = Result<JsonValue, DataQueryError>>>;
+/// 惰性对象流.
+pub type JsonObjIter = Box<dyn Iterator<Item = Result<JsonObject, DataQueryError>>>;
+/// 惰性字符串流.
+pub type JsonStrIter = Box<dyn Iterator<Item = Result<String, DataQueryError>>>;
+/// 惰性字符串对流.
+pub type JsonPairIter = Box<dyn Iterator<Item = Result<(String, String), DataQueryError>>>;
 
 // ==================== 惰性去重迭代器 ====================
 
@@ -215,7 +205,7 @@ impl CommentQueryBuilder {
     /// 构建基础评论流(原始 `JsonValue`).
     fn build_raw_stream(
         &self,
-    ) -> Result<Box<dyn Iterator<Item = Result<JsonValue, DataQueryError>>>, DataQueryError> {
+    ) -> Result<JsonValueIter, DataQueryError> {
         let source = self
             .source
             .ok_or_else(|| DataQueryError::InvalidSource("未设置来源".into()))?;
@@ -285,14 +275,14 @@ impl CommentQueryBuilder {
     /// 惰性获取评论原始数据流.
     pub fn stream_raw_comments(
         self,
-    ) -> Result<Box<dyn Iterator<Item = Result<JsonValue, DataQueryError>>>, DataQueryError> {
+    ) -> Result<JsonValueIter, DataQueryError> {
         self.build_raw_stream()
     }
 
     /// 惰性获取去重后的用户ID流.
     pub fn stream_user_ids(
         self,
-    ) -> Result<Box<dyn Iterator<Item = Result<String, DataQueryError>>>, DataQueryError> {
+    ) -> Result<JsonStrIter, DataQueryError> {
         let source = self
             .source
             .ok_or_else(|| DataQueryError::InvalidSource("未设置来源".into()))?;
@@ -354,7 +344,7 @@ impl CommentQueryBuilder {
     /// 惰性获取去重后的评论ID流,格式为 "主评论ID" 或 "主评论ID.回复ID".
     pub fn stream_comment_ids(
         self,
-    ) -> Result<Box<dyn Iterator<Item = Result<String, DataQueryError>>>, DataQueryError> {
+    ) -> Result<JsonStrIter, DataQueryError> {
         let source = self
             .source
             .ok_or_else(|| DataQueryError::InvalidSource("未设置来源".into()))?;
@@ -372,15 +362,17 @@ impl CommentQueryBuilder {
                 ids.push(Ok(comment_id.to_string()));
             }
 
-            let comment_obj = comment.as_object().cloned().unwrap_or_default();
-            for reply in Self::reply_items(source, comment_id, &comment_obj) {
-                match reply {
-                    Ok(reply_obj) => {
-                        if let Some(rid) = reply_obj.get("id").and_then(|id| id.as_i64()) {
-                            ids.push(Ok(format!("{}.{}", comment_id, rid)));
+            let comment_obj = comment.as_object();
+            if let Some(comment_obj) = comment_obj {
+                for reply in Self::reply_items(source, comment_id, comment_obj) {
+                    match reply {
+                        Ok(reply_obj) => {
+                            if let Some(rid) = reply_obj.get("id").and_then(|id| id.as_i64()) {
+                                ids.push(Ok(format!("{}.{}", comment_id, rid)));
+                            }
                         }
+                        Err(e) => ids.push(Err(e)),
                     }
-                    Err(e) => ids.push(Err(e)),
                 }
             }
             ids.into_iter()
@@ -395,7 +387,7 @@ impl CommentQueryBuilder {
     /// 惰性获取详细评论数据流,每个元素为一个精简的 `JsonObject`,包含其下所有回复.
     pub fn stream_detailed_comments(
         self,
-    ) -> Result<Box<dyn Iterator<Item = Result<JsonObject, DataQueryError>>>, DataQueryError> {
+    ) -> Result<JsonObjIter, DataQueryError> {
         let source = self
             .source
             .ok_or_else(|| DataQueryError::InvalidSource("未设置来源".into()))?;
@@ -494,7 +486,7 @@ impl DataQuery {
         source: CommentSource,
         target_id: i32,
         limit: Option<usize>,
-    ) -> Result<Box<dyn Iterator<Item = Result<JsonValue, DataQueryError>>>, DataQueryError> {
+    ) -> Result<JsonValueIter, DataQueryError> {
         self.query_comments()
             .source(source)
             .target_id(target_id)
@@ -508,7 +500,7 @@ impl DataQuery {
         source: CommentSource,
         target_id: i32,
         limit: Option<usize>,
-    ) -> Result<Box<dyn Iterator<Item = Result<String, DataQueryError>>>, DataQueryError> {
+    ) -> Result<JsonStrIter, DataQueryError> {
         self.query_comments()
             .source(source)
             .target_id(target_id)
@@ -522,7 +514,7 @@ impl DataQuery {
         source: CommentSource,
         target_id: i32,
         limit: Option<usize>,
-    ) -> Result<Box<dyn Iterator<Item = Result<String, DataQueryError>>>, DataQueryError> {
+    ) -> Result<JsonStrIter, DataQueryError> {
         self.query_comments()
             .source(source)
             .target_id(target_id)
@@ -536,7 +528,7 @@ impl DataQuery {
         source: CommentSource,
         target_id: i32,
         limit: Option<usize>,
-    ) -> Result<Box<dyn Iterator<Item = Result<JsonObject, DataQueryError>>>, DataQueryError> {
+    ) -> Result<JsonObjIter, DataQueryError> {
         self.query_comments()
             .source(source)
             .target_id(target_id)
@@ -612,7 +604,7 @@ impl DataQuery {
     pub fn stream_works_from_both_sources(
         &self,
         limit: i32,
-    ) -> Box<dyn Iterator<Item = Result<JsonObject, DataQueryError>> + 'static> {
+    ) -> JsonObjIter {
         let per_source_limit = Some(limit / 2);
 
         let nemo_field_mapping: HashMap<&str, &str> = [
@@ -647,15 +639,15 @@ impl DataQuery {
         let process_result = |res: Result<Value, MewError>, mapping: HashMap<&str, &str>| match res
         {
             Ok(val) => {
-                let items = val
+                let items: &[Value] = val
                     .get("items")
                     .and_then(|i| i.as_array())
-                    .cloned()
-                    .unwrap_or_default();
+                    .map(|a| a.as_slice())
+                    .unwrap_or(&[]);
                 let mapped: Vec<Result<JsonObject, DataQueryError>> = items
-                    .into_iter()
-                    .filter_map(|v| v.as_object().cloned())
-                    .map(move |obj| {
+                    .iter()
+                    .filter_map(|v| v.as_object())
+                    .map(|obj| {
                         let mut mapped_obj = JsonObject::new();
                         for (target, source) in &mapping {
                             if let Some(val) = obj.get(*source) {
@@ -666,7 +658,7 @@ impl DataQuery {
                     })
                     .collect();
                 Box::new(mapped.into_iter())
-                    as Box<dyn Iterator<Item = Result<JsonObject, DataQueryError>>>
+                    as JsonObjIter
             }
             Err(e) => Box::new(std::iter::once::<Result<JsonObject, DataQueryError>>(Err(
                 DataQueryError::from(e),
@@ -908,7 +900,7 @@ impl DataQuery {
     pub fn stream_edu_accounts_with_reset_passwords(
         &self,
         limit: Option<usize>,
-    ) -> Box<dyn Iterator<Item = Result<(String, String), DataQueryError>> + 'static> {
+    ) -> JsonPairIter {
         const MAX_EDU_STUDENTS: usize = 2000;
 
         if let Err(e) = CodeMaoClient::global().switch_identity(Catsona::Scholar) {
@@ -958,7 +950,7 @@ impl DataQuery {
         &self,
         reply_type: ReplyTypes,
         limit: i32,
-    ) -> Box<dyn Iterator<Item = Result<JsonObject, DataQueryError>> + 'static> {
+    ) -> JsonObjIter {
         let total = match CommunityDataFetcher::new()
             .fetch_message_count(MessageMethod::Web)
             .map_err(DataQueryError::from)

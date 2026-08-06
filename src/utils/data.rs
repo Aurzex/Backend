@@ -11,10 +11,6 @@ pub enum FileError {
     Io(#[from] std::io::Error),
     #[error("JSON 序列化错误: {0}")]
     Json(#[from] serde_json::Error),
-    #[error("类型错误: {0}")]
-    TypeError(String),
-    #[error("未知错误: {0}")]
-    Other(String),
 }
 
 // ==================== 路径配置(可自定义根目录) ====================

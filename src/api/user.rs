@@ -1,5 +1,5 @@
 use crate::utils::acquire::{
-    BaseKey, CodeMaoClient, HTTPStatus, HttpMethod, MewResult, PaginatedIter,
+    BaseKey, ClientAccess, CodeMaoClient, HTTPStatus, HttpMethod, MewResult, PaginatedIter,
 };
 use log::debug;
 use serde_json::{Value, json};
@@ -150,15 +150,6 @@ impl UserDataFetcher {
     }
 
     // ==================== 私有辅助 ====================
-
-    /// 发送请求并将响应解析为 JSON.
-    fn send_and_parse(
-        &self,
-        builder: crate::utils::acquire::KittyRequestBuilder,
-    ) -> MewResult<Value> {
-        let response = builder.send()?;
-        self.client.response_to_json(response)
-    }
 
     /// 构建基础分页迭代器,设置页大小和默认限制.
     fn build_paginated(
@@ -722,6 +713,12 @@ impl Default for UserDataFetcher {
     }
 }
 
+impl ClientAccess for UserDataFetcher {
+    fn client(&self) -> &CodeMaoClient {
+        self.client
+    }
+}
+
 // ==================== 用户管理器 ====================
 
 /// 更新个人资料详细信息的参数.
@@ -748,40 +745,6 @@ impl UserManager {
     }
 
     // ==================== 私有辅助 ====================
-
-    /// 发送请求并返回 status == 预期状态码.
-    fn check_status(
-        &self,
-        builder: crate::utils::acquire::KittyRequestBuilder,
-        expected: HTTPStatus,
-    ) -> MewResult<bool> {
-        let response = builder.send()?;
-        Ok(response.status() == expected as u16)
-    }
-
-    /// 发送请求并将响应解析为 JSON.
-    fn send_and_parse(
-        &self,
-        builder: crate::utils::acquire::KittyRequestBuilder,
-    ) -> MewResult<Value> {
-        let response = builder.send()?;
-        self.client.response_to_json(response)
-    }
-
-    /// 发送请求并根据 `return_data` 决定返回 JSON 数据或成功标志.
-    fn send_maybe_parse(
-        &self,
-        builder: crate::utils::acquire::KittyRequestBuilder,
-        return_data: bool,
-        expected: HTTPStatus,
-    ) -> MewResult<Value> {
-        let response = builder.send()?;
-        if return_data {
-            self.client.response_to_json(response)
-        } else {
-            Ok(json!({ "success": response.status() == expected as u16 }))
-        }
-    }
 
     // ==================== 公共方法 ====================
 
@@ -935,5 +898,11 @@ impl UserManager {
 impl Default for UserManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl ClientAccess for UserManager {
+    fn client(&self) -> &CodeMaoClient {
+        self.client
     }
 }

@@ -1,7 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::io::{self, Write};
-use std::num::ParseIntError;
 use std::sync::OnceLock;
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -11,53 +10,16 @@ use crate::utils::acquire;
 use serde_json::{Value, json};
 
 // ==================== 自定义错误类型 ====================
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ProcessorError {
+    #[error("Processing error: {0}")]
     Processing(String),
-    Io(io::Error),
-    Json(serde_json::Error),
-    ParseInt(ParseIntError),
-    External(Box<dyn std::error::Error>),
-}
-
-impl std::fmt::Display for ProcessorError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ProcessorError::Processing(s) => write!(f, "Processing error: {}", s),
-            ProcessorError::Io(e) => write!(f, "I/O error: {}", e),
-            ProcessorError::Json(e) => write!(f, "JSON error: {}", e),
-            ProcessorError::ParseInt(e) => write!(f, "Parse int error: {}", e),
-            ProcessorError::External(e) => write!(f, "External error: {}", e),
-        }
-    }
-}
-
-impl std::error::Error for ProcessorError {}
-
-impl From<io::Error> for ProcessorError {
-    fn from(e: io::Error) -> Self {
-        ProcessorError::Io(e)
-    }
-}
-impl From<serde_json::Error> for ProcessorError {
-    fn from(e: serde_json::Error) -> Self {
-        ProcessorError::Json(e)
-    }
-}
-impl From<ParseIntError> for ProcessorError {
-    fn from(e: ParseIntError) -> Self {
-        ProcessorError::ParseInt(e)
-    }
-}
-impl From<acquire::MewError> for ProcessorError {
-    fn from(e: acquire::MewError) -> Self {
-        ProcessorError::External(Box::new(e))
-    }
-}
-impl From<Box<dyn std::error::Error>> for ProcessorError {
-    fn from(e: Box<dyn std::error::Error>) -> Self {
-        ProcessorError::External(e)
-    }
+    #[error("I/O error: {0}")]
+    Io(#[from] io::Error),
+    #[error("JSON error: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("External error: {0}")]
+    Mew(#[from] acquire::MewError),
 }
 
 // ==================== 评论配置 trait ====================
@@ -347,8 +309,28 @@ impl ReportTypeRegistry {
 }
 
 // ==================== 举报获取器 ====================
-/// 举报状态字段中表示"待处理"的值.
-const TO_BE_DONE_STATUS: &str = "TOBEDONE";
+
+/// 注册辅助:包装分页迭代器为"总数"闭包.
+fn total_from(mut paginated: acquire::PaginatedIter) -> Result<Value, ProcessorError> {
+    paginated.fetch_metadata()?;
+    Ok(json!(paginated.total_items().unwrap_or(0) as i32))
+}
+
+/// 注册辅助:包装分页迭代器为"生成器"闭包.
+fn gen_from(
+    paginated: acquire::PaginatedIter,
+) -> Box<dyn Iterator<Item = Result<Value, ProcessorError>>> {
+    Box::new(paginated.map(|r| r.map_err(ProcessorError::from)))
+}
+
+/// 批量设置 `SourceConfig` 的字符串/动作列表字段,减少逐行赋值样板.
+macro_rules! set_config_fields {
+    ($cfg:expr, $( $field:ident = $value:expr ),* $(,)?) => {
+        $(
+            $cfg.$field = $value.into();
+        )*
+    };
+}
 
 pub struct ReportFetcher {
     pub registry: ReportTypeRegistry,
@@ -370,44 +352,41 @@ impl ReportFetcher {
                 "工作室评论举报",
                 "execute_process_comment_report",
                 |status| {
-                    let mut paginated = WhaleReportFetcher::new().fetch_comment_reports_gen(
+                    total_from(WhaleReportFetcher::new().fetch_comment_reports_gen(
                         CommentSourceType::All,
                         status,
                         None,
                         None,
                         None,
-                    );
-                    paginated
-                        .fetch_metadata()
-                        .map_err(|e| ProcessorError::External(e.into()))?;
-                    Ok(json!(paginated.total_items().unwrap_or(0) as i32))
+                    ))
                 },
                 |status| {
-                    let iter = WhaleReportFetcher::new().fetch_comment_reports_gen(
+                    gen_from(WhaleReportFetcher::new().fetch_comment_reports_gen(
                         CommentSourceType::All,
                         status,
                         None,
                         None,
                         Some(100),
-                    );
-                    Box::new(iter.map(|r| r.map_err(|e| ProcessorError::External(e.into()))))
+                    ))
                 },
             );
-            cfg.admin_username_field = "admin_user_name".into();
-            cfg.available_actions = actions(&["D", "S", "T", "P", "F", "J"]);
-            cfg.content_field = "comment_content".into();
-            cfg.content_type_field = "comment_source".into();
-            cfg.content_id_field = "comment_id".into();
-            cfg.user_id_field = "comment_user_id".into();
-            cfg.user_nickname_field = "comment_user_nickname".into();
-            cfg.user_parent_id_field = "comment_parent_user_id".into();
-            cfg.user_parent_nickname_field = "comment_parent_user_nickname".into();
-            cfg.source_id_field = "comment_source_object_id".into();
-            cfg.source_name_field = "comment_source_object_name".into();
-            cfg.source_type_field = "comment_source".into();
-            cfg.source_object_id_field = "comment_source_object_id".into();
-            cfg.source_object_name_field = "comment_source_object_name".into();
-            cfg.parent_id_field = "comment_parent_id".into();
+            set_config_fields!(cfg,
+                admin_username_field = "admin_user_name",
+                available_actions = actions(&["D", "S", "T", "P", "F", "J"]),
+                content_field = "comment_content",
+                content_type_field = "comment_source",
+                content_id_field = "comment_id",
+                user_id_field = "comment_user_id",
+                user_nickname_field = "comment_user_nickname",
+                user_parent_id_field = "comment_parent_user_id",
+                user_parent_nickname_field = "comment_parent_user_nickname",
+                source_id_field = "comment_source_object_id",
+                source_name_field = "comment_source_object_name",
+                source_type_field = "comment_source",
+                source_object_id_field = "comment_source_object_id",
+                source_object_name_field = "comment_source_object_name",
+                parent_id_field = "comment_parent_id",
+            );
             cfg.special_check = Some(|item| {
                 item.get("comment_source")
                     .and_then(|v| v.as_str())
@@ -423,41 +402,38 @@ impl ReportFetcher {
                 "作品举报",
                 "execute_process_work_report",
                 |status| {
-                    let mut paginated = WhaleReportFetcher::new().fetch_work_reports_gen(
+                    total_from(WhaleReportFetcher::new().fetch_work_reports_gen(
                         WorkSourceType::All,
                         status,
                         None,
                         None,
                         None,
-                    );
-                    paginated
-                        .fetch_metadata()
-                        .map_err(|e| ProcessorError::External(e.into()))?;
-                    Ok(json!(paginated.total_items().unwrap_or(0) as i32))
+                    ))
                 },
                 |status| {
-                    let iter = WhaleReportFetcher::new().fetch_work_reports_gen(
+                    gen_from(WhaleReportFetcher::new().fetch_work_reports_gen(
                         WorkSourceType::All,
                         status,
                         None,
                         None,
                         Some(100),
-                    );
-                    Box::new(iter.map(|r| r.map_err(|e| ProcessorError::External(e.into()))))
+                    ))
                 },
             );
-            cfg.admin_username_field = "admin_username".into();
-            cfg.available_actions = actions(&["D", "P", "U", "J"]);
-            cfg.content_field = "work_name".into();
-            cfg.content_type_field = "work_type".into();
-            cfg.content_id_field = "work_id".into();
-            cfg.user_id_field = "work_user_id".into();
-            cfg.user_nickname_field = "work_user_nickname".into();
-            cfg.source_id_field = "work_id".into();
-            cfg.source_name_field = "work_name".into();
-            cfg.source_type_field = "work_type".into();
-            cfg.source_object_id_field = "work_id".into();
-            cfg.source_object_name_field = "work_name".into();
+            set_config_fields!(cfg,
+                admin_username_field = "admin_username",
+                available_actions = actions(&["D", "P", "U", "J"]),
+                content_field = "work_name",
+                content_type_field = "work_type",
+                content_id_field = "work_id",
+                user_id_field = "work_user_id",
+                user_nickname_field = "work_user_nickname",
+                source_id_field = "work_id",
+                source_name_field = "work_name",
+                source_type_field = "work_type",
+                source_object_id_field = "work_id",
+                source_object_name_field = "work_name",
+            );
             cfg.work_type_field = Some("work_type".into());
             cfg.title_field = Some("work_name".into());
             registry.register("work_work", cfg);
@@ -469,36 +445,38 @@ impl ReportFetcher {
                 "帖子举报",
                 "execute_process_post_report",
                 |status| {
-                    let mut paginated = WhaleReportFetcher::new()
-                        .fetch_post_reports_gen(status, None, None, None, None);
-                    paginated
-                        .fetch_metadata()
-                        .map_err(|e| ProcessorError::External(e.into()))?;
-                    Ok(json!(paginated.total_items().unwrap_or(0) as i32))
+                    total_from(WhaleReportFetcher::new().fetch_post_reports_gen(
+                        status,
+                        None,
+                        None,
+                        None,
+                        None,
+                    ))
                 },
                 |status| {
-                    let iter = WhaleReportFetcher::new().fetch_post_reports_gen(
+                    gen_from(WhaleReportFetcher::new().fetch_post_reports_gen(
                         status,
                         None,
                         None,
                         None,
                         Some(100),
-                    );
-                    Box::new(iter.map(|r| r.map_err(|e| ProcessorError::External(e.into()))))
+                    ))
                 },
             );
-            cfg.admin_username_field = "admin_username".into();
-            cfg.available_actions = actions(&["D", "S", "T", "P", "F", "J"]);
-            cfg.content_field = "post_title".into();
-            cfg.content_type_field = "board_name".into();
-            cfg.content_id_field = "post_id".into();
-            cfg.user_id_field = "post_user_id".into();
-            cfg.user_nickname_field = "post_user_nick_name".into();
-            cfg.source_id_field = "post_id".into();
-            cfg.source_name_field = "board_name".into();
-            cfg.source_type_field = "board_name".into();
-            cfg.source_object_id_field = "post_id".into();
-            cfg.source_object_name_field = "board_name".into();
+            set_config_fields!(cfg,
+                admin_username_field = "admin_username",
+                available_actions = actions(&["D", "S", "T", "P", "F", "J"]),
+                content_field = "post_title",
+                content_type_field = "board_name",
+                content_id_field = "post_id",
+                user_id_field = "post_user_id",
+                user_nickname_field = "post_user_nick_name",
+                source_id_field = "post_id",
+                source_name_field = "board_name",
+                source_type_field = "board_name",
+                source_object_id_field = "post_id",
+                source_object_name_field = "board_name",
+            );
             cfg.title_field = Some("post_title".into());
             cfg.board_name_field = Some("board_name".into());
             cfg.board_id_field = Some("board_id".into());
@@ -511,36 +489,38 @@ impl ReportFetcher {
                 "讨论举报",
                 "execute_process_discussion_report",
                 |status| {
-                    let mut paginated = WhaleReportFetcher::new()
-                        .fetch_discussion_reports_gen(status, None, None, None, None);
-                    paginated
-                        .fetch_metadata()
-                        .map_err(|e| ProcessorError::External(e.into()))?;
-                    Ok(json!(paginated.total_items().unwrap_or(0) as i32))
+                    total_from(WhaleReportFetcher::new().fetch_discussion_reports_gen(
+                        status,
+                        None,
+                        None,
+                        None,
+                        None,
+                    ))
                 },
                 |status| {
-                    let iter = WhaleReportFetcher::new().fetch_discussion_reports_gen(
+                    gen_from(WhaleReportFetcher::new().fetch_discussion_reports_gen(
                         status,
                         None,
                         None,
                         None,
                         Some(100),
-                    );
-                    Box::new(iter.map(|r| r.map_err(|e| ProcessorError::External(e.into()))))
+                    ))
                 },
             );
-            cfg.admin_username_field = "admin_username".into();
-            cfg.available_actions = actions(&["D", "S", "T", "P", "F", "J"]);
-            cfg.content_field = "discussion_content".into();
-            cfg.content_type_field = "discussion_source".into();
-            cfg.content_id_field = "discussion_id".into();
-            cfg.user_id_field = "discussion_user_id".into();
-            cfg.user_nickname_field = "discussion_user_nickname".into();
-            cfg.source_id_field = "post_id".into();
-            cfg.source_name_field = "post_title".into();
-            cfg.source_type_field = "discussion_source".into();
-            cfg.source_object_id_field = "post_id".into();
-            cfg.source_object_name_field = "post_title".into();
+            set_config_fields!(cfg,
+                admin_username_field = "admin_username",
+                available_actions = actions(&["D", "S", "T", "P", "F", "J"]),
+                content_field = "discussion_content",
+                content_type_field = "discussion_source",
+                content_id_field = "discussion_id",
+                user_id_field = "discussion_user_id",
+                user_nickname_field = "discussion_user_nickname",
+                source_id_field = "post_id",
+                source_name_field = "post_title",
+                source_type_field = "discussion_source",
+                source_object_id_field = "post_id",
+                source_object_name_field = "post_title",
+            );
             cfg.title_field = Some("post_title".into());
             cfg.board_name_field = Some("board_name".into());
             cfg.board_id_field = Some("board_id".into());
@@ -583,7 +563,7 @@ impl ReportFetcher {
 
                     if status == ReportStatus::ToBeDone
                         && let Some(state) = item.get(&config.status_field).and_then(|v| v.as_str())
-                        && state != TO_BE_DONE_STATUS
+                        && state != ReportStatus::ToBeDone.as_str()
                     {
                         continue;
                     }

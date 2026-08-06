@@ -1,5 +1,6 @@
 use crate::utils::acquire::{
-    CodeMaoClient, HTTPStatus, HttpMethod, MewError, MewResult, PaginatedIter, PaginationMethod,
+    ClientAccess, CodeMaoClient, HTTPStatus, HttpMethod, MewError, MewResult, PaginatedIter,
+    PaginationMethod,
 };
 use log::debug;
 use serde_json::{Value, json};
@@ -132,15 +133,6 @@ impl ForumDataFetcher {
     }
 
     // ==================== 私有辅助 ====================
-
-    /// 发送请求并将响应解析为 JSON.
-    fn send_and_parse(
-        &self,
-        builder: crate::utils::acquire::KittyRequestBuilder,
-    ) -> MewResult<Value> {
-        let response = builder.send()?;
-        self.client.response_to_json(response)
-    }
 
     /// 构建基础分页迭代器,使用 Page 分页方式,初始页码 1.
     fn build_paginated(
@@ -346,6 +338,12 @@ impl Default for ForumDataFetcher {
     }
 }
 
+impl ClientAccess for ForumDataFetcher {
+    fn client(&self) -> &CodeMaoClient {
+        self.client
+    }
+}
+
 // ==================== 论坛操作处理器 ====================
 
 /// 论坛操作接口(发帖,回复,点赞,举报等).
@@ -357,33 +355,6 @@ impl ForumActionHandler {
     pub fn new() -> Self {
         Self {
             client: CodeMaoClient::global(),
-        }
-    }
-
-    // ==================== 私有辅助 ====================
-
-    /// 发送请求并返回 status == 预期状态码.
-    fn check_status(
-        &self,
-        builder: crate::utils::acquire::KittyRequestBuilder,
-        expected: HTTPStatus,
-    ) -> MewResult<bool> {
-        let response = builder.send()?;
-        Ok(response.status() == expected as u16)
-    }
-
-    /// 发送请求并根据 `return_data` 决定返回 JSON 数据或成功标志.
-    fn send_maybe_parse(
-        &self,
-        builder: crate::utils::acquire::KittyRequestBuilder,
-        return_data: bool,
-        expected: HTTPStatus,
-    ) -> MewResult<Value> {
-        let response = builder.send()?;
-        if return_data {
-            self.client.response_to_json(response)
-        } else {
-            Ok(json!({ "success": response.status() == expected as u16 }))
         }
     }
 
@@ -579,5 +550,11 @@ impl ForumActionHandler {
 impl Default for ForumActionHandler {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl ClientAccess for ForumActionHandler {
+    fn client(&self) -> &CodeMaoClient {
+        self.client
     }
 }

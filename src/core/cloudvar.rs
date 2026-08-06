@@ -1028,14 +1028,12 @@ impl CloudConnection {
             .lock()
             .unwrap()
             .push_back(cvid.clone());
-        if let Err(e) = self.send_event(
-            "list_ranking",
-            &json!({
-                "cvid": cvid,
-                "limit": limit,
-                "order_type": order,
-            }),
-        ) {
+        // 手工构造载荷,将 cvid 移入(零拷贝),避免 json! 的额外克隆
+        let mut payload = serde_json::Map::new();
+        payload.insert("cvid".into(), Value::String(cvid));
+        payload.insert("limit".into(), Value::from(limit));
+        payload.insert("order_type".into(), Value::from(order));
+        if let Err(e) = self.send_event("list_ranking", &Value::Object(payload)) {
             // 发送失败时回滚待处理队列,避免后续排行榜结果错配
             self.inner.pending_rankings.lock().unwrap().pop_back();
             return Err(e);

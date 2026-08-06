@@ -1,25 +1,9 @@
 use crate::utils::acquire::{
-    CodeMaoClient, HTTPStatus, HttpMethod, KittyRequestBuilder, MewResult, PaginatedIter,
-    PaginationMethod,
+    ClientAccess, CodeMaoClient, HTTPStatus, HttpMethod, KittyRequestBuilder, MewResult,
+    PaginatedIter, PaginationMethod, current_timestamp_13,
 };
 use log::debug;
 use serde_json::{Value, json};
-use std::time::{SystemTime, UNIX_EPOCH};
-
-// ==================== 工具函数 ====================
-
-/// 获取 13 位毫秒时间戳(本地时间).
-///
-/// 若系统时间异常(早于 Unix 纪元),则返回 0 并记录警告.
-fn current_timestamp_13() -> u128 {
-    match SystemTime::now().duration_since(UNIX_EPOCH) {
-        Ok(dur) => dur.as_millis(),
-        Err(_) => {
-            log::warn!("系统时间异常,无法获取时间戳,返回 0");
-            0
-        }
-    }
-}
 
 // ==================== 教育用户操作 ====================
 
@@ -62,12 +46,6 @@ impl EduUserAction {
     }
 
     // ==================== 私有辅助 ====================
-
-    /// 发送请求并返回 status == 预期状态码.
-    fn check_status(&self, builder: KittyRequestBuilder, expected: HTTPStatus) -> MewResult<bool> {
-        let response = builder.send()?;
-        Ok(response.status() == expected as u16)
-    }
 
     // ==================== 公共方法 ====================
 
@@ -398,6 +376,12 @@ impl Default for EduUserAction {
     }
 }
 
+impl ClientAccess for EduUserAction {
+    fn client(&self) -> &CodeMaoClient {
+        self.client
+    }
+}
+
 // ==================== 教育数据获取器 ====================
 
 /// 教育平台数据查询接口.
@@ -424,12 +408,6 @@ impl EduDataFetcher {
     fn add_timestamp_to_paginated(paginated: PaginatedIter) -> PaginatedIter {
         let timestamp = current_timestamp_13();
         paginated.with_iter_param("TIME", timestamp.to_string())
-    }
-
-    /// 发送请求并将响应解析为 JSON.
-    fn send_and_parse(&self, builder: KittyRequestBuilder) -> MewResult<Value> {
-        let response = builder.send()?;
-        self.client.response_to_json(response)
     }
 
     /// 构建一个基础分页迭代器,使用 Page 分页方式,初始页码 1.
@@ -1104,5 +1082,11 @@ impl EduDataFetcher {
 impl Default for EduDataFetcher {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl ClientAccess for EduDataFetcher {
+    fn client(&self) -> &CodeMaoClient {
+        self.client
     }
 }

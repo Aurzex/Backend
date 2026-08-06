@@ -1,25 +1,11 @@
 use crate::utils::acquire::{
-    BaseKey, CodeMaoClient, HTTPStatus, HttpMethod, KittyRequestBuilder, MewResult, PaginatedIter,
-    PaginationMethod,
+    BaseKey, ClientAccess, CodeMaoClient, HTTPStatus, HttpMethod, KittyRequestBuilder, MewResult,
+    PaginatedIter, PaginationMethod, current_timestamp_13,
 };
-use log::{debug, warn};
+use log::debug;
 use serde_json::{Value, json};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 // ==================== 工具函数 ====================
-
-/// 获取 13 位毫秒时间戳(本地时间).
-///
-/// 若系统时间异常(早于 Unix 纪元),则返回 0 并记录警告.
-fn current_timestamp_13() -> u128 {
-    match SystemTime::now().duration_since(UNIX_EPOCH) {
-        Ok(dur) => dur.as_millis(),
-        Err(_) => {
-            warn!("系统时间异常,无法获取时间戳,返回 0");
-            0
-        }
-    }
-}
 
 // ==================== 作品相关枚举 ====================
 
@@ -161,18 +147,6 @@ impl BaseWorkOperations {
         }
     }
 
-    /// 发送请求并返回 status == 预期状态码.
-    fn check_status(&self, builder: KittyRequestBuilder, expected: HTTPStatus) -> MewResult<bool> {
-        let response = builder.send()?;
-        Ok(response.status() == expected as u16)
-    }
-
-    /// 发送请求并将响应解析为 JSON.
-    fn send_and_parse(&self, builder: KittyRequestBuilder) -> MewResult<Value> {
-        let response = builder.send()?;
-        self.client.response_to_json(response)
-    }
-
     /// 关注或取消关注用户.
     pub fn execute_toggle_follow(&self, user_id: i32, method: SelectMethod) -> MewResult<bool> {
         debug!("切换关注状态: user_id={}, method={:?}", user_id, method);
@@ -289,27 +263,6 @@ impl CommentOperations {
     pub fn new() -> Self {
         Self {
             client: CodeMaoClient::global(),
-        }
-    }
-
-    /// 发送请求并返回 status == 预期状态码.
-    fn check_status(&self, builder: KittyRequestBuilder, expected: HTTPStatus) -> MewResult<bool> {
-        let response = builder.send()?;
-        Ok(response.status() == expected as u16)
-    }
-
-    /// 发送请求并根据 `return_data` 决定返回 JSON 数据或成功标志.
-    fn send_maybe_parse(
-        &self,
-        builder: KittyRequestBuilder,
-        return_data: bool,
-        expected: HTTPStatus,
-    ) -> MewResult<Value> {
-        let response = builder.send()?;
-        if return_data {
-            self.client.response_to_json(response)
-        } else {
-            Ok(json!({ "success": response.status() == expected as u16 }))
         }
     }
 
@@ -496,18 +449,6 @@ impl KittenWorkManager {
         }
     }
 
-    /// 发送请求并返回 status == 预期状态码.
-    fn check_status(&self, builder: KittyRequestBuilder, expected: HTTPStatus) -> MewResult<bool> {
-        let response = builder.send()?;
-        Ok(response.status() == expected as u16)
-    }
-
-    /// 发送请求并将响应解析为 JSON.
-    fn send_and_parse(&self, builder: KittyRequestBuilder) -> MewResult<Value> {
-        let response = builder.send()?;
-        self.client.response_to_json(response)
-    }
-
     /// 创建 Kitten 作品.
     pub fn create_kitten_work(&self, args: CreateKittenWorkArgs<'_>) -> MewResult<Value> {
         debug!(
@@ -668,18 +609,6 @@ impl NekoWorkManager {
             operations: BaseWorkOperations::new(),
             comments: CommentOperations::new(),
         }
-    }
-
-    /// 发送请求并返回 status == 预期状态码.
-    fn check_status(&self, builder: KittyRequestBuilder, expected: HTTPStatus) -> MewResult<bool> {
-        let response = builder.send()?;
-        Ok(response.status() == expected as u16)
-    }
-
-    /// 发送请求并将响应解析为 JSON.
-    fn send_and_parse(&self, builder: KittyRequestBuilder) -> MewResult<Value> {
-        let response = builder.send()?;
-        self.client.response_to_json(response)
     }
 
     /// 创建 KN 作品.
@@ -844,18 +773,6 @@ impl WoodWorkManager {
         }
     }
 
-    /// 发送请求并返回 status == 预期状态码.
-    fn check_status(&self, builder: KittyRequestBuilder, expected: HTTPStatus) -> MewResult<bool> {
-        let response = builder.send()?;
-        Ok(response.status() == expected as u16)
-    }
-
-    /// 发送请求并将响应解析为 JSON.
-    fn send_and_parse(&self, builder: KittyRequestBuilder) -> MewResult<Value> {
-        let response = builder.send()?;
-        self.client.response_to_json(response)
-    }
-
     /// 获取海龟编辑器项目信息.
     pub fn fetch_wood_project(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取海龟编辑器项目: work_id={}", work_id);
@@ -989,12 +906,6 @@ impl CocoWorkManager {
         Self {
             client: CodeMaoClient::global(),
         }
-    }
-
-    /// 发送请求并将响应解析为 JSON.
-    fn send_and_parse(&self, builder: KittyRequestBuilder) -> MewResult<Value> {
-        let response = builder.send()?;
-        self.client.response_to_json(response)
     }
 
     /// 获取 Coco 平台的主要课程列表.
@@ -1141,18 +1052,6 @@ impl CollaborationManager {
         Self {
             client: CodeMaoClient::global(),
         }
-    }
-
-    /// 发送请求并返回 status == 预期状态码.
-    fn check_status(&self, builder: KittyRequestBuilder, expected: HTTPStatus) -> MewResult<bool> {
-        let response = builder.send()?;
-        Ok(response.status() == expected as u16)
-    }
-
-    /// 发送请求并将响应解析为 JSON.
-    fn send_and_parse(&self, builder: KittyRequestBuilder) -> MewResult<Value> {
-        let response = builder.send()?;
-        self.client.response_to_json(response)
     }
 
     /// 获取或删除 Kitten 协作邀请码.
@@ -1303,12 +1202,6 @@ impl AIServices {
         }
     }
 
-    /// 发送请求并将响应解析为 JSON.
-    fn send_and_parse(&self, builder: KittyRequestBuilder) -> MewResult<Value> {
-        let response = builder.send()?;
-        self.client.response_to_json(response)
-    }
-
     /// 获取文生图提示词.
     pub fn fetch_text2img_prompt(&self) -> MewResult<Value> {
         debug!("获取文生图提示词");
@@ -1397,12 +1290,6 @@ impl TeachingPlanManager {
         Self {
             client: CodeMaoClient::global(),
         }
-    }
-
-    /// 发送请求并将响应解析为 JSON.
-    fn send_and_parse(&self, builder: KittyRequestBuilder) -> MewResult<Value> {
-        let response = builder.send()?;
-        self.client.response_to_json(response)
     }
 
     /// 保存团队作品(教学计划).
@@ -1543,12 +1430,6 @@ impl ImageClassifyManager {
         }
     }
 
-    /// 发送请求并将响应解析为 JSON.
-    fn send_and_parse(&self, builder: KittyRequestBuilder) -> MewResult<Value> {
-        let response = builder.send()?;
-        self.client.response_to_json(response)
-    }
-
     /// 获取图像分类列表.
     pub fn fetch_image_classify_list(
         &self,
@@ -1624,12 +1505,6 @@ impl PackageManager {
         Self {
             client: CodeMaoClient::global(),
         }
-    }
-
-    /// 发送请求并将响应解析为 JSON.
-    fn send_and_parse(&self, builder: KittyRequestBuilder) -> MewResult<Value> {
-        let response = builder.send()?;
-        self.client.response_to_json(response)
     }
 
     /// 获取包列表.
@@ -1719,12 +1594,6 @@ impl SampleManager {
         }
     }
 
-    /// 发送请求并将响应解析为 JSON.
-    fn send_and_parse(&self, builder: KittyRequestBuilder) -> MewResult<Value> {
-        let response = builder.send()?;
-        self.client.response_to_json(response)
-    }
-
     /// 获取 Kitten N 示例详情.
     pub fn fetch_sample_detail(&self, params: Vec<(String, String)>) -> MewResult<Value> {
         debug!("获取示例详情: params={:?}", params);
@@ -1778,12 +1647,6 @@ impl WorkDataFetcher {
         Self {
             client: CodeMaoClient::global(),
         }
-    }
-
-    /// 发送请求并将响应解析为 JSON.
-    fn send_and_parse(&self, builder: KittyRequestBuilder) -> MewResult<Value> {
-        let response = builder.send()?;
-        self.client.response_to_json(response)
     }
 
     /// 构建带时间戳的基础分页迭代器.
@@ -2533,5 +2396,85 @@ impl WorkDataFetcher {
 impl Default for WorkDataFetcher {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ==================== 共享请求辅助(ClientAccess) ====================
+
+impl ClientAccess for BaseWorkOperations {
+    fn client(&self) -> &CodeMaoClient {
+        self.client
+    }
+}
+
+impl ClientAccess for CommentOperations {
+    fn client(&self) -> &CodeMaoClient {
+        self.client
+    }
+}
+
+impl ClientAccess for KittenWorkManager {
+    fn client(&self) -> &CodeMaoClient {
+        self.client
+    }
+}
+
+impl ClientAccess for NekoWorkManager {
+    fn client(&self) -> &CodeMaoClient {
+        self.client
+    }
+}
+
+impl ClientAccess for WoodWorkManager {
+    fn client(&self) -> &CodeMaoClient {
+        self.client
+    }
+}
+
+impl ClientAccess for CocoWorkManager {
+    fn client(&self) -> &CodeMaoClient {
+        self.client
+    }
+}
+
+impl ClientAccess for CollaborationManager {
+    fn client(&self) -> &CodeMaoClient {
+        self.client
+    }
+}
+
+impl ClientAccess for AIServices {
+    fn client(&self) -> &CodeMaoClient {
+        self.client
+    }
+}
+
+impl ClientAccess for TeachingPlanManager {
+    fn client(&self) -> &CodeMaoClient {
+        self.client
+    }
+}
+
+impl ClientAccess for ImageClassifyManager {
+    fn client(&self) -> &CodeMaoClient {
+        self.client
+    }
+}
+
+impl ClientAccess for PackageManager {
+    fn client(&self) -> &CodeMaoClient {
+        self.client
+    }
+}
+
+impl ClientAccess for SampleManager {
+    fn client(&self) -> &CodeMaoClient {
+        self.client
+    }
+}
+
+impl ClientAccess for WorkDataFetcher {
+    fn client(&self) -> &CodeMaoClient {
+        self.client
     }
 }

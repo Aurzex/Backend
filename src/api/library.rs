@@ -1,5 +1,5 @@
 use crate::utils::acquire::{
-    CodeMaoClient, HTTPStatus, HttpMethod, KittyRequestBuilder, MewResult,
+    ClientAccess, CodeMaoClient, HTTPStatus, HttpMethod, KittyRequestBuilder, MewResult,
 };
 use log::debug;
 use serde_json::{Value, json};
@@ -99,12 +99,6 @@ impl CartoonDataFetcher {
         }
     }
 
-    /// 发送请求并将响应解析为 JSON.
-    fn send_and_parse(&self, builder: KittyRequestBuilder) -> MewResult<Value> {
-        let response = builder.send()?;
-        self.client.response_to_json(response)
-    }
-
     /// 获取全部漫画列表.
     pub fn fetch_all_cartoons(&self) -> MewResult<Value> {
         debug!("获取全部漫画");
@@ -137,6 +131,12 @@ impl Default for CartoonDataFetcher {
     }
 }
 
+impl ClientAccess for CartoonDataFetcher {
+    fn client(&self) -> &CodeMaoClient {
+        self.client
+    }
+}
+
 // ==================== 小说数据获取器 ====================
 
 /// 小说相关数据查询接口.
@@ -149,12 +149,6 @@ impl NovelDataFetcher {
         Self {
             client: CodeMaoClient::global(),
         }
-    }
-
-    /// 发送请求并将响应解析为 JSON.
-    fn send_and_parse(&self, builder: KittyRequestBuilder) -> MewResult<Value> {
-        let response = builder.send()?;
-        self.client.response_to_json(response)
     }
 
     /// 获取小说分类列表.
@@ -321,6 +315,12 @@ impl Default for NovelDataFetcher {
     }
 }
 
+impl ClientAccess for NovelDataFetcher {
+    fn client(&self) -> &CodeMaoClient {
+        self.client
+    }
+}
+
 // ==================== 小说操作处理器 ====================
 
 /// 小说相关操作接口(收藏,评论,发布章节等).
@@ -332,33 +332,6 @@ impl NovelActionHandler {
     pub fn new() -> Self {
         Self {
             client: CodeMaoClient::global(),
-        }
-    }
-
-    /// 发送请求并将响应解析为 JSON.
-    fn send_and_parse(&self, builder: KittyRequestBuilder) -> MewResult<Value> {
-        let response = builder.send()?;
-        self.client.response_to_json(response)
-    }
-
-    /// 发送请求并返回 status == 预期状态码.
-    fn check_status(&self, builder: KittyRequestBuilder, expected: HTTPStatus) -> MewResult<bool> {
-        let response = builder.send()?;
-        Ok(response.status() == expected as u16)
-    }
-
-    /// 发送请求并根据 `return_data` 决定返回 JSON 数据或成功标志.
-    fn send_maybe_parse(
-        &self,
-        builder: KittyRequestBuilder,
-        return_data: bool,
-        expected: HTTPStatus,
-    ) -> MewResult<Value> {
-        let response = builder.send()?;
-        if return_data {
-            self.client.response_to_json(response)
-        } else {
-            Ok(json!({ "success": response.status() == expected as u16 }))
         }
     }
 
@@ -520,6 +493,12 @@ impl Default for NovelActionHandler {
     }
 }
 
+impl ClientAccess for NovelActionHandler {
+    fn client(&self) -> &CodeMaoClient {
+        self.client
+    }
+}
+
 // ==================== 图鉴数据获取器 ====================
 
 /// 图鉴相关数据查询接口.
@@ -532,12 +511,6 @@ impl BookDataFetcher {
         Self {
             client: CodeMaoClient::global(),
         }
-    }
-
-    /// 发送请求并将响应解析为 JSON.
-    fn send_and_parse(&self, builder: KittyRequestBuilder) -> MewResult<Value> {
-        let response = builder.send()?;
-        self.client.response_to_json(response)
     }
 
     /// 获取全部图鉴.
@@ -590,6 +563,12 @@ impl BookDataFetcher {
 impl Default for BookDataFetcher {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl ClientAccess for BookDataFetcher {
+    fn client(&self) -> &CodeMaoClient {
+        self.client
     }
 }
 

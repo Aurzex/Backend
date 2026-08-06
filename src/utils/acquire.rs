@@ -27,8 +27,6 @@ pub enum MewError {
     Json(#[from] serde_json::Error),
     #[error("Auth error: {0}")]
     Auth(String),
-    #[error("Pagination error: {0}")]
-    Pagination(String),
     #[error("Other error: {0}")]
     Other(String),
     /// 携带状态码的其他错误.
@@ -476,6 +474,18 @@ impl KittyRequestBuilder {
             self.base_key,
             &self.params,
             self.payload.as_ref(),
+            &self.headers,
+        )
+    }
+
+    /// 发送请求但复用外部持有的请求体(借用,避免克隆),适用于分页等重复发送场景.
+    pub fn send_with_payload_ref(&self, payload: &Value) -> MewResult<Response<Body>> {
+        self.client.inner.send_request(
+            self.method,
+            &self.endpoint,
+            self.base_key,
+            &self.params,
+            Some(payload),
             &self.headers,
         )
     }
@@ -1137,14 +1147,16 @@ impl PaginatedIter {
     /// 封装了参数构建,负载附加,发送与 JSON 解析.
     fn request_page(&self, page: usize) -> MewResult<Value> {
         let params = self.build_params(page);
-        let mut builder = self
+        let builder = self
             .client
             .build_request(self.method, &self.endpoint, self.base_key)
             .with_params(params);
-        if let Some(payload) = &self.payload {
-            builder = builder.with_payload(payload.clone());
-        }
-        let response = builder.send()?;
+        // 请求体借用发送,避免每翻一页克隆一次 payload
+        let response = if let Some(payload) = &self.payload {
+            builder.send_with_payload_ref(payload)?
+        } else {
+            builder.send()?
+        };
         self.client.response_to_json(response)
     }
 
@@ -1705,5 +1717,59 @@ impl KittyFactory {
     /// 获取全局身份管理器.
     pub fn global_identity_manager() -> &'static KittyIdentityManager {
         get_global_identity_manager()
+    }
+}
+
+/// 获取 13 位毫秒时间戳(本地时间).
+///
+/// 若系统时间异常(早于 Unix 纪元),则返回 0 并记录警告.
+pub fn current_timestamp_13() -> u128 {
+    match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        Ok(dur) => dur.as_millis(),
+        Err(_) => {
+            log::warn!("系统时间异常,无法获取时间戳,返回 0");
+            0
+        }
+    }
+}
+
+// ==================== 共享请求辅助(trait) ====================
+/// 各 API 管理器的共享请求辅助,消除每个 Manager 中重复的
+/// `check_status`/`send_and_parse`/`send_maybe_parse` 样板.
+///
+/// 实现方只需提供 `client()` 访问器,其余方法由默认实现提供.
+pub trait ClientAccess {
+    /// 返回管理器持有的客户端.
+    fn client(&self) -> &CodeMaoClient;
+
+    /// 发送请求并检查响应状态码是否为预期值.
+    fn check_status(
+        &self,
+        builder: KittyRequestBuilder,
+        expected: HTTPStatus,
+    ) -> MewResult<bool> {
+        let response = builder.send()?;
+        Ok(response.status() == expected as u16)
+    }
+
+    /// 发送请求并将响应解析为 JSON.
+    fn send_and_parse(&self, builder: KittyRequestBuilder) -> MewResult<Value> {
+        let response = builder.send()?;
+        self.client().response_to_json(response)
+    }
+
+    /// 发送请求,根据 `return_data` 决定返回 JSON 数据或成功标志.
+    fn send_maybe_parse(
+        &self,
+        builder: KittyRequestBuilder,
+        return_data: bool,
+        expected: HTTPStatus,
+    ) -> MewResult<Value> {
+        let response = builder.send()?;
+        if return_data {
+            self.client().response_to_json(response)
+        } else {
+            Ok(serde_json::json!({ "success": response.status() == expected as u16 }))
+        }
     }
 }

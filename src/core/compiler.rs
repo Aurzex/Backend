@@ -1012,7 +1012,7 @@ impl BlockDecompilerBehavior for BlockBehavior {
 pub struct BlockContext {
     pub actor_data: Value,
     pub functions: Arc<HashMap<String, Value>>,
-    pub variable_map: HashMap<String, String>, // UUID -> 变量名
+    pub variable_map: Arc<HashMap<String, String>>, // UUID -> 变量名
     pub shadow_builder: ShadowBuilder,
     pub blocks: HashMap<String, Value>,
     pub connections: HashMap<String, HashMap<String, Value>>,
@@ -1026,7 +1026,7 @@ impl BlockContext {
         actor_data: Value,
         functions: Arc<HashMap<String, Value>>,
         shadow_builder: ShadowBuilder,
-        variable_map: HashMap<String, String>,
+        variable_map: Arc<HashMap<String, String>>,
     ) -> Self {
         Self {
             actor_data,
@@ -1044,7 +1044,7 @@ impl BlockContext {
         actor_data: Value,
         functions: Arc<HashMap<String, Value>>,
         shadow_builder: ShadowBuilder,
-        variable_map: HashMap<String, String>,
+        variable_map: Arc<HashMap<String, String>>,
         blocks_cap: usize,
         connections_cap: usize,
     ) -> Self {
@@ -1704,9 +1704,9 @@ impl KittenDecompiler {
         config: &Arc<DecompilerConfig>,
         id_generator: &IdGenerator,
         actor_compiled: &Value,
-        functions: &HashMap<String, Value>,
+        functions: &Arc<HashMap<String, Value>>,
         actor_info: Value,
-        variable_map: HashMap<String, String>,
+        variable_map: Arc<HashMap<String, String>>,
         work_type: WorkType,
     ) -> Result<Value> {
         let shadow_builder = ShadowBuilder::new(config.clone(), id_generator.clone(), work_type);
@@ -1714,7 +1714,7 @@ impl KittenDecompiler {
             .get("compiled_block_map")
             .and_then(|v| v.as_object());
         let estimated_blocks = compiled_blocks.map(|m| m.len() * 10 + 100).unwrap_or(256);
-        let functions_arc = Arc::new(functions.clone());
+        let functions_arc = Arc::clone(functions);
         // 移动前先提取 actor_info 中已有的注释,供注释回退使用
         let actor_existing_comments = actor_info
             .get("block_data_json")
@@ -1837,7 +1837,7 @@ impl KittenDecompiler {
         actor_compiled: &Value,
         scene_info: &Value,
         work_type: WorkType,
-        functions: &HashMap<String, Value>,
+        functions: &Arc<HashMap<String, Value>>,
     ) -> Result<Value> {
         let shadow_builder = ShadowBuilder::new(config.clone(), id_generator.clone(), work_type);
         let compiled_blocks = actor_compiled
@@ -1849,9 +1849,9 @@ impl KittenDecompiler {
         // 否则场景中的调用块会因找不到定义而被禁用
         let mut context = BlockContext::with_capacity(
             json!({}),
-            Arc::new(functions.clone()),
+            Arc::clone(functions),
             shadow_builder,
-            HashMap::new(), // 场景没有变量映射
+            Arc::new(HashMap::new()), // 场景没有变量映射
             estimated_blocks,
             estimated_blocks * 2,
         );
@@ -2044,41 +2044,20 @@ impl KittenDecompiler {
         Ok(())
     }
 
-    fn restore_global_fields(work: &mut Value, original: &Value) {
-        let keys = [
-            "variables",
-            "lists",
-            "broadcasts",
-            "audio",
-            "matrix",
-            "models",
-        ];
-        for key in &keys {
-            if let Some(val) = original.get(key) {
-                work[key] = val.clone();
-            }
+    fn restore_global_fields(
+        work: &mut Value,
+        restore_fields: &HashMap<&'static str, Value>,
+        restore_groups: Option<&Value>,
+    ) {
+        for (key, val) in restore_fields {
+            work[key] = val.clone();
         }
 
-        if let Some(groups) = original.get("theatre").and_then(|t| t.get("groups"))
+        if let Some(groups) = restore_groups
             && let Some(theatre) = work.get_mut("theatre")
             && let Some(obj) = theatre.as_object_mut()
         {
             obj.insert("groups".to_string(), groups.clone());
-        }
-
-        let switches = [
-            "physics2",
-            "cloud_variable",
-            "cloud_list",
-            "ai_lab",
-            "camera",
-            "video",
-            "midimusic",
-        ];
-        for key in &switches {
-            if let Some(val) = original.get(key) {
-                work[key] = val.clone();
-            }
         }
     }
 }
@@ -2291,14 +2270,43 @@ impl WorkDecompiler for KittenDecompiler {
             }
         };
 
-        let original_work = (*work_arc).clone();
+        // 提取需要恢复的全局字段(仅克隆这些字段,而非整份作品 JSON)
+        let mut restore_fields: HashMap<&'static str, Value> = HashMap::new();
+        let mut restore_groups: Option<Value> = None;
+        {
+            let original = work_arc.as_ref();
+            for key in [
+                "variables",
+                "lists",
+                "broadcasts",
+                "audio",
+                "matrix",
+                "models",
+                "physics2",
+                "cloud_variable",
+                "cloud_list",
+                "ai_lab",
+                "camera",
+                "video",
+                "midimusic",
+            ] {
+                if let Some(val) = original.get(key) {
+                    restore_fields.insert(key, val.clone());
+                }
+            }
+            restore_groups = original
+                .get("theatre")
+                .and_then(|t| t.get("groups"))
+                .cloned();
+        }
         let mut work = Arc::try_unwrap(work_arc).unwrap_or_else(|arc| (*arc).clone());
 
+        // 编译产物最终会被 clean_work_data 移除,直接 take 以避免整数组深拷贝
         let compile_result = work
-            .get("compile_result")
-            .and_then(|v| v.as_array())
-            .ok_or_else(|| DecompilerError::InvalidResponse("compile_result不存在".to_string()))?
-            .clone();
+            .get_mut("compile_result")
+            .and_then(|v| v.as_array_mut())
+            .map(std::mem::take)
+            .ok_or_else(|| DecompilerError::InvalidResponse("compile_result不存在".to_string()))?;
 
         // 从全局 variables 构建 UUID -> 变量名映射
         let mut global_variable_map = HashMap::new();
@@ -2309,6 +2317,8 @@ impl WorkDecompiler for KittenDecompiler {
                 }
             }
         }
+        // 所有角色/场景共享同一份映射,避免每角色深拷贝
+        let global_variable_map = Arc::new(global_variable_map);
 
         let work_type = context.work_info.work_type;
         // Kitten2/3 编辑版用 blocksXML(Blockly XML 字符串),Kitten4 用 block_data_json
@@ -2324,15 +2334,26 @@ impl WorkDecompiler for KittenDecompiler {
                 }
             }
         }
+        // 所有角色/场景共享同一份函数表,避免每角色深拷贝
+        let global_functions = Arc::new(global_functions);
+
+        // scenes 移出以消除每场景的深拷贝,处理完再写回
+        let had_scenes = work
+            .get("theatre")
+            .and_then(|t| t.get("scenes"))
+            .and_then(|s| s.as_object())
+            .is_some();
+        let mut scenes = work
+            .get_mut("theatre")
+            .and_then(|t| t.get_mut("scenes"))
+            .and_then(|s| s.as_object_mut())
+            .map(std::mem::take)
+            .unwrap_or_default();
 
         for actor_compiled in &compile_result {
             let actor_id = actor_compiled.get_str_or("id", "");
 
-            let is_scene = work
-                .get("theatre")
-                .and_then(|t| t.get("scenes"))
-                .and_then(|s| s.get(actor_id))
-                .is_some();
+            let is_scene = scenes.contains_key(actor_id);
 
             if is_scene {
                 if use_blocks_xml {
@@ -2340,33 +2361,21 @@ impl WorkDecompiler for KittenDecompiler {
                     let xml = XmlBlockWriter::new(context.config.as_ref())
                         .write_blocks(actor_compiled)
                         .with_context(|| format!("反编译场景 {} 失败", actor_id))?;
-                    if let Some(scenes) = work
-                        .get_mut("theatre")
-                        .and_then(|t| t.get_mut("scenes"))
-                        .and_then(|s| s.as_object_mut())
-                        && let Some(scene) =
-                            scenes.get_mut(actor_id).and_then(|v| v.as_object_mut())
-                    {
+                    if let Some(scene) = scenes.get_mut(actor_id).and_then(|v| v.as_object_mut()) {
                         scene.insert("blocksXML".to_string(), Value::String(xml));
                     }
                 } else {
-                    let scene_info = work["theatre"]["scenes"][actor_id].clone();
+                    let scene_info = &scenes[actor_id];
                     let updated_scene = Self::decompile_scene_blocks(
                         &context.config,
                         &context.id_generator,
                         actor_compiled,
-                        &scene_info,
+                        scene_info,
                         work_type,
                         &global_functions,
                     )
                     .with_context(|| format!("反编译场景 {} 失败", actor_id))?;
-                    if let Some(scenes) = work
-                        .get_mut("theatre")
-                        .and_then(|t| t.get_mut("scenes"))
-                        .and_then(|s| s.as_object_mut())
-                    {
-                        scenes.insert(actor_id.to_string(), updated_scene);
-                    }
+                    scenes.insert(actor_id.to_string(), updated_scene);
                 }
             } else {
                 if use_blocks_xml {
@@ -2392,7 +2401,7 @@ impl WorkDecompiler for KittenDecompiler {
                         actor_compiled,
                         &global_functions,
                         actor_info,
-                        global_variable_map.clone(), // 克隆,每个角色独立
+                        Arc::clone(&global_variable_map),
                         work_type,
                     )
                     .with_context(|| format!("反编译角色 {} 失败", actor_id))?;
@@ -2408,9 +2417,16 @@ impl WorkDecompiler for KittenDecompiler {
             }
         }
 
+        // 写回处理后的 scenes
+        if had_scenes
+            && let Some(theatre) = work.get_mut("theatre").and_then(|t| t.as_object_mut())
+        {
+            theatre.insert("scenes".to_string(), Value::Object(scenes));
+        }
+
         Self::update_work_info(&mut work, &context.work_info, context.config.as_ref())?;
         Self::clean_work_data(&mut work, work_type)?;
-        Self::restore_global_fields(&mut work, &original_work);
+        Self::restore_global_fields(&mut work, &restore_fields, restore_groups.as_ref());
 
         Ok(DecompileResult::Json(work))
     }

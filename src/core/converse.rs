@@ -324,17 +324,18 @@ impl ChatClient {
         if self.inner.receiving.load(Ordering::Acquire) {
             return Err(ChatError::Busy);
         }
-        let messages = {
+        // 先取会话 ID(释放锁)再构造帧,避免与 new_conversation 形成嵌套取锁
+        let session_id = self.inner.conversation_id.lock().unwrap().clone();
+        let frame = {
             let mut history = self.inner.history.lock().unwrap();
             history.push(HistoryMessage::user(message));
-            if include_history && history.len() > 1 {
-                history.clone()
+            let messages: &[HistoryMessage] = if include_history && history.len() > 1 {
+                &history
             } else {
-                vec![history.last().cloned().unwrap()]
-            }
+                std::slice::from_ref(history.last().unwrap())
+            };
+            build_chat_frame(&session_id, messages)?
         };
-        let session_id = self.inner.conversation_id.lock().unwrap().clone();
-        let frame = build_chat_frame(&session_id, &messages)?;
         self.send_text(&frame)?;
         // 记录本轮回合编号,供快速回复场景的等待判定
         self.inner.pending_round.fetch_add(1, Ordering::AcqRel);
@@ -719,7 +720,8 @@ impl ChatEventHandler for ChatAckHandler {
                 inner.notify.notify_with(|| {
                     inner.receiving.store(false, Ordering::Release);
                 });
-                // 先落历史,再发 End 事件:End 回调中可读到完整对话
+                // 先落历史,再发 End 事件:End 回调中可读到完整对话.
+                // 保留克隆而非 take:current_response 需在 End 后仍可被 send_and_wait 读取.
                 let full = inner.current_response.lock().unwrap().clone();
                 if !full.is_empty() {
                     inner
