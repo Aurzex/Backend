@@ -1,3 +1,4 @@
+# Project-specific
 /target
 /download
 /data
@@ -58,11 +59,9 @@ coverage.xml
 # Rope
 .ropeproject
 
-# Django stuff:
+# Django
 *.log
 *.pot
-
-.DS_Store
 
 # Sphinx documentation
 docs/_build/
@@ -75,3 +74,6 @@ docs/_build/
 
 # Pyenv
 .python-version
+
+# OS
+.DS_Store
