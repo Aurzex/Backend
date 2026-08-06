@@ -47,10 +47,10 @@ pub enum DecompilerError {
     },
 }
 
-pub type Result<T> = std::result::Result<T, DecompilerError>;
+pub(crate) type Result<T> = std::result::Result<T, DecompilerError>;
 
 // 错误上下文扩展
-pub trait ResultExt<T> {
+pub(crate) trait ResultExt<T> {
     fn with_context<F: FnOnce() -> String>(self, f: F) -> Result<T>;
 }
 
@@ -64,7 +64,7 @@ impl<T> ResultExt<T> for Result<T> {
 }
 
 // Value 扩展
-pub trait ValueExt {
+pub(crate) trait ValueExt {
     fn get_str(&self, key: &str) -> Result<&str>;
     fn get_i64(&self, key: &str) -> Result<i64>;
     fn get_bool(&self, key: &str) -> Result<bool>;
@@ -146,13 +146,13 @@ impl ValueExt for Value {
 
 // 阴影模板
 #[derive(Debug, Clone)]
-pub struct ShadowTemplate {
-    pub editable: bool,
-    pub visible: String,
-    pub extra_fields: Vec<(String, String)>,
-    pub default_text: Option<String>,
-    pub use_custom_name: bool,
-    pub main_field: Option<String>, // 新增,指明主字段名(在 shadow_fields 中的键)
+pub(crate) struct ShadowTemplate {
+    pub(crate) editable: bool,
+    pub(crate) visible: String,
+    pub(crate) extra_fields: Vec<(String, String)>,
+    pub(crate) default_text: Option<String>,
+    pub(crate) use_custom_name: bool,
+    pub(crate) main_field: Option<String>, // 新增,指明主字段名(在 shadow_fields 中的键)
 }
 
 impl Default for ShadowTemplate {
@@ -170,17 +170,17 @@ impl Default for ShadowTemplate {
 
 // 配置
 #[derive(Debug, Clone)]
-pub struct DecompilerConfig {
-    pub base_url: String,
-    pub creation_base_url: String,
-    pub client_secret: String,
-    pub crypto_salt: Vec<u8>,
-    pub default_output_dir: PathBuf,
-    pub toolbox_categories: Vec<String>,
-    pub shadow_types: Arc<HashSet<String>>,
-    pub shadow_fields: Arc<HashMap<String, HashMap<String, String>>>,
-    pub file_extensions: Arc<HashMap<String, String>>,
-    pub shadow_templates: Arc<HashMap<String, ShadowTemplate>>,
+pub(crate) struct DecompilerConfig {
+    pub(crate) base_url: String,
+    pub(crate) creation_base_url: String,
+    pub(crate) client_secret: String,
+    pub(crate) crypto_salt: Vec<u8>,
+    pub(crate) default_output_dir: PathBuf,
+    pub(crate) toolbox_categories: Vec<String>,
+    pub(crate) shadow_types: Arc<HashSet<String>>,
+    pub(crate) shadow_fields: Arc<HashMap<String, HashMap<String, String>>>,
+    pub(crate) file_extensions: Arc<HashMap<String, String>>,
+    pub(crate) shadow_templates: Arc<HashMap<String, ShadowTemplate>>,
 }
 
 impl Default for DecompilerConfig {
@@ -554,7 +554,7 @@ impl Default for DecompilerConfig {
 
 // 作品类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum WorkType {
+pub(crate) enum WorkType {
     Kitten2,
     Kitten3,
     Kitten4,
@@ -584,7 +584,7 @@ impl std::str::FromStr for WorkType {
 }
 
 impl WorkType {
-    pub fn as_str(&self) -> &'static str {
+    pub(crate) fn as_str(&self) -> &'static str {
         match self {
             WorkType::Kitten2 => "KITTEN2",
             WorkType::Kitten3 => "KITTEN3",
@@ -596,25 +596,25 @@ impl WorkType {
         }
     }
 
-    pub fn is_kitten(&self) -> bool {
+    pub(crate) fn is_kitten(&self) -> bool {
         matches!(
             self,
             WorkType::Kitten2 | WorkType::Kitten3 | WorkType::Kitten4
         )
     }
-    pub fn is_nemo(&self) -> bool {
+    pub(crate) fn is_nemo(&self) -> bool {
         matches!(self, WorkType::Nemo)
     }
-    pub fn is_neko(&self) -> bool {
+    pub(crate) fn is_neko(&self) -> bool {
         matches!(self, WorkType::Neko)
     }
-    pub fn is_coco(&self) -> bool {
+    pub(crate) fn is_coco(&self) -> bool {
         matches!(self, WorkType::Coco)
     }
-    pub fn is_wood(&self) -> bool {
+    pub(crate) fn is_wood(&self) -> bool {
         matches!(self, WorkType::Wood)
     }
-    pub fn use_xml_shadow(&self) -> bool {
+    pub(crate) fn use_xml_shadow(&self) -> bool {
         // Kitten2/3/4 编辑版(.bcm/.bcm4)的 shadows 均为 XML 字符串
         matches!(
             self,
@@ -625,18 +625,18 @@ impl WorkType {
 
 // 作品信息
 #[derive(Debug, Clone)]
-pub struct WorkInfo {
-    pub id: i64,
-    pub name: String,
-    pub work_type: WorkType,
-    pub version: String,
-    pub user_id: i64,
-    pub preview_url: String,
-    pub application_version: String,
+pub(crate) struct WorkInfo {
+    pub(crate) id: i64,
+    pub(crate) name: String,
+    pub(crate) work_type: WorkType,
+    pub(crate) version: String,
+    pub(crate) user_id: i64,
+    pub(crate) preview_url: String,
+    pub(crate) application_version: String,
 }
 
 impl WorkInfo {
-    pub fn from_api_response(data: &Value) -> Result<Self> {
+    pub(crate) fn from_api_response(data: &Value) -> Result<Self> {
         let work_type_str = data.get_str_or("type", "NEMO");
         let work_type = work_type_str.parse::<WorkType>().unwrap_or(WorkType::Nemo);
         let name = data
@@ -656,7 +656,7 @@ impl WorkInfo {
         })
     }
 
-    pub fn file_extension(&self, config: &Arc<DecompilerConfig>) -> String {
+    pub(crate) fn file_extension(&self, config: &Arc<DecompilerConfig>) -> String {
         config
             .file_extensions
             .get(self.work_type.as_str())
@@ -667,16 +667,16 @@ impl WorkInfo {
 
 // 文件服务
 #[derive(Clone)]
-pub struct FileService {
+pub(crate) struct FileService {
     config: Arc<DecompilerConfig>,
 }
 
 impl FileService {
-    pub fn new(config: Arc<DecompilerConfig>) -> Self {
+    pub(crate) fn new(config: Arc<DecompilerConfig>) -> Self {
         Self { config }
     }
 
-    pub fn safe_filename(name: &str, work_id: i64, extension: &str) -> String {
+    pub(crate) fn safe_filename(name: &str, work_id: i64, extension: &str) -> String {
         let safe_name: String = name
             .chars()
             .filter(|c| c.is_alphanumeric() || *c == ' ' || *c == '-' || *c == '_')
@@ -695,18 +695,18 @@ impl FileService {
         format!("{}_{}{}", name_part, work_id, ext)
     }
 
-    pub fn ensure_dir(path: &Path) -> Result<PathBuf> {
+    pub(crate) fn ensure_dir(path: &Path) -> Result<PathBuf> {
         std::fs::create_dir_all(path)?;
         Ok(path.to_path_buf())
     }
 
-    pub fn write_json(path: &Path, data: &Value) -> Result<()> {
+    pub(crate) fn write_json(path: &Path, data: &Value) -> Result<()> {
         let json_str = to_string(data)?;
         std::fs::write(path, json_str)?;
         Ok(())
     }
 
-    pub fn write_binary(path: &Path, data: &[u8]) -> Result<()> {
+    pub(crate) fn write_binary(path: &Path, data: &[u8]) -> Result<()> {
         std::fs::write(path, data)?;
         Ok(())
     }
@@ -714,19 +714,19 @@ impl FileService {
 
 // 新 ID 生成器(方案一风格)
 #[derive(Clone)]
-pub struct IdGenerator {
+pub(crate) struct IdGenerator {
     chars: Vec<char>,
 }
 
 impl IdGenerator {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let chars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
             .chars()
             .collect();
         Self { chars }
     }
 
-    pub fn generate(&self, length: usize) -> String {
+    pub(crate) fn generate(&self, length: usize) -> String {
         (0..length)
             .map(|_| {
                 let idx = fastrand::usize(0..self.chars.len());
@@ -744,37 +744,37 @@ impl Default for IdGenerator {
 
 // 加密服务
 #[derive(Clone)]
-pub struct CryptoService {
+pub(crate) struct CryptoService {
     salt: Vec<u8>,
 }
 
 const NONCE_SIZE: usize = 12;
 
 impl CryptoService {
-    pub fn new(salt: &[u8]) -> Self {
+    pub(crate) fn new(salt: &[u8]) -> Self {
         Self {
             salt: salt.to_vec(),
         }
     }
 
-    pub fn sha256(data: &str) -> String {
+    pub(crate) fn sha256(data: &str) -> String {
         let mut hasher = Sha256::new();
         hasher.update(data.as_bytes());
         let result = hasher.finalize();
         result.iter().map(|b| format!("{:02x}", b)).collect()
     }
 
-    pub fn base64_to_bytes(&self, data: &str) -> Result<Vec<u8>> {
+    pub(crate) fn base64_to_bytes(&self, data: &str) -> Result<Vec<u8>> {
         general_purpose::STANDARD
             .decode(data)
             .map_err(|e| DecompilerError::Crypto(format!("Base64解码失败: {}", e)))
     }
 
-    pub fn reverse_string(&self, data: &str) -> String {
+    pub(crate) fn reverse_string(&self, data: &str) -> String {
         data.chars().rev().collect()
     }
 
-    pub fn generate_aes_key(&self) -> [u8; 32] {
+    pub(crate) fn generate_aes_key(&self) -> [u8; 32] {
         let mut hasher = Sha256::new();
         hasher.update(&self.salt);
         let hash = hasher.finalize();
@@ -783,7 +783,7 @@ impl CryptoService {
         key
     }
 
-    pub fn decrypt_aes_gcm(&self, ciphertext: &[u8], iv: &[u8]) -> Result<Vec<u8>> {
+    pub(crate) fn decrypt_aes_gcm(&self, ciphertext: &[u8], iv: &[u8]) -> Result<Vec<u8>> {
         type AesKey = Array<u8, U32>;
         type Nonce = Array<u8, U12>;
 
@@ -799,7 +799,7 @@ impl CryptoService {
             .map_err(|e| DecompilerError::Crypto(format!("AES解密失败: {}", e)))
     }
 
-    pub fn decrypt_bcmkn(&self, encrypted_content: &str) -> Result<Vec<u8>> {
+    pub(crate) fn decrypt_bcmkn(&self, encrypted_content: &str) -> Result<Vec<u8>> {
         let reversed = self.reverse_string(encrypted_content);
         let decoded = self.base64_to_bytes(&reversed)?;
         if decoded.len() <= NONCE_SIZE {
@@ -816,16 +816,16 @@ impl CryptoService {
     }
 }
 
-pub struct BCMKNDecryptor {
+pub(crate) struct BCMKNDecryptor {
     crypto_service: CryptoService,
 }
 
 impl BCMKNDecryptor {
-    pub fn new(crypto_service: CryptoService) -> Self {
+    pub(crate) fn new(crypto_service: CryptoService) -> Self {
         Self { crypto_service }
     }
 
-    pub fn decrypt(&self, encrypted_content: &str) -> Result<Value> {
+    pub(crate) fn decrypt(&self, encrypted_content: &str) -> Result<Value> {
         let decrypted_bytes = self.crypto_service.decrypt_bcmkn(encrypted_content)?;
         let decrypted_str = String::from_utf8(decrypted_bytes)
             .map_err(|e| DecompilerError::Crypto(format!("UTF-8转换失败: {}", e)))?;
@@ -836,14 +836,14 @@ impl BCMKNDecryptor {
 
 // 阴影构建器
 #[derive(Clone)]
-pub struct ShadowBuilder {
+pub(crate) struct ShadowBuilder {
     pub(crate) config: Arc<DecompilerConfig>,
     pub(crate) id_generator: IdGenerator,
     work_type: WorkType,
 }
 
 impl ShadowBuilder {
-    pub fn new(
+    pub(crate) fn new(
         config: Arc<DecompilerConfig>,
         id_generator: IdGenerator,
         work_type: WorkType,
@@ -855,7 +855,7 @@ impl ShadowBuilder {
         }
     }
 
-    pub fn create(&self, shadow_type: &str, block_id: Option<String>, text: Option<&str>) -> Value {
+    pub(crate) fn create(&self, shadow_type: &str, block_id: Option<String>, text: Option<&str>) -> Value {
         if self.work_type.use_xml_shadow() {
             let xml = self.create_xml(shadow_type, block_id, text);
             Value::String(xml)
@@ -864,7 +864,7 @@ impl ShadowBuilder {
         }
     }
 
-    pub fn create_json(
+    pub(crate) fn create_json(
         &self,
         shadow_type: &str,
         block_id: Option<String>,
@@ -977,12 +977,12 @@ impl ShadowBuilder {
 }
 
 // 积木行为
-pub trait BlockDecompilerBehavior: Send + Sync {
+pub(crate) trait BlockDecompilerBehavior: Send + Sync {
     fn get_child_input_name(&self, index: usize, conditions_count: usize) -> String;
 }
 
 #[derive(Clone)]
-pub enum BlockBehavior {
+pub(crate) enum BlockBehavior {
     Default,
     If { conditions_count: usize },
     FunctionBody,
@@ -1009,20 +1009,20 @@ impl BlockDecompilerBehavior for BlockBehavior {
 
 // 积木上下文
 #[derive(Clone)]
-pub struct BlockContext {
-    pub actor_data: Value,
-    pub functions: Arc<HashMap<String, Value>>,
-    pub variable_map: Arc<HashMap<String, String>>, // UUID -> 变量名
-    pub shadow_builder: ShadowBuilder,
-    pub blocks: HashMap<String, Value>,
-    pub connections: HashMap<String, HashMap<String, Value>>,
+pub(crate) struct BlockContext {
+    pub(crate) actor_data: Value,
+    pub(crate) functions: Arc<HashMap<String, Value>>,
+    pub(crate) variable_map: Arc<HashMap<String, String>>, // UUID -> 变量名
+    pub(crate) shadow_builder: ShadowBuilder,
+    pub(crate) blocks: HashMap<String, Value>,
+    pub(crate) connections: HashMap<String, HashMap<String, Value>>,
     // 布局游标:编译版无 location 时按树形自动排列积木,避免恢复产物全部重叠在 [0,0]
-    pub layout_col: f64,
-    pub layout_row: f64,
+    pub(crate) layout_col: f64,
+    pub(crate) layout_row: f64,
 }
 
 impl BlockContext {
-    pub fn new(
+    pub(crate) fn new(
         actor_data: Value,
         functions: Arc<HashMap<String, Value>>,
         shadow_builder: ShadowBuilder,
@@ -1040,7 +1040,7 @@ impl BlockContext {
         }
     }
 
-    pub fn with_capacity(
+    pub(crate) fn with_capacity(
         actor_data: Value,
         functions: Arc<HashMap<String, Value>>,
         shadow_builder: ShadowBuilder,
@@ -1060,7 +1060,7 @@ impl BlockContext {
         }
     }
 
-    pub fn insert_connection(&mut self, source_id: &str, target_id: &str, connection_info: Value) {
+    pub(crate) fn insert_connection(&mut self, source_id: &str, target_id: &str, connection_info: Value) {
         self.connections
             .entry(source_id.to_string())
             .or_default()
@@ -1070,17 +1070,17 @@ impl BlockContext {
 
 // 积木反编译核心
 
-pub struct BlockDecompilerCore<'a> {
+pub(crate) struct BlockDecompilerCore<'a> {
     compiled: &'a Value,
     behavior: BlockBehavior,
 }
 
 impl<'a> BlockDecompilerCore<'a> {
-    pub fn new(compiled: &'a Value, behavior: BlockBehavior) -> Self {
+    pub(crate) fn new(compiled: &'a Value, behavior: BlockBehavior) -> Self {
         Self { compiled, behavior }
     }
 
-    pub fn decompile(&mut self, context: &mut BlockContext) -> Result<Value> {
+    pub(crate) fn decompile(&mut self, context: &mut BlockContext) -> Result<Value> {
         let config = &context.shadow_builder.config;
         let id = self.compiled.get_str_or("id", "");
         let block_type = self.compiled.get_str_or("type", "");
@@ -1419,16 +1419,16 @@ impl<'a> BlockDecompilerCore<'a> {
 }
 
 // 反编译器上下文
-pub struct DecompilerContext {
-    pub work_info: WorkInfo,
-    pub http_client: Box<dyn HttpClient>,
-    pub file_service: FileService,
-    pub id_generator: IdGenerator,
-    pub config: Arc<DecompilerConfig>,
+pub(crate) struct DecompilerContext {
+    pub(crate) work_info: WorkInfo,
+    pub(crate) http_client: Box<dyn HttpClient>,
+    pub(crate) file_service: FileService,
+    pub(crate) id_generator: IdGenerator,
+    pub(crate) config: Arc<DecompilerConfig>,
 }
 
 // Context Builder
-pub struct DecompilerContextBuilder {
+pub(crate) struct DecompilerContextBuilder {
     work_info: Option<WorkInfo>,
     http_client: Option<Box<dyn HttpClient>>,
     config: Option<Arc<DecompilerConfig>>,
@@ -1443,7 +1443,7 @@ impl Default for DecompilerContextBuilder {
 }
 
 impl DecompilerContextBuilder {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             work_info: None,
             http_client: None,
@@ -1453,32 +1453,32 @@ impl DecompilerContextBuilder {
         }
     }
 
-    pub fn work_info(mut self, info: WorkInfo) -> Self {
+    pub(crate) fn work_info(mut self, info: WorkInfo) -> Self {
         self.work_info = Some(info);
         self
     }
 
-    pub fn http_client(mut self, client: Box<dyn HttpClient>) -> Self {
+    pub(crate) fn http_client(mut self, client: Box<dyn HttpClient>) -> Self {
         self.http_client = Some(client);
         self
     }
 
-    pub fn config(mut self, config: Arc<DecompilerConfig>) -> Self {
+    pub(crate) fn config(mut self, config: Arc<DecompilerConfig>) -> Self {
         self.config = Some(config);
         self
     }
 
-    pub fn file_service(mut self, service: FileService) -> Self {
+    pub(crate) fn file_service(mut self, service: FileService) -> Self {
         self.file_service = Some(service);
         self
     }
 
-    pub fn id_generator(mut self, generator: IdGenerator) -> Self {
+    pub(crate) fn id_generator(mut self, generator: IdGenerator) -> Self {
         self.id_generator = Some(generator);
         self
     }
 
-    pub fn build(self) -> Result<DecompilerContext> {
+    pub(crate) fn build(self) -> Result<DecompilerContext> {
         let config = self.config.unwrap_or_default();
         Ok(DecompilerContext {
             work_info: self.work_info.ok_or_else(|| DecompilerError::Other {
@@ -1500,12 +1500,12 @@ impl DecompilerContextBuilder {
 
 // 结果类型与 Trait
 #[derive(Debug)]
-pub enum DecompileResult {
+pub(crate) enum DecompileResult {
     Json(Value),
     Path(String),
 }
 
-pub enum RawWorkData {
+pub(crate) enum RawWorkData {
     Kitten(Arc<Value>),
     NekoEncrypted(String),
     Nemo(Arc<Value>, Arc<Value>),
@@ -1513,11 +1513,11 @@ pub enum RawWorkData {
     Coco(Arc<Value>),
 }
 
-pub trait WorkFetcher: Send + Sync {
+pub(crate) trait WorkFetcher: Send + Sync {
     fn fetch(&self, work_info: &WorkInfo) -> Result<RawWorkData>;
 }
 
-pub trait WorkDecompiler: Send + Sync {
+pub(crate) trait WorkDecompiler: Send + Sync {
     fn decompile(&self, raw: RawWorkData, context: &DecompilerContext) -> Result<DecompileResult>;
     fn save_result(
         &self,
@@ -1528,13 +1528,13 @@ pub trait WorkDecompiler: Send + Sync {
 }
 
 // NEKO
-pub struct NekoFetcher {
+pub(crate) struct NekoFetcher {
     http_client: Box<dyn HttpClient>,
     config: Arc<DecompilerConfig>,
 }
 
 impl NekoFetcher {
-    pub fn new(http_client: Box<dyn HttpClient>, config: Arc<DecompilerConfig>) -> Self {
+    pub(crate) fn new(http_client: Box<dyn HttpClient>, config: Arc<DecompilerConfig>) -> Self {
         Self {
             http_client,
             config,
@@ -1580,12 +1580,12 @@ impl WorkFetcher for NekoFetcher {
     }
 }
 
-pub struct NekoDecompiler {
+pub(crate) struct NekoDecompiler {
     crypto_service: CryptoService,
 }
 
 impl NekoDecompiler {
-    pub fn new(salt: &[u8]) -> Self {
+    pub(crate) fn new(salt: &[u8]) -> Self {
         Self {
             crypto_service: CryptoService::new(salt),
         }
@@ -1633,13 +1633,13 @@ impl WorkDecompiler for NekoDecompiler {
 }
 
 // KITTEN
-pub struct KittenFetcher {
+pub(crate) struct KittenFetcher {
     http_client: Box<dyn HttpClient>,
     config: Arc<DecompilerConfig>,
 }
 
 impl KittenFetcher {
-    pub fn new(http_client: Box<dyn HttpClient>, config: Arc<DecompilerConfig>) -> Self {
+    pub(crate) fn new(http_client: Box<dyn HttpClient>, config: Arc<DecompilerConfig>) -> Self {
         Self {
             http_client,
             config,
@@ -1665,7 +1665,7 @@ impl WorkFetcher for KittenFetcher {
     }
 }
 
-pub struct KittenDecompiler;
+pub(crate) struct KittenDecompiler;
 
 impl KittenDecompiler {
     fn get_actor_info(work: &Value, actor_id: &str) -> Value {
@@ -2066,17 +2066,17 @@ impl KittenDecompiler {
 /// Kitten2/3 编辑版(如春风得意)以 Blockly XML 字符串(blocksXML)存储积木
 /// 与 Kitten4 的 block_data_json(blocks/connections)不同,本组件负责把编译块树
 /// 序列化为 Blockly XML,独立成组件便于单独测试与复用
-pub struct XmlBlockWriter<'a> {
+pub(crate) struct XmlBlockWriter<'a> {
     config: &'a DecompilerConfig,
 }
 
 impl<'a> XmlBlockWriter<'a> {
-    pub fn new(config: &'a DecompilerConfig) -> Self {
+    pub(crate) fn new(config: &'a DecompilerConfig) -> Self {
         Self { config }
     }
 
     /// 生成 actor/场景的 blocksXML(`<variables></variables>` + 各根块)
-    pub fn write_blocks(&self, actor_compiled: &Value) -> Result<String> {
+    pub(crate) fn write_blocks(&self, actor_compiled: &Value) -> Result<String> {
         let mut xml = String::from("<variables></variables>");
         let compiled_blocks = actor_compiled
             .get("compiled_block_map")
@@ -2468,19 +2468,19 @@ impl WorkDecompiler for KittenDecompiler {
 }
 
 // NEMO
-pub struct NemoResourceConfig<'a> {
-    pub http_client: &'a dyn HttpClient,
-    pub file_service: &'a FileService,
-    pub work_id: i64,
+pub(crate) struct NemoResourceConfig<'a> {
+    pub(crate) http_client: &'a dyn HttpClient,
+    pub(crate) file_service: &'a FileService,
+    pub(crate) work_id: i64,
 }
 
-pub struct NemoFetcher {
+pub(crate) struct NemoFetcher {
     http_client: Box<dyn HttpClient>,
     config: Arc<DecompilerConfig>,
 }
 
 impl NemoFetcher {
-    pub fn new(http_client: Box<dyn HttpClient>, config: Arc<DecompilerConfig>) -> Self {
+    pub(crate) fn new(http_client: Box<dyn HttpClient>, config: Arc<DecompilerConfig>) -> Self {
         Self {
             http_client,
             config,
@@ -2508,7 +2508,7 @@ impl WorkFetcher for NemoFetcher {
     }
 }
 
-pub struct NemoDecompiler;
+pub(crate) struct NemoDecompiler;
 
 impl NemoDecompiler {
     fn decompile_inner(
@@ -2568,7 +2568,7 @@ impl WorkDecompiler for NemoDecompiler {
     }
 }
 
-pub struct NemoResourceManager<'a> {
+pub(crate) struct NemoResourceManager<'a> {
     config: NemoResourceConfig<'a>,
     work_dir: PathBuf,
     dirs: HashMap<String, PathBuf>,
@@ -2576,7 +2576,7 @@ pub struct NemoResourceManager<'a> {
 }
 
 impl<'a> NemoResourceManager<'a> {
-    pub fn new(config: NemoResourceConfig<'a>, work_dir: PathBuf) -> Self {
+    pub(crate) fn new(config: NemoResourceConfig<'a>, work_dir: PathBuf) -> Self {
         Self {
             config,
             work_dir,
@@ -2593,7 +2593,7 @@ impl<'a> NemoResourceManager<'a> {
             .clone()
     }
 
-    pub fn create_directories(&mut self) -> Result<&HashMap<String, PathBuf>> {
+    pub(crate) fn create_directories(&mut self) -> Result<&HashMap<String, PathBuf>> {
         self.dirs.insert(
             "material".to_string(),
             FileService::ensure_dir(&self.work_dir.join("user_material"))?,
@@ -2620,7 +2620,7 @@ impl<'a> NemoResourceManager<'a> {
         Ok(&self.dirs)
     }
 
-    pub fn save_core_files(&self, bcm_data: &Value, source_info: &Value) -> Result<()> {
+    pub(crate) fn save_core_files(&self, bcm_data: &Value, source_info: &Value) -> Result<()> {
         let works_dir = self
             .dirs
             .get("works")
@@ -2723,7 +2723,7 @@ impl<'a> NemoResourceManager<'a> {
         }))
     }
 
-    pub fn download_resources(&self, bcm_data: &Value) -> Result<()> {
+    pub(crate) fn download_resources(&self, bcm_data: &Value) -> Result<()> {
         let material_dir = self
             .dirs
             .get("material")
@@ -2755,19 +2755,19 @@ impl<'a> NemoResourceManager<'a> {
 }
 
 // WOOD
-pub struct WoodResourceConfig<'a> {
-    pub http_client: &'a dyn HttpClient,
-    pub file_service: &'a FileService,
-    pub work_id: i64,
+pub(crate) struct WoodResourceConfig<'a> {
+    pub(crate) http_client: &'a dyn HttpClient,
+    pub(crate) file_service: &'a FileService,
+    pub(crate) work_id: i64,
 }
 
-pub struct WoodFetcher {
+pub(crate) struct WoodFetcher {
     http_client: Box<dyn HttpClient>,
     config: Arc<DecompilerConfig>,
 }
 
 impl WoodFetcher {
-    pub fn new(http_client: Box<dyn HttpClient>, config: Arc<DecompilerConfig>) -> Self {
+    pub(crate) fn new(http_client: Box<dyn HttpClient>, config: Arc<DecompilerConfig>) -> Self {
         Self {
             http_client,
             config,
@@ -2786,7 +2786,7 @@ impl WorkFetcher for WoodFetcher {
     }
 }
 
-pub struct WoodDecompiler;
+pub(crate) struct WoodDecompiler;
 
 impl WoodDecompiler {
     fn decompile_inner(context: &DecompilerContext, work_data: Arc<Value>) -> Result<String> {
@@ -2837,14 +2837,14 @@ impl WorkDecompiler for WoodDecompiler {
     }
 }
 
-pub struct WoodResourceManager<'a> {
+pub(crate) struct WoodResourceManager<'a> {
     config: WoodResourceConfig<'a>,
     work_dir: PathBuf,
     dirs: HashMap<String, PathBuf>,
 }
 
 impl<'a> WoodResourceManager<'a> {
-    pub fn new(config: WoodResourceConfig<'a>, work_dir: PathBuf) -> Self {
+    pub(crate) fn new(config: WoodResourceConfig<'a>, work_dir: PathBuf) -> Self {
         Self {
             config,
             work_dir,
@@ -2852,7 +2852,7 @@ impl<'a> WoodResourceManager<'a> {
         }
     }
 
-    pub fn create_directories(&mut self) -> Result<&HashMap<String, PathBuf>> {
+    pub(crate) fn create_directories(&mut self) -> Result<&HashMap<String, PathBuf>> {
         self.dirs
             .insert("root".to_string(), FileService::ensure_dir(&self.work_dir)?);
         self.dirs.insert(
@@ -2862,7 +2862,7 @@ impl<'a> WoodResourceManager<'a> {
         Ok(&self.dirs)
     }
 
-    pub fn save_work_files(&self, work_data: &Value) -> Result<()> {
+    pub(crate) fn save_work_files(&self, work_data: &Value) -> Result<()> {
         self.save_work_info(work_data)?;
         self.save_code_files(work_data)?;
         self.download_images(work_data)?;
@@ -2964,13 +2964,13 @@ impl<'a> WoodResourceManager<'a> {
 }
 
 // COCO
-pub struct CocoFetcher {
+pub(crate) struct CocoFetcher {
     http_client: Box<dyn HttpClient>,
     config: Arc<DecompilerConfig>,
 }
 
 impl CocoFetcher {
-    pub fn new(http_client: Box<dyn HttpClient>, config: Arc<DecompilerConfig>) -> Self {
+    pub(crate) fn new(http_client: Box<dyn HttpClient>, config: Arc<DecompilerConfig>) -> Self {
         Self {
             http_client,
             config,
@@ -2995,7 +2995,7 @@ impl WorkFetcher for CocoFetcher {
     }
 }
 
-pub struct CocoDecompiler;
+pub(crate) struct CocoDecompiler;
 
 impl CocoDecompiler {
     fn reorganize(work: &mut Value, context: &DecompilerContext) -> Result<()> {
@@ -3198,16 +3198,16 @@ impl WorkDecompiler for CocoDecompiler {
 }
 
 // 积木反编译器 trait 与具体实现
-pub trait BlockDecompiler<'a>: Send + Sync {
+pub(crate) trait BlockDecompiler<'a>: Send + Sync {
     fn decompile(&mut self, context: &mut BlockContext) -> Result<Value>;
 }
 
-pub struct DefaultBlockDecompiler<'a> {
+pub(crate) struct DefaultBlockDecompiler<'a> {
     core: BlockDecompilerCore<'a>,
 }
 
 impl<'a> DefaultBlockDecompiler<'a> {
-    pub fn new(compiled: &'a Value) -> Self {
+    pub(crate) fn new(compiled: &'a Value) -> Self {
         Self {
             core: BlockDecompilerCore::new(compiled, BlockBehavior::Default),
         }
@@ -3220,13 +3220,13 @@ impl<'a> BlockDecompiler<'a> for DefaultBlockDecompiler<'a> {
     }
 }
 
-pub struct IfBlockDecompiler<'a> {
+pub(crate) struct IfBlockDecompiler<'a> {
     core: BlockDecompilerCore<'a>,
     compiled: &'a Value,
 }
 
 impl<'a> IfBlockDecompiler<'a> {
-    pub fn new(compiled: &'a Value) -> Self {
+    pub(crate) fn new(compiled: &'a Value) -> Self {
         let conditions_count = compiled
             .get("conditions")
             .and_then(|v| v.as_array())
@@ -3280,13 +3280,13 @@ impl<'a> BlockDecompiler<'a> for IfBlockDecompiler<'a> {
     }
 }
 
-pub struct TextJoinDecompiler<'a> {
+pub(crate) struct TextJoinDecompiler<'a> {
     core: BlockDecompilerCore<'a>,
     compiled: &'a Value,
 }
 
 impl<'a> TextJoinDecompiler<'a> {
-    pub fn new(compiled: &'a Value) -> Self {
+    pub(crate) fn new(compiled: &'a Value) -> Self {
         Self {
             core: BlockDecompilerCore::new(compiled, BlockBehavior::Default),
             compiled,
@@ -3311,13 +3311,13 @@ impl<'a> BlockDecompiler<'a> for TextJoinDecompiler<'a> {
     }
 }
 
-pub struct AskAndChooseDecompiler<'a> {
+pub(crate) struct AskAndChooseDecompiler<'a> {
     core: BlockDecompilerCore<'a>,
     compiled: &'a Value,
 }
 
 impl<'a> AskAndChooseDecompiler<'a> {
-    pub fn new(compiled: &'a Value) -> Self {
+    pub(crate) fn new(compiled: &'a Value) -> Self {
         Self {
             core: BlockDecompilerCore::new(compiled, BlockBehavior::Default),
             compiled,
@@ -3342,13 +3342,13 @@ impl<'a> BlockDecompiler<'a> for AskAndChooseDecompiler<'a> {
     }
 }
 
-pub struct SetEntityShowHideDecompiler<'a> {
+pub(crate) struct SetEntityShowHideDecompiler<'a> {
     core: BlockDecompilerCore<'a>,
     compiled: &'a Value,
 }
 
 impl<'a> SetEntityShowHideDecompiler<'a> {
-    pub fn new(compiled: &'a Value) -> Self {
+    pub(crate) fn new(compiled: &'a Value) -> Self {
         Self {
             core: BlockDecompilerCore::new(compiled, BlockBehavior::Default),
             compiled,
@@ -3380,13 +3380,13 @@ impl<'a> BlockDecompiler<'a> for SetEntityShowHideDecompiler<'a> {
     }
 }
 
-pub struct TextSelectChangeableDecompiler<'a> {
+pub(crate) struct TextSelectChangeableDecompiler<'a> {
     core: BlockDecompilerCore<'a>,
     compiled: &'a Value,
 }
 
 impl<'a> TextSelectChangeableDecompiler<'a> {
-    pub fn new(compiled: &'a Value) -> Self {
+    pub(crate) fn new(compiled: &'a Value) -> Self {
         Self {
             core: BlockDecompilerCore::new(compiled, BlockBehavior::Default),
             compiled,
@@ -3411,13 +3411,13 @@ impl<'a> BlockDecompiler<'a> for TextSelectChangeableDecompiler<'a> {
     }
 }
 
-pub struct FunctionDefDecompiler<'a> {
+pub(crate) struct FunctionDefDecompiler<'a> {
     core: BlockDecompilerCore<'a>,
     compiled: &'a Value,
 }
 
 impl<'a> FunctionDefDecompiler<'a> {
-    pub fn new(compiled: &'a Value) -> Self {
+    pub(crate) fn new(compiled: &'a Value) -> Self {
         Self {
             // 函数体 child_block 使用 STACK 插槽
             core: BlockDecompilerCore::new(compiled, BlockBehavior::FunctionBody),
@@ -3520,13 +3520,13 @@ impl<'a> BlockDecompiler<'a> for FunctionDefDecompiler<'a> {
     }
 }
 
-pub struct FunctionCallDecompiler<'a> {
+pub(crate) struct FunctionCallDecompiler<'a> {
     core: BlockDecompilerCore<'a>,
     compiled: &'a Value,
 }
 
 impl<'a> FunctionCallDecompiler<'a> {
-    pub fn new(compiled: &'a Value) -> Self {
+    pub(crate) fn new(compiled: &'a Value) -> Self {
         Self {
             core: BlockDecompilerCore::new(compiled, BlockBehavior::Default),
             compiled,
@@ -3644,13 +3644,13 @@ impl<'a> BlockDecompiler<'a> for FunctionCallDecompiler<'a> {
     }
 }
 
-pub struct MutationDecompiler<'a> {
+pub(crate) struct MutationDecompiler<'a> {
     inner: DefaultBlockDecompiler<'a>,
     mutation: String,
 }
 
 impl<'a> MutationDecompiler<'a> {
-    pub fn new(compiled: &'a Value, mutation: String) -> Self {
+    pub(crate) fn new(compiled: &'a Value, mutation: String) -> Self {
         Self {
             inner: DefaultBlockDecompiler::new(compiled),
             mutation,
@@ -3702,26 +3702,26 @@ fn create_block_decompiler<'a>(compiled: &'a Value) -> Box<dyn BlockDecompiler<'
     }
 }
 
-pub struct BlockDecompilerFactory<'a> {
+pub(crate) struct BlockDecompilerFactory<'a> {
     config: &'a DecompilerConfig,
     id_generator: &'a IdGenerator,
 }
 
 impl<'a> BlockDecompilerFactory<'a> {
-    pub fn new(config: &'a DecompilerConfig, id_generator: &'a IdGenerator) -> Self {
+    pub(crate) fn new(config: &'a DecompilerConfig, id_generator: &'a IdGenerator) -> Self {
         Self {
             config,
             id_generator,
         }
     }
 
-    pub fn create(&self, compiled: &'a Value) -> Box<dyn BlockDecompiler<'a> + 'a> {
+    pub(crate) fn create(&self, compiled: &'a Value) -> Box<dyn BlockDecompiler<'a> + 'a> {
         create_block_decompiler(compiled)
     }
 }
 
 // HTTP 客户端
-pub trait HttpClient: Send + Sync {
+pub(crate) trait HttpClient: Send + Sync {
     fn get_json(&self, url: &str, headers: Option<Vec<(String, String)>>) -> Result<Value>;
     fn get_binary(&self, url: &str) -> Result<Vec<u8>>;
     fn get_text(&self, url: &str) -> Result<String>;
@@ -3735,12 +3735,12 @@ impl Clone for Box<dyn HttpClient> {
 }
 
 #[derive(Clone)]
-pub struct CodeMaoHttpClient {
+pub(crate) struct CodeMaoHttpClient {
     client: Arc<CodeMaoClient>,
 }
 
 impl CodeMaoHttpClient {
-    pub fn new(client: Arc<CodeMaoClient>) -> Self {
+    pub(crate) fn new(client: Arc<CodeMaoClient>) -> Self {
         Self { client }
     }
 }
@@ -3834,21 +3834,21 @@ impl DecompileOptions {
 
 // 作品处理器注册表(注册表模式)
 /// fetcher 构造器:按作品类型创建对应的 `WorkFetcher`
-pub type FetcherFactory =
+pub(crate) type FetcherFactory =
     Box<dyn Fn(Box<dyn HttpClient>, Arc<DecompilerConfig>) -> Box<dyn WorkFetcher> + Send + Sync>;
 /// decompiler 构造器:按作品类型创建对应的 `WorkDecompiler`
-pub type DecompilerFactory =
+pub(crate) type DecompilerFactory =
     Box<dyn Fn(&Arc<DecompilerConfig>) -> Box<dyn WorkDecompiler> + Send + Sync>;
 
 /// 作品类型 → 处理器(fetcher/decompiler)的注册表
 /// 新增作品类型时只需 `register`,无需修改门面代码(开闭原则)
-pub struct WorkProcessorRegistry {
+pub(crate) struct WorkProcessorRegistry {
     fetchers: HashMap<WorkType, FetcherFactory>,
     decompilers: HashMap<WorkType, DecompilerFactory>,
 }
 
 impl WorkProcessorRegistry {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             fetchers: HashMap::new(),
             decompilers: HashMap::new(),
@@ -3856,7 +3856,7 @@ impl WorkProcessorRegistry {
     }
 
     /// 注册某一作品类型的 fetcher 与 decompiler 构造器
-    pub fn register(
+    pub(crate) fn register(
         &mut self,
         work_type: WorkType,
         fetcher: FetcherFactory,
@@ -3867,7 +3867,7 @@ impl WorkProcessorRegistry {
     }
 
     /// 按作品类型创建 fetcher
-    pub fn fetcher_for(
+    pub(crate) fn fetcher_for(
         &self,
         work_type: &WorkType,
         client: Box<dyn HttpClient>,
@@ -3880,7 +3880,7 @@ impl WorkProcessorRegistry {
     }
 
     /// 按作品类型创建 decompiler
-    pub fn decompiler_for(
+    pub(crate) fn decompiler_for(
         &self,
         work_type: &WorkType,
         config: &Arc<DecompilerConfig>,
@@ -3933,7 +3933,7 @@ impl Default for WorkProcessorRegistry {
 }
 
 // 主入口
-pub struct CodemaoDecompiler {
+pub(crate) struct CodemaoDecompiler {
     config: Arc<DecompilerConfig>,
     client: Arc<CodeMaoClient>,
     id_generator: IdGenerator,
@@ -3941,7 +3941,7 @@ pub struct CodemaoDecompiler {
 }
 
 impl CodemaoDecompiler {
-    pub fn new(config: Option<DecompilerConfig>, client: Arc<CodeMaoClient>) -> Self {
+    pub(crate) fn new(config: Option<DecompilerConfig>, client: Arc<CodeMaoClient>) -> Self {
         let config = Arc::new(config.unwrap_or_default());
         Self {
             config,
@@ -3953,7 +3953,7 @@ impl CodemaoDecompiler {
 
     /// 全局单例门面:复用全局 HTTP 客户端与默认注册表
     /// 多次反编译不重复创建客户端(性能优化)
-    pub fn global() -> &'static Self {
+    pub(crate) fn global() -> &'static Self {
         static GLOBAL: OnceLock<CodemaoDecompiler> = OnceLock::new();
         GLOBAL.get_or_init(|| {
             let client = Arc::new(KittyFactory::global_client().clone());
@@ -3961,7 +3961,7 @@ impl CodemaoDecompiler {
         })
     }
     /// 反编译单个作品(默认选项,向后兼容)
-    pub fn decompile(&self, work_id: i64, output_dir: Option<&Path>) -> Result<String> {
+    pub(crate) fn decompile(&self, work_id: i64, output_dir: Option<&Path>) -> Result<String> {
         let mut options = DecompileOptions::new();
         if let Some(dir) = output_dir {
             options = options.output_dir(dir.to_path_buf());
@@ -3970,7 +3970,7 @@ impl CodemaoDecompiler {
     }
 
     /// 使用自定义选项反编译单个作品
-    pub fn decompile_with_options(
+    pub(crate) fn decompile_with_options(
         &self,
         work_id: i64,
         options: DecompileOptions,
@@ -3979,7 +3979,7 @@ impl CodemaoDecompiler {
     }
 
     /// 批处理反编译多个作品,返回与输入顺序一致的 `Vec<Result>`
-    pub fn decompile_batch(
+    pub(crate) fn decompile_batch(
         &self,
         work_ids: &[i64],
         options: DecompileOptions,

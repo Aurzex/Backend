@@ -25,7 +25,7 @@ type Ws = WebSocket<WsStream>;
 // 常量配置
 
 /// 云存储 WebSocket 服务器地址
-pub const CLOUD_WS_BASE_URL: &str = "wss://socketcv.codemao.cn:9096/cloudstorage/";
+pub(crate) const CLOUD_WS_BASE_URL: &str = "wss://socketcv.codemao.cn:9096/cloudstorage/";
 /// Socket.IO 帧前缀
 const HANDSHAKE_PREFIX: &str = "0";
 const CONNECTED_MESSAGE: &str = "40";
@@ -39,10 +39,10 @@ const DEFAULT_FLUSH_INTERVAL: Duration = Duration::from_millis(100);
 const DEFAULT_RECONNECT_INTERVAL: Duration = Duration::from_secs(8);
 const DEFAULT_MAX_RECONNECT_ATTEMPTS: usize = 5;
 /// 排行榜限制范围
-pub const MIN_RANKING_LIMIT: i64 = 1;
-pub const MAX_RANKING_LIMIT: i64 = 31;
-pub const ASCENDING_ORDER: i64 = 1;
-pub const DESCENDING_ORDER: i64 = -1;
+pub(crate) const MIN_RANKING_LIMIT: i64 = 1;
+pub(crate) const MAX_RANKING_LIMIT: i64 = 31;
+pub(crate) const ASCENDING_ORDER: i64 = 1;
+pub(crate) const DESCENDING_ORDER: i64 = -1;
 
 // 错误类型
 
@@ -78,7 +78,7 @@ impl From<tungstenite::Error> for CloudError {
 }
 
 /// 本模块统一的 `Result` 别名
-pub type Result<T> = std::result::Result<T, CloudError>;
+pub(crate) type Result<T> = std::result::Result<T, CloudError>;
 
 // 基础类型
 
@@ -94,7 +94,7 @@ pub enum EditorType {
 
 impl EditorType {
     /// 返回 `(authorization_type, stag)` 查询参数
-    pub fn query_params(self) -> (&'static str, &'static str) {
+    pub(crate) fn query_params(self) -> (&'static str, &'static str) {
         match self {
             EditorType::Nemo => ("5", "2"),
             EditorType::Kitten | EditorType::Coco => ("1", "1"),
@@ -113,7 +113,7 @@ pub enum CloudValue {
 
 impl CloudValue {
     /// 云协议要求的 `param_type`
-    pub fn param_type(&self) -> &'static str {
+    pub(crate) fn param_type(&self) -> &'static str {
         match self {
             CloudValue::Number(_) => "number",
             CloudValue::Text(_) => "string",
@@ -121,7 +121,7 @@ impl CloudValue {
     }
 
     /// 从 JSON 值转换(布尔/浮点按 Python 语义尽量转整数,否则转为文本)
-    pub fn from_json(v: &Value) -> CloudValue {
+    pub(crate) fn from_json(v: &Value) -> CloudValue {
         match v {
             Value::Number(n) => n
                 .as_i64()
@@ -175,7 +175,7 @@ pub enum ChangeSource {
 }
 
 impl ChangeSource {
-    pub fn as_str(&self) -> &'static str {
+    pub(crate) fn as_str(&self) -> &'static str {
         match self {
             ChangeSource::Local => "local",
             ChangeSource::Cloud => "cloud",
@@ -195,24 +195,24 @@ pub enum ConnectionEvent {
 /// 排行榜条目中的用户信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RankingUser {
-    pub id: i64,
-    pub nickname: String,
-    pub avatar_url: String,
+    pub(crate) id: i64,
+    pub(crate) nickname: String,
+    pub(crate) avatar_url: String,
 }
 
 /// 排行榜条目
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RankingItem {
-    pub value: CloudValue,
-    pub user: RankingUser,
+    pub(crate) value: CloudValue,
+    pub(crate) user: RankingUser,
 }
 
 /// 一次排行榜查询结果
 #[derive(Debug, Clone, Default)]
 pub struct RankingData {
-    pub cvid: String,
-    pub name: String,
-    pub items: Vec<RankingItem>,
+    pub(crate) cvid: String,
+    pub(crate) name: String,
+    pub(crate) items: Vec<RankingItem>,
 }
 
 // 回调类型别名
@@ -229,7 +229,7 @@ type ConnectionCallback = Box<dyn Fn(ConnectionEvent) + Send + Sync>;
 /// 云数据更新命令(命令模式:请求对象化,可排队,批量执行)
 /// 由 [`CommandFactory`] 创建
 #[derive(Debug, Clone)]
-pub enum CloudCommand {
+pub(crate) enum CloudCommand {
     /// 变量更新:私有/公有
     Variable { private: bool, data: Value },
     /// 列表更新:cvid + 操作序列
@@ -237,11 +237,11 @@ pub enum CloudCommand {
 }
 
 /// 命令工厂:集中创建云数据更新命令
-pub struct CommandFactory;
+pub(crate) struct CommandFactory;
 
 impl CommandFactory {
     /// 创建私有变量更新命令
-    pub fn update_private_variable(cvid: &str, value: &CloudValue) -> CloudCommand {
+    pub(crate) fn update_private_variable(cvid: &str, value: &CloudValue) -> CloudCommand {
         CloudCommand::Variable {
             private: true,
             data: json!({
@@ -253,7 +253,7 @@ impl CommandFactory {
     }
 
     /// 创建公有变量更新命令
-    pub fn update_public_variable(cvid: &str, value: &CloudValue) -> CloudCommand {
+    pub(crate) fn update_public_variable(cvid: &str, value: &CloudValue) -> CloudCommand {
         CloudCommand::Variable {
             private: false,
             data: json!({
@@ -266,7 +266,7 @@ impl CommandFactory {
     }
 
     /// 创建列表更新命令
-    pub fn update_list(cvid: &str, ops: Vec<Value>) -> CloudCommand {
+    pub(crate) fn update_list(cvid: &str, ops: Vec<Value>) -> CloudCommand {
         CloudCommand::List {
             cvid: cvid.to_string(),
             ops,
@@ -276,10 +276,10 @@ impl CommandFactory {
 
 /// 批量合并后的上传载荷
 #[derive(Debug, Default)]
-pub struct BatchedUploads {
-    pub private_updates: Vec<Value>,
-    pub public_updates: Vec<Value>,
-    pub list_updates: Vec<(String, Vec<Value>)>,
+pub(crate) struct BatchedUploads {
+    pub(crate) private_updates: Vec<Value>,
+    pub(crate) public_updates: Vec<Value>,
+    pub(crate) list_updates: Vec<(String, Vec<Value>)>,
 }
 
 /// 将待上传命令合并为最少次数的网络请求:
@@ -289,7 +289,7 @@ pub struct BatchedUploads {
 /// 减少 WebSocket 帧数量与网络往返
 /// 变量命令按 data 中的 action 分流到公有/私有两个通道,
 /// 列表命令按 cvid 归并,同一列表的连续操作合并进同一帧
-pub fn merge_commands(commands: Vec<CloudCommand>) -> BatchedUploads {
+pub(crate) fn merge_commands(commands: Vec<CloudCommand>) -> BatchedUploads {
     let mut out = BatchedUploads::default();
     for cmd in commands {
         match cmd {
@@ -1123,7 +1123,7 @@ impl CloudConnection {
     // 内部发送
 
     /// 发送 Socket.IO 事件帧:`42["name",payload]`
-    pub(crate) fn send_event(&self, name: &str, payload: &Value) -> Result<()> {
+    pub fn send_event(&self, name: &str, payload: &Value) -> Result<()> {
         let frame = format!(
             "{EVENT_MESSAGE_PREFIX}{}",
             serde_json::to_string(&(name, payload))?
@@ -1132,7 +1132,7 @@ impl CloudConnection {
     }
 
     /// 发送原始文本帧
-    pub(crate) fn send_text(&self, payload: &str) -> Result<()> {
+    pub fn send_text(&self, payload: &str) -> Result<()> {
         let tx = self
             .inner
             .tx
@@ -1761,7 +1761,7 @@ fn set_stream_read_timeout(stream: &mut WsStream, timeout: Duration) -> std::io:
 
 /// 解析后的 Socket.IO 帧
 #[derive(Debug, Clone, PartialEq)]
-pub enum Frame {
+pub(crate) enum Frame {
     Handshake(Value),
     Connected,
     Ping,
@@ -1774,7 +1774,7 @@ pub enum Frame {
 }
 
 /// 纯函数:解析 Socket.IO 文本帧(可测)
-pub fn parse_frame(text: &str) -> Frame {
+pub(crate) fn parse_frame(text: &str) -> Frame {
     if text == PING_MESSAGE {
         return Frame::Ping;
     }

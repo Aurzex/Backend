@@ -43,7 +43,7 @@ pub enum CommentSource {
 }
 
 impl CommentSource {
-    pub fn as_str(&self) -> &'static str {
+    pub(crate) fn as_str(&self) -> &'static str {
         match self {
             CommentSource::Work => "work",
             CommentSource::Forum => "forum",
@@ -73,7 +73,7 @@ pub enum NotificationCategory {
 }
 
 impl NotificationCategory {
-    pub fn as_str(&self) -> &'static str {
+    pub(crate) fn as_str(&self) -> &'static str {
         match self {
             NotificationCategory::LikeFork => "LIKE_FORK",
             NotificationCategory::CommentReply => "COMMENT_REPLY",
@@ -84,8 +84,8 @@ impl NotificationCategory {
 
 // 数据类型别名
 
-pub type JsonValue = Value;
-pub type JsonObject = Map<String, Value>;
+pub(crate) type JsonValue = Value;
+pub(crate) type JsonObject = Map<String, Value>;
 /// 惰性值流(统一迭代器特征对象签名)
 pub type JsonValueIter = Box<dyn Iterator<Item = Result<JsonValue, DataQueryError>>>;
 /// 惰性对象流
@@ -99,7 +99,7 @@ pub type JsonPairIter = Box<dyn Iterator<Item = Result<(String, String), DataQue
 
 /// 惰性去重迭代器,仅保留第一次出现的元素(基于 `HashSet` 记录)
 /// 遇到 `Err` 直接返回并停止去重状态,但后续 `Ok` 仍会继续去重
-pub struct UniqueIter<I: Iterator> {
+pub(crate) struct UniqueIter<I: Iterator> {
     iter: I,
     seen: HashSet<String>,
 }
@@ -963,32 +963,32 @@ impl Default for DataQuery {
 /// 管理员举报统计条目
 #[derive(Debug, Clone)]
 pub struct AdminReportStatsEntry {
-    pub admin_id: i32,
-    pub admin_name: String,
-    pub comment_reports: i32,
-    pub work_reports: i32,
-    pub total_reports: i32,
-    pub percentage: f64,
+    pub(crate) admin_id: i32,
+    pub(crate) admin_name: String,
+    pub(crate) comment_reports: i32,
+    pub(crate) work_reports: i32,
+    pub(crate) total_reports: i32,
+    pub(crate) percentage: f64,
 }
 
 /// 管理员举报统计汇总
 #[derive(Debug, Clone)]
 pub struct AdminReportStatistics {
-    pub total_admins: i32,
-    pub total_comment_reports: i32,
-    pub total_work_reports: i32,
-    pub total_all_reports: i32,
-    pub statistics: Vec<AdminReportStatsEntry>,
+    pub(crate) total_admins: i32,
+    pub(crate) total_comment_reports: i32,
+    pub(crate) total_work_reports: i32,
+    pub(crate) total_all_reports: i32,
+    pub(crate) statistics: Vec<AdminReportStatsEntry>,
 }
 
 /// 粉丝点赞统计
 #[derive(Debug, Clone)]
 pub struct FanByLikesStatistics {
-    pub target_user_id: i32,
-    pub like_threshold: i32,
-    pub total_fans: i32,
-    pub qualified_fans_count: i32,
-    pub qualified_fans: Vec<JsonObject>,
+    pub(crate) target_user_id: i32,
+    pub(crate) like_threshold: i32,
+    pub(crate) total_fans: i32,
+    pub(crate) qualified_fans_count: i32,
+    pub(crate) qualified_fans: Vec<JsonObject>,
 }
 
 // 辅助迭代器实现

@@ -116,9 +116,9 @@ fn visit_dir(
 
 // 主举报处理器
 pub struct ReportProcessor {
-    pub fetcher: ReportFetcher,
-    pub pipeline_factory: Arc<ReportTypeRegistry>,
-    pub batch_manager: Arc<Mutex<BatchActionManager>>,
+    pub(crate) fetcher: ReportFetcher,
+    pub(crate) pipeline_factory: Arc<ReportTypeRegistry>,
+    pub(crate) batch_manager: Arc<Mutex<BatchActionManager>>,
     pending_groups: Mutex<HashMap<GroupKey, Vec<String>>>,
     config: CheckConfig, // 注入配置,包含批量识别阈值等
 }

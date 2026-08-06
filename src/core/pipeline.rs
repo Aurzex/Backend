@@ -5,7 +5,6 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 
-use fastrand;
 use log::{error, info, warn};
 use serde_json::Value;
 
@@ -26,13 +25,13 @@ use crate::utils::data::PathConfig;
 // 配置结构体(依赖注入)
 #[derive(Clone)]
 pub struct CheckConfig {
-    pub official_ids: &'static [i64],
-    pub ad_keywords: &'static [&'static str],
-    pub spam_threshold: usize,
-    pub comment_fetch_default_limit: usize,
-    pub max_reports_per_account: usize,
-    pub batch_item_id_threshold: usize,
-    pub batch_content_threshold: usize,
+    pub(crate) official_ids: &'static [i64],
+    pub(crate) ad_keywords: &'static [&'static str],
+    pub(crate) spam_threshold: usize,
+    pub(crate) comment_fetch_default_limit: usize,
+    pub(crate) max_reports_per_account: usize,
+    pub(crate) batch_item_id_threshold: usize,
+    pub(crate) batch_content_threshold: usize,
 }
 
 impl Default for CheckConfig {
@@ -164,7 +163,7 @@ pub(crate) fn parse_resolution(resolution: &str) -> Result<Resolution, Processor
     }
 }
 
-pub trait ReportIdExt {
+pub(crate) trait ReportIdExt {
     fn get_report_id(&self, item: &Value) -> Result<i32, ProcessorError>;
 }
 
@@ -300,7 +299,7 @@ impl CommentProcessStrategy for DuplicatesStrategy {
 }
 
 // 策略工厂
-pub struct StrategyFactory {
+pub(crate) struct StrategyFactory {
     strategies: HashMap<String, Box<dyn CommentProcessStrategy>>,
 }
 
@@ -311,7 +310,7 @@ impl Default for StrategyFactory {
 }
 
 impl StrategyFactory {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let mut factory = StrategyFactory {
             strategies: HashMap::new(),
         };
@@ -320,15 +319,15 @@ impl StrategyFactory {
         factory
     }
 
-    pub fn register(&mut self, name: &str, strategy: Box<dyn CommentProcessStrategy>) {
+    pub(crate) fn register(&mut self, name: &str, strategy: Box<dyn CommentProcessStrategy>) {
         self.strategies.insert(name.to_string(), strategy);
     }
 
-    pub fn get(&self, name: &str) -> Option<&dyn CommentProcessStrategy> {
+    pub(crate) fn get(&self, name: &str) -> Option<&dyn CommentProcessStrategy> {
         self.strategies.get(name).map(|b| b.as_ref())
     }
 
-    pub fn get_all_strategy_types(&self) -> Vec<String> {
+    pub(crate) fn get_all_strategy_types(&self) -> Vec<String> {
         self.strategies.keys().cloned().collect()
     }
 }
@@ -385,14 +384,14 @@ impl CommentProcessor {
 
 // 批量组与管理器
 #[derive(Debug, Clone)]
-pub struct BatchGroup {
-    pub group_type: String,
-    pub group_key: String,
-    pub record_ids: Vec<String>,
+pub(crate) struct BatchGroup {
+    pub(crate) group_type: String,
+    pub(crate) group_key: String,
+    pub(crate) record_ids: Vec<String>,
 }
 
 impl BatchGroup {
-    pub fn new(group_type: &str, group_key: &str, record_ids: Vec<String>) -> Self {
+    pub(crate) fn new(group_type: &str, group_key: &str, record_ids: Vec<String>) -> Self {
         BatchGroup {
             group_type: group_type.to_string(),
             group_key: group_key.to_string(),
@@ -402,70 +401,70 @@ impl BatchGroup {
 }
 
 #[derive(Default)]
-pub struct BatchActionManager {
+pub(crate) struct BatchActionManager {
     batch_actions: HashMap<(String, String), String>,
     processed_records: HashSet<String>,
 }
 
 impl BatchActionManager {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         BatchActionManager::default()
     }
 
-    pub fn save_batch_action(&mut self, group_type: &str, group_key: &str, action: &str) {
+    pub(crate) fn save_batch_action(&mut self, group_type: &str, group_key: &str, action: &str) {
         self.batch_actions.insert(
             (group_type.to_string(), group_key.to_string()),
             action.to_string(),
         );
     }
 
-    pub fn get_batch_action(&self, group_type: &str, group_key: &str) -> Option<String> {
+    pub(crate) fn get_batch_action(&self, group_type: &str, group_key: &str) -> Option<String> {
         self.batch_actions
             .get(&(group_type.to_string(), group_key.to_string()))
             .cloned()
     }
 
-    pub fn mark_record_processed(&mut self, record_id: &str) {
+    pub(crate) fn mark_record_processed(&mut self, record_id: &str) {
         self.processed_records.insert(record_id.to_string());
     }
 
-    pub fn is_record_processed(&self, record_id: &str) -> bool {
+    pub(crate) fn is_record_processed(&self, record_id: &str) -> bool {
         self.processed_records.contains(record_id)
     }
 
-    pub fn clear_processed_records(&mut self) {
+    pub(crate) fn clear_processed_records(&mut self) {
         self.processed_records.clear();
     }
 }
 
 // 处理上下文(不可变记录 + 可变状态)
 #[derive(Debug, Clone)]
-pub struct ReportRecord {
-    pub record_id: String,
-    pub report_type: String,
-    pub item: Value,
-    pub admin_id: i32,
-    pub is_batch_mode: bool,
-    pub is_reprocess_mode: bool,
-    pub config: Option<SourceConfig>,
-    pub user_id: Option<i64>,
+pub(crate) struct ReportRecord {
+    pub(crate) record_id: String,
+    pub(crate) report_type: String,
+    pub(crate) item: Value,
+    pub(crate) admin_id: i32,
+    pub(crate) is_batch_mode: bool,
+    pub(crate) is_reprocess_mode: bool,
+    pub(crate) config: Option<SourceConfig>,
+    pub(crate) user_id: Option<i64>,
 }
 
 #[derive(Debug, Default)]
-pub struct ProcessingState {
-    pub processed: bool,
-    pub action: Option<String>,
-    pub skip_reason: Option<String>,
-    pub messages: Vec<String>,
+pub(crate) struct ProcessingState {
+    pub(crate) processed: bool,
+    pub(crate) action: Option<String>,
+    pub(crate) skip_reason: Option<String>,
+    pub(crate) messages: Vec<String>,
 }
 
-pub struct ProcessingContext {
-    pub record: ReportRecord,
-    pub state: ProcessingState,
+pub(crate) struct ProcessingContext {
+    pub(crate) record: ReportRecord,
+    pub(crate) state: ProcessingState,
 }
 
 impl ProcessingContext {
-    pub fn new(record_id: String, report_type: String, item: Value, admin_id: i32) -> Self {
+    pub(crate) fn new(record_id: String, report_type: String, item: Value, admin_id: i32) -> Self {
         ProcessingContext {
             record: ReportRecord {
                 record_id,
@@ -483,7 +482,7 @@ impl ProcessingContext {
 }
 
 // 处理器接口
-pub trait Processor: Send + Sync {
+pub(crate) trait Processor: Send + Sync {
     fn process(
         &self,
         record: &ReportRecord,
@@ -494,7 +493,7 @@ pub trait Processor: Send + Sync {
 // 动作注册表(静态函数表)
 type ActionFn = fn(i32, i32, Resolution) -> Result<bool, ProcessorError>;
 
-pub struct ActionRegistry {
+pub(crate) struct ActionRegistry {
     handlers: HashMap<&'static str, ActionFn>,
 }
 
@@ -505,7 +504,7 @@ impl Default for ActionRegistry {
 }
 
 impl ActionRegistry {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         macro_rules! register_report_handler {
             ($handlers:ident, $method:literal, $handler:ident) => {
                 $handlers.insert(
@@ -545,7 +544,7 @@ impl ActionRegistry {
         ActionRegistry { handlers }
     }
 
-    pub fn apply(
+    pub(crate) fn apply(
         &self,
         method: &str,
         report_id: i32,
@@ -561,7 +560,7 @@ impl ActionRegistry {
 }
 
 static ACTION_REGISTRY: OnceLock<ActionRegistry> = OnceLock::new();
-pub fn global_action_registry() -> &'static ActionRegistry {
+pub(crate) fn global_action_registry() -> &'static ActionRegistry {
     ACTION_REGISTRY.get_or_init(ActionRegistry::new)
 }
 
@@ -590,7 +589,7 @@ fn apply_action_by_key(
 }
 
 // 详情展示(字段表驱动)
-pub trait ReportDisplay: Send + Sync {
+pub(crate) trait ReportDisplay: Send + Sync {
     fn display(&self, item: &Value, config: &SourceConfig);
 }
 
@@ -785,7 +784,7 @@ fn get_display_registry() -> &'static HashMap<&'static str, Box<dyn ReportDispla
 }
 
 // 详情显示处理器
-pub struct DetailDisplayProcessor;
+pub(crate) struct DetailDisplayProcessor;
 
 impl Processor for DetailDisplayProcessor {
     fn process(
@@ -820,12 +819,12 @@ impl Processor for DetailDisplayProcessor {
 }
 
 // 官方账号检查处理器
-pub struct OfficialCheckProcessor {
+pub(crate) struct OfficialCheckProcessor {
     config: CheckConfig,
 }
 
 impl OfficialCheckProcessor {
-    pub fn new(config: CheckConfig) -> Self {
+    pub(crate) fn new(config: CheckConfig) -> Self {
         OfficialCheckProcessor { config }
     }
 }
@@ -876,14 +875,14 @@ enum ViolationKind {
 }
 
 // 违规检查器
-pub struct ViolationChecker {
-    pub comment_processor: CommentProcessor,
+pub(crate) struct ViolationChecker {
+    pub(crate) comment_processor: CommentProcessor,
     config: CheckConfig,
     ad_keywords_cache: Arc<HashSet<String>>,
 }
 
 impl ViolationChecker {
-    pub fn new(config: CheckConfig) -> Self {
+    pub(crate) fn new(config: CheckConfig) -> Self {
         let ad_keywords_cache = Arc::new(
             config
                 .ad_keywords
@@ -1066,7 +1065,7 @@ impl ViolationChecker {
         Ok(comments)
     }
 
-    pub fn check_violation(
+    pub(crate) fn check_violation(
         &self,
         source_id: i64,
         source_type: &str,
@@ -1402,14 +1401,14 @@ impl ViolationChecker {
 }
 
 // 动作选择处理器
-pub struct ActionSelectionProcessor {
-    pub registry: Arc<ReportTypeRegistry>,
-    pub batch_manager: Arc<Mutex<BatchActionManager>>,
+pub(crate) struct ActionSelectionProcessor {
+    pub(crate) registry: Arc<ReportTypeRegistry>,
+    pub(crate) batch_manager: Arc<Mutex<BatchActionManager>>,
     violation_checker: ViolationChecker,
 }
 
 impl ActionSelectionProcessor {
-    pub fn new(
+    pub(crate) fn new(
         registry: Arc<ReportTypeRegistry>,
         batch_manager: Arc<Mutex<BatchActionManager>>,
         check_config: CheckConfig,
@@ -1545,16 +1544,16 @@ impl Processor for ActionSelectionProcessor {
 }
 
 // 处理管道
-pub struct ProcessingPipeline {
+pub(crate) struct ProcessingPipeline {
     processors: Vec<Box<dyn Processor>>,
 }
 
 impl ProcessingPipeline {
-    pub fn new(processors: Vec<Box<dyn Processor>>) -> Self {
+    pub(crate) fn new(processors: Vec<Box<dyn Processor>>) -> Self {
         ProcessingPipeline { processors }
     }
 
-    pub fn execute(&self, context: &mut ProcessingContext) -> Result<(), ProcessorError> {
+    pub(crate) fn execute(&self, context: &mut ProcessingContext) -> Result<(), ProcessorError> {
         for processor in &self.processors {
             if context.state.processed || context.state.skip_reason.is_some() {
                 break;
@@ -1564,7 +1563,7 @@ impl ProcessingPipeline {
         Ok(())
     }
 
-    pub fn create_default(
+    pub(crate) fn create_default(
         registry: Arc<ReportTypeRegistry>,
         batch_manager: Arc<Mutex<BatchActionManager>>,
         check_config: CheckConfig,
@@ -1582,8 +1581,8 @@ impl ProcessingPipeline {
 }
 
 // 多账号管理器
-pub struct MultiAccount {
-    pub accounts: Vec<(String, String)>,
+pub(crate) struct MultiAccount {
+    pub(crate) accounts: Vec<(String, String)>,
 }
 
 impl Default for MultiAccount {
@@ -1593,13 +1592,13 @@ impl Default for MultiAccount {
 }
 
 impl MultiAccount {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         MultiAccount {
             accounts: Vec::new(),
         }
     }
 
-    pub fn load_from_file(&mut self, path: &Path) -> Result<(), ProcessorError> {
+    pub(crate) fn load_from_file(&mut self, path: &Path) -> Result<(), ProcessorError> {
         let content = fs::read_to_string(path)?;
         self.accounts.clear();
         for line in content.lines() {
@@ -1616,7 +1615,7 @@ impl MultiAccount {
         Ok(())
     }
 
-    pub fn execute_with_accounts<F>(&self, func: F, limit: Option<usize>, delay_secs: u64)
+    pub(crate) fn execute_with_accounts<F>(&self, func: F, limit: Option<usize>, delay_secs: u64)
     where
         F: Fn(),
     {
@@ -1638,11 +1637,11 @@ impl MultiAccount {
 static COMMENT_PROCESSOR: OnceLock<CommentProcessor> = OnceLock::new();
 static VIOLATION_CHECKER: OnceLock<ViolationChecker> = OnceLock::new();
 
-pub fn comment_processor() -> &'static CommentProcessor {
+pub(crate) fn comment_processor() -> &'static CommentProcessor {
     COMMENT_PROCESSOR.get_or_init(CommentProcessor::new)
 }
 
-pub fn violation_checker() -> &'static ViolationChecker {
+pub(crate) fn violation_checker() -> &'static ViolationChecker {
     VIOLATION_CHECKER.get_or_init(|| ViolationChecker::new(CheckConfig::default()))
 }
 

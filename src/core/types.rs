@@ -28,7 +28,7 @@ pub trait CommentConfig {
 }
 
 // 交互工具
-pub fn prompt_input(prompt: &str) -> String {
+pub(crate) fn prompt_input(prompt: &str) -> String {
     print!("{}", prompt);
     io::stdout().flush().unwrap();
     let mut input = String::new();
@@ -36,7 +36,7 @@ pub fn prompt_input(prompt: &str) -> String {
     input.trim().to_string()
 }
 
-pub fn get_valid_input(prompt: &str, valid_options: &HashSet<String>) -> String {
+pub(crate) fn get_valid_input(prompt: &str, valid_options: &HashSet<String>) -> String {
     loop {
         let input = prompt_input(prompt);
         if valid_options.contains(&input.to_uppercase()) {
@@ -47,7 +47,7 @@ pub fn get_valid_input(prompt: &str, valid_options: &HashSet<String>) -> String 
 }
 
 // 辅助函数
-pub fn value_to_string(v: &serde_json::Value) -> String {
+pub(crate) fn value_to_string(v: &serde_json::Value) -> String {
     match v {
         serde_json::Value::String(s) => s.clone(),
         serde_json::Value::Number(n) => n.to_string(),
@@ -55,7 +55,7 @@ pub fn value_to_string(v: &serde_json::Value) -> String {
     }
 }
 
-pub fn value_to_i64(v: &serde_json::Value) -> Option<i64> {
+pub(crate) fn value_to_i64(v: &serde_json::Value) -> Option<i64> {
     match v {
         serde_json::Value::Number(n) => n.as_i64(),
         serde_json::Value::String(s) => s.parse().ok(),
@@ -64,7 +64,7 @@ pub fn value_to_i64(v: &serde_json::Value) -> Option<i64> {
 }
 
 /// 将时间戳转换为字符串表示
-pub fn timestamp_to_string(ts: &serde_json::Value) -> String {
+pub(crate) fn timestamp_to_string(ts: &serde_json::Value) -> String {
     if let Some(secs) = ts.as_i64()
         && secs > 0
     {
@@ -76,7 +76,7 @@ pub fn timestamp_to_string(ts: &serde_json::Value) -> String {
     ts.to_string()
 }
 
-pub fn html_to_text(html: &str) -> String {
+pub(crate) fn html_to_text(html: &str) -> String {
     html.replace("<br>", "\n")
         .replace("<br/>", "\n")
         .replace("<br />", "\n")
@@ -88,7 +88,7 @@ pub fn html_to_text(html: &str) -> String {
         .replace("&amp;", "&")
 }
 
-pub fn bytes_to_human(size_bytes: u64) -> String {
+pub(crate) fn bytes_to_human(size_bytes: u64) -> String {
     if size_bytes >= 1024 * 1024 {
         format!("{:.2} MB", size_bytes as f64 / 1024.0 / 1024.0)
     } else {
@@ -98,12 +98,12 @@ pub fn bytes_to_human(size_bytes: u64) -> String {
 
 // 举报类型配置
 #[derive(Debug, Clone)]
-pub struct ActionConfig {
-    pub key: String,
-    pub name: String,
-    pub description: String,
-    pub status: String,
-    pub enabled: bool,
+pub(crate) struct ActionConfig {
+    pub(crate) key: String,
+    pub(crate) name: String,
+    pub(crate) description: String,
+    pub(crate) status: String,
+    pub(crate) enabled: bool,
 }
 
 impl ActionConfig {
@@ -134,45 +134,45 @@ fn actions(keys: &[&str]) -> Vec<ActionConfig> {
     keys.iter().map(|k| ActionConfig::simple(k)).collect()
 }
 
-pub type FetchGenerator =
+pub(crate) type FetchGenerator =
     fn(ReportStatus) -> Box<dyn Iterator<Item = Result<Value, ProcessorError>>>;
-pub type FetchTotal = fn(ReportStatus) -> Result<Value, ProcessorError>;
+pub(crate) type FetchTotal = fn(ReportStatus) -> Result<Value, ProcessorError>;
 
 #[derive(Clone, Debug)]
-pub struct SourceConfig {
-    pub admin_id_field: String,
-    pub admin_username_field: String,
-    pub available_actions: Vec<ActionConfig>,
-    pub board_id_field: Option<String>,
-    pub board_name_field: Option<String>,
-    pub chunk_size: usize,
-    pub content_field: String,
-    pub content_id_field: String,
-    pub content_type_field: String,
-    pub created_at_field: String,
-    pub description_field: String,
-    pub fetch_generator: FetchGenerator,
-    pub fetch_total: FetchTotal,
-    pub handle_method: String,
-    pub item_id_field: String,
-    pub name: String,
-    pub parent_id_field: String,
-    pub reason_field: String,
-    pub reason_id_field: String,
-    pub report_id_field: String,
-    pub source_id_field: String,
-    pub source_name_field: String,
-    pub source_object_id_field: String,
-    pub source_object_name_field: String,
-    pub source_type_field: String,
-    pub special_check: Option<fn(&Value) -> bool>,
-    pub status_field: String,
-    pub title_field: Option<String>,
-    pub user_id_field: String,
-    pub user_nickname_field: String,
-    pub user_parent_id_field: String,
-    pub user_parent_nickname_field: String,
-    pub work_type_field: Option<String>,
+pub(crate) struct SourceConfig {
+    pub(crate) admin_id_field: String,
+    pub(crate) admin_username_field: String,
+    pub(crate) available_actions: Vec<ActionConfig>,
+    pub(crate) board_id_field: Option<String>,
+    pub(crate) board_name_field: Option<String>,
+    pub(crate) chunk_size: usize,
+    pub(crate) content_field: String,
+    pub(crate) content_id_field: String,
+    pub(crate) content_type_field: String,
+    pub(crate) created_at_field: String,
+    pub(crate) description_field: String,
+    pub(crate) fetch_generator: FetchGenerator,
+    pub(crate) fetch_total: FetchTotal,
+    pub(crate) handle_method: String,
+    pub(crate) item_id_field: String,
+    pub(crate) name: String,
+    pub(crate) parent_id_field: String,
+    pub(crate) reason_field: String,
+    pub(crate) reason_id_field: String,
+    pub(crate) report_id_field: String,
+    pub(crate) source_id_field: String,
+    pub(crate) source_name_field: String,
+    pub(crate) source_object_id_field: String,
+    pub(crate) source_object_name_field: String,
+    pub(crate) source_type_field: String,
+    pub(crate) special_check: Option<fn(&Value) -> bool>,
+    pub(crate) status_field: String,
+    pub(crate) title_field: Option<String>,
+    pub(crate) user_id_field: String,
+    pub(crate) user_nickname_field: String,
+    pub(crate) user_parent_id_field: String,
+    pub(crate) user_parent_nickname_field: String,
+    pub(crate) work_type_field: Option<String>,
 }
 
 impl SourceConfig {
@@ -230,7 +230,7 @@ pub(crate) struct ActionOptions {
     pub(crate) valid_keys: HashSet<String>,
 }
 
-pub struct ReportTypeRegistry {
+pub(crate) struct ReportTypeRegistry {
     registry: HashMap<String, SourceConfig>,
     default_actions: Vec<ActionConfig>, // 保留用于构建默认动作,也可直接为静态
     action_cache: Mutex<HashMap<String, Arc<ActionOptions>>>,
@@ -269,7 +269,7 @@ impl Default for ReportTypeRegistry {
 }
 
 impl ReportTypeRegistry {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let default_actions = actions(&["D", "S", "T", "U", "P", "F", "J"]);
 
         ReportTypeRegistry {
@@ -279,20 +279,20 @@ impl ReportTypeRegistry {
         }
     }
 
-    pub fn register(&mut self, report_type: &str, config: SourceConfig) {
+    pub(crate) fn register(&mut self, report_type: &str, config: SourceConfig) {
         self.registry.insert(report_type.to_string(), config);
     }
 
-    pub fn get_config(&self, report_type: &str) -> Option<&SourceConfig> {
+    pub(crate) fn get_config(&self, report_type: &str) -> Option<&SourceConfig> {
         self.registry.get(report_type)
     }
 
-    pub fn get_all_types(&self) -> Vec<String> {
+    pub(crate) fn get_all_types(&self) -> Vec<String> {
         self.registry.keys().cloned().collect()
     }
 
     /// 返回可用动作的引用,避免克隆整个 ActionConfig
-    pub fn get_available_actions(&self, report_type: &str) -> Vec<&ActionConfig> {
+    pub(crate) fn get_available_actions(&self, report_type: &str) -> Vec<&ActionConfig> {
         self.get_config(report_type)
             .map(|config| {
                 config
@@ -323,16 +323,16 @@ impl ReportTypeRegistry {
         options
     }
 
-    pub fn get_action_prompt(&self, report_type: &str) -> String {
+    pub(crate) fn get_action_prompt(&self, report_type: &str) -> String {
         self.action_options(report_type).prompt.clone()
     }
 
     /// 返回全局静态的状态映射引用
-    pub fn get_status_mapping(&self) -> &'static HashMap<&'static str, &'static str> {
+    pub(crate) fn get_status_mapping(&self) -> &'static HashMap<&'static str, &'static str> {
         status_mapping()
     }
 
-    pub fn is_action_available(&self, report_type: &str, action_key: &str) -> bool {
+    pub(crate) fn is_action_available(&self, report_type: &str, action_key: &str) -> bool {
         self.action_options(report_type)
             .valid_keys
             .contains(action_key)
@@ -363,8 +363,8 @@ macro_rules! set_config_fields {
     };
 }
 
-pub struct ReportFetcher {
-    pub registry: ReportTypeRegistry,
+pub(crate) struct ReportFetcher {
+    pub(crate) registry: ReportTypeRegistry,
 }
 
 impl Default for ReportFetcher {
@@ -374,7 +374,7 @@ impl Default for ReportFetcher {
 }
 
 impl ReportFetcher {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let mut registry = ReportTypeRegistry::new();
 
         // shop_comment
@@ -559,7 +559,7 @@ impl ReportFetcher {
         ReportFetcher { registry }
     }
 
-    pub fn fetch_chunked(&self, status: ReportStatus) -> impl Iterator<Item = Vec<Value>> {
+    pub(crate) fn fetch_chunked(&self, status: ReportStatus) -> impl Iterator<Item = Vec<Value>> {
         let report_types = self.registry.get_all_types();
         let total_types = report_types.len();
         let mut type_index = 0;
@@ -615,11 +615,11 @@ impl ReportFetcher {
         })
     }
 
-    pub fn fetch_reports_chunked(&self, status: ReportStatus) -> impl Iterator<Item = Vec<Value>> {
+    pub(crate) fn fetch_reports_chunked(&self, status: ReportStatus) -> impl Iterator<Item = Vec<Value>> {
         self.fetch_chunked(status)
     }
 
-    pub fn get_total_reports(&self, status: ReportStatus) -> i64 {
+    pub(crate) fn get_total_reports(&self, status: ReportStatus) -> i64 {
         let mut total = 0i64;
         for rtype in self.registry.get_all_types() {
             if let Some(config) = self.registry.get_config(&rtype)

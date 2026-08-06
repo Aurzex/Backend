@@ -23,9 +23,9 @@ type Ws = WebSocket<WsStream>;
 // 常量配置
 
 /// CodeMao AI 聊天 WebSocket 服务器地址
-pub const CHAT_WS_BASE_URL: &str = "wss://cr-aichat.codemao.cn/aichat/";
+pub(crate) const CHAT_WS_BASE_URL: &str = "wss://cr-aichat.codemao.cn/aichat/";
 /// 默认请求头(与 Python `CodeMaoConfig.HEADERS` 一致)
-pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 Edg/140.0.0.0";
+pub(crate) const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 Edg/140.0.0.0";
 
 /// Socket.IO 帧前缀
 const HANDSHAKE_PREFIX: &str = "0";
@@ -35,11 +35,11 @@ const PING_MESSAGE: &str = "2";
 const PONG_MESSAGE: &str = "3";
 
 /// 等待 AI 开始回复的默认超时
-pub const DEFAULT_RESPONSE_START_TIMEOUT: Duration = Duration::from_secs(10);
+pub(crate) const DEFAULT_RESPONSE_START_TIMEOUT: Duration = Duration::from_secs(10);
 /// 等待回复完成的默认超时
-pub const DEFAULT_RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
+pub(crate) const DEFAULT_RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
 /// 连接建立等待超时
-pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+pub(crate) const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 // 错误类型
 
@@ -75,7 +75,7 @@ impl From<tungstenite::Error> for ChatError {
 }
 
 /// 本模块统一的 `Result` 别名
-pub type Result<T> = std::result::Result<T, ChatError>;
+pub(crate) type Result<T> = std::result::Result<T, ChatError>;
 
 // 基础类型
 
@@ -103,19 +103,19 @@ pub enum Role {
 /// 单条对话历史消息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HistoryMessage {
-    pub role: Role,
-    pub content: String,
+    pub(crate) role: Role,
+    pub(crate) content: String,
 }
 
 impl HistoryMessage {
-    pub fn user(content: impl Into<String>) -> Self {
+    pub(crate) fn user(content: impl Into<String>) -> Self {
         Self {
             role: Role::User,
             content: content.into(),
         }
     }
 
-    pub fn assistant(content: impl Into<String>) -> Self {
+    pub(crate) fn assistant(content: impl Into<String>) -> Self {
         Self {
             role: Role::Assistant,
             content: content.into(),
@@ -126,11 +126,11 @@ impl HistoryMessage {
 /// 用户配额信息
 #[derive(Debug, Clone, Default)]
 pub struct UserInfo {
-    pub user_id: Option<i64>,
+    pub(crate) user_id: Option<i64>,
     /// 剩余对话次数
-    pub chat_count: Option<i64>,
+    pub(crate) chat_count: Option<i64>,
     /// 剩余图片生成次数
-    pub remaining_image_times: Option<i64>,
+    pub(crate) remaining_image_times: Option<i64>,
 }
 
 /// 回调句柄,用于取消注册回调
@@ -467,7 +467,7 @@ impl ChatClient {
 
     // 内部发送
 
-    pub(crate) fn send_event(&self, name: &str, payload: &Value) -> Result<()> {
+    pub fn send_event(&self, name: &str, payload: &Value) -> Result<()> {
         let frame = format!(
             "{EVENT_MESSAGE_PREFIX} {}",
             serde_json::to_string(&(name, payload))?
@@ -475,7 +475,7 @@ impl ChatClient {
         self.send_text(&frame)
     }
 
-    pub(crate) fn send_text(&self, payload: &str) -> Result<()> {
+    pub fn send_text(&self, payload: &str) -> Result<()> {
         let tx = self
             .inner
             .tx
@@ -490,7 +490,7 @@ impl ChatClient {
 // 帧构造与解析
 
 /// 构建 `chat` 事件帧:`42["chat",{...}]`(可测)
-pub fn build_chat_frame(session_id: &str, messages: &[HistoryMessage]) -> Result<String> {
+pub(crate) fn build_chat_frame(session_id: &str, messages: &[HistoryMessage]) -> Result<String> {
     let payload = json!({
         "session_id": session_id,
         "messages": messages,
@@ -506,7 +506,7 @@ pub fn build_chat_frame(session_id: &str, messages: &[HistoryMessage]) -> Result
 
 /// 解析后的 Socket.IO 帧
 #[derive(Debug, Clone, PartialEq)]
-pub enum Frame {
+pub(crate) enum Frame {
     Handshake(Value),
     Connected,
     Ping,
@@ -517,7 +517,7 @@ pub enum Frame {
 }
 
 /// 纯函数:解析 Socket.IO 文本帧(可测)
-pub fn parse_frame(text: &str) -> Frame {
+pub(crate) fn parse_frame(text: &str) -> Frame {
     if text == PING_MESSAGE {
         return Frame::Ping;
     }
@@ -552,7 +552,7 @@ pub enum StreamEvent {
 }
 
 /// 纯函数:解析 `chat_ack` 载荷为流式事件(可测)
-pub fn parse_chat_ack(payload: &Value) -> Option<StreamEvent> {
+pub(crate) fn parse_chat_ack(payload: &Value) -> Option<StreamEvent> {
     if payload.get("code").and_then(Value::as_i64) != Some(1) {
         return None;
     }
