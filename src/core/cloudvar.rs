@@ -227,7 +227,6 @@ type ConnectionCallback = Box<dyn Fn(ConnectionEvent) + Send + Sync>;
 // 命令模式 + 工厂
 
 /// 云数据更新命令(命令模式:请求对象化,可排队,批量执行)
-///
 /// 由 [`CommandFactory`] 创建
 #[derive(Debug, Clone)]
 pub enum CloudCommand {
@@ -817,7 +816,6 @@ impl CloudConnection {
     }
 
     /// 关闭连接并清理资源
-    ///
     /// 注意:请勿在回调(如 `on_data_ready`)中调用本方法--回调在连接读线程内执行,
     /// 调用 `close()` 会 join 自身线程导致死锁
     pub fn close(&self) {

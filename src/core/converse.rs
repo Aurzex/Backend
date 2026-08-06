@@ -346,7 +346,6 @@ impl ChatClient {
     }
 
     /// 等待 AI 开始回复(超时返回 false)
-    ///
     /// 通过回合编号判定:即使 AI 在调用前已完成整轮快速回复,
     /// 也不会误报超时
     pub fn wait_for_response_start(&self, timeout: Duration) -> bool {
@@ -594,7 +593,6 @@ trait ChatEventHandler: Send + Sync {
 }
 
 /// `on_connect_ack`:记录连接确认信息(剩余对话次数),并发送 JOIN
-///
 /// JOIN 在收到连接确认后发送(服务器就绪),与 Python 的时序一致
 struct ConnectAckHandler;
 

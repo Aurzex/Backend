@@ -163,7 +163,6 @@ impl AsRef<str> for Catsona {
 
 // 身份管理器(核心单例,扁平化设计)
 /// 全局身份管理器,使用固定长度数组存储令牌
-///
 /// 采用 `RwLock` + `AtomicUsize` 分离 token 存储和当前身份索引
 /// `AtomicUsize` 使用 `Release/Acquire` 排序保证身份切换后令牌可见
 #[derive(Debug)]
@@ -182,7 +181,6 @@ impl KittyIdentityManager {
 }
 
 /// 全局身份管理器单例
-///
 /// 使用 `OnceLock` 确保线程安全的懒加载初始化
 static GLOBAL_IDENTITY_MANAGER: OnceLock<KittyIdentityManager> = OnceLock::new();
 
@@ -305,7 +303,6 @@ impl KittyAuth for KittyIdentityManager {
     }
 
     /// 设置指定身份的令牌
-    ///
     /// - 若 token 非空,则设置该身份的令牌
     /// - 若 token 为空字符串,则**清除**该身份的令牌(设为 None)
     /// - `Blanky` 身份不允许持有令牌,尝试设置将返回错误
@@ -324,7 +321,6 @@ impl KittyAuth for KittyIdentityManager {
     }
 
     /// 切换到指定身份
-    ///
     /// 切换使用 `Release` 存储,确保之前的 token 写入对后续 `current_token` 可见
     /// Blanky 可以无条件切换(不需要令牌),其他身份必须已持有令牌
     fn switch_identity(&self, identity: Catsona) -> MewResult<()> {
@@ -825,10 +821,6 @@ impl KittyCore {
 
 // 公开的 CodeMaoClient
 /// 主客户端,支持全局单例和独立实例两种模式
-///
-/// # 全局单例
-/// 通过 `CodeMaoClient::global()` 获取全局共享实例,该实例使用默认配置
-/// 如需自定义配置(如超时,日志,独立身份管理),请使用 `new` / `new_with_global_auth` / `new_independent` 创建独立实例
 #[derive(Clone)]
 pub struct CodeMaoClient {
     inner: Arc<KittyCore>,
@@ -836,7 +828,6 @@ pub struct CodeMaoClient {
 
 impl CodeMaoClient {
     /// 获取全局单例实例(使用全局身份管理器,默认配置)
-    ///
     /// 首次调用时自动初始化,后续调用返回同一实例
     pub fn global() -> &'static Self {
         static INSTANCE: OnceLock<CodeMaoClient> = OnceLock::new();
@@ -877,7 +868,6 @@ impl CodeMaoClient {
     }
 
     /// 设置指定身份的令牌
-    ///
     /// - 非空 token:设置该身份的令牌
     /// - 空字符串:清除该身份的令牌(设为 None)
     /// - `Blanky` 身份不允许设置令牌
@@ -1058,7 +1048,6 @@ impl PaginatedIter {
     }
 
     /// 将点分隔的 key 转换为 JSON Pointer 路径
-    ///
     /// 例如 "data.items" -> "/data/items"
     fn key_to_pointer(key: &str) -> String {
         format!("/{}", key.replace('.', "/"))
@@ -1170,7 +1159,6 @@ impl PaginatedIter {
     }
 
     /// 统一发送一页请求,返回完整的响应 JSON
-    ///
     /// 封装了参数构建,负载附加,发送与 JSON 解析
     fn request_page(&self, page: usize) -> MewResult<Value> {
         let params = self.build_params(page);
@@ -1748,7 +1736,6 @@ impl KittyFactory {
 }
 
 /// 获取 13 位毫秒时间戳(本地时间)
-///
 /// 若系统时间异常(早于 Unix 纪元),则返回 0 并记录警告
 pub fn current_timestamp_13() -> u128 {
     match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
@@ -1763,7 +1750,6 @@ pub fn current_timestamp_13() -> u128 {
 // 共享请求辅助(trait)
 /// 各 API 管理器的共享请求辅助,消除每个 Manager 中重复的
 /// `check_status`/`send_and_parse`/`send_maybe_parse` 样板
-///
 /// 实现方只需提供 `client()` 访问器,其余方法由默认实现提供
 pub trait ClientAccess {
     /// 返回管理器持有的客户端

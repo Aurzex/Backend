@@ -17,12 +17,6 @@ impl Ranking {
     }
 
     /// 更新排行榜(全量更新)
-    ///
-    /// # Arguments
-    /// * `data` - 完整的排行榜数据(JSON 格式)
-    ///
-    /// # Returns
-    /// 服务器返回的更新结果
     pub fn update_ranking_list(&self, data: Value) -> MewResult<Value> {
         debug!("正在全量更新排行榜");
         let response = self
@@ -38,12 +32,6 @@ impl Ranking {
     }
 
     /// 清空指定排行榜
-    ///
-    /// # Arguments
-    /// * `ranking_id` - 排行榜 ID
-    ///
-    /// # Returns
-    /// 清空结果
     pub fn clear_ranking_list(&self, ranking_id: &str) -> MewResult<Value> {
         debug!("清空排行榜: id={}", ranking_id);
         let response = self
@@ -59,13 +47,6 @@ impl Ranking {
     }
 
     /// 获取排行榜记录
-    ///
-    /// # Arguments
-    /// * `ranking_id` - 排行榜 ID
-    /// * `work_id` - 作品 ID
-    ///
-    /// # Returns
-    /// 排行榜记录列表
     pub fn fetch_ranking_records(&self, ranking_id: &str, work_id: i32) -> MewResult<Value> {
         debug!("获取排行榜记录: id={}, work_id={}", ranking_id, work_id);
         let response = self
@@ -82,14 +63,6 @@ impl Ranking {
     }
 
     /// 添加排行榜记录
-    ///
-    /// # Arguments
-    /// * `work_id` - 作品 ID
-    /// * `value` - 记录值(字符串形式)
-    /// * `ranking_id` - 排行榜 ID
-    ///
-    /// # Returns
-    /// 添加结果
     pub fn add_ranking_record(
         &self,
         work_id: i32,
@@ -115,12 +88,6 @@ impl Ranking {
     }
 
     /// 创建新排行榜
-    ///
-    /// # Arguments
-    /// * `data` - 排行榜定义数据
-    ///
-    /// # Returns
-    /// 创建结果
     pub fn create_ranking_list(&self, data: Value) -> MewResult<Value> {
         debug!("创建排行榜: {:?}", data);
         let response = self
@@ -136,13 +103,6 @@ impl Ranking {
     }
 
     /// 删除排行榜
-    ///
-    /// # Arguments
-    /// * `ranking_id` - 排行榜 ID
-    /// * `work_id` - 作品 ID
-    ///
-    /// # Returns
-    /// 删除结果
     pub fn delete_ranking_list(&self, ranking_id: &str, work_id: i32) -> MewResult<Value> {
         let endpoint = format!("/neko/ranking-list/{}", ranking_id);
         debug!("删除排行榜: id={}, work_id={}", ranking_id, work_id);
@@ -177,16 +137,7 @@ impl CoconutCloud {
     }
 
     /// 设置云字典键值
-    ///
     /// 根据值的 JSON 类型自动推断 `type` 字段
-    ///
-    /// # Arguments
-    /// * `dict_id` - 字典 ID
-    /// * `key` - 键名
-    /// * `value` - 值(JSON 类型)
-    ///
-    /// # Returns
-    /// 操作结果
     pub fn set_dictionary_value(&self, dict_id: &str, key: &str, value: Value) -> MewResult<Value> {
         let type_name = match value {
             Value::String(_) => "str",
@@ -215,13 +166,6 @@ impl CoconutCloud {
     }
 
     /// 删除云字典中的键
-    ///
-    /// # Arguments
-    /// * `dict_id` - 字典 ID
-    /// * `key` - 键名
-    ///
-    /// # Returns
-    /// 删除结果
     pub fn delete_dictionary_key(&self, dict_id: &str, key: &str) -> MewResult<Value> {
         debug!("删除云字典键: dict={}, key={}", dict_id, key);
         let endpoint = format!("/coconut/webdb/try/dict/{}/remove", dict_id);
@@ -234,12 +178,6 @@ impl CoconutCloud {
     }
 
     /// 清空云字典
-    ///
-    /// # Arguments
-    /// * `dict_id` - 字典 ID
-    ///
-    /// # Returns
-    /// 清空结果
     pub fn clear_dictionary(&self, dict_id: &str) -> MewResult<Value> {
         debug!("清空云字典: dict={}", dict_id);
         let endpoint = format!("/coconut/webdb/try/dict/clear/{}", dict_id);
@@ -251,12 +189,6 @@ impl CoconutCloud {
     }
 
     /// 获取云字典的所有键
-    ///
-    /// # Arguments
-    /// * `dict_id` - 字典 ID
-    ///
-    /// # Returns
-    /// 键名列表
     pub fn get_dictionary_keys(&self, dict_id: &str) -> MewResult<Value> {
         debug!("获取云字典所有键: dict={}", dict_id);
         let endpoint = format!("/coconut/webdb/try/dict/{}/keys", dict_id);
@@ -268,13 +200,6 @@ impl CoconutCloud {
     }
 
     /// 获取云字典中指定键的值
-    ///
-    /// # Arguments
-    /// * `dict_id` - 字典 ID
-    /// * `key` - 键名
-    ///
-    /// # Returns
-    /// 键值
     pub fn get_dictionary_value(&self, dict_id: &str, key: &str) -> MewResult<Value> {
         debug!("获取云字典值: dict={}, key={}", dict_id, key);
         let endpoint = format!("/coconut/webdb/try/dict/{}/getvalue", dict_id);
@@ -287,13 +212,6 @@ impl CoconutCloud {
     }
 
     /// 查询云数据表
-    ///
-    /// # Arguments
-    /// * `table_id` - 表 ID
-    /// * `queries` - 查询条件数组
-    ///
-    /// # Returns
-    /// 查询结果
     pub fn query_table(&self, table_id: &str, queries: Value) -> MewResult<Value> {
         let data = json!({
             "querys": {
@@ -311,14 +229,6 @@ impl CoconutCloud {
     }
 
     /// 更新云数据表行
-    ///
-    /// # Arguments
-    /// * `table_id` - 表 ID
-    /// * `queries` - 查询条件数组
-    /// * `values` - 更新值
-    ///
-    /// # Returns
-    /// 更新结果
     pub fn update_table_rows(
         &self,
         table_id: &str,
@@ -342,13 +252,6 @@ impl CoconutCloud {
     }
 
     /// 插入云数据表行
-    ///
-    /// # Arguments
-    /// * `table_id` - 表 ID
-    /// * `values` - 要插入的值(可以是单行对象或数组)
-    ///
-    /// # Returns
-    /// 插入结果
     pub fn insert_table_rows(&self, table_id: &str, values: Value) -> MewResult<Value> {
         let data = json!({
             "values": values
@@ -364,13 +267,6 @@ impl CoconutCloud {
     }
 
     /// 删除云数据表行
-    ///
-    /// # Arguments
-    /// * `table_id` - 表 ID
-    /// * `queries` - 查询条件数组
-    ///
-    /// # Returns
-    /// 删除结果
     pub fn delete_table_rows(&self, table_id: &str, queries: Value) -> MewResult<Value> {
         let data = json!({
             "querys": {
@@ -388,12 +284,6 @@ impl CoconutCloud {
     }
 
     /// 清空云数据表
-    ///
-    /// # Arguments
-    /// * `table_id` - 表 ID
-    ///
-    /// # Returns
-    /// 清空结果
     pub fn clear_table(&self, table_id: &str) -> MewResult<Value> {
         debug!("清空云数据表: table={}", table_id);
         let endpoint = format!("/coconut/clouddb/v2/runtime/{}/clear", table_id);
@@ -405,12 +295,6 @@ impl CoconutCloud {
     }
 
     /// 获取云数据表的行数
-    ///
-    /// # Arguments
-    /// * `table_id` - 表 ID
-    ///
-    /// # Returns
-    /// 行数信息
     pub fn get_table_row_count(&self, table_id: &str) -> MewResult<Value> {
         debug!("获取数据表行数: table={}", table_id);
         let endpoint = format!("/coconut/clouddb/runtime/{}/count", table_id);
@@ -423,12 +307,6 @@ impl CoconutCloud {
     }
 
     /// 获取多个云数据表的信息
-    ///
-    /// # Arguments
-    /// * `table_ids` - 表 ID 列表
-    ///
-    /// # Returns
-    /// 表信息列表
     pub fn get_table_info(&self, table_ids: &[String]) -> MewResult<Value> {
         let ids_str = table_ids.join(",");
         debug!("获取数据表信息: ids={}", ids_str);
@@ -445,13 +323,6 @@ impl CoconutCloud {
     }
 
     /// 加载作品数据(H5 或社区版)
-    ///
-    /// # Arguments
-    /// * `work_id` - 作品 ID
-    /// * `channel` - 通道,"0" 为 H5,"1" 为社区
-    ///
-    /// # Returns
-    /// 作品数据
     pub fn load_work_data(&self, work_id: i32, channel: &str) -> MewResult<Value> {
         debug!("加载作品数据: work_id={}, channel={}", work_id, channel);
         let endpoint = format!("/coconut/web/work/{}/load", work_id);
@@ -492,12 +363,6 @@ impl CoconutCloudAdmin {
     }
 
     /// 获取用户云数据库列表
-    ///
-    /// # Arguments
-    /// * `db_type` - 数据库类型(1:字典,2:数据表,`None`:全部)
-    ///
-    /// # Returns
-    /// 数据库列表
     pub fn list_user_databases(&self, db_type: Option<CloudDatabaseType>) -> MewResult<Value> {
         let mut builder = self.client.build_request(
             HttpMethod::Get,
@@ -513,12 +378,6 @@ impl CoconutCloudAdmin {
     }
 
     /// 获取用户云数据库详细信息列表
-    ///
-    /// # Arguments
-    /// * `db_type` - 数据库类型(1:字典,2:数据表)
-    ///
-    /// # Returns
-    /// 数据库详细信息列表
     pub fn list_user_databases_detail(
         &self,
         db_type: Option<CloudDatabaseType>,
@@ -537,12 +396,6 @@ impl CoconutCloudAdmin {
     }
 
     /// 获取作品关联的云字典列表
-    ///
-    /// # Arguments
-    /// * `work_id` - 作品 ID
-    ///
-    /// # Returns
-    /// 云字典列表
     pub fn list_work_dicts(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取作品云字典: work_id={}", work_id);
         let response = self
@@ -558,12 +411,6 @@ impl CoconutCloudAdmin {
     }
 
     /// 按类型获取云字典列表
-    ///
-    /// # Arguments
-    /// * `dict_type` - 字典类型代码
-    ///
-    /// # Returns
-    /// 云字典列表
     pub fn list_work_dicts_by_type(&self, dict_type: i32) -> MewResult<Value> {
         debug!("按类型获取云字典: type={}", dict_type);
         let response = self
@@ -579,15 +426,6 @@ impl CoconutCloudAdmin {
     }
 
     /// 获取云字典条目列表(分页)
-    ///
-    /// # Arguments
-    /// * `dict_id` - 字典 ID
-    /// * `work_id` - 作品 ID
-    /// * `offset` - 偏移量(从 1 开始)
-    /// * `limit` - 每页数量(默认 500)
-    ///
-    /// # Returns
-    /// 字典条目列表
     pub fn get_dict_entries(
         &self,
         dict_id: i32,
@@ -613,14 +451,6 @@ impl CoconutCloudAdmin {
     }
 
     /// 迁移云字典环境
-    ///
-    /// # Arguments
-    /// * `db_id` - 数据库 ID
-    /// * `from_env` - 源环境代码
-    /// * `to_env` - 目标环境代码
-    ///
-    /// # Returns
-    /// 迁移结果
     pub fn migrate_dict(&self, db_id: &str, from_env: i32, to_env: i32) -> MewResult<Value> {
         let data = json!({
             "db_id": db_id,

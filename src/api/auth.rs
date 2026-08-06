@@ -416,7 +416,6 @@ impl AuthProcessor {
     }
 
     /// 获取管理员验证码图片并保存到文件
-    ///
     /// 返回时间戳,供后续登录使用
     pub fn fetch_admin_captcha(&self) -> MewResult<i64> {
         let timestamp = SystemTime::now()
@@ -675,7 +674,6 @@ impl LoginHandler {
     }
 
     /// 管理员用户名密码登录(完全由参数驱动,不再交互与重试)
-    ///
     /// 需要调用者先通过 `AuthProcessor::fetch_admin_captcha` 获取 `timestamp` 和验证码图片,
     /// 然后将用户识别的验证码字符串传入
     pub fn handle_admin_password(
@@ -741,7 +739,6 @@ impl Default for LoginHandler {
 // 认证管理器
 
 /// 认证管理器,整合登录,登出,凭据管理等功能
-///
 /// 可通过 `new()` 创建默认实例,或使用 `new_with_provider` 注入自定义客户端
 #[derive(Debug)]
 pub struct AuthManager {
@@ -772,7 +769,6 @@ impl AuthManager {
     }
 
     /// 执行登录,自动根据角色和凭据选择登录方式
-    ///
     /// `prefer_method` 可强制指定登录方式,但需与角色匹配
     pub fn login(
         &mut self,
@@ -1040,7 +1036,6 @@ impl Default for AuthManager {
 // 云服务认证器
 
 /// 用于生成云端请求所需的 `x-device-auth` 签名头
-///
 /// 自动校准本地时间与服务器时间的差值
 pub struct CloudAuthenticator {
     client_provider: Box<dyn ClientProvider>,

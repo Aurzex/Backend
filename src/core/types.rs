@@ -177,7 +177,6 @@ pub struct SourceConfig {
 
 impl SourceConfig {
     /// 构造带公共默认字段名的配置;差异字段由调用方覆盖后再注册
-    ///
     /// 大部分举报类型的字段名高度一致(如 `report_id_field` 均为 "id"),
     /// 通过"公共默认值 + 覆盖差异"大幅减少重复
     fn base(

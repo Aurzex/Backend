@@ -3,7 +3,6 @@ use log::debug;
 use serde_json::{Value, json};
 
 /// 海外平台数据访问客户端
-///
 /// 提供获取 Tiger 账号信息和平台配置的能力
 pub struct OverseaDataClient {
     client: &'static CodeMaoClient,
@@ -18,9 +17,6 @@ impl OverseaDataClient {
     }
 
     /// 获取 Tiger 账号信息列表
-    ///
-    /// # Returns
-    /// 包含账号信息的 JSON 对象
     pub fn fetch_tiger_accounts(&self) -> MewResult<Value> {
         debug!("获取海外 Tiger 账号信息");
         let response = self
@@ -35,9 +31,6 @@ impl OverseaDataClient {
     }
 
     /// 获取海外平台配置信息
-    ///
-    /// # Returns
-    /// 平台配置的 JSON 对象
     pub fn fetch_platform_config(&self) -> MewResult<Value> {
         debug!("获取海外平台配置");
         let response = self
@@ -75,7 +68,6 @@ impl Language {
 }
 
 /// 用户操作处理器
-///
 /// 负责海外平台的注册与登录功能
 pub struct UserActionHandler {
     client: &'static CodeMaoClient,
@@ -93,17 +85,6 @@ impl UserActionHandler {
     }
 
     /// 通过邮箱注册新账号
-    ///
-    /// # Arguments
-    /// * `email` - 用户邮箱
-    /// * `password` - 账号密码
-    /// * `pid` - 产品 ID,默认使用 [`DEFAULT_PID`](Self::DEFAULT_PID)
-    /// * `language` - 语言,默认英语(`Language::En`)
-    ///
-    /// # Returns
-    /// * `Ok(true)` - 注册成功(HTTP 201)
-    /// * `Ok(false)` - 注册失败(非 201 状态码)
-    /// * `Err(...)` - 网络或解析错误
     pub fn register_with_email(
         &self,
         email: &str,
@@ -138,16 +119,6 @@ impl UserActionHandler {
     }
 
     /// 使用身份(邮箱或用户名)和密码登录
-    ///
-    /// # Arguments
-    /// * `identity` - 身份标识(邮箱或用户名)
-    /// * `password` - 账号密码
-    /// * `pid` - 产品 ID,默认使用 [`DEFAULT_PID`](Self::DEFAULT_PID)
-    ///
-    /// # Returns
-    /// * `Ok(true)` - 登录成功(HTTP 200)
-    /// * `Ok(false)` - 登录失败(非 200 状态码)
-    /// * `Err(...)` - 网络或解析错误
     pub fn authenticate_with_credentials(
         &self,
         identity: &str,

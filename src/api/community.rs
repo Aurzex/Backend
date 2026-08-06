@@ -157,7 +157,6 @@ impl CommunityDataFetcher {
     // 辅助方法
 
     /// 从 `/coconut/clouddb/currentTime` 获取 10 位时间戳,返回原始 JSON
-    ///
     /// 内部复用,避免代码重复
     fn raw_timestamp_10(&self) -> MewResult<Value> {
         let response = self

@@ -15,12 +15,6 @@ pub enum FileError {
 
 // 路径配置(可自定义根目录)
 /// 文件路径管理器,可基于自定义根目录构建所有子目录
-///
-/// # 示例
-/// ```no_run
-/// let paths = PathConfig::with_root("/var/myapp");
-/// let data_dir = paths.data_dir();
-/// ```
 #[derive(Debug, Clone)]
 pub struct PathConfig {
     root: PathBuf,
@@ -112,13 +106,11 @@ pub enum FileContent {
 
 // 文件写入工具
 /// 封装了基于 `FileContent` 的安全文件写入操作
-///
 /// 所有写入方法都会自动创建父目录,并记录相应日志
 pub struct CodeMaoFile;
 
 impl CodeMaoFile {
     /// 将 `FileContent` 写入到指定路径,根据内容类型自动选择写入模式
-    ///
     /// 此方法为统一入口,内部委托给具体类型方法
     pub fn file_write(path: &Path, content: &FileContent) -> Result<(), FileError> {
         if let Some(parent) = path.parent() {

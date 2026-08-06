@@ -2064,7 +2064,6 @@ impl KittenDecompiler {
 
 // Kitten2/3 blocksXML 序列化器
 /// Kitten2/3 编辑版(如春风得意)以 Blockly XML 字符串(blocksXML)存储积木
-///
 /// 与 Kitten4 的 block_data_json(blocks/connections)不同,本组件负责把编译块树
 /// 序列化为 Blockly XML,独立成组件便于单独测试与复用
 pub struct XmlBlockWriter<'a> {
@@ -3672,7 +3671,6 @@ impl<'a> BlockDecompiler<'a> for MutationDecompiler<'a> {
 
 // 积木反编译器工厂
 /// 按块类型分派专用反编译器
-///
 /// 树内递归(process_next/children/conditions/params)也使用本函数,
 /// 否则嵌套的 procedures_2_callnoreturn / controls_if 等不会走专用反编译器,
 /// 导致 NAME/mutation/ARG 参数块/if-else 结构缺失
@@ -3844,7 +3842,6 @@ pub type DecompilerFactory =
     Box<dyn Fn(&Arc<DecompilerConfig>) -> Box<dyn WorkDecompiler> + Send + Sync>;
 
 /// 作品类型 → 处理器(fetcher/decompiler)的注册表
-///
 /// 新增作品类型时只需 `register`,无需修改门面代码(开闭原则)
 pub struct WorkProcessorRegistry {
     fetchers: HashMap<WorkType, FetcherFactory>,
@@ -3956,7 +3953,6 @@ impl CodemaoDecompiler {
     }
 
     /// 全局单例门面:复用全局 HTTP 客户端与默认注册表
-    ///
     /// 多次反编译不重复创建客户端(性能优化)
     pub fn global() -> &'static Self {
         static GLOBAL: OnceLock<CodemaoDecompiler> = OnceLock::new();
@@ -4023,7 +4019,6 @@ impl CodemaoDecompiler {
     }
 
     /// 反编译主流程(模板方法)
-    ///
     /// 流程为:获取信息 → 创建处理器 → 取原始数据 → (可选)保存原始数据 → 反编译 → 保存结果
     fn decompile_inner(&self, work_id: i64, options: &DecompileOptions) -> Result<String> {
         info!("开始反编译作品 [work_id={}]", work_id);
@@ -4073,7 +4068,6 @@ impl CodemaoDecompiler {
         Ok(saved)
     }
     /// 将获取到的未编译原始数据保存到 `output_dir/raw/` 目录下
-    ///
     /// 文件名格式为 `raw-{作品名称}.{扩展名}`,其中名称经过安全过滤
     fn save_raw_data(
         &self,

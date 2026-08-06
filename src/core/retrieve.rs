@@ -239,7 +239,6 @@ impl CommentQueryBuilder {
     }
 
     /// 获取某条主评论下的所有回复对象
-    ///
     /// 论坛来源需额外请求回复接口;其余来源直接取内联的 `replies.items` 字段
     fn reply_items(
         source: CommentSource,
@@ -829,7 +828,6 @@ impl DataQuery {
     }
 
     /// 获取粉丝统计(基于点赞数阈值)
-    ///
     /// 注意:为每个符合条件的粉丝单独查询荣誉数据(N+1 请求),需评估性能影响
     pub fn compute_fans_by_like_threshold(
         &self,
@@ -900,7 +898,6 @@ impl DataQuery {
     }
 
     /// 获取教育账号流(切换身份,重置密码)
-    ///
     /// 为防止一次性加载过多学生造成 OOM,会限制最大学生数(默认 2000)
     /// 保持原始顺序,不再进行随机打乱
     pub fn stream_edu_accounts_with_reset_passwords(
