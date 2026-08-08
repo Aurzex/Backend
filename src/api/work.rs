@@ -1,6 +1,6 @@
 use crate::utils::acquire::{
     BaseKey, ClientAccess, CodeMaoClient, DEFAULT_LIMIT, DEFAULT_PAGE_SIZE, HTTPStatus, HttpMethod,
-    KittyRequestBuilder, MewResult, PaginatedIter, PaginationMethod, current_timestamp_13,
+    MewResult, PaginatedIter, PaginationMethod, current_timestamp_13,
 };
 
 /// 萌新盒子套餐列表接口的单页上限

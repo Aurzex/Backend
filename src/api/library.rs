@@ -1,6 +1,4 @@
-use crate::utils::acquire::{
-    ClientAccess, CodeMaoClient, HTTPStatus, HttpMethod, KittyRequestBuilder, MewResult,
-};
+use crate::utils::acquire::{ClientAccess, CodeMaoClient, HTTPStatus, HttpMethod, MewResult};
 use log::debug;
 use serde_json::{Value, json};
 
