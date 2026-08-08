@@ -5,7 +5,7 @@ edition = "2024"
 
 [lib]
 name = "backend"
-crate-type = ["cdylib", "rlib"]
+crate-type = ["rlib"]
 
 [profile.release]
 strip = true

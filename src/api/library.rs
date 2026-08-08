@@ -426,6 +426,58 @@ impl NovelActionHandler {
         self.check_status(builder, HTTPStatus::NoContent)
     }
 
+    /// 创建章节
+    pub fn create_section(
+        &self,
+        title: &str,
+        draft: &str,
+        draft_words_num: i32,
+    ) -> MewResult<Value> {
+        debug!("创建章节: title={}", title);
+        let payload = json!({
+            "title": title,
+            "draft": draft,
+            "draft_words_num": draft_words_num,
+        });
+        let builder = self
+            .client
+            .build_request(HttpMethod::Post, "/web/fanfic/section", None)
+            .with_payload(payload);
+        self.send_and_parse(builder)
+    }
+
+    /// 永久删除章节
+    pub fn permanently_delete_section(&self, section_id: i32) -> MewResult<bool> {
+        debug!("永久删除章节: section_id={}", section_id);
+        let endpoint = format!("/web/fanfic/section/{}/permanently", section_id);
+        let builder = self
+            .client
+            .build_request(HttpMethod::Delete, &endpoint, None);
+        self.check_status(builder, HTTPStatus::NoContent)
+    }
+
+    /// 恢复已删除章节
+    pub fn recover_section(&self, section_id: i32) -> MewResult<bool> {
+        debug!("恢复章节: section_id={}", section_id);
+        let endpoint = format!("/web/fanfic/section/{}/recover", section_id);
+        let builder = self
+            .client
+            .build_request(HttpMethod::Put, &endpoint, None)
+            .with_payload(json!({}));
+        self.check_status(builder, HTTPStatus::NoContent)
+    }
+
+    /// 取消发布章节
+    pub fn unpublish_section(&self, section_id: i32) -> MewResult<bool> {
+        debug!("取消发布章节: section_id={}", section_id);
+        let endpoint = format!("/web/fanfic/section/{}/unpublish", section_id);
+        let builder = self
+            .client
+            .build_request(HttpMethod::Put, &endpoint, None)
+            .with_payload(json!({}));
+        self.check_status(builder, HTTPStatus::NoContent)
+    }
+
     /// 更新小说信息
     pub fn update_novel(
         &self,

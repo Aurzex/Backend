@@ -3,6 +3,7 @@
 /download
 /data
 /cache
+/temp
 /.reasonix
 reasonix.toml
 

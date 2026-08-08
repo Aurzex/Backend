@@ -1887,6 +1887,43 @@ impl WorkDataFetcher {
         self.send_and_parse(builder)
     }
 
+    /// 获取 Nemo 播放器详情
+    pub fn fetch_nemo_player_detail(
+        &self,
+        work_type: Option<i32>,
+        url: Option<&str>,
+    ) -> MewResult<Value> {
+        debug!("获取Nemo播放器详情: type={:?}", work_type);
+        let mut builder = self
+            .client
+            .build_request(HttpMethod::Get, "/nemo/player/detail", None);
+        if let Some(t) = work_type {
+            builder = builder.with_param("type", t.to_string());
+        }
+        if let Some(u) = url {
+            builder = builder.with_param("url", u);
+        }
+        self.send_and_parse(builder)
+    }
+
+    /// 绑定七牛上传业务
+    pub fn bind_qiniu_upload_business(
+        &self,
+        business_id: &str,
+        url_list: Vec<String>,
+    ) -> MewResult<Value> {
+        debug!("绑定七牛上传业务: business_id={}", business_id);
+        let payload = json!({
+            "business_id": business_id,
+            "url_list": url_list,
+        });
+        let builder = self
+            .client
+            .build_request(HttpMethod::Post, "/nemo/qiniu/upload/business/bind", None)
+            .with_payload(payload);
+        self.send_and_parse(builder)
+    }
+
     /// 获取 Web 端最新作品
     pub fn fetch_new_works_web(
         &self,
@@ -2347,6 +2384,15 @@ impl WorkDataFetcher {
             )
             .with_param("TIME", timestamp.to_string())
             .with_param("type", material_type);
+        self.send_and_parse(builder)
+    }
+
+    /// 获取素材根分类
+    pub fn fetch_material_categories_root(&self) -> MewResult<Value> {
+        debug!("获取素材根分类");
+        let builder =
+            self.client
+                .build_request(HttpMethod::Get, "/web/materials/categories/root", None);
         self.send_and_parse(builder)
     }
 

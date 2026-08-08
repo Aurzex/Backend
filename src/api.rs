@@ -1,4 +1,6 @@
+pub mod account;
 pub mod auth;
+pub mod captcha;
 pub mod clouddb;
 pub mod codegame;
 pub mod community;

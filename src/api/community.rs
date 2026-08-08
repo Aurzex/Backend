@@ -1,6 +1,5 @@
 use crate::utils::acquire::{
-    BaseKey, CodeMaoClient, DEFAULT_PID, HTTPStatus, HttpMethod, MewResult, PaginatedIter,
-    PaginationMethod,
+    BaseKey, CodeMaoClient, HTTPStatus, HttpMethod, MewResult, PaginatedIter, PaginationMethod,
 };
 use log::{debug, warn};
 use serde_json::{Value, json};
@@ -801,7 +800,7 @@ impl Default for CommunityDataFetcher {
 
 // 用户操作接口
 
-/// 用户相关操作(注册,协议签署,消息管理等)
+/// 用户相关操作(协议签署,消息管理等)
 pub struct UserAction {
     client: &'static CodeMaoClient,
 }
@@ -822,54 +821,6 @@ impl UserAction {
             .with_payload(json!({}))
             .send()?;
         Ok(response.status() == HTTPStatus::Ok as u16)
-    }
-
-    /// 获取用户协议列表
-    pub fn fetch_agreements(&self) -> MewResult<Value> {
-        debug!("获取用户协议");
-        let response = self
-            .client
-            .build_request(HttpMethod::Get, "/tiger/v3/web/accounts/agreements", None)
-            .send()?;
-        self.client.response_to_json(response)
-    }
-
-    /// 手机号注册账号
-    pub fn create_account(
-        &self,
-        identity: &str,
-        password: &str,
-        captcha: &str,
-        pid: Option<&str>,
-        agreement_ids: Option<Vec<i32>>,
-    ) -> MewResult<Value> {
-        debug!("注册账号: identity={}", identity);
-        let mut data = serde_json::Map::new();
-        data.insert("identity".to_string(), Value::String(identity.to_string()));
-        data.insert("password".to_string(), Value::String(password.to_string()));
-        data.insert("captcha".to_string(), Value::String(captcha.to_string()));
-
-        let pid_value = pid.unwrap_or(DEFAULT_PID);
-        data.insert("pid".to_string(), Value::String(pid_value.to_string()));
-
-        let agreement_values = match agreement_ids {
-            Some(ids) => ids.into_iter().map(|id| Value::Number(id.into())).collect(),
-            None => vec![Value::Number(186.into()), Value::Number(13.into())],
-        };
-        data.insert("agreement_ids".to_string(), Value::Array(agreement_values));
-
-        let payload = Value::Object(data);
-
-        let response = self
-            .client
-            .build_request(
-                HttpMethod::Post,
-                "/tiger/v3/web/accounts/register/phone/with-agreement",
-                None,
-            )
-            .with_payload(payload)
-            .send()?;
-        self.client.response_to_json(response)
     }
 
     /// 删除指定消息

@@ -985,17 +985,6 @@ impl AuthManager {
         Ok(response.status() == 204)
     }
 
-    /// v1/v2 登出,`method` 为 "web" 或 "mobile"
-    pub fn execute_logout_v12(&self, method: &str) -> MewResult<bool> {
-        let client = self.client();
-        let endpoint = format!("/tiger/v3/{}/accounts/logout", method);
-        let response = client
-            .build_request(HttpMethod::Post, &endpoint, None)
-            .with_payload(json!({}))
-            .send()?;
-        Ok(response.status() == 204)
-    }
-
     /// 管理员登出
     pub fn admin_logout(&self) -> MewResult<bool> {
         let client = self.client();

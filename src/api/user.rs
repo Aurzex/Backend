@@ -40,22 +40,6 @@ impl WorksListType {
     }
 }
 
-/// 平台类型
-#[derive(Debug, Clone, Copy)]
-pub enum PlatformMethod {
-    Web,
-    App,
-}
-
-impl PlatformMethod {
-    fn as_str(&self) -> &'static str {
-        match self {
-            PlatformMethod::Web => "web",
-            PlatformMethod::App => "app",
-        }
-    }
-}
-
 /// 云端作品类型
 #[derive(Debug, Clone, Copy)]
 pub enum CloudWorkType {
@@ -120,13 +104,6 @@ impl WorkShowStatus {
     }
 }
 
-/// 性别
-#[derive(Debug, Clone, Copy)]
-pub enum Gender {
-    Female = 0,
-    Male = 1,
-}
-
 /// 头像框 ID
 #[derive(Debug, Clone, Copy)]
 pub enum AvatarFrameId {
@@ -171,6 +148,57 @@ impl UserDataFetcher {
         debug!("获取用户详细信息: user_id={}", user_id);
         let endpoint = format!("/api/user/info/detail/{}", user_id);
         let builder = self.client.build_request(HttpMethod::Get, &endpoint, None);
+        self.send_and_parse(builder)
+    }
+
+    /// 获取当前登录用户信息
+    pub fn fetch_own_user_info(&self) -> MewResult<Value> {
+        debug!("获取当前用户信息");
+        let builder = self
+            .client
+            .build_request(HttpMethod::Get, "/api/user/info", None);
+        self.send_and_parse(builder)
+    }
+
+    /// 获取用户收藏列表(v1)
+    pub fn fetch_user_collections_v1(
+        &self,
+        offset: Option<i32>,
+        limit: Option<i32>,
+    ) -> MewResult<Value> {
+        debug!("获取用户收藏列表v1: offset={:?}, limit={:?}", offset, limit);
+        let mut builder = self.client.build_request(
+            HttpMethod::Get,
+            "/creation-tools/v1/user/center/collect/list",
+            None,
+        );
+        if let Some(off) = offset {
+            builder = builder.with_param("offset", off.to_string());
+        }
+        if let Some(lim) = limit {
+            builder = builder.with_param("limit", lim.to_string());
+        }
+        self.send_and_parse(builder)
+    }
+
+    /// 获取用户作品列表(v1)
+    pub fn fetch_user_work_list_v1(
+        &self,
+        user_id: i32,
+        offset: i32,
+        limit: i32,
+    ) -> MewResult<Value> {
+        debug!("获取用户作品列表v1: user_id={}", user_id);
+        let builder = self
+            .client
+            .build_request(
+                HttpMethod::Get,
+                "/creation-tools/v1/user/center/work-list",
+                None,
+            )
+            .with_param("user_id", user_id.to_string())
+            .with_param("offset", offset.to_string())
+            .with_param("limit", limit.to_string());
         self.send_and_parse(builder)
     }
 
@@ -265,23 +293,6 @@ impl UserDataFetcher {
         let builder = self
             .client
             .build_request(HttpMethod::Get, "/web/users/details", None);
-        self.send_and_parse(builder)
-    }
-
-    /// 获取平台账号资料
-    pub fn fetch_account_platform_profile(&self, method: PlatformMethod) -> MewResult<Value> {
-        debug!("获取平台账号资料: method={:?}", method);
-        let endpoint = format!("/tiger/v3/{}/accounts/profile", method.as_str());
-        let builder = self.client.build_request(HttpMethod::Get, &endpoint, None);
-        self.send_and_parse(builder)
-    }
-
-    /// 获取账号隐私设置
-    pub fn fetch_account_privacy(&self) -> MewResult<Value> {
-        debug!("获取账号隐私设置");
-        let builder =
-            self.client
-                .build_request(HttpMethod::Get, "/tiger/v3/web/accounts/privacy", None);
         self.send_and_parse(builder)
     }
 
@@ -721,18 +732,7 @@ impl ClientAccess for UserDataFetcher {
 
 // 用户管理器
 
-/// 更新个人资料详细信息的参数
-pub struct UpdateProfileDetailsArgs<'a> {
-    pub avatar_url: &'a str,
-    pub nickname: &'a str,
-    pub birthday: i32,
-    pub description: &'a str,
-    pub fullname: &'a str,
-    pub qq: &'a str,
-    pub sex: Gender,
-}
-
-/// 用户相关操作接口(更新资料,修改密码,注销等)
+/// 用户相关操作接口(更新状态,头像框,主页封面等)
 pub struct UserManager {
     client: &'static CodeMaoClient,
 }
@@ -762,78 +762,6 @@ impl UserManager {
         self.check_status(builder, HTTPStatus::Ok)
     }
 
-    /// 验证手机号码是否一致
-    pub fn validate_phone_number(&self, phone_num: i32) -> MewResult<Value> {
-        debug!("验证手机号: phone_num={}", phone_num);
-        let builder = self
-            .client
-            .build_request(
-                HttpMethod::Get,
-                "/web/users/phone_number/is_consistent",
-                None,
-            )
-            .with_param("phone_number", phone_num.to_string());
-        self.send_and_parse(builder)
-    }
-
-    /// 修改密码
-    pub fn update_password(&self, old_password: &str, new_password: &str) -> MewResult<bool> {
-        debug!("修改密码");
-        let payload = json!({
-            "old_password": old_password,
-            "password": new_password,
-            "confirm_password": new_password,
-        });
-        let builder = self
-            .client
-            .build_request(HttpMethod::Patch, "/tiger/v3/web/accounts/password", None)
-            .with_payload(payload);
-        self.check_status(builder, HTTPStatus::NoContent)
-    }
-
-    /// 请求更换手机号验证码
-    pub fn execute_request_phone_change_verification(
-        &self,
-        old_phonenum: i32,
-        new_phonenum: i32,
-    ) -> MewResult<bool> {
-        debug!(
-            "请求更换手机号验证码: old={}, new={}",
-            old_phonenum, new_phonenum
-        );
-        let payload = json!({
-            "phone_number": new_phonenum,
-            "old_phone_number": old_phonenum,
-        });
-        let builder = self
-            .client
-            .build_request(
-                HttpMethod::Post,
-                "/tiger/v3/web/accounts/captcha/phone/change",
-                None,
-            )
-            .with_payload(payload);
-        self.check_status(builder, HTTPStatus::NoContent)
-    }
-
-    /// 更新手机号码
-    pub fn update_phone_number(&self, captcha: i32, phonenum: i32) -> MewResult<Value> {
-        debug!("更新手机号: phonenum={}", phonenum);
-        let payload = json!({
-            "phone_number": phonenum,
-            "captcha": captcha,
-        });
-        let builder = self
-            .client
-            .build_request(
-                HttpMethod::Patch,
-                "/tiger/v3/web/accounts/phone/change",
-                None,
-            )
-            .with_payload(payload);
-        self.send_and_parse(builder)
-    }
-
     /// 移除头像框
     pub fn delete_avatar_frame(&self) -> MewResult<bool> {
         debug!("移除头像框");
@@ -853,25 +781,6 @@ impl UserManager {
         self.check_status(builder, HTTPStatus::Ok)
     }
 
-    /// 更新个人资料详细信息
-    pub fn update_profile_details(&self, args: UpdateProfileDetailsArgs<'_>) -> MewResult<bool> {
-        debug!("更新个人资料: nickname={}", args.nickname);
-        let payload = json!({
-            "avatar_url": args.avatar_url,
-            "nickname": args.nickname,
-            "birthday": args.birthday,
-            "description": args.description,
-            "fullname": args.fullname,
-            "qq": args.qq,
-            "sex": args.sex as i32,
-        });
-        let builder = self
-            .client
-            .build_request(HttpMethod::Patch, "/tiger/v3/web/accounts/info", None)
-            .with_payload(payload);
-        self.check_status(builder, HTTPStatus::NoContent)
-    }
-
     /// 更新个人主页封面
     pub fn update_profile_cover(&self, cover_url: &str) -> MewResult<bool> {
         debug!("更新个人主页封面: cover_url={}", cover_url);
@@ -881,17 +790,6 @@ impl UserManager {
             .build_request(HttpMethod::Post, "/nemo/v2/user/preview", None)
             .with_payload(payload);
         self.check_status(builder, HTTPStatus::Ok)
-    }
-
-    /// 注销用户
-    pub fn delete_user(&self, reason: &str, return_data: bool) -> MewResult<Value> {
-        debug!("注销用户: reason={}", reason);
-        let payload = json!({ "closeReason": reason });
-        let builder = self
-            .client
-            .build_request(HttpMethod::Post, "/tiger/v3/web/accounts/close", None)
-            .with_payload(payload);
-        self.send_maybe_parse(builder, return_data, HTTPStatus::Ok)
     }
 }
 
