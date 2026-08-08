@@ -2,7 +2,6 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{Duration, UNIX_EPOCH};
 
 use crate::api::whale::{CommentSourceType, ReportStatus, WhaleReportFetcher, WorkSourceType};
 use crate::utils::acquire;
@@ -68,10 +67,8 @@ pub(crate) fn timestamp_to_string(ts: &serde_json::Value) -> String {
     if let Some(secs) = ts.as_i64()
         && secs > 0
     {
-        let t = UNIX_EPOCH + Duration::from_secs(secs as u64);
-        // 简化格式化(实际可用 chrono,此处保留原有方式)
-        let timestamp = t.duration_since(UNIX_EPOCH).unwrap().as_secs();
-        return format!("{}", timestamp);
+        // 原实现先做 UNIX_EPOCH+Duration 再换算回秒数,结果恒等于 secs,属无意义换算
+        return format!("{}", secs);
     }
     ts.to_string()
 }
@@ -231,7 +228,8 @@ pub(crate) struct ActionOptions {
 }
 
 pub(crate) struct ReportTypeRegistry {
-    registry: HashMap<String, SourceConfig>,
+    /// Arc 包装:每条举报记录的处理都需持有配置,避免逐记录深克隆整个 SourceConfig(~30 个 String)
+    registry: HashMap<String, Arc<SourceConfig>>,
     default_actions: Vec<ActionConfig>, // 保留用于构建默认动作,也可直接为静态
     action_cache: Mutex<HashMap<String, Arc<ActionOptions>>>,
 }
@@ -280,11 +278,17 @@ impl ReportTypeRegistry {
     }
 
     pub(crate) fn register(&mut self, report_type: &str, config: SourceConfig) {
-        self.registry.insert(report_type.to_string(), config);
+        self.registry
+            .insert(report_type.to_string(), Arc::new(config));
     }
 
     pub(crate) fn get_config(&self, report_type: &str) -> Option<&SourceConfig> {
-        self.registry.get(report_type)
+        self.registry.get(report_type).map(|a| a.as_ref())
+    }
+
+    /// 返回配置的 Arc 句柄,供处理上下文持有(零拷贝引用计数)
+    pub(crate) fn get_config_arc(&self, report_type: &str) -> Option<Arc<SourceConfig>> {
+        self.registry.get(report_type).cloned()
     }
 
     pub(crate) fn get_all_types(&self) -> Vec<String> {
@@ -615,7 +619,10 @@ impl ReportFetcher {
         })
     }
 
-    pub(crate) fn fetch_reports_chunked(&self, status: ReportStatus) -> impl Iterator<Item = Vec<Value>> {
+    pub(crate) fn fetch_reports_chunked(
+        &self,
+        status: ReportStatus,
+    ) -> impl Iterator<Item = Vec<Value>> {
         self.fetch_chunked(status)
     }
 

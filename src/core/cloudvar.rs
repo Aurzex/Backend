@@ -291,6 +291,8 @@ pub(crate) struct BatchedUploads {
 /// 列表命令按 cvid 归并,同一列表的连续操作合并进同一帧
 pub(crate) fn merge_commands(commands: Vec<CloudCommand>) -> BatchedUploads {
     let mut out = BatchedUploads::default();
+    // cvid → list_updates 下标:替代逐命令线性查找,避免批内列表数量多时退化为 O(n²)
+    let mut list_index: HashMap<String, usize> = HashMap::new();
     for cmd in commands {
         match cmd {
             CloudCommand::Variable { data, .. } => {
@@ -307,13 +309,10 @@ pub(crate) fn merge_commands(commands: Vec<CloudCommand>) -> BatchedUploads {
             CloudCommand::List { cvid, ops } => {
                 // 同一 cvid 的列表操作合并:服务端按顺序执行一个帧内的全部操作,
                 // 合并能显著减少命令队列积压(如批量 append 100 个元素只需 1 帧)
-                if let Some((_, existing)) = out
-                    .list_updates
-                    .iter_mut()
-                    .find(|(existing_cvid, _)| existing_cvid == &cvid)
-                {
-                    existing.extend(ops);
+                if let Some(&idx) = list_index.get(&cvid) {
+                    out.list_updates[idx].1.extend(ops);
                 } else {
+                    list_index.insert(cvid.clone(), out.list_updates.len());
                     out.list_updates.push((cvid, ops));
                 }
             }

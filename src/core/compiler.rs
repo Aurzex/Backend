@@ -855,7 +855,12 @@ impl ShadowBuilder {
         }
     }
 
-    pub(crate) fn create(&self, shadow_type: &str, block_id: Option<String>, text: Option<&str>) -> Value {
+    pub(crate) fn create(
+        &self,
+        shadow_type: &str,
+        block_id: Option<String>,
+        text: Option<&str>,
+    ) -> Value {
         if self.work_type.use_xml_shadow() {
             let xml = self.create_xml(shadow_type, block_id, text);
             Value::String(xml)
@@ -1060,7 +1065,12 @@ impl BlockContext {
         }
     }
 
-    pub(crate) fn insert_connection(&mut self, source_id: &str, target_id: &str, connection_info: Value) {
+    pub(crate) fn insert_connection(
+        &mut self,
+        source_id: &str,
+        target_id: &str,
+        connection_info: Value,
+    ) {
         self.connections
             .entry(source_id.to_string())
             .or_default()
@@ -1132,7 +1142,9 @@ impl<'a> BlockDecompilerCore<'a> {
             obj.insert("shadows".to_string(), Value::Object(shadows_map));
         }
 
-        context.blocks.insert(id.to_string(), block_value.clone());
+        // 不再在此处插入 blocks:所有调用方(process_next/children/conditions/params、
+        // 顶层循环、FunctionCall 参数块)都会将返回值重新插入 context.blocks,
+        // 原深克隆 + 哈希插入 + 丢弃每积木重复一次,属纯浪费
         Ok(block_value)
     }
 
@@ -1326,6 +1338,12 @@ impl<'a> BlockDecompilerCore<'a> {
                     context.layout_col += 220.0;
                     let param_block = decompiler.decompile(context)?;
                     context.layout_col -= 220.0;
+                    // 类型名较短,转为拥有值以解除对 param_block 的借用,允许随后移动
+                    let param_type = param_block
+                        .get("type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
                     let param_id = param_block
                         .get("id")
                         .and_then(|v| v.as_str())
@@ -1333,7 +1351,9 @@ impl<'a> BlockDecompilerCore<'a> {
                             DecompilerError::InvalidResponse("param_block缺少id".to_string())
                         })?
                         .to_string();
-                    context.blocks.insert(param_id.clone(), param_block.clone());
+                    // 先取类型再移动:param_block 的 clone 仅为满足 insert 的取所有权,
+                    // 移动后不再需要原值
+                    context.blocks.insert(param_id.clone(), param_block);
                     if let Some(b) = context.blocks.get_mut(&param_id)
                         && let Some(o) = b.as_object_mut()
                     {
@@ -1348,23 +1368,19 @@ impl<'a> BlockDecompilerCore<'a> {
                             "input_name": name
                         }),
                     );
-
-                    let param_type = param_block
-                        .get("type")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
                     if context
                         .shadow_builder
                         .config
                         .shadow_types
-                        .contains(param_type)
+                        .contains(&param_type)
                     {
                         // 编辑版 shadow 模板显示的是类型默认值(如 math_number 的 0),
                         // 与参数块实际值无关,因此不传 text
-                        let shadow_value =
-                            context
-                                .shadow_builder
-                                .create(param_type, Some(param_id.clone()), None);
+                        let shadow_value = context.shadow_builder.create(
+                            &param_type,
+                            Some(param_id.clone()),
+                            None,
+                        );
                         shadows.insert(name.clone(), shadow_value);
                     } else {
                         let shadow_type = self.infer_shadow_type(name, &Value::Null);
@@ -1668,24 +1684,23 @@ impl WorkFetcher for KittenFetcher {
 pub(crate) struct KittenDecompiler;
 
 impl KittenDecompiler {
-    fn get_actor_info(work: &Value, actor_id: &str) -> Value {
-        if let Some(theatre) = work.get("theatre").and_then(|v| v.as_object()) {
-            if let Some(actors) = theatre.get("actors").and_then(|v| v.as_object())
-                && let Some(actor) = actors.get(actor_id)
+    /// 从 work 的 theatre 中移出角色信息(所有权转移,避免整角色深克隆);
+    /// 缺失时回退为默认角色 JSON
+    fn take_actor_info(work: &mut Value, actor_id: &str) -> Value {
+        if let Some(theatre) = work.get_mut("theatre").and_then(|v| v.as_object_mut()) {
+            if let Some(actors) = theatre.get_mut("actors").and_then(|v| v.as_object_mut())
+                && let Some(actor) = actors.remove(actor_id)
             {
-                return actor.clone();
+                return actor;
             }
-            if let Some(scenes) = theatre.get("scenes").and_then(|v| v.as_object())
-                && let Some(scene) = scenes.get(actor_id)
+            if let Some(scenes) = theatre.get_mut("scenes").and_then(|v| v.as_object_mut())
+                && let Some(scene) = scenes.remove(actor_id)
             {
-                return scene.clone();
+                return scene;
             }
         }
-        let short_id = if actor_id.len() > 8 {
-            &actor_id[..8]
-        } else {
-            actor_id
-        };
+        // 按字符截断而非字节:actor_id.len() 为字节数,直接切片可能切断多字节字符导致 panic
+        let short_id: String = actor_id.chars().take(8).collect();
         json!({
             "direction": 90,
             "draggable": false,
@@ -1835,7 +1850,7 @@ impl KittenDecompiler {
         config: &Arc<DecompilerConfig>,
         id_generator: &IdGenerator,
         actor_compiled: &Value,
-        scene_info: &Value,
+        scene_info: Value,
         work_type: WorkType,
         functions: &Arc<HashMap<String, Value>>,
     ) -> Result<Value> {
@@ -1945,7 +1960,7 @@ impl KittenDecompiler {
             comments = existing.clone();
         }
 
-        let mut scene = scene_info.clone();
+        let mut scene = scene_info;
         if let Some(obj) = scene.as_object_mut() {
             obj.insert(
                 "block_data_json".to_string(),
@@ -2166,16 +2181,16 @@ impl<'a> XmlBlockWriter<'a> {
         s.push_str(&value_xml);
 
         // conditions → <value name="IF{i}">
-        let conditions = compiled
-            .get("conditions")
-            .and_then(|v| v.as_array())
-            .cloned()
-            .unwrap_or_default();
-        for (i, c) in conditions.iter().enumerate() {
-            if c.is_object() {
-                s.push_str(&format!(r#"<value name="IF{}">"#, i));
-                s.push_str(&self.value_xml(c));
-                s.push_str("</value>");
+        // 借用数组而非克隆:仅需迭代与长度
+        let conditions = compiled.get("conditions").and_then(|v| v.as_array());
+        let conditions_len = conditions.map(|arr| arr.len()).unwrap_or(0);
+        if let Some(conditions) = conditions {
+            for (i, c) in conditions.iter().enumerate() {
+                if c.is_object() {
+                    s.push_str(&format!(r#"<value name="IF{}">"#, i));
+                    s.push_str(&self.value_xml(c));
+                    s.push_str("</value>");
+                }
             }
         }
 
@@ -2187,7 +2202,7 @@ impl<'a> XmlBlockWriter<'a> {
                 }
                 let name = match bt {
                     "controls_if" | "controls_if_no_else" => {
-                        if i < conditions.len() {
+                        if i < conditions_len {
                             format!("DO{}", i)
                         } else {
                             "ELSE".to_string()
@@ -2239,13 +2254,23 @@ impl<'a> XmlBlockWriter<'a> {
         }
     }
 
-    /// XML 转义
+    /// XML 转义:单遍扫描,避免链式 replace 每次全量分配
     fn escape_text(s: &str) -> String {
-        s.replace('&', "&amp;")
-            .replace('<', "&lt;")
-            .replace('>', "&gt;")
-            .replace('"', "&quot;")
-            .replace('\'', "&apos;")
+        if !s.contains(['&', '<', '>', '"', '\'']) {
+            return s.to_owned();
+        }
+        let mut out = String::with_capacity(s.len());
+        for c in s.chars() {
+            match c {
+                '&' => out.push_str("&amp;"),
+                '<' => out.push_str("&lt;"),
+                '>' => out.push_str("&gt;"),
+                '"' => out.push_str("&quot;"),
+                '\'' => out.push_str("&apos;"),
+                _ => out.push(c),
+            }
+        }
+        out
     }
 
     fn value_to_text(v: &Value) -> String {
@@ -2373,7 +2398,11 @@ impl WorkDecompiler for KittenDecompiler {
                         scene.insert("blocksXML".to_string(), Value::String(xml));
                     }
                 } else {
-                    let scene_info = &scenes[actor_id];
+                    // remove 移出所有权:场景整表已在循环前从 work 取出(mem::take),
+                    // 直接转移所有权避免整场景深克隆
+                    let scene_info = scenes.remove(actor_id).ok_or_else(|| {
+                        DecompilerError::InvalidResponse(format!("场景 {} 不存在", actor_id))
+                    })?;
                     let updated_scene = Self::decompile_scene_blocks(
                         &context.config,
                         &context.id_generator,
@@ -2401,7 +2430,7 @@ impl WorkDecompiler for KittenDecompiler {
                         actor.insert("blocksXML".to_string(), Value::String(xml));
                     }
                 } else {
-                    let actor_info = Self::get_actor_info(&work, actor_id);
+                    let actor_info = Self::take_actor_info(&mut work, actor_id);
                     // 角色也使用全局变量映射
                     let updated_actor = Self::decompile_actor_blocks(
                         &context.config,
@@ -3014,16 +3043,19 @@ impl CocoDecompiler {
 
         work_obj.insert("authorId".to_string(), json!(context.work_info.user_id));
         work_obj.insert("title".to_string(), json!(context.work_info.name));
-        work_obj.insert("screens".to_string(), json!({}));
-        work_obj.insert("screenIds".to_string(), json!([]));
+        // screens/screenIds 在下方由真实数据插入,无需先放空占位
 
         let mut screens = serde_json::Map::new();
         let mut screen_ids = Vec::with_capacity(screen_list.len());
 
-        for mut screen in screen_list {
-            let screen_obj = screen
-                .as_object_mut()
-                .ok_or_else(|| DecompilerError::Decompile("screen不是对象".to_string()))?;
+        for screen in screen_list {
+            // 直接解构出 Map 所有权,循环末尾整体移入 screens,避免整屏深克隆
+            let mut screen_obj = match screen {
+                Value::Object(map) => map,
+                _ => {
+                    return Err(DecompilerError::Decompile("screen不是对象".to_string()));
+                }
+            };
             let screen_id = screen_obj
                 .get("id")
                 .and_then(|v| v.as_str())
@@ -3066,8 +3098,8 @@ impl CocoDecompiler {
                 screen_obj.insert("missing_widget_ids".to_string(), Value::Array(missing_ids));
             }
             screen_obj.insert("widgets".to_string(), Value::Object(screen_widgets));
-            screens.insert(screen_id.clone(), Value::Object(screen_obj.clone()));
-            screen_ids.push(Value::String(screen_id));
+            screen_ids.push(Value::String(screen_id.clone()));
+            screens.insert(screen_id, Value::Object(screen_obj));
         }
 
         work_obj.insert("screens".to_string(), Value::Object(screens));

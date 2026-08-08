@@ -102,7 +102,9 @@ fn title_preview_str(title: &str) -> String {
     if title.is_empty() {
         String::new()
     } else {
-        format!("[{}]", &title[..title.len().min(10)])
+        // 按字符截断而非字节:title.len() 是字节数,直接切片可能切断多字节字符(如中文)导致 panic
+        let preview: String = title.chars().take(10).collect();
+        format!("[{}]", preview)
     }
 }
 
@@ -446,7 +448,8 @@ pub(crate) struct ReportRecord {
     pub(crate) admin_id: i32,
     pub(crate) is_batch_mode: bool,
     pub(crate) is_reprocess_mode: bool,
-    pub(crate) config: Option<SourceConfig>,
+    /// Arc 共享配置:每条记录一条管道,避免逐记录深克隆整个 SourceConfig
+    pub(crate) config: Option<Arc<SourceConfig>>,
     pub(crate) user_id: Option<i64>,
 }
 

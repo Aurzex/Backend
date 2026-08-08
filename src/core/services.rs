@@ -330,7 +330,7 @@ impl ReportProcessor {
             return Ok(None);
         };
 
-        let config = self.fetcher.registry.get_config(report_type).cloned();
+        let config = self.fetcher.registry.get_config_arc(report_type);
         let mut context = ProcessingContext::new(
             first_record_id.to_string(),
             report_type.to_string(),
@@ -417,7 +417,7 @@ impl ReportProcessor {
                 item.clone(),
                 admin_id,
             );
-            context.record.config = Some(config.clone());
+            context.record.config = self.fetcher.registry.get_config_arc(report_type);
 
             let pipeline = self.create_pipeline();
             if let Err(e) = pipeline.execute(&mut context) {
