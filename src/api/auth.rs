@@ -67,6 +67,19 @@ impl std::str::FromStr for LoginMethod {
     }
 }
 
+/// 退出登录方式
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogoutMethod {
+    /// v0 旧版登出
+    V0,
+    /// v1/v2 Web 端登出
+    Web,
+    /// v1/v2 移动端登出
+    Mobile,
+    /// 管理员登出
+    Admin,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UserRole {
     User,
@@ -742,6 +755,7 @@ pub struct AuthManager {
     processor: AuthProcessor,
     handler: LoginHandler,
     current_credentials: Option<LoginCredentials>,
+    current_method: Option<LoginMethod>,
 }
 
 impl AuthManager {
@@ -753,6 +767,7 @@ impl AuthManager {
             processor,
             handler,
             current_credentials: None,
+            current_method: None,
         }
     }
 
@@ -774,10 +789,12 @@ impl AuthManager {
         self.validate_login_parameters(credentials, prefer_method)?;
         self.current_credentials = Some(credentials.clone());
 
-        match credentials.role {
+        let result = match credentials.role {
             UserRole::Admin => self.admin_login(credentials, prefer_method),
             UserRole::User => self.user_login(credentials, prefer_method),
-        }
+        }?;
+        self.current_method = Some(result.method);
+        Ok(result)
     }
 
     /// 验证登录参数是否与指定方式匹配
@@ -985,6 +1002,17 @@ impl AuthManager {
         Ok(response.status() == 204)
     }
 
+    /// v1/v2 登出,`method` 为 "web" 或 "mobile"
+    pub fn execute_logout_v12(&self, method: &str) -> MewResult<bool> {
+        let client = self.client();
+        let endpoint = format!("/tiger/v3/{}/accounts/logout", method);
+        let response = client
+            .build_request(HttpMethod::Post, &endpoint, None)
+            .with_payload(json!({}))
+            .send()?;
+        Ok(response.status() == 204)
+    }
+
     /// 管理员登出
     pub fn admin_logout(&self) -> MewResult<bool> {
         let client = self.client();
@@ -992,6 +1020,37 @@ impl AuthManager {
             .build_request(HttpMethod::Delete, "/admins/logout", Some(BaseKey::Whale))
             .send()?;
         Ok(response.status() == 204)
+    }
+
+    /// 统一退出登录,根据当前登录方式自动选择登出端点
+    /// 登出成功后清空当前身份令牌
+    pub fn logout(&self) -> MewResult<bool> {
+        let method = self
+            .current_method
+            .ok_or_else(|| MewError::Auth("当前未登录,无法退出".into()))?;
+        let logout = match method {
+            LoginMethod::PasswordV0 => LogoutMethod::V0,
+            LoginMethod::PasswordV1 | LoginMethod::PasswordV2 | LoginMethod::Token => {
+                LogoutMethod::Web
+            }
+            LoginMethod::AdminToken | LoginMethod::AdminPassword => LogoutMethod::Admin,
+        };
+        self.logout_with(logout)
+    }
+
+    /// 显式指定方式退出登录
+    pub fn logout_with(&self, method: LogoutMethod) -> MewResult<bool> {
+        let ok = match method {
+            LogoutMethod::V0 => self.execute_logout_v0()?,
+            LogoutMethod::Web => self.execute_logout_v12("web")?,
+            LogoutMethod::Mobile => self.execute_logout_v12("mobile")?,
+            LogoutMethod::Admin => self.admin_logout()?,
+        };
+        if ok {
+            let identity = self.client().current_identity();
+            let _ = self.client().set_token(identity, "");
+        }
+        Ok(ok)
     }
 
     /// 手动配置认证令牌(不经过登录流程)

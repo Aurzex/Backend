@@ -823,18 +823,7 @@ impl AccountManager {
         self.send_and_parse(builder)
     }
 
-    // ---- 登出 / 注销 ----
-
-    /// v1/v2 登出,`method` 为 "web" 或 "mobile"
-    pub fn execute_logout_v12(&self, method: &str) -> MewResult<bool> {
-        let endpoint = format!("/tiger/v3/{}/accounts/logout", method);
-        let response = self
-            .client
-            .build_request(HttpMethod::Post, &endpoint, None)
-            .with_payload(json!({}))
-            .send()?;
-        Ok(response.status() == 204)
-    }
+    // ---- 注销 ----
 
     /// 注销用户
     pub fn delete_user(&self, reason: &str, return_data: bool) -> MewResult<Value> {
