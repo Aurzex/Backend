@@ -529,55 +529,104 @@ impl ReportProcessor {
         Ok(processed)
     }
 
-    /// 分页浏览已处理记录,输入序号查看详情
+    /// 分页浏览已处理记录,支持按举报类型过滤切换(如仅看工作室评论举报)
     /// 数据按需分块拉取:仅当翻页到未加载区域时才请求下一块,避免一次性拉全量造成卡顿
     pub fn view_processed_reports(&self) -> Result<(), ProcessorError> {
         println!("=== 已处理记录 ===");
+        let mut type_options: Vec<(String, String)> = self
+            .fetcher
+            .registry
+            .get_all_types()
+            .into_iter()
+            .map(|rt| {
+                let name = self
+                    .fetcher
+                    .registry
+                    .get_config(&rt)
+                    .map(|c| c.name.clone())
+                    .unwrap_or_else(|| rt.clone());
+                (rt, name)
+            })
+            .collect();
+        type_options.sort_by(|a, b| a.1.cmp(&b.1));
+
+        let mut current_type: Option<String> = None; // None = 全部类型
         let mut chunks = self.fetcher.fetch_reports_chunked(ReportStatus::Done);
-        let mut items: Vec<Value> = Vec::new();
+        let mut raw_items: Vec<Value> = Vec::new();
+        let mut visible_count = 0usize; // 已缓存原始数据中匹配当前过滤的数量
         let mut exhausted = false;
 
         const PAGE_SIZE: usize = 15;
         let mut page = 0usize;
 
         loop {
-            // 按需拉取:确保当前页所需数据已加载
+            // 按需拉取:确保当前页所需可见数据已加载
             let needed = (page + 1) * PAGE_SIZE;
-            while items.len() < needed && !exhausted {
+            while visible_count < needed && !exhausted {
                 match chunks.next() {
-                    Some(chunk) => items.extend(chunk),
+                    Some(chunk) => {
+                        visible_count += chunk
+                            .iter()
+                            .filter(|v| self.type_filter_matches(v, &current_type))
+                            .count();
+                        raw_items.extend(chunk);
+                    }
                     None => exhausted = true,
                 }
             }
 
-            if items.is_empty() {
-                println!("暂无已处理记录");
-                return Ok(());
-            }
-
-            let page_count = items.len().div_ceil(PAGE_SIZE);
-            let start = page * PAGE_SIZE;
-            let end = (start + PAGE_SIZE).min(items.len());
+            let filter_name = current_type
+                .as_ref()
+                .and_then(|t| {
+                    type_options
+                        .iter()
+                        .find(|(rt, _)| rt == t)
+                        .map(|(_, name)| name.as_str())
+                })
+                .unwrap_or("全部");
+            let page_count = visible_count.div_ceil(PAGE_SIZE).max(1);
             println!(
-                "\n=== 已处理记录 (第 {}/{} 页, 已加载 {} 条{}) ===",
+                "\n=== 已处理记录 (类型: {}, 第 {}/{} 页, 共 {} 条{}) ===",
+                filter_name,
                 page + 1,
                 page_count,
-                items.len(),
+                visible_count,
                 if exhausted {
                     ""
                 } else {
                     ", 按需加载更多"
                 }
             );
-            for (i, item) in items[start..end].iter().enumerate() {
-                println!("{}", self.format_done_row(start + i + 1, item));
+
+            if visible_count > 0 {
+                let start = page * PAGE_SIZE;
+                for (i, item) in raw_items
+                    .iter()
+                    .filter(|v| self.type_filter_matches(v, &current_type))
+                    .skip(start)
+                    .take(PAGE_SIZE)
+                    .enumerate()
+                {
+                    println!("{}", self.format_done_row(start + i + 1, item));
+                }
+            } else {
+                println!("(该类型暂无已处理记录)");
             }
-            println!("[序号] 查看详情 | n 下一页 | p 上一页 | q 返回");
+
+            println!("[序号] 查看详情 | n 下一页 | p 上一页 | t 切换类型 | q 返回");
             let input = prompt_input("> ");
             let trimmed = input.trim();
             if let Ok(idx) = trimmed.parse::<usize>() {
-                if idx >= 1 && idx <= items.len() {
-                    self.display_done_item(&items[idx - 1])?;
+                if visible_count == 0 {
+                    println!("当前无记录");
+                } else if idx >= 1 && idx <= visible_count {
+                    if let Some(item) = raw_items
+                        .iter()
+                        .filter(|v| self.type_filter_matches(v, &current_type))
+                        .nth(idx - 1)
+                    {
+                        self.display_done_item(item)?;
+                    }
                 } else {
                     println!("序号超出范围");
                 }
@@ -597,12 +646,65 @@ impl ReportProcessor {
                             println!("已经是第一页");
                         }
                     }
+                    "t" => {
+                        if let Some(new_type) = self.pick_report_type(&type_options, &current_type)
+                        {
+                            current_type = new_type;
+                            visible_count = raw_items
+                                .iter()
+                                .filter(|v| self.type_filter_matches(v, &current_type))
+                                .count();
+                            page = 0;
+                        }
+                    }
                     "q" | "" => break,
                     _ => println!("无效输入,请重试"),
                 }
             }
         }
         Ok(())
+    }
+
+    /// 判断记录是否匹配当前类型过滤(None 表示不过滤)
+    fn type_filter_matches(&self, item: &Value, current: &Option<String>) -> bool {
+        match current {
+            Some(t) => self.infer_report_type(item) == Some(t.as_str()),
+            None => true,
+        }
+    }
+
+    /// 交互选择要查看的举报类型,返回 None 表示取消,Some(None) 表示全部
+    fn pick_report_type(
+        &self,
+        type_options: &[(String, String)],
+        current: &Option<String>,
+    ) -> Option<Option<String>> {
+        println!("\n选择要查看的举报类型:");
+        println!("  0. 全部");
+        for (i, (rt, name)) in type_options.iter().enumerate() {
+            let mark = if current.as_ref() == Some(rt) {
+                " (当前)"
+            } else {
+                ""
+            };
+            println!("  {}. {}{}", i + 1, name, mark);
+        }
+        println!("  回车返回");
+        let input = prompt_input("> ");
+        let trimmed = input.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        if trimmed == "0" {
+            return Some(None);
+        }
+        if let Ok(n) = trimmed.parse::<usize>() {
+            if n >= 1 && n <= type_options.len() {
+                return Some(Some(type_options[n - 1].0.clone()));
+            }
+        }
+        println!("无效输入");
+        None
     }
 
     /// 生成已处理记录列表行
