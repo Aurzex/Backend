@@ -113,10 +113,6 @@ impl CodeMaoFile {
     /// 将 `FileContent` 写入到指定路径,根据内容类型自动选择写入模式
     /// 此方法为统一入口,内部委托给具体类型方法
     pub fn file_write(path: &Path, content: &FileContent) -> Result<(), FileError> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
         match content {
             FileContent::Text(s) => Self::write_text(path, s),
             FileContent::Bytes(b) => Self::write_bytes(path, b),

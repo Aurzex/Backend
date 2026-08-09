@@ -549,7 +549,11 @@ impl DataQuery {
     ) -> Result<i32, DataQueryError> {
         let mut paginated = configure(client.build_paginated(endpoint).with_total_key(total_key));
         paginated.fetch_metadata().map_err(DataQueryError::from)?;
-        Ok(i32::try_from(paginated.total_items().unwrap_or(0)).unwrap_or(0))
+        let total = paginated
+            .total_items()
+            .ok_or_else(|| DataQueryError::ParseError("分页元数据缺少总数".into()))?;
+        i32::try_from(total)
+            .map_err(|_| DataQueryError::ParseError(format!("总数超出 i32 范围: {}", total)))
     }
 
     /// 获取评论总数
@@ -777,9 +781,15 @@ impl DataQuery {
                         comment_paginated
                             .fetch_metadata()
                             .map_err(DataQueryError::from)?;
-                        let comment_count =
-                            i32::try_from(comment_paginated.total_items().unwrap_or(0))
-                                .unwrap_or(0);
+                        let comment_total = comment_paginated.total_items().ok_or_else(|| {
+                            DataQueryError::ParseError("评论举报元数据缺少总数".into())
+                        })?;
+                        let comment_count = i32::try_from(comment_total).map_err(|_| {
+                            DataQueryError::ParseError(format!(
+                                "评论举报总数超出 i32 范围: {}",
+                                comment_total
+                            ))
+                        })?;
 
                         // 获取作品举报总数
                         let mut work_paginated = WhaleReportFetcher::new().fetch_work_reports_gen(
@@ -792,8 +802,15 @@ impl DataQuery {
                         work_paginated
                             .fetch_metadata()
                             .map_err(DataQueryError::from)?;
-                        let work_count =
-                            i32::try_from(work_paginated.total_items().unwrap_or(0)).unwrap_or(0);
+                        let work_total = work_paginated.total_items().ok_or_else(|| {
+                            DataQueryError::ParseError("作品举报元数据缺少总数".into())
+                        })?;
+                        let work_count = i32::try_from(work_total).map_err(|_| {
+                            DataQueryError::ParseError(format!(
+                                "作品举报总数超出 i32 范围: {}",
+                                work_total
+                            ))
+                        })?;
 
                         Ok((admin_id, admin_name.to_string(), comment_count, work_count))
                     });
@@ -862,17 +879,17 @@ impl DataQuery {
             let total_likes = fan
                 .get("total_likes")
                 .and_then(serde_json::Value::as_i64)
-                .map(|v| i32::try_from(v).unwrap_or(0))
                 .unwrap_or(0);
 
-            if total_likes >= like_threshold {
+            if total_likes >= like_threshold as i64 {
                 let mut fan_obj = JsonObject::new();
                 if let Some(id) = fan.get("id").and_then(serde_json::Value::as_i64) {
                     fan_obj.insert("user_id".into(), Value::Number(id.into()));
-                    let honors_result = UserDataFetcher::new()
-                        .fetch_user_honors(i32::try_from(id).unwrap_or(0))
-                        .map_err(DataQueryError::from);
-                    if let Ok(ref honors_data) = honors_result {
+                    // 荣誉数据为尽力而为:ID 超出 i32 范围或请求失败时输出 N/A
+                    let honors_data = i32::try_from(id)
+                        .ok()
+                        .and_then(|id32| UserDataFetcher::new().fetch_user_honors(id32).ok());
+                    if let Some(ref honors_data) = honors_data {
                         if let Some(fans_total) = honors_data.get("fans_total") {
                             fan_obj.insert("fans_total".into(), fans_total.clone());
                         } else {

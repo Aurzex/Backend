@@ -14,6 +14,7 @@ use serde_json::Value;
 use super::pipeline::{
     BatchActionManager, BatchGroup, CheckConfig, ReportIdExt, ViolationChecker,
     apply_action_by_key, get_display_registry, get_source_type_map, global_action_registry,
+    truncate_chars,
 };
 use super::registry::{
     ProcessorError, ReportFetcher, SourceConfig, bytes_to_human, html_to_text,
@@ -521,11 +522,10 @@ impl ReportProcessor {
 
     /// 保存批量组动作(同内容后续遇到时自动应用)
     pub fn save_group_action(&self, group: &BatchGroup, action: &str) {
-        self.batch_manager.lock().unwrap().save_batch_action(
-            &group.group_type,
-            &group.group_key,
-            action,
-        );
+        self.batch_manager
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .save_batch_action(&group.group_type, &group.group_key, action);
     }
 
     /// 按分组键查询本次会话已保存的动作(供 UI 展示同内容历史处理)
@@ -673,7 +673,7 @@ impl ReportProcessor {
             .get(&config.content_field)
             .map(value_to_string)
             .map(|s| html_to_text(&s))
-            .map(|s| truncate_chars_local(&s, 24))
+            .map(|s| truncate_chars(&s, 24))
             .unwrap_or_default();
         format!(
             "{:>3}. [{}] ID={} 状态={} 管理员={} 时间={} {}",
@@ -844,15 +844,6 @@ impl ReportProcessor {
         } else {
             None
         }
-    }
-}
-
-/// 截断字符串到指定字符数(按字符而非字节,避免切断多字节字符)
-fn truncate_chars_local(s: &str, max_chars: usize) -> String {
-    if s.chars().count() <= max_chars {
-        s.to_owned()
-    } else {
-        s.chars().take(max_chars).collect::<String>() + "..."
     }
 }
 

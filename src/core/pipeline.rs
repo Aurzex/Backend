@@ -96,7 +96,7 @@ pub(crate) fn get_source_type_map() -> &'static HashMap<&'static str, &'static s
 }
 
 // 公共工具函数
-fn truncate_chars(s: &str, max_chars: usize) -> String {
+pub(crate) fn truncate_chars(s: &str, max_chars: usize) -> String {
     if s.chars().count() <= max_chars {
         s.to_owned()
     } else {
@@ -750,16 +750,17 @@ impl ViolationChecker {
             .parse()
             .map_err(|_| ProcessorError::Processing(format!("未知来源类型: {}", source_type)))?;
 
+        let source_id32 = i32::try_from(source_id).map_err(|_| {
+            ProcessorError::Processing(format!("source_id 超出 i32 范围: {}", source_id))
+        })?;
+
         let total = DataQuery::new()
-            .count_comments(comment_source, i32::try_from(source_id).unwrap_or(0))
-            .unwrap_or(0);
+            .count_comments(comment_source, source_id32)
+            .map_err(|e| ProcessorError::Processing(format!("获取评论总数失败: {}", e)))?;
         info!("该内容共有 {} 条评论", total);
 
-        let detailed_comments = Self::fetch_detailed_comments(
-            comment_source,
-            i32::try_from(source_id).unwrap_or(0),
-            comment_limit,
-        )?;
+        let detailed_comments =
+            Self::fetch_detailed_comments(comment_source, source_id32, comment_limit)?;
 
         let pending = self.collect_pending_violations(&detailed_comments, source_type, source_id);
         let mut violations = Self::classify_violations(pending, self.config.spam_threshold);
@@ -1015,12 +1016,14 @@ impl ViolationChecker {
                 let is_reply = violation_type == "reply";
                 match source.as_str() {
                     "work" => {
+                        let work_id = i32::try_from(source_id).map_err(|_| {
+                            ProcessorError::Processing(format!(
+                                "作品 ID 超出 i32 范围: {}",
+                                source_id
+                            ))
+                        })?;
                         CommentOperations::new()
-                            .execute_report_comment(
-                                i32::try_from(source_id).unwrap_or(0),
-                                content_id,
-                                reason_content,
-                            )
+                            .execute_report_comment(work_id, content_id, reason_content)
                             .map_err(ProcessorError::from)?;
                     }
                     "forum" => {

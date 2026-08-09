@@ -1122,23 +1122,12 @@ impl CloudConnection {
 
     /// 发送 Socket.IO 事件帧:`42["name",payload]`
     pub fn send_event(&self, name: &str, payload: &Value) -> Result<()> {
-        let frame = format!(
-            "{EVENT_MESSAGE_PREFIX}{}",
-            serde_json::to_string(&(name, payload))?
-        );
-        self.send_text(&frame)
+        send_inner_event(&self.inner, name, payload)
     }
 
     /// 发送原始文本帧
     pub fn send_text(&self, payload: &str) -> Result<()> {
-        let tx = self
-            .inner
-            .tx
-            .lock()
-            .unwrap()
-            .clone()
-            .ok_or(CloudError::NotConnected)?;
-        tx.send(Message::text(payload)).map_err(CloudError::from)
+        send_inner_text(&self.inner, payload)
     }
 
     fn reset_state(&self) {
@@ -1565,7 +1554,7 @@ fn parse_list_action(op: &Value) -> Option<ListAction> {
         "insert" => {
             let nth = op.get("nth")?.as_i64()?;
             Some(ListAction::Insert(
-                usize::try_from(nth.saturating_sub(1).max(0)).unwrap_or(0),
+                nth.saturating_sub(1).max(0) as usize,
                 value()?,
             ))
         }
@@ -1573,7 +1562,7 @@ fn parse_list_action(op: &Value) -> Option<ListAction> {
             Some(Value::String(s)) if s == "last" => Some(ListAction::DeleteLast),
             Some(Value::String(s)) if s == "all" => Some(ListAction::DeleteAll),
             Some(Value::Number(n)) => {
-                let idx = usize::try_from(n.as_i64()?.saturating_sub(1).max(0)).unwrap_or(0);
+                let idx = n.as_i64()?.saturating_sub(1).max(0) as usize;
                 Some(ListAction::DeleteAt(idx))
             }
             _ => None,
@@ -1584,7 +1573,7 @@ fn parse_list_action(op: &Value) -> Option<ListAction> {
             match nth {
                 Value::String(s) if s == "last" => Some(ListAction::ReplaceLast(v)),
                 Value::Number(n) => {
-                    let idx = usize::try_from(n.as_i64()?.saturating_sub(1).max(0)).unwrap_or(0);
+                    let idx = n.as_i64()?.saturating_sub(1).max(0) as usize;
                     Some(ListAction::ReplaceAt(idx, v))
                 }
                 _ => None,
@@ -2203,7 +2192,8 @@ fn send_inner_text(inner: &Arc<CloudInner>, payload: &str) -> Result<()> {
         .unwrap()
         .clone()
         .ok_or(CloudError::NotConnected)?;
-    tx.send(Message::text(payload)).map_err(CloudError::from)
+    tx.send(Message::text(payload))?;
+    Ok(())
 }
 
 fn emit_online_users_change(inner: &Arc<CloudInner>, old: i64, new: i64) {

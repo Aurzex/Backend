@@ -1543,6 +1543,45 @@ pub(crate) trait WorkDecompiler: Send + Sync {
     ) -> Result<String>;
 }
 
+/// 将 JSON 反编译结果写入输出目录,返回文件路径(供各反编译器共用)
+fn save_json_result(
+    result: &DecompileResult,
+    output_dir: Option<&Path>,
+    context: &DecompilerContext,
+    extension: &str,
+    decompiler_name: &str,
+) -> Result<String> {
+    match result {
+        DecompileResult::Json(json) => {
+            let output_path = output_dir.unwrap_or(&context.config.default_output_dir);
+            FileService::ensure_dir(output_path)?;
+            let filename = FileService::safe_filename(
+                &context.work_info.name,
+                context.work_info.id,
+                extension,
+            );
+            let filepath = output_path.join(filename);
+            FileService::write_json(&filepath, json)?;
+            Ok(filepath.to_string_lossy().to_string())
+        }
+        _ => Err(DecompilerError::Decompile(format!(
+            "{}反编译器应返回JSON",
+            decompiler_name
+        ))),
+    }
+}
+
+/// 返回路径型反编译结果(供返回路径的反编译器共用)
+fn save_path_result(result: &DecompileResult, decompiler_name: &str) -> Result<String> {
+    match result {
+        DecompileResult::Path(path) => Ok(path.clone()),
+        _ => Err(DecompilerError::Decompile(format!(
+            "{}反编译器应返回路径",
+            decompiler_name
+        ))),
+    }
+}
+
 // NEKO
 pub(crate) struct NekoFetcher {
     http_client: Box<dyn HttpClient>,
@@ -1628,23 +1667,7 @@ impl WorkDecompiler for NekoDecompiler {
         output_dir: Option<&Path>,
         context: &DecompilerContext,
     ) -> Result<String> {
-        match result {
-            DecompileResult::Json(json) => {
-                let output_path = output_dir.unwrap_or(&context.config.default_output_dir);
-                FileService::ensure_dir(output_path)?;
-                let filename = FileService::safe_filename(
-                    &context.work_info.name,
-                    context.work_info.id,
-                    "bcmkn",
-                );
-                let filepath = output_path.join(filename);
-                FileService::write_json(&filepath, json)?;
-                Ok(filepath.to_string_lossy().to_string())
-            }
-            _ => Err(DecompilerError::Decompile(
-                "NekoDecompiler 应返回 JSON".into(),
-            )),
-        }
+        save_json_result(result, output_dir, context, "bcmkn", "NEKO")
     }
 }
 
@@ -1715,6 +1738,98 @@ impl KittenDecompiler {
         })
     }
 
+    /// 收集被 next_block/child_block/conditions/params 引用的块 ID(角色/场景共享)
+    fn collect_referenced_ids(blocks: &serde_json::Map<String, Value>) -> HashSet<String> {
+        let mut referenced_ids: HashSet<String> = HashSet::new();
+        for (_, block) in blocks {
+            if let Some(next) = block.get("next_block") {
+                if let Some(id) = next.as_str() {
+                    referenced_ids.insert(id.to_string());
+                } else if let Some(obj) = next.as_object()
+                    && let Some(id) = obj.get("id").and_then(|v| v.as_str())
+                {
+                    referenced_ids.insert(id.to_string());
+                }
+            }
+            if let Some(children) = block.get("child_block").and_then(|v| v.as_array()) {
+                for child in children {
+                    if let Some(id) = child.as_str() {
+                        referenced_ids.insert(id.to_string());
+                    } else if let Some(obj) = child.as_object()
+                        && let Some(id) = obj.get("id").and_then(|v| v.as_str())
+                    {
+                        referenced_ids.insert(id.to_string());
+                    }
+                }
+            }
+            if let Some(conditions) = block.get("conditions").and_then(|v| v.as_array()) {
+                for cond in conditions {
+                    if let Some(id) = cond.as_str() {
+                        referenced_ids.insert(id.to_string());
+                    } else if let Some(obj) = cond.as_object()
+                        && let Some(id) = obj.get("id").and_then(|v| v.as_str())
+                    {
+                        referenced_ids.insert(id.to_string());
+                    }
+                }
+            }
+            if let Some(params) = block.get("params").and_then(|v| v.as_object()) {
+                for (_, param_value) in params {
+                    if let Some(obj) = param_value.as_object()
+                        && let Some(id) = obj.get("id").and_then(|v| v.as_str())
+                    {
+                        referenced_ids.insert(id.to_string());
+                    }
+                }
+            }
+        }
+        referenced_ids
+    }
+
+    /// 反编译根块(未被引用的块)并插入 context(角色/场景共享)
+    fn decompile_root_blocks(
+        blocks: &serde_json::Map<String, Value>,
+        factory: &BlockDecompilerFactory,
+        context: &mut BlockContext,
+    ) -> Result<()> {
+        let referenced_ids = Self::collect_referenced_ids(blocks);
+        for (id, block_data) in blocks {
+            if !referenced_ids.contains(id) {
+                // 根块之间增加垂直间距,避免自动布局后挤在一起
+                context.layout_row += 50.0;
+                let mut decompiler = factory.create(block_data);
+                // 重新插入补充后的块(If/FunctionDef 等会修改 block_value)
+                let block_value = decompiler.decompile(context)?;
+                if let Some(bid) = block_value.get("id").and_then(|v| v.as_str()) {
+                    context.blocks.insert(bid.to_string(), block_value);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// 反编译函数定义块(procedures_2_defnoreturn)并插入 context(角色/场景共享)
+    fn decompile_procedures(
+        actor_compiled: &Value,
+        factory: &BlockDecompilerFactory,
+        context: &mut BlockContext,
+    ) -> Result<()> {
+        // 函数可能定义在角色/场景(屏幕角色)中,被其它场景/角色调用;
+        // 独立于 compiled_block_map,避免其缺失时连带丢失函数定义
+        if let Some(procedures) = actor_compiled.get("procedures").and_then(|v| v.as_object()) {
+            for (_, func_data) in procedures {
+                context.layout_row += 50.0;
+                let mut decompiler = factory.create(func_data);
+                // 重新插入:FunctionDefDecompiler 补充的 shadows/mutation/NAME 需覆盖 core 版本
+                let block_value = decompiler.decompile(context)?;
+                if let Some(bid) = block_value.get("id").and_then(|v| v.as_str()) {
+                    context.blocks.insert(bid.to_string(), block_value);
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn decompile_actor_blocks(
         config: &Arc<DecompilerConfig>,
         id_generator: &IdGenerator,
@@ -1747,78 +1862,13 @@ impl KittenDecompiler {
         let factory = BlockDecompilerFactory::new(config.as_ref(), id_generator);
 
         if let Some(blocks) = compiled_blocks {
-            let mut referenced_ids: HashSet<String> = HashSet::new();
-            for (_, block) in blocks {
-                if let Some(next) = block.get("next_block") {
-                    if let Some(id) = next.as_str() {
-                        referenced_ids.insert(id.to_string());
-                    } else if let Some(obj) = next.as_object()
-                        && let Some(id) = obj.get("id").and_then(|v| v.as_str())
-                    {
-                        referenced_ids.insert(id.to_string());
-                    }
-                }
-                if let Some(children) = block.get("child_block").and_then(|v| v.as_array()) {
-                    for child in children {
-                        if let Some(id) = child.as_str() {
-                            referenced_ids.insert(id.to_string());
-                        } else if let Some(obj) = child.as_object()
-                            && let Some(id) = obj.get("id").and_then(|v| v.as_str())
-                        {
-                            referenced_ids.insert(id.to_string());
-                        }
-                    }
-                }
-                if let Some(conditions) = block.get("conditions").and_then(|v| v.as_array()) {
-                    for cond in conditions {
-                        if let Some(id) = cond.as_str() {
-                            referenced_ids.insert(id.to_string());
-                        } else if let Some(obj) = cond.as_object()
-                            && let Some(id) = obj.get("id").and_then(|v| v.as_str())
-                        {
-                            referenced_ids.insert(id.to_string());
-                        }
-                    }
-                }
-                if let Some(params) = block.get("params").and_then(|v| v.as_object()) {
-                    for (_, param_value) in params {
-                        if let Some(obj) = param_value.as_object()
-                            && let Some(id) = obj.get("id").and_then(|v| v.as_str())
-                        {
-                            referenced_ids.insert(id.to_string());
-                        }
-                    }
-                }
-            }
-
-            for (id, block_data) in blocks {
-                if !referenced_ids.contains(id) {
-                    // 根块之间增加垂直间距,避免自动布局后挤在一起
-                    context.layout_row += 50.0;
-                    let mut decompiler = factory.create(block_data);
-                    // 重新插入补充后的块(If/FunctionDef 等会修改 block_value)
-                    let block_value = decompiler.decompile(&mut context)?;
-                    if let Some(bid) = block_value.get("id").and_then(|v| v.as_str()) {
-                        context.blocks.insert(bid.to_string(), block_value);
-                    }
-                }
-            }
+            Self::decompile_root_blocks(blocks, &factory, &mut context)?;
         }
 
         // 生成函数定义块(procedures_2_defnoreturn),否则调用块会因找不到
         // 定义而被 FunctionCallDecompiler 置为 disabled,函数功能丢失
         // 独立于 compiled_block_map,避免其缺失时连带丢失函数定义
-        if let Some(procedures) = actor_compiled.get("procedures").and_then(|v| v.as_object()) {
-            for (_, func_data) in procedures {
-                context.layout_row += 50.0;
-                let mut decompiler = factory.create(func_data);
-                // 重新插入:FunctionDefDecompiler 补充的 shadows/mutation/NAME 需覆盖 core 版本
-                let block_value = decompiler.decompile(&mut context)?;
-                if let Some(bid) = block_value.get("id").and_then(|v| v.as_str()) {
-                    context.blocks.insert(bid.to_string(), block_value);
-                }
-            }
-        }
+        Self::decompile_procedures(actor_compiled, &factory, &mut context)?;
 
         // 优先使用 compile_result 中的注释;若数据源未提供,则保留 actor_info
         // 中已有的注释,避免反编译覆盖掉输入中已有的注释数据
@@ -1874,77 +1924,13 @@ impl KittenDecompiler {
         let factory = BlockDecompilerFactory::new(config.as_ref(), id_generator);
 
         if let Some(blocks) = compiled_blocks {
-            let mut referenced_ids: HashSet<String> = HashSet::new();
-            for (_, block) in blocks {
-                if let Some(next) = block.get("next_block") {
-                    if let Some(id) = next.as_str() {
-                        referenced_ids.insert(id.to_string());
-                    } else if let Some(obj) = next.as_object()
-                        && let Some(id) = obj.get("id").and_then(|v| v.as_str())
-                    {
-                        referenced_ids.insert(id.to_string());
-                    }
-                }
-                if let Some(children) = block.get("child_block").and_then(|v| v.as_array()) {
-                    for child in children {
-                        if let Some(id) = child.as_str() {
-                            referenced_ids.insert(id.to_string());
-                        } else if let Some(obj) = child.as_object()
-                            && let Some(id) = obj.get("id").and_then(|v| v.as_str())
-                        {
-                            referenced_ids.insert(id.to_string());
-                        }
-                    }
-                }
-                if let Some(conditions) = block.get("conditions").and_then(|v| v.as_array()) {
-                    for cond in conditions {
-                        if let Some(id) = cond.as_str() {
-                            referenced_ids.insert(id.to_string());
-                        } else if let Some(obj) = cond.as_object()
-                            && let Some(id) = obj.get("id").and_then(|v| v.as_str())
-                        {
-                            referenced_ids.insert(id.to_string());
-                        }
-                    }
-                }
-                if let Some(params) = block.get("params").and_then(|v| v.as_object()) {
-                    for (_, param_value) in params {
-                        if let Some(obj) = param_value.as_object()
-                            && let Some(id) = obj.get("id").and_then(|v| v.as_str())
-                        {
-                            referenced_ids.insert(id.to_string());
-                        }
-                    }
-                }
-            }
-
-            for (id, block_data) in blocks {
-                if !referenced_ids.contains(id) {
-                    // 根块之间增加垂直间距,避免自动布局后挤在一起
-                    context.layout_row += 50.0;
-                    let mut decompiler = factory.create(block_data);
-                    let block_value = decompiler.decompile(&mut context)?;
-                    if let Some(bid) = block_value.get("id").and_then(|v| v.as_str()) {
-                        context.blocks.insert(bid.to_string(), block_value);
-                    }
-                }
-            }
+            Self::decompile_root_blocks(blocks, &factory, &mut context)?;
         }
 
         // 生成函数定义块(procedures_2_defnoreturn).函数可能定义在场景
         // (屏幕角色)中(如"总移动设置4"定义在背景(3)),与角色分支一致,
         // 否则场景中定义的函数缺失,调用块会被 FunctionCallDecompiler 禁用
-        if let Some(procedures) = actor_compiled.get("procedures").and_then(|v| v.as_object()) {
-            for (_, func_data) in procedures {
-                context.layout_row += 50.0;
-                let mut decompiler = factory.create(func_data);
-                // 重新插入:FunctionDefDecompiler 补充的 shadows/mutation/NAME 需覆盖 core 版本
-                let block_value = decompiler.decompile(&mut context)?;
-                if let Some(bid) = block_value.get("id").and_then(|v| v.as_str()) {
-                    context.blocks.insert(bid.to_string(), block_value);
-                }
-            }
-        }
+        Self::decompile_procedures(actor_compiled, &factory, &mut context)?;
 
         // 优先使用 compile_result 中的注释;若数据源未提供,则保留 scene_info
         // 中已有的注释,避免反编译覆盖掉输入中已有的注释数据
@@ -2473,26 +2459,12 @@ impl WorkDecompiler for KittenDecompiler {
         output_dir: Option<&Path>,
         context: &DecompilerContext,
     ) -> Result<String> {
-        match result {
-            DecompileResult::Json(json) => {
-                let output_path = output_dir.unwrap_or(&context.config.default_output_dir);
-                FileService::ensure_dir(output_path)?;
-                let filename = FileService::safe_filename(
-                    &context.work_info.name,
-                    context.work_info.id,
-                    context
-                        .work_info
-                        .file_extension(&context.config)
-                        .trim_start_matches('.'),
-                );
-                let filepath = output_path.join(filename);
-                FileService::write_json(&filepath, json)?;
-                Ok(filepath.to_string_lossy().to_string())
-            }
-            _ => Err(DecompilerError::Decompile(
-                "KITTEN反编译器应返回JSON".to_string(),
-            )),
-        }
+        let extension = context
+            .work_info
+            .file_extension(&context.config)
+            .trim_start_matches('.')
+            .to_owned();
+        save_json_result(result, output_dir, context, &extension, "KITTEN")
     }
 }
 
@@ -2588,12 +2560,7 @@ impl WorkDecompiler for NemoDecompiler {
         _output_dir: Option<&Path>,
         _context: &DecompilerContext,
     ) -> Result<String> {
-        match result {
-            DecompileResult::Path(path) => Ok(path.clone()),
-            _ => Err(DecompilerError::Decompile(
-                "NEMO反编译器应返回路径".to_string(),
-            )),
-        }
+        save_path_result(result, "NEMO")
     }
 }
 
@@ -2857,12 +2824,7 @@ impl WorkDecompiler for WoodDecompiler {
         _output_dir: Option<&Path>,
         _context: &DecompilerContext,
     ) -> Result<String> {
-        match result {
-            DecompileResult::Path(path) => Ok(path.clone()),
-            _ => Err(DecompilerError::Decompile(
-                "WOOD反编译器应返回路径".to_string(),
-            )),
-        }
+        save_path_result(result, "WOOD")
     }
 }
 
@@ -3206,26 +3168,12 @@ impl WorkDecompiler for CocoDecompiler {
         output_dir: Option<&Path>,
         context: &DecompilerContext,
     ) -> Result<String> {
-        match result {
-            DecompileResult::Json(json) => {
-                let output_path = output_dir.unwrap_or(&context.config.default_output_dir);
-                FileService::ensure_dir(output_path)?;
-                let filename = FileService::safe_filename(
-                    &context.work_info.name,
-                    context.work_info.id,
-                    context
-                        .work_info
-                        .file_extension(&context.config)
-                        .trim_start_matches('.'),
-                );
-                let filepath = output_path.join(filename);
-                FileService::write_json(&filepath, json)?;
-                Ok(filepath.to_string_lossy().to_string())
-            }
-            _ => Err(DecompilerError::Decompile(
-                "COCO反编译器应返回JSON".to_string(),
-            )),
-        }
+        let extension = context
+            .work_info
+            .file_extension(&context.config)
+            .trim_start_matches('.')
+            .to_owned();
+        save_json_result(result, output_dir, context, &extension, "COCO")
     }
 }
 

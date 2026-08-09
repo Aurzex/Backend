@@ -328,9 +328,12 @@ impl ReportTypeRegistry {
 /// 注册辅助:包装分页迭代器为"总数"闭包
 fn total_from(mut paginated: acquire::PaginatedIter) -> Result<Value, ProcessorError> {
     paginated.fetch_metadata()?;
-    Ok(json!(
-        i32::try_from(paginated.total_items().unwrap_or(0)).unwrap_or(i32::MAX)
-    ))
+    let total = paginated
+        .total_items()
+        .ok_or_else(|| ProcessorError::Processing("分页元数据缺少总数".into()))?;
+    let total = i32::try_from(total)
+        .map_err(|_| ProcessorError::Processing(format!("总数超出 i32 范围: {}", total)))?;
+    Ok(json!(total))
 }
 
 /// 注册辅助:包装分页迭代器为"生成器"闭包

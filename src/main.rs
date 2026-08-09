@@ -90,7 +90,7 @@ fn main() {
 
 /// 管理员账密登录,验证码错误时自动重新获取验证码并重试
 fn admin_login_with_retry(ui: &mut dyn ProcessorUi) -> Result<LoginResult, String> {
-    const MAX_ATTEMPTS: usize = 3;
+    const MAX_ATTEMPTS: usize = 10;
     let mut attempts = 0usize;
     let mut username = String::new();
     let mut password = String::new();

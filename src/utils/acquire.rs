@@ -29,9 +29,6 @@ pub enum MewError {
     Auth(String),
     #[error("Other error: {0}")]
     Other(String),
-    /// 携带状态码的其他错误
-    #[error("Other error: {0} (status: {1})")]
-    OtherWithCode(String, u16),
 }
 
 pub type MewResult<T> = std::result::Result<T, MewError>;
@@ -1528,7 +1525,7 @@ impl FileUploader {
             .send_multipart(form)?;
 
         let json = self.client.response_to_json(response)?;
-        Ok(json["url"].as_str().unwrap_or("").to_string())
+        Self::required_str_field(&json, "url")
     }
 
     fn upload_codegame(&self, file_path: &Path, save_path: &str) -> MewResult<String> {
@@ -1541,7 +1538,7 @@ impl FileUploader {
             file_path,
             &token_info.upload_url,
         )?;
-        let key = json["key"].as_str().unwrap_or("");
+        let key = Self::required_str_field(&json, "key")?;
         Ok(format!("{}/{}", token_info.bucket_url, key))
     }
 
@@ -1564,7 +1561,7 @@ impl FileUploader {
             file_path,
             &token_info.upload_url,
         )?;
-        let key = json["key"].as_str().unwrap_or("");
+        let key = Self::required_str_field(&json, "key")?;
         Ok(format!("{}{}", token_info.bucket_url, key))
     }
 
@@ -1598,6 +1595,14 @@ impl FileUploader {
             .ok_or_else(|| MewError::Other(error.into()))
     }
 
+    /// 从响应 JSON 中提取必填字符串字段,缺失时报错而非静默返回空串
+    fn required_str_field(json: &Value, key: &str) -> MewResult<String> {
+        json.get(key)
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .ok_or_else(|| MewError::Other(format!("上传响应缺少必填字段: {}", key)))
+    }
+
     fn get_codemao_token(&self, file_path: &str) -> MewResult<UploadTokenInfo> {
         let response = self
             .client
@@ -1618,10 +1623,10 @@ impl FileUploader {
         let token_info = Self::first_token_entry(&json, "tokens", "No tokens array")?;
 
         Ok(UploadTokenInfo {
-            token: token_info["token"].as_str().unwrap_or("").to_string(),
-            file_path: token_info["file_path"].as_str().unwrap_or("").to_string(),
-            upload_url: json["upload_url"].as_str().unwrap_or("").to_string(),
-            bucket_url: json["bucket_url"].as_str().unwrap_or("").to_string(),
+            token: Self::required_str_field(token_info, "token")?,
+            file_path: Self::required_str_field(token_info, "file_path")?,
+            upload_url: Self::required_str_field(&json, "upload_url")?,
+            bucket_url: Self::required_str_field(&json, "bucket_url")?,
         })
     }
 
@@ -1647,10 +1652,10 @@ impl FileUploader {
         let token_data = Self::first_token_entry(&json, "data", "No data array")?;
 
         Ok(UploadTokenInfo {
-            token: token_data["token"].as_str().unwrap_or("").to_string(),
-            file_path: token_data["filename"].as_str().unwrap_or("").to_string(),
+            token: Self::required_str_field(token_data, "token")?,
+            file_path: Self::required_str_field(token_data, "filename")?,
             upload_url: "https://upload.qiniup.com".to_string(),
-            bucket_url: json["bucket_url"].as_str().unwrap_or("").to_string(),
+            bucket_url: Self::required_str_field(&json, "bucket_url")?,
         })
     }
 }
@@ -1710,43 +1715,6 @@ pub enum HTTPStatus {
 }
 
 impl HTTPStatus {
-    pub fn from_code(code: u16) -> Option<Self> {
-        match code {
-            100 => Some(HTTPStatus::Continue),
-            101 => Some(HTTPStatus::SwitchingProtocols),
-            102 => Some(HTTPStatus::Processing),
-            200 => Some(HTTPStatus::Ok),
-            201 => Some(HTTPStatus::Created),
-            202 => Some(HTTPStatus::Accepted),
-            203 => Some(HTTPStatus::NonAuthoritativeInfo),
-            204 => Some(HTTPStatus::NoContent),
-            205 => Some(HTTPStatus::ResetContent),
-            206 => Some(HTTPStatus::PartialContent),
-            300 => Some(HTTPStatus::MultipleChoices),
-            301 => Some(HTTPStatus::MovedPermanently),
-            302 => Some(HTTPStatus::Found),
-            303 => Some(HTTPStatus::SeeOther),
-            304 => Some(HTTPStatus::NotModified),
-            307 => Some(HTTPStatus::TemporaryRedirect),
-            308 => Some(HTTPStatus::PermanentRedirect),
-            400 => Some(HTTPStatus::BadRequest),
-            401 => Some(HTTPStatus::Unauthorized),
-            402 => Some(HTTPStatus::PaymentRequired),
-            403 => Some(HTTPStatus::Forbidden),
-            404 => Some(HTTPStatus::NotFound),
-            405 => Some(HTTPStatus::MethodNotAllowed),
-            406 => Some(HTTPStatus::NotAcceptable),
-            409 => Some(HTTPStatus::Conflict),
-            410 => Some(HTTPStatus::Gone),
-            500 => Some(HTTPStatus::InternalServerError),
-            501 => Some(HTTPStatus::NotImplemented),
-            502 => Some(HTTPStatus::BadGateway),
-            503 => Some(HTTPStatus::ServiceUnavailable),
-            504 => Some(HTTPStatus::GatewayTimeout),
-            _ => None,
-        }
-    }
-
     pub fn reason_phrase(&self) -> &'static str {
         match self {
             HTTPStatus::Continue => "Continue",

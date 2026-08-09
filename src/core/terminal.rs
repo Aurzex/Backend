@@ -788,13 +788,18 @@ impl ReportConsole {
     fn pick_status(ui: &mut dyn ProcessorUi, current: Option<&str>) -> StatusFilterChoice {
         ui.info("\n选择状态过滤:");
         ui.info("  0. 全部");
-        for (i, (raw, name)) in STATUS_FILTER_OPTIONS.iter().enumerate() {
+        for (i, raw) in STATUS_FILTER_OPTIONS.iter().enumerate() {
             let mark = if current == Some(raw) {
                 " (当前)"
             } else {
                 ""
             };
-            ui.info(&format!("  {}. {}{}", i + 1, name, mark));
+            ui.info(&format!(
+                "  {}. {}{}",
+                i + 1,
+                resolution_display_name(raw),
+                mark
+            ));
         }
         ui.info("  回车返回");
         let input = ui.input("> ");
@@ -809,7 +814,7 @@ impl ReportConsole {
             && n >= 1
             && n <= STATUS_FILTER_OPTIONS.len()
         {
-            return StatusFilterChoice::Select(STATUS_FILTER_OPTIONS[n - 1].0.to_string());
+            return StatusFilterChoice::Select(STATUS_FILTER_OPTIONS[n - 1].to_string());
         }
         ui.info("无效输入");
         StatusFilterChoice::Cancel
@@ -836,13 +841,13 @@ enum StatusFilterChoice {
     Select(String),
 }
 
-/// 已处理记录状态过滤选项 (原始状态值, 中文名)
-const STATUS_FILTER_OPTIONS: [(&str, &str); 5] = [
-    ("PASS", "通过"),
-    ("DELETE", "删除"),
-    ("MUTE_SEVEN_DAYS", "禁言7天"),
-    ("MUTE_THREE_MONTHS", "禁言3月"),
-    ("UNLOAD", "取消发布"),
+/// 已处理记录状态过滤选项 (原始状态值, 显示名由 resolution_display_name 提供)
+const STATUS_FILTER_OPTIONS: [&str; 5] = [
+    "PASS",
+    "DELETE",
+    "MUTE_SEVEN_DAYS",
+    "MUTE_THREE_MONTHS",
+    "UNLOAD",
 ];
 
 /// 已处理记录的过滤条件
