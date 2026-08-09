@@ -457,13 +457,7 @@ impl ReportProcessor {
                 continue;
             }
             match self.apply_action(item, action, admin_id) {
-                Ok(()) => {
-                    applied += 1;
-                    self.batch_manager
-                        .lock()
-                        .unwrap()
-                        .mark_record_processed(&record_id);
-                }
+                Ok(()) => applied += 1,
                 Err(e) => log_error!("批量应用失败 (id={}): {}", record_id, e),
             }
         }

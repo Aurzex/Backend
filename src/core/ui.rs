@@ -197,22 +197,34 @@ impl ReportConsole {
         }
 
         let mut processed = 0i64;
-        let mut session = processor.pending_session();
-        while let Some((groups, non_group)) = session.next_chunk() {
-            for group in groups {
+        let outcome = (|| -> Result<(), ProcessorError> {
+            let mut session = processor.pending_session();
+            while let Some((groups, non_group)) = session.next_chunk() {
+                for group in groups {
+                    processed += self.process_group(ui, processor, admin_id, &group)?;
+                }
+                for item in &non_group {
+                    processed +=
+                        self.process_item(ui, processor, admin_id, item, processed + 1, total)?;
+                }
+            }
+            for group in session.leftover_groups() {
                 processed += self.process_group(ui, processor, admin_id, &group)?;
             }
-            for item in &non_group {
-                processed +=
-                    self.process_item(ui, processor, admin_id, item, processed + 1, total)?;
-            }
-        }
-        for group in session.leftover_groups() {
-            processed += self.process_group(ui, processor, admin_id, &group)?;
-        }
+            Ok(())
+        })();
 
-        ui.info(&format!("所有举报处理完成, 共处理 {} 条举报", processed));
-        Ok(processed)
+        match outcome {
+            Ok(()) => {
+                ui.info(&format!("所有举报处理完成, 共处理 {} 条举报", processed));
+                Ok(processed)
+            }
+            Err(ProcessorError::Aborted) => {
+                ui.info(&format!("已中止处理, 累计处理 {} 条", processed));
+                Ok(processed)
+            }
+            Err(e) => Err(e),
+        }
     }
 
     /// 处理一个批量组:有保存动作直接应用,否则询问首条后应用到全部
