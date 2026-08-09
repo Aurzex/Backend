@@ -1,16 +1,13 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
-use std::sync::{Arc, LazyLock, Mutex, OnceLock};
-use std::thread;
-use std::time::Duration;
+use std::sync::{Arc, LazyLock};
 
 use log::{error, info, warn};
 use serde_json::Value;
 
 use super::registry::{
-    CommentConfig, ProcessorError, ReportTypeRegistry, SourceConfig, action_name, html_to_text,
-    status_mapping, timestamp_to_string, value_to_string,
+    ProcessorError, SourceConfig, html_to_text, timestamp_to_string, value_to_string,
 };
 use crate::api::forum::{
     ForumActionHandler, ForumDataFetcher, ForumReportReasonId, ItemType, PostReportReasonId,
@@ -87,87 +84,23 @@ impl Default for CheckConfig {
 
 // 静态映射与注册表
 /// 来源类型映射
-static SOURCE_TYPE_MAP: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
+static SOURCE_TYPE_MAP: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
+    HashMap::from([
+        ("shop_comment", "shop"),
+        ("forum_post", "forum"),
+        ("forum_discussion", "forum"),
+    ])
+});
 pub(crate) fn get_source_type_map() -> &'static HashMap<&'static str, &'static str> {
-    SOURCE_TYPE_MAP.get_or_init(|| {
-        HashMap::from([
-            ("shop_comment", "shop"),
-            ("forum_post", "forum"),
-            ("forum_discussion", "forum"),
-        ])
-    })
+    &SOURCE_TYPE_MAP
 }
 
 // 公共工具函数
-fn title_preview_str(title: &str) -> String {
-    if title.is_empty() {
-        String::new()
-    } else {
-        // 按字符截断而非字节:title.len() 是字节数,直接切片可能切断多字节字符(如中文)导致 panic
-        let preview: String = title.chars().take(10).collect();
-        format!("[{}]", preview)
-    }
-}
-
 fn truncate_chars(s: &str, max_chars: usize) -> String {
     if s.chars().count() <= max_chars {
         s.to_owned()
     } else {
         s.chars().take(max_chars).collect::<String>() + "..."
-    }
-}
-
-fn build_identifier(source_type: &str, item_id: i64, data: &Value, is_reply: bool) -> String {
-    let content_id = data
-        .get("id")
-        .and_then(serde_json::Value::as_i64)
-        .unwrap_or(0);
-    let parent_id = if is_reply {
-        data.get("parent_id")
-            .and_then(serde_json::Value::as_i64)
-            .unwrap_or(0)
-    } else {
-        0
-    };
-    format!(
-        "{}:{}:{}:{}:{}",
-        source_type,
-        item_id,
-        if is_reply { "reply" } else { "comment" },
-        parent_id,
-        content_id
-    )
-}
-
-fn for_each_comment_reply(comments: &[Value], mut handler: impl FnMut(&Value, bool)) {
-    for comment in comments {
-        if comment
-            .get("is_top")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false)
-        {
-            continue;
-        }
-        handler(comment, false);
-        if let Some(replies) = comment.get("replies").and_then(|v| v.as_array()) {
-            for reply in replies {
-                handler(reply, true);
-            }
-        }
-    }
-}
-
-pub(crate) fn parse_resolution(resolution: &str) -> Result<Resolution, ProcessorError> {
-    match resolution {
-        "DELETE" => Ok(Resolution::Delete),
-        "MUTE_SEVEN_DAYS" => Ok(Resolution::MuteSevenDays),
-        "MUTE_THREE_MONTHS" => Ok(Resolution::MuteThreeMonths),
-        "PASS" => Ok(Resolution::Pass),
-        "UNLOAD" => Ok(Resolution::Unload),
-        _ => Err(ProcessorError::Processing(format!(
-            "未知状态: {}",
-            resolution
-        ))),
     }
 }
 
@@ -186,207 +119,6 @@ impl ReportIdExt for SourceConfig {
                     self.report_id_field
                 ))
             })
-    }
-}
-
-// 策略模式:评论违规检测
-pub trait CommentProcessStrategy: Send + Sync {
-    fn process(
-        &self,
-        comments: &[Value],
-        item_id: i64,
-        title: &str,
-        params: &HashMap<String, Value>,
-        target_lists: &mut HashMap<String, Vec<String>>,
-        source_type: &str,
-    );
-}
-
-struct AdsStrategy;
-impl CommentProcessStrategy for AdsStrategy {
-    fn process(
-        &self,
-        comments: &[Value],
-        item_id: i64,
-        title: &str,
-        params: &HashMap<String, Value>,
-        target_lists: &mut HashMap<String, Vec<String>>,
-        source_type: &str,
-    ) {
-        let ad_keywords: HashSet<String> = params
-            .get("ads")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(str::to_lowercase))
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        if ad_keywords.is_empty() {
-            return;
-        }
-
-        for_each_comment_reply(comments, |data, is_reply| {
-            let content = data
-                .get("content")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_lowercase();
-            if ad_keywords.iter().any(|kw| content.contains(kw)) {
-                let identifier = build_identifier(source_type, item_id, data, is_reply);
-                let log_type = if is_reply { "回复" } else { "评论" };
-                let content_preview = truncate_chars(&content, 50);
-                let title_part = title_preview_str(title);
-                info!(
-                    "广告 {} [{}]{} : {}",
-                    log_type,
-                    source_type.to_uppercase(),
-                    title_part,
-                    content_preview
-                );
-                target_lists
-                    .entry("ads".to_string())
-                    .or_default()
-                    .push(identifier);
-            }
-        });
-    }
-}
-
-struct DuplicatesStrategy;
-impl CommentProcessStrategy for DuplicatesStrategy {
-    fn process(
-        &self,
-        comments: &[Value],
-        item_id: i64,
-        _title: &str,
-        params: &HashMap<String, Value>,
-        target_lists: &mut HashMap<String, Vec<String>>,
-        source_type: &str,
-    ) {
-        let threshold = params
-            .get("duplicates")
-            .and_then(serde_json::Value::as_u64)
-            .map_or(3, |v| usize::try_from(v).unwrap_or(usize::MAX));
-
-        let mut content_map: HashMap<(String, String), Vec<String>> = HashMap::new();
-
-        for_each_comment_reply(comments, |data, is_reply| {
-            let user_id = data.get("user_id").map(value_to_string).unwrap_or_default();
-            let content = data
-                .get("content")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_lowercase();
-            if user_id.is_empty() || content.is_empty() {
-                return;
-            }
-            let identifier = build_identifier(source_type, item_id, data, is_reply);
-            content_map
-                .entry((user_id, content))
-                .or_default()
-                .push(identifier);
-        });
-
-        for ((user_id, content), identifiers) in content_map {
-            if identifiers.len() >= threshold {
-                info!(
-                    "用户 {} 刷屏评论: {}... - 出现 {} 次",
-                    user_id,
-                    truncate_chars(&content, 50),
-                    identifiers.len()
-                );
-                target_lists
-                    .entry("duplicates".to_string())
-                    .or_default()
-                    .extend(identifiers);
-            }
-        }
-    }
-}
-
-// 策略工厂
-pub(crate) struct StrategyFactory {
-    strategies: HashMap<String, Box<dyn CommentProcessStrategy>>,
-}
-
-impl Default for StrategyFactory {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl StrategyFactory {
-    pub(crate) fn new() -> Self {
-        let mut factory = StrategyFactory {
-            strategies: HashMap::new(),
-        };
-        factory.register("ads", Box::new(AdsStrategy));
-        factory.register("duplicates", Box::new(DuplicatesStrategy));
-        factory
-    }
-
-    pub(crate) fn register(&mut self, name: &str, strategy: Box<dyn CommentProcessStrategy>) {
-        self.strategies.insert(name.to_string(), strategy);
-    }
-
-    pub(crate) fn get(&self, name: &str) -> Option<&dyn CommentProcessStrategy> {
-        self.strategies.get(name).map(std::convert::AsRef::as_ref)
-    }
-
-    pub(crate) fn get_all_strategy_types(&self) -> Vec<String> {
-        self.strategies.keys().cloned().collect()
-    }
-}
-
-// 评论处理器
-pub struct CommentProcessor {
-    factory: StrategyFactory,
-}
-
-impl Default for CommentProcessor {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl CommentProcessor {
-    pub fn new() -> Self {
-        CommentProcessor {
-            factory: StrategyFactory::new(),
-        }
-    }
-
-    /// 处理单条评论的违规检测,参数较多,保留显式参数以保持调用清晰
-    #[allow(clippy::too_many_arguments)]
-    pub fn process_item(
-        &self,
-        item_id: i64,
-        title: &str,
-        config: &dyn CommentConfig,
-        action_type: &str,
-        params: &HashMap<String, Value>,
-        target_lists: &mut HashMap<String, Vec<String>>,
-        source_type: &str,
-    ) {
-        if let Some(strategy) = self.factory.get(action_type)
-            && let Some(comments) = config.get_comments(item_id)
-        {
-            strategy.process(comments, item_id, title, params, target_lists, source_type);
-        }
-    }
-
-    pub fn register_strategy(
-        &mut self,
-        action_type: &str,
-        strategy: Box<dyn CommentProcessStrategy>,
-    ) {
-        self.factory.register(action_type, strategy);
-    }
-
-    pub fn get_all_strategy_types(&self) -> Vec<String> {
-        self.factory.get_all_strategy_types()
     }
 }
 
@@ -515,9 +247,9 @@ impl ActionRegistry {
     }
 }
 
-static ACTION_REGISTRY: OnceLock<ActionRegistry> = OnceLock::new();
+static ACTION_REGISTRY: LazyLock<ActionRegistry> = LazyLock::new(ActionRegistry::new);
 pub(crate) fn global_action_registry() -> &'static ActionRegistry {
-    ACTION_REGISTRY.get_or_init(ActionRegistry::new)
+    &ACTION_REGISTRY
 }
 
 // 应用动作的便捷函数
@@ -525,22 +257,30 @@ pub(crate) fn apply_action_by_method(
     method: &str,
     report_id: i32,
     admin_id: i32,
-    resolution: &str,
+    resolution: Resolution,
 ) -> Result<bool, ProcessorError> {
-    let resolution_enum = parse_resolution(resolution)?;
-    global_action_registry().apply(method, report_id, admin_id, resolution_enum)
+    global_action_registry().apply(method, report_id, admin_id, resolution)
 }
 
-/// 依据动作键查找 resolution 并执行处理动作,动作键不在映射中时静默跳过
+/// 依据动作键查配置中的决议并执行处理动作;
+/// 未知键或非执行类动作(检查违规/跳过)静默跳过,保持原有行为
 pub(crate) fn apply_action_by_key(
     config: &SourceConfig,
     report_id: i32,
     admin_id: i32,
     action_key: &str,
 ) -> Result<(), ProcessorError> {
-    if let Some(resolution) = status_mapping().get(action_key) {
-        apply_action_by_method(&config.handle_method, report_id, admin_id, resolution)?;
-    }
+    let Some(action) = config
+        .available_actions
+        .iter()
+        .find(|a| a.key == action_key)
+    else {
+        return Ok(());
+    };
+    let Some(resolution) = action.resolution else {
+        return Ok(());
+    };
+    apply_action_by_method(&config.handle_method, report_id, admin_id, resolution)?;
     Ok(())
 }
 
@@ -793,7 +533,6 @@ enum ViolationKind {
 
 // 违规检查器
 pub(crate) struct ViolationChecker {
-    pub(crate) comment_processor: CommentProcessor,
     config: CheckConfig,
     ad_keywords_cache: Arc<HashSet<String>>,
 }
@@ -808,7 +547,6 @@ impl ViolationChecker {
                 .collect(),
         );
         ViolationChecker {
-            comment_processor: CommentProcessor::new(),
             config,
             ad_keywords_cache,
         }
@@ -1342,41 +1080,5 @@ impl MultiAccount {
         }
         info!("加载 {} 个账号", self.accounts.len());
         Ok(())
-    }
-
-    pub(crate) fn execute_with_accounts<F>(&self, func: F, limit: Option<usize>, delay_secs: u64)
-    where
-        F: Fn(),
-    {
-        let accs = if let Some(lim) = limit {
-            &self.accounts[..lim.min(self.accounts.len())]
-        } else {
-            &self.accounts[..]
-        };
-        for (i, _) in accs.iter().enumerate() {
-            func();
-            if i < accs.len() - 1 && delay_secs > 0 {
-                thread::sleep(Duration::from_secs(delay_secs));
-            }
-        }
-    }
-}
-
-// 全局单例
-static COMMENT_PROCESSOR: OnceLock<CommentProcessor> = OnceLock::new();
-static VIOLATION_CHECKER: OnceLock<ViolationChecker> = OnceLock::new();
-
-pub(crate) fn comment_processor() -> &'static CommentProcessor {
-    COMMENT_PROCESSOR.get_or_init(CommentProcessor::new)
-}
-
-pub(crate) fn violation_checker() -> &'static ViolationChecker {
-    VIOLATION_CHECKER.get_or_init(|| ViolationChecker::new(CheckConfig::default()))
-}
-
-// 为 Vec<Value> 实现 CommentConfig
-impl CommentConfig for Vec<Value> {
-    fn get_comments(&self, _item_id: i64) -> Option<&[Value]> {
-        Some(self.as_slice())
     }
 }

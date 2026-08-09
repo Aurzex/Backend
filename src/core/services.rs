@@ -3,7 +3,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use log::{error as log_error, info as log_info};
 
@@ -22,6 +22,22 @@ use crate::utils::acquire::{FileUploader, KittyFactory};
 
 /// 批量分组的键:(分组类型, 分组键)
 type GroupKey = (String, String);
+
+/// 总数缓存刷新间隔:控制台菜单轮询期间避免每次渲染都打满 8 个网络请求
+const TOTALS_TTL: Duration = Duration::from_secs(5);
+
+/// 未处理/已处理总数的短时缓存
+struct TotalsCache {
+    pending: i64,
+    done: i64,
+    fetched_at: Instant,
+}
+
+impl TotalsCache {
+    fn fresh(&self) -> bool {
+        self.fetched_at.elapsed() < TOTALS_TTL
+    }
+}
 
 // 文件处理器
 pub struct FileProcessor;
@@ -142,7 +158,7 @@ impl PendingSession<'_> {
     /// 拉取下一块,返回(已达标批量组, 非组内项);流结束时返回 None
     pub fn next_chunk(&mut self) -> Option<(Vec<BatchGroup>, Vec<Value>)> {
         let chunk = self.chunks.next()?;
-        Some(self.processor.split_chunk(&chunk, &mut self.pending_groups))
+        Some(self.processor.split_chunk(chunk, &mut self.pending_groups))
     }
 
     /// 流结束后的遗留组(未达阈值的组,交由调用方决定处理)
@@ -160,6 +176,7 @@ pub struct ReportProcessor {
     batch_manager: Arc<Mutex<BatchActionManager>>,
     violation_checker: ViolationChecker,
     config: CheckConfig,
+    totals_cache: Mutex<Option<TotalsCache>>,
 }
 
 impl Default for ReportProcessor {
@@ -184,33 +201,49 @@ impl ReportProcessor {
             batch_manager,
             violation_checker,
             config,
+            totals_cache: Mutex::new(None),
         }
     }
 
     // ---- 查询 ----
 
+    /// 未处理与已处理总数(短时缓存;任何处理动作后自动失效,保证下次展示即时刷新)
+    pub fn totals(&self) -> (i64, i64) {
+        let mut cache = self
+            .totals_cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(c) = cache.as_ref()
+            && c.fresh()
+        {
+            return (c.pending, c.done);
+        }
+        let pending = self.fetcher.get_total_reports(ReportStatus::ToBeDone);
+        let done = self.fetcher.get_total_reports(ReportStatus::Done);
+        *cache = Some(TotalsCache {
+            pending,
+            done,
+            fetched_at: Instant::now(),
+        });
+        (pending, done)
+    }
+
     /// 待处理举报总数
     pub fn pending_total(&self) -> i64 {
-        self.fetcher.get_total_reports(ReportStatus::ToBeDone)
+        self.totals().0
     }
 
     /// 已处理举报总数
     pub fn done_total(&self) -> i64 {
-        self.fetcher.get_total_reports(ReportStatus::Done)
+        self.totals().1
     }
 
-    /// 各举报类型的待处理数量 (类型名, 数量)
-    pub fn backlog(&self) -> Vec<(String, i64)> {
-        let mut items = Vec::new();
-        for report_type in self.fetcher.registry.get_all_types() {
-            if let Some(cfg) = self.fetcher.registry.get_config(&report_type) {
-                match (cfg.fetch_total)(ReportStatus::ToBeDone) {
-                    Ok(v) => items.push((cfg.name.clone(), v.as_i64().unwrap_or(0))),
-                    Err(e) => log_error!("获取 {} 总数失败: {}", cfg.name, e),
-                }
-            }
-        }
-        items
+    /// 使总数缓存失效,由处理动作调用,保证菜单展示即时刷新
+    fn invalidate_totals(&self) {
+        self.totals_cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
     }
 
     /// 举报类型选项 (类型键, 类型名),按名称排序
@@ -315,6 +348,22 @@ impl ReportProcessor {
                 report_type
             )));
         };
+        let result = self.execute_action(report_type, config, item, action, admin_id);
+        if result.is_ok() {
+            self.invalidate_totals();
+        }
+        result
+    }
+
+    /// 校验动作可用性并应用单条记录(不负责缓存失效,由调用方处理)
+    fn execute_action(
+        &self,
+        report_type: &str,
+        config: &SourceConfig,
+        item: &Value,
+        action: &str,
+        admin_id: i32,
+    ) -> Result<(), ProcessorError> {
         if !self
             .fetcher
             .registry
@@ -410,6 +459,9 @@ impl ReportProcessor {
         }
 
         log_info!("一键通过完成, 共通过 {} 条举报", count);
+        if count > 0 {
+            self.invalidate_totals();
+        }
         count
     }
 
@@ -434,26 +486,40 @@ impl ReportProcessor {
 
     /// 将动作应用到批量组全部记录,返回成功数(逐条错误仅记录日志)
     pub fn apply_group(&self, group: &BatchGroup, action: &str, admin_id: i32) -> i64 {
+        // 组内记录由同一分组键聚合,举报类型必然一致,配置只解析一次
+        let Some(first) = group.items.first() else {
+            return 0;
+        };
+        let Some(report_type) = Self::infer_report_type(first) else {
+            return 0;
+        };
+        let Some(config) = self.fetcher.registry.get_config(report_type) else {
+            return 0;
+        };
+        if !self
+            .fetcher
+            .registry
+            .is_action_available(report_type, action)
+        {
+            return 0;
+        }
+
         let mut applied = 0i64;
         for item in &group.items {
-            let Some(report_type) = Self::infer_report_type(item) else {
-                continue;
-            };
-            let Some(config) = self.fetcher.registry.get_config(report_type) else {
-                continue;
-            };
-            let record_id = Self::extract_record_id(item, config);
-            if !self
-                .fetcher
-                .registry
-                .is_action_available(report_type, action)
-            {
-                continue;
+            if Self::infer_report_type(item) != Some(report_type) {
+                continue; // 防御:组内类型不一致时跳过
             }
-            match self.apply_action(item, action, admin_id) {
+            match self.execute_action(report_type, config, item, action, admin_id) {
                 Ok(()) => applied += 1,
-                Err(e) => log_error!("批量应用失败 (id={}): {}", record_id, e),
+                Err(e) => log_error!(
+                    "批量应用失败 (id={}): {}",
+                    Self::extract_record_id(item, config),
+                    e
+                ),
             }
+        }
+        if applied > 0 {
+            self.invalidate_totals();
         }
         applied
     }
@@ -569,19 +635,20 @@ impl ReportProcessor {
     /// 避免组员在组完成前被当作个体处理导致动作不一致。
     fn split_chunk(
         &self,
-        chunk: &[Value],
+        chunk: Vec<Value>,
         pending: &mut HashMap<GroupKey, Vec<Value>>,
     ) -> (Vec<BatchGroup>, Vec<Value>) {
         let mut ready = Vec::new();
         let mut non_group = Vec::new();
 
+        // chunk 为自有所有权:条目直接移动进组,避免逐条深拷贝 JSON
         for item in chunk {
-            let Some(key) = self.extract_group_key(item) else {
-                non_group.push(item.clone());
+            let Some(key) = self.extract_group_key(&item) else {
+                non_group.push(item);
                 continue;
             };
             let entry = pending.entry(key.clone()).or_default();
-            entry.push(item.clone());
+            entry.push(item);
             let threshold = if key.0 == "item_id" {
                 self.config.batch_item_id_threshold
             } else {

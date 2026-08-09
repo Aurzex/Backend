@@ -128,32 +128,40 @@ enum ActionChoice {
 pub struct ReportConsole;
 
 impl ReportConsole {
-    /// 控制台主循环
+    /// 控制台主循环:主菜单只保留"处理未处理/查看已处理"两个工作区,
+    /// 支持数字或字母快捷键直达,总数带缓存避免菜单渲染阻塞
     pub fn run(ui: &mut dyn ProcessorUi, processor: &ReportProcessor, admin_id: i32) {
         loop {
-            let todo = processor.pending_total();
-            let done = processor.done_total();
+            let (todo, done) = processor.totals();
             ui.info("\n=== 举报处理控制台 ===");
-            ui.info(&format!("待处理: {} 条 | 已处理: {} 条", todo, done));
-            ui.info("1. 处理待处理举报");
-            ui.info("2. 查看已处理记录");
-            ui.info("3. 待处理分布(按类型)");
-            ui.info("0. 退出");
+            ui.info(&format!("未处理: {} 条 | 已处理: {} 条", todo, done));
+            ui.info("1(p). 处理未处理举报");
+            ui.info("2(d). 查看已处理记录");
+            ui.info("0(q). 退出");
             let input = ui.input("> ");
-            match input.trim() {
-                "1" => match Self::process_pending(ui, processor, admin_id) {
-                    Ok(n) => ui.info(&format!("本次共处理 {} 条举报", n)),
-                    Err(ProcessorError::Aborted) => ui.info("已中止处理"),
-                    Err(e) => ui.error(&format!("处理失败: {}", e)),
-                },
-                "2" => Self::view_done(ui, processor),
-                "3" => Self::backlog(ui, processor),
-                "0" | "q" | "Q" | "" => {
+            match input.trim().to_lowercase().as_str() {
+                "1" | "p" => Self::process_flow(ui, processor, admin_id),
+                "2" | "d" => {
+                    if Self::view_done(ui, processor) {
+                        // 已处理记录中直接切到处理未处理
+                        Self::process_flow(ui, processor, admin_id);
+                    }
+                }
+                "0" | "q" | "" => {
                     ui.info("退出举报处理控制台");
                     return;
                 }
                 _ => ui.info("无效输入,请重试"),
             }
+        }
+    }
+
+    /// 执行一次"处理未处理"流程并汇报结果
+    fn process_flow(ui: &mut dyn ProcessorUi, processor: &ReportProcessor, admin_id: i32) {
+        match Self::process_pending(ui, processor, admin_id) {
+            Ok(n) => ui.info(&format!("本次共处理 {} 条举报", n)),
+            Err(ProcessorError::Aborted) => ui.info("已中止处理"),
+            Err(e) => ui.error(&format!("处理失败: {}", e)),
         }
     }
 
@@ -359,8 +367,9 @@ impl ReportConsole {
         }
     }
 
-    /// 分页浏览已处理记录,支持按类型过滤切换
-    fn view_done(ui: &mut dyn ProcessorUi, processor: &ReportProcessor) {
+    /// 分页浏览已处理记录,支持按类型过滤与直接切到处理未处理;
+    /// 返回 true 表示用户要求切换到"处理未处理"
+    fn view_done(ui: &mut dyn ProcessorUi, processor: &ReportProcessor) -> bool {
         const PAGE_SIZE: usize = 15;
 
         ui.info("=== 已处理记录 ===");
@@ -368,20 +377,23 @@ impl ReportConsole {
         let mut current_type: Option<String> = None; // None = 全部
         let mut chunks = processor.done_chunks();
         let mut raw_items: Vec<serde_json::Value> = Vec::new();
-        let mut visible_count = 0usize;
+        // 匹配当前过滤的条目在 raw_items 中的下标;翻页/详情只走索引,避免每页全量重扫
+        let mut visible: Vec<usize> = Vec::new();
         let mut exhausted = false;
         let mut page = 0usize;
 
         loop {
-            let needed = (page + 1) * PAGE_SIZE;
-            while visible_count < needed && !exhausted {
+            // 按需拉取,直到当前页有足够条目或流耗尽
+            while visible.len() < (page + 1) * PAGE_SIZE && !exhausted {
                 match chunks.next() {
                     Some(chunk) => {
-                        visible_count += chunk
-                            .iter()
-                            .filter(|v| Self::type_matches(v, current_type.as_deref()))
-                            .count();
+                        let base = raw_items.len();
                         raw_items.extend(chunk);
+                        for (i, item) in raw_items[base..].iter().enumerate() {
+                            if Self::type_matches(item, current_type.as_deref()) {
+                                visible.push(base + i);
+                            }
+                        }
                     }
                     None => exhausted = true,
                 }
@@ -389,7 +401,7 @@ impl ReportConsole {
 
             if raw_items.is_empty() {
                 ui.info("暂无已处理记录");
-                return;
+                return false;
             }
 
             let filter_name = current_type
@@ -401,13 +413,13 @@ impl ReportConsole {
                         .map(|(_, n)| n.as_str())
                 })
                 .unwrap_or("全部");
-            let page_count = visible_count.div_ceil(PAGE_SIZE).max(1);
+            let page_count = visible.len().div_ceil(PAGE_SIZE).max(1);
             ui.info(&format!(
                 "\n=== 已处理记录 (类型: {}, 第 {}/{} 页, 共 {} 条{}) ===",
                 filter_name,
                 page + 1,
                 page_count,
-                visible_count,
+                visible.len(),
                 if exhausted {
                     ""
                 } else {
@@ -415,36 +427,24 @@ impl ReportConsole {
                 }
             ));
 
-            if visible_count > 0 {
+            if !visible.is_empty() {
                 let start = page * PAGE_SIZE;
-                for (i, item) in raw_items
-                    .iter()
-                    .filter(|v| Self::type_matches(v, current_type.as_deref()))
-                    .skip(start)
-                    .take(PAGE_SIZE)
-                    .enumerate()
-                {
-                    ui.info(&processor.done_row(start + i + 1, item));
+                for (row, &idx) in visible.iter().skip(start).take(PAGE_SIZE).enumerate() {
+                    ui.info(&processor.done_row(start + row + 1, &raw_items[idx]));
                 }
             } else {
                 ui.info("(该类型暂无已处理记录)");
             }
 
-            ui.info("[序号] 查看详情 | n 下一页 | p 上一页 | t 切换类型 | q 返回");
+            ui.info("[序号] 查看详情 | n 下一页 | b 上一页 | t 切换类型 | u 处理未处理 | q 返回");
             let input = ui.input("> ");
             let trimmed = input.trim();
             if let Ok(idx) = trimmed.parse::<usize>() {
-                if visible_count == 0 {
+                if visible.is_empty() {
                     ui.info("当前无记录");
-                } else if idx >= 1 && idx <= visible_count {
-                    if let Some(item) = raw_items
-                        .iter()
-                        .filter(|v| Self::type_matches(v, current_type.as_deref()))
-                        .nth(idx - 1)
-                    {
-                        for line in processor.done_item_details(item) {
-                            ui.info(&line);
-                        }
+                } else if idx >= 1 && idx <= visible.len() {
+                    for line in processor.done_item_details(&raw_items[visible[idx - 1]]) {
+                        ui.info(&line);
                     }
                 } else {
                     ui.info("序号超出范围");
@@ -458,7 +458,7 @@ impl ReportConsole {
                             page += 1;
                         }
                     }
-                    "p" => {
+                    "b" => {
                         if page > 0 {
                             page -= 1;
                         } else {
@@ -466,27 +466,23 @@ impl ReportConsole {
                         }
                     }
                     "t" => {
-                        let changed =
-                            match Self::pick_type(ui, &type_options, current_type.as_deref()) {
-                                TypeFilterChoice::Cancel => false,
-                                TypeFilterChoice::All => {
-                                    current_type = None;
-                                    true
-                                }
-                                TypeFilterChoice::Select(rt) => {
-                                    current_type = Some(rt);
-                                    true
-                                }
-                            };
-                        if changed {
-                            visible_count = raw_items
-                                .iter()
-                                .filter(|v| Self::type_matches(v, current_type.as_deref()))
-                                .count();
-                            page = 0;
+                        match Self::pick_type(ui, &type_options, current_type.as_deref()) {
+                            TypeFilterChoice::Cancel => {}
+                            TypeFilterChoice::All => current_type = None,
+                            TypeFilterChoice::Select(rt) => current_type = Some(rt),
                         }
+                        visible.clear();
+                        visible.extend(
+                            raw_items
+                                .iter()
+                                .enumerate()
+                                .filter(|(_, v)| Self::type_matches(v, current_type.as_deref()))
+                                .map(|(i, _)| i),
+                        );
+                        page = 0;
                     }
-                    "q" | "" => break,
+                    "u" => return true,
+                    "q" | "" => return false,
                     _ => ui.info("无效输入,请重试"),
                 }
             }
@@ -534,18 +530,6 @@ impl ReportConsole {
         }
         ui.info("无效输入");
         TypeFilterChoice::Cancel
-    }
-
-    /// 展示各举报类型的待处理数量
-    fn backlog(ui: &mut dyn ProcessorUi, processor: &ReportProcessor) {
-        ui.info("=== 待处理举报分布 ===");
-        let items = processor.backlog();
-        let mut total = 0i64;
-        for (name, count) in items {
-            ui.info(&format!("  {}: {}", name, count));
-            total += count;
-        }
-        ui.info(&format!("  合计: {}", total));
     }
 }
 

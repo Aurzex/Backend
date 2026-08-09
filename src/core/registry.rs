@@ -1,9 +1,13 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::io;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread;
 
-use crate::api::whale::{CommentSourceType, ReportStatus, WhaleReportFetcher, WorkSourceType};
+use crate::api::whale::{
+    CommentSourceType, ReportStatus, Resolution, WhaleReportFetcher, WorkSourceType,
+};
 use crate::utils::acquire;
 
 use serde_json::{Value, json};
@@ -22,11 +26,6 @@ pub enum ProcessorError {
     /// 用户在交互中主动中止(如按 Q 退出处理会话)
     #[error("Aborted by user")]
     Aborted,
-}
-
-// 评论配置 trait
-pub trait CommentConfig {
-    fn get_comments(&self, item_id: i64) -> Option<&[Value]>;
 }
 
 // 辅助函数
@@ -83,7 +82,8 @@ pub(crate) struct ActionConfig {
     pub(crate) key: String,
     pub(crate) name: String,
     pub(crate) description: String,
-    pub(crate) status: String,
+    /// 动作对应的处理决议;非执行类动作(检查违规/跳过)为 None
+    pub(crate) resolution: Option<Resolution>,
     pub(crate) enabled: bool,
 }
 
@@ -116,23 +116,21 @@ pub(crate) fn resolution_display_name(status: &str) -> String {
 }
 
 impl ActionConfig {
-    /// 由动作键构造配置(名称与状态取自内置映射)
+    /// 由动作键构造配置(名称与决议取自内置映射)
     fn simple(key: &str) -> Self {
-        let status = match key {
-            "D" => "DELETE",
-            "S" => "MUTE_SEVEN_DAYS",
-            "T" => "MUTE_THREE_MONTHS",
-            "U" => "UNLOAD",
-            "P" => "PASS",
-            "F" => "CHECK_VIOLATION",
-            "J" => "SKIP",
-            _ => key,
+        let resolution = match key {
+            "D" => Some(Resolution::Delete),
+            "S" => Some(Resolution::MuteSevenDays),
+            "T" => Some(Resolution::MuteThreeMonths),
+            "U" => Some(Resolution::Unload),
+            "P" => Some(Resolution::Pass),
+            _ => None,
         };
         ActionConfig {
             key: key.into(),
             name: action_name(key).into(),
             description: String::new(),
-            status: status.into(),
+            resolution,
             enabled: true,
         }
     }
@@ -248,21 +246,6 @@ pub(crate) struct ReportTypeRegistry {
     action_cache: Mutex<HashMap<String, Arc<ActionOptions>>>,
 }
 
-// 静态状态映射(避免每次构建)
-static STATUS_MAPPING: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
-
-pub(crate) fn status_mapping() -> &'static HashMap<&'static str, &'static str> {
-    STATUS_MAPPING.get_or_init(|| {
-        HashMap::from([
-            ("D", "DELETE"),
-            ("S", "MUTE_SEVEN_DAYS"),
-            ("T", "MUTE_THREE_MONTHS"),
-            ("P", "PASS"),
-            ("U", "UNLOAD"),
-        ])
-    })
-}
-
 impl Default for ReportTypeRegistry {
     fn default() -> Self {
         Self::new()
@@ -330,15 +313,6 @@ impl ReportTypeRegistry {
         });
         cache.insert(report_type.to_string(), Arc::clone(&options));
         options
-    }
-
-    pub(crate) fn get_action_prompt(&self, report_type: &str) -> String {
-        self.action_options(report_type).prompt.clone()
-    }
-
-    /// 返回全局静态的状态映射引用
-    pub(crate) fn get_status_mapping(&self) -> &'static HashMap<&'static str, &'static str> {
-        status_mapping()
     }
 
     pub(crate) fn is_action_available(&self, report_type: &str, action_key: &str) -> bool {
@@ -663,16 +637,23 @@ impl ReportFetcher {
     }
 
     pub(crate) fn get_total_reports(&self, status: ReportStatus) -> i64 {
-        let mut total = 0i64;
-        for rtype in self.registry.get_all_types() {
-            if let Some(config) = self.registry.get_config(&rtype)
-                && let Ok(result) = (config.fetch_total)(status)
-                && let Some(t) = result.as_i64()
-            {
-                total += t;
+        // 各举报类型的总数接口相互独立,并行请求把 N 次串行 RTT 压到一次
+        let total = &AtomicI64::new(0);
+        thread::scope(|s| {
+            for rtype in self.registry.get_all_types() {
+                let Some(config) = self.registry.get_config(&rtype) else {
+                    continue;
+                };
+                let fetch_total = config.fetch_total; // fn 指针:Copy + Send
+                s.spawn(move || match fetch_total(status) {
+                    Ok(result) => {
+                        total.fetch_add(result.as_i64().unwrap_or(0), Ordering::Relaxed);
+                    }
+                    Err(e) => log::error!("获取 {} 总数失败: {}", rtype, e),
+                });
             }
-        }
-        total
+        });
+        total.load(Ordering::Relaxed)
     }
 }
 
@@ -729,5 +710,27 @@ mod tests {
                 .iter()
                 .all(|v| { v.get("_report_type").and_then(|s| s.as_str()) == Some("test_type") })
         );
+    }
+
+    /// 并行总数查询:各类型总数正确求和(fetch_total 为 fn 指针,不能捕获,
+    /// 用相同常量注册两个类型,总和 2*N 证明并行分支的结果全部被累加)
+    #[test]
+    fn get_total_reports_sums_across_types() {
+        let mut registry = ReportTypeRegistry::new();
+        for name in ["type_a", "type_b"] {
+            let cfg = SourceConfig::base(
+                name,
+                "execute_process_comment_report",
+                |_| Ok(Value::from(10i64)),
+                |_| Box::new(std::iter::empty()),
+            );
+            registry.register(name, cfg);
+        }
+
+        let fetcher = ReportFetcher {
+            registry: Arc::new(registry),
+        };
+        assert_eq!(fetcher.get_total_reports(ReportStatus::ToBeDone), 20);
+        assert_eq!(fetcher.get_total_reports(ReportStatus::Done), 20);
     }
 }
