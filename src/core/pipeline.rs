@@ -1503,8 +1503,9 @@ impl Processor for ActionSelectionProcessor {
             return Ok(());
         }
 
-        // 以可用动作渲染编号菜单,支持数字/字母/回车默认/中止
-        let actions = self.registry.get_available_actions(&record.report_type);
+        // 以缓存的动作选项渲染编号菜单,支持数字/字母/回车默认/中止
+        let options = self.registry.action_options(&record.report_type);
+        let actions = &options.actions;
         if actions.is_empty() {
             state.skip_reason = Some("该举报类型无可用操作".into());
             state.processed = true;

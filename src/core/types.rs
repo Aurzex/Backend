@@ -256,6 +256,8 @@ impl SourceConfig {
 pub(crate) struct ActionOptions {
     pub(crate) prompt: String,
     pub(crate) valid_keys: HashSet<String>,
+    /// 有序可用动作列表(已过滤禁用项),供菜单渲染零分配
+    pub(crate) actions: Vec<ActionConfig>,
 }
 
 pub(crate) struct ReportTypeRegistry {
@@ -263,17 +265,6 @@ pub(crate) struct ReportTypeRegistry {
     registry: HashMap<String, Arc<SourceConfig>>,
     default_actions: Vec<ActionConfig>, // 保留用于构建默认动作,也可直接为静态
     action_cache: Mutex<HashMap<String, Arc<ActionOptions>>>,
-}
-
-impl Clone for ReportTypeRegistry {
-    /// 深拷贝注册表但清空动作缓存(缓存按需重建,无正确性影响)
-    fn clone(&self) -> Self {
-        ReportTypeRegistry {
-            registry: self.registry.clone(),
-            default_actions: self.default_actions.clone(),
-            action_cache: Mutex::new(HashMap::new()),
-        }
-    }
 }
 
 // 静态状态映射(避免每次构建)
@@ -326,26 +317,24 @@ impl ReportTypeRegistry {
         self.registry.keys().cloned().collect()
     }
 
-    /// 返回可用动作的引用,避免克隆整个 ActionConfig
-    pub(crate) fn get_available_actions(&self, report_type: &str) -> Vec<&ActionConfig> {
-        self.get_config(report_type)
-            .map(|config| {
-                config
-                    .available_actions
-                    .iter()
-                    .filter(|a| a.enabled && a.key != "C")
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
-
-    /// 获取(或按举报类型缓存)动作提示与合法键集合,避免交互处理时每记录重建
+    /// 获取(或按举报类型缓存)动作选项:提示,合法键与有序动作列表
+    /// 缓存避免交互处理时每条记录重建提示与动作集合
     pub(crate) fn action_options(&self, report_type: &str) -> Arc<ActionOptions> {
         let mut cache = self.action_cache.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(cached) = cache.get(report_type) {
             return Arc::clone(cached);
         }
-        let actions = self.get_available_actions(report_type);
+        let actions: Vec<ActionConfig> = self
+            .get_config(report_type)
+            .map(|config| {
+                config
+                    .available_actions
+                    .iter()
+                    .filter(|a| a.enabled && a.key != "C")
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
         let parts: Vec<String> = actions
             .iter()
             .map(|a| format!("{}({})", a.key, a.name))
@@ -353,6 +342,7 @@ impl ReportTypeRegistry {
         let options = Arc::new(ActionOptions {
             prompt: format!("选择操作:{}", parts.join(",")),
             valid_keys: actions.iter().map(|a| a.key.clone()).collect(),
+            actions,
         });
         cache.insert(report_type.to_string(), Arc::clone(&options));
         options
@@ -398,8 +388,16 @@ macro_rules! set_config_fields {
     };
 }
 
+/// `fetch_chunked` 中当前正在产出的举报来源(类型 + 持久生成器)
+struct ActiveSource {
+    report_type: String,
+    config: Arc<SourceConfig>,
+    generator: Box<dyn Iterator<Item = Result<Value, ProcessorError>>>,
+}
+
 pub(crate) struct ReportFetcher {
-    pub(crate) registry: ReportTypeRegistry,
+    /// Arc 共享:ReportProcessor 的管道工厂与 fetcher 复用同一注册表,避免深拷贝
+    pub(crate) registry: Arc<ReportTypeRegistry>,
 }
 
 impl Default for ReportFetcher {
@@ -591,7 +589,9 @@ impl ReportFetcher {
             registry.register("forum_discussion", cfg);
         }
 
-        ReportFetcher { registry }
+        ReportFetcher {
+            registry: Arc::new(registry),
+        }
     }
 
     pub(crate) fn fetch_chunked(&self, status: ReportStatus) -> impl Iterator<Item = Vec<Value>> {
@@ -599,50 +599,72 @@ impl ReportFetcher {
         let total_types = report_types.len();
         let mut type_index = 0;
         let mut pending_items: Vec<Value> = Vec::new();
+        // 当前类型的生成器在闭包调用间保持,避免每个 chunk 都从头重建
+        // (原实现每次重建会重复产出已有数据,类型数据超过 chunk_size 时陷入死循环)
+        let mut active: Option<ActiveSource> = None;
 
         std::iter::from_fn(move || {
             let mut chunk = Vec::new();
             std::mem::swap(&mut chunk, &mut pending_items);
 
-            while type_index < total_types {
-                let report_type = &report_types[type_index];
-                let config = match self.registry.get_config(report_type) {
-                    Some(cfg) => cfg,
-                    None => {
+            loop {
+                // 惰性进入下一类型,为每个类型创建一次生成器
+                if active.is_none() {
+                    if type_index >= total_types {
+                        break;
+                    }
+                    let report_type = report_types[type_index].clone();
+                    let Some(config) = self.registry.get_config_arc(&report_type) else {
                         type_index += 1;
                         continue;
-                    }
-                };
+                    };
+                    active = Some(ActiveSource {
+                        report_type,
+                        config: config.clone(),
+                        generator: (config.fetch_generator)(status),
+                    });
+                }
 
-                let generator = (config.fetch_generator)(status);
+                let source = active.as_mut().unwrap();
+                let chunk_size = source.config.chunk_size;
+                let mut source_exhausted = false;
 
-                for result in generator {
+                for result in &mut source.generator {
                     let mut item = match result {
                         Ok(item) => item,
                         Err(e) => {
                             eprintln!("Error fetching report data: {}", e);
+                            source_exhausted = true;
                             break;
                         }
                     };
 
                     if status == ReportStatus::ToBeDone
-                        && let Some(state) = item.get(&config.status_field).and_then(|v| v.as_str())
+                        && let Some(state) = item
+                            .get(&source.config.status_field)
+                            .and_then(|v| v.as_str())
                         && state != ReportStatus::ToBeDone.as_str()
                     {
                         continue;
                     }
 
-                    if let Value::Object(ref mut map) = item {
-                        map.insert("_report_type".into(), Value::String(report_type.clone()));
+                    if let Value::Object(map) = &mut item {
+                        map.insert(
+                            "_report_type".into(),
+                            Value::String(source.report_type.clone()),
+                        );
                     }
 
                     chunk.push(item);
-                    if chunk.len() >= config.chunk_size {
-                        let remaining = chunk.split_off(config.chunk_size);
+                    if chunk.len() >= chunk_size {
+                        let remaining = chunk.split_off(chunk_size);
                         pending_items = remaining;
                         return Some(chunk);
                     }
                 }
+
+                // 当前类型耗尽或出错,推进到下一类型
+                active = None;
                 type_index += 1;
             }
 
@@ -668,5 +690,61 @@ impl ReportFetcher {
             }
         }
         total
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// 回归测试:单类型数据量超过 chunk_size 时,`fetch_chunked` 必须终止且不重复
+    /// (旧实现每次闭包调用都重建生成器,超过 chunk_size 后无限重复产出)
+    #[test]
+    fn fetch_chunked_terminates_without_duplicates() {
+        const TOTAL: i32 = 350; // 3.5 个 chunk,> chunk_size=100
+        let mut registry = ReportTypeRegistry::new();
+        let mut cfg = SourceConfig::base(
+            "测试类型",
+            "execute_process_comment_report",
+            |_| Ok(Value::from(TOTAL)),
+            |_| {
+                Box::new((0..TOTAL).map(|i| -> Result<Value, ProcessorError> {
+                    Ok(json!({
+                        "id": i.to_string(),
+                        "status": "TOBEDONE",
+                        "content": format!("item {}", i),
+                    }))
+                }))
+            },
+        );
+        cfg.chunk_size = 100;
+        registry.register("test_type", cfg);
+
+        let fetcher = ReportFetcher {
+            registry: Arc::new(registry),
+        };
+        let items: Vec<Value> = fetcher
+            .fetch_chunked(ReportStatus::ToBeDone)
+            .flatten()
+            .collect();
+
+        assert_eq!(items.len(), TOTAL as usize);
+
+        // 无重复:每个 id 恰好出现一次
+        let mut ids: Vec<String> = items
+            .iter()
+            .filter_map(|v| v.get("id").and_then(|s| s.as_str()).map(String::from))
+            .collect();
+        ids.sort();
+        let unique: HashSet<String> = ids.iter().cloned().collect();
+        assert_eq!(ids.len(), unique.len());
+
+        // 所有条目都带正确的 _report_type 标注
+        assert!(
+            items
+                .iter()
+                .all(|v| { v.get("_report_type").and_then(|s| s.as_str()) == Some("test_type") })
+        );
     }
 }

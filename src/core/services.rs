@@ -139,7 +139,8 @@ impl ReportProcessor {
     /// 使用自定义配置构造
     pub fn new_with_config(config: CheckConfig) -> Self {
         let fetcher = ReportFetcher::new();
-        let registry = Arc::new(fetcher.registry.clone());
+        // fetcher.registry 已是 Arc,此处仅共享引用计数,避免深拷贝整个注册表
+        let registry = fetcher.registry.clone();
         let batch_manager = Arc::new(Mutex::new(BatchActionManager::new()));
         ReportProcessor {
             fetcher,
@@ -285,17 +286,19 @@ impl ReportProcessor {
     /// 将 chunk 划分为"已达标批量组"与"非组内项"。
     /// 组内成员先缓存到跨 chunk 的待分组表,未达标前不单独处理,
     /// 避免组员在组完成前被当作个体处理导致动作不一致。
-    fn split_chunk_items(&self, chunk: &[Value]) -> (Vec<BatchGroup>, Vec<Value>) {
+    fn split_chunk_items<'a>(&self, chunk: &'a [Value]) -> (Vec<BatchGroup>, Vec<&'a Value>) {
         let mut pending = self.pending_groups.lock().unwrap();
         let mut ready = Vec::new();
         let mut non_group = Vec::new();
 
         for item in chunk {
             let Some(key) = self.extract_group_key(item) else {
-                non_group.push(item.clone());
+                // 非组内项仅借用 chunk,后续处理时再克隆进上下文
+                non_group.push(item);
                 continue;
             };
             let entry = pending.entry(key.clone()).or_default();
+            // 组内成员需跨 chunk 保留,必须克隆
             entry.push(item.clone());
             let threshold = if key.0 == "item_id" {
                 self.config.batch_item_id_threshold
@@ -527,29 +530,44 @@ impl ReportProcessor {
     }
 
     /// 分页浏览已处理记录,输入序号查看详情
+    /// 数据按需分块拉取:仅当翻页到未加载区域时才请求下一块,避免一次性拉全量造成卡顿
     pub fn view_processed_reports(&self) -> Result<(), ProcessorError> {
         println!("=== 已处理记录 ===");
+        let mut chunks = self.fetcher.fetch_reports_chunked(ReportStatus::Done);
         let mut items: Vec<Value> = Vec::new();
-        for chunk in self.fetcher.fetch_reports_chunked(ReportStatus::Done) {
-            items.extend(chunk);
-        }
-        if items.is_empty() {
-            println!("暂无已处理记录");
-            return Ok(());
-        }
+        let mut exhausted = false;
 
         const PAGE_SIZE: usize = 15;
-        let page_count = items.len().div_ceil(PAGE_SIZE);
         let mut page = 0usize;
 
         loop {
+            // 按需拉取:确保当前页所需数据已加载
+            let needed = (page + 1) * PAGE_SIZE;
+            while items.len() < needed && !exhausted {
+                match chunks.next() {
+                    Some(chunk) => items.extend(chunk),
+                    None => exhausted = true,
+                }
+            }
+
+            if items.is_empty() {
+                println!("暂无已处理记录");
+                return Ok(());
+            }
+
+            let page_count = items.len().div_ceil(PAGE_SIZE);
             let start = page * PAGE_SIZE;
             let end = (start + PAGE_SIZE).min(items.len());
             println!(
-                "\n=== 已处理记录 (共 {} 条, 第 {}/{} 页) ===",
-                items.len(),
+                "\n=== 已处理记录 (第 {}/{} 页, 已加载 {} 条{}) ===",
                 page + 1,
-                page_count
+                page_count,
+                items.len(),
+                if exhausted {
+                    ""
+                } else {
+                    ", 按需加载更多"
+                }
             );
             for (i, item) in items[start..end].iter().enumerate() {
                 println!("{}", self.format_done_row(start + i + 1, item));
@@ -566,10 +584,10 @@ impl ReportProcessor {
             } else {
                 match trimmed.to_lowercase().as_str() {
                     "n" => {
-                        if page + 1 < page_count {
-                            page += 1;
-                        } else {
+                        if exhausted && page + 1 >= page_count {
                             println!("已经是最后一页");
+                        } else {
+                            page += 1;
                         }
                     }
                     "p" => {
