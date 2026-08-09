@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::thread;
 
 use log::warn;
 use serde_json::{Map, Value};
@@ -758,55 +759,66 @@ impl DataQuery {
             (228, "奇怪的小蜜桃"),
         ];
 
-        let mut stats = Vec::new();
+        // 每个管理员的两类总数相互独立,并行请求(8 管理员 × 2 请求 → 约 1 个 RTT)
+        let results: Vec<Result<(i32, String, i32, i32), DataQueryError>> = thread::scope(|s| {
+            admins
+                .iter()
+                .map(|&(admin_id, admin_name)| {
+                    let handle = s.spawn(move || {
+                        // 获取评论举报总数
+                        let mut comment_paginated = WhaleReportFetcher::new()
+                            .fetch_comment_reports_gen(
+                                CommentSourceType::All,
+                                ReportStatus::All,
+                                Some(CommentReportFilterType::Admin),
+                                Some(admin_id),
+                                None, // 不设置limit,使用默认值
+                            );
+                        comment_paginated
+                            .fetch_metadata()
+                            .map_err(DataQueryError::from)?;
+                        let comment_count =
+                            i32::try_from(comment_paginated.total_items().unwrap_or(0))
+                                .unwrap_or(0);
+
+                        // 获取作品举报总数
+                        let mut work_paginated = WhaleReportFetcher::new().fetch_work_reports_gen(
+                            WorkSourceType::All,
+                            ReportStatus::All,
+                            Some(WorkReportFilterType::Admin),
+                            Some(admin_id),
+                            None, // 不设置limit,使用默认值
+                        );
+                        work_paginated
+                            .fetch_metadata()
+                            .map_err(DataQueryError::from)?;
+                        let work_count =
+                            i32::try_from(work_paginated.total_items().unwrap_or(0)).unwrap_or(0);
+
+                        Ok((admin_id, admin_name.to_string(), comment_count, work_count))
+                    });
+                    match handle.join() {
+                        Ok(r) => r,
+                        Err(_) => Err(DataQueryError::ParseError("统计线程 panic".into())),
+                    }
+                })
+                .collect()
+        });
+
+        let mut stats = Vec::with_capacity(admins.len());
         let mut total_comment_reports = 0;
         let mut total_work_reports = 0;
 
-        for &(admin_id, admin_name) in &admins {
-            // 获取评论举报总数
-            let mut comment_paginated = WhaleReportFetcher::new().fetch_comment_reports_gen(
-                CommentSourceType::All,
-                ReportStatus::All,
-                Some(CommentReportFilterType::Admin),
-                Some(admin_id),
-                None, // 不设置limit,使用默认值
-            );
-
-            // 初始化分页迭代器以获取元数据
-            comment_paginated
-                .fetch_metadata()
-                .map_err(DataQueryError::from)?;
-
-            let comment_count =
-                i32::try_from(comment_paginated.total_items().unwrap_or(0)).unwrap_or(0);
-
-            // 获取作品举报总数
-            let mut work_paginated = WhaleReportFetcher::new().fetch_work_reports_gen(
-                WorkSourceType::All,
-                ReportStatus::All,
-                Some(WorkReportFilterType::Admin),
-                Some(admin_id),
-                None, // 不设置limit,使用默认值
-            );
-
-            // 初始化分页迭代器以获取元数据
-            work_paginated
-                .fetch_metadata()
-                .map_err(DataQueryError::from)?;
-
-            let work_count = i32::try_from(work_paginated.total_items().unwrap_or(0)).unwrap_or(0);
-
-            let total = comment_count + work_count;
-
+        for r in results {
+            let (admin_id, admin_name, comment_count, work_count) = r?;
             total_comment_reports += comment_count;
             total_work_reports += work_count;
-
             stats.push(AdminReportStatsEntry {
                 admin_id,
-                admin_name: admin_name.to_string(),
+                admin_name,
                 comment_reports: comment_count,
                 work_reports: work_count,
-                total_reports: total,
+                total_reports: comment_count + work_count,
                 percentage: 0.0,
             });
         }

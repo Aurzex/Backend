@@ -4,6 +4,7 @@ use std::io;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
 use crate::api::whale::{
     CommentSourceType, ReportStatus, Resolution, WhaleReportFetcher, WorkSourceType,
@@ -597,12 +598,40 @@ impl ReportFetcher {
                 let source = active.as_mut().unwrap();
                 let chunk_size = source.config.chunk_size;
 
-                for result in &mut source.generator {
+                // 单页瞬时错误:PaginatedIter 已保证错误后 next() 重试同一页,这里做有界重试
+                const FETCH_RETRY: usize = 3;
+                loop {
+                    let result = source.generator.next();
                     let mut item = match result {
-                        Ok(item) => item,
-                        Err(e) => {
-                            log::error!("Error fetching report data: {}", e);
-                            break;
+                        Some(Ok(item)) => item,
+                        None => break,
+                        Some(Err(e)) => {
+                            let mut recovered = None;
+                            for attempt in 1..=FETCH_RETRY {
+                                thread::sleep(Duration::from_millis(300 * attempt as u64));
+                                match source.generator.next() {
+                                    Some(Ok(v)) => {
+                                        recovered = Some(v);
+                                        break;
+                                    }
+                                    Some(Err(e2)) => {
+                                        log::warn!(
+                                            "获取举报数据重试 {}/{} 失败: {}",
+                                            attempt,
+                                            FETCH_RETRY,
+                                            e2
+                                        );
+                                    }
+                                    None => break,
+                                }
+                            }
+                            match recovered {
+                                Some(v) => v,
+                                None => {
+                                    log::error!("获取举报数据失败: {}, 跳过该类型余下数据", e);
+                                    break;
+                                }
+                            }
                         }
                     };
 
@@ -663,6 +692,35 @@ impl ReportFetcher {
             }
         });
         total.load(Ordering::Relaxed)
+    }
+
+    /// 一次并行批次同时取两个状态的总数(菜单渲染只需 1 个 RTT)
+    pub(crate) fn get_totals_pair(&self, a: ReportStatus, b: ReportStatus) -> (i64, i64) {
+        let ta = &AtomicI64::new(0);
+        let tb = &AtomicI64::new(0);
+        thread::scope(|s| {
+            for rtype in self.registry.get_all_types() {
+                let Some(config) = self.registry.get_config(&rtype) else {
+                    continue;
+                };
+                let fetch_total = config.fetch_total; // fn 指针:Copy + Send
+                let rtype_a = rtype.clone();
+                let rtype_b = rtype.clone();
+                s.spawn(move || match fetch_total(a) {
+                    Ok(result) => {
+                        ta.fetch_add(result.as_i64().unwrap_or(0), Ordering::Relaxed);
+                    }
+                    Err(e) => log::error!("获取 {} 总数失败: {}", rtype_a, e),
+                });
+                s.spawn(move || match fetch_total(b) {
+                    Ok(result) => {
+                        tb.fetch_add(result.as_i64().unwrap_or(0), Ordering::Relaxed);
+                    }
+                    Err(e) => log::error!("获取 {} 总数失败: {}", rtype_b, e),
+                });
+            }
+        });
+        (ta.load(Ordering::Relaxed), tb.load(Ordering::Relaxed))
     }
 }
 

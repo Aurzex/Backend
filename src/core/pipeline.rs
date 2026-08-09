@@ -274,23 +274,21 @@ pub(crate) fn apply_action_by_method(
 }
 
 /// 依据动作键查配置中的决议并执行处理动作;
-/// 未知键或非执行类动作(检查违规/跳过)静默跳过,保持原有行为
+/// 未知键或非执行类动作(检查违规/跳过)直接报错,避免调用方误把记录静默标记为已处理
 pub(crate) fn apply_action_by_key(
     config: &SourceConfig,
     report_id: i32,
     admin_id: i32,
     action_key: &str,
 ) -> Result<(), ProcessorError> {
-    let Some(action) = config
+    let action = config
         .available_actions
         .iter()
         .find(|a| a.key == action_key)
-    else {
-        return Ok(());
-    };
-    let Some(resolution) = action.resolution else {
-        return Ok(());
-    };
+        .ok_or_else(|| ProcessorError::Processing(format!("动作 {} 对该类型不可用", action_key)))?;
+    let resolution = action
+        .resolution
+        .ok_or_else(|| ProcessorError::Processing(format!("动作 {} 为非执行类动作", action_key)))?;
     apply_action_by_method(&config.handle_method, report_id, admin_id, resolution)?;
     Ok(())
 }

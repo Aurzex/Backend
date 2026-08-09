@@ -170,6 +170,16 @@ impl AddAssign for RunStats {
     }
 }
 
+/// 一个 chunk 内非组项的一次性预计算上下文,避免每条记录重复推断类型/构建详情
+struct ChunkContext {
+    /// 每条的分组键 (group_type, group_key)
+    keys: Vec<Option<(String, String)>>,
+    /// 每条是否官方内容(批量应用时排除)
+    official: Vec<bool>,
+    /// 同源计数:分组键 -> 出现次数
+    source_counts: HashMap<String, usize>,
+}
+
 /// 动作菜单的最终选择
 enum ActionChoice {
     /// 应用指定动作
@@ -290,13 +300,26 @@ impl ReportConsole {
                 for group in groups {
                     stats += Self::process_group(ui, processor, admin_id, &group)?;
                 }
-                // 同源聚合计数:同一内容/作品被多次举报时提醒
-                let mut source_counts: HashMap<String, usize> = HashMap::new();
-                for item in &non_group {
-                    if let Some((_, key)) = processor.item_group_key(item) {
-                        *source_counts.entry(key).or_default() += 1;
+                // 一次性预计算分组键/官方标记/同源计数(避免逐条重复推断与构建详情)
+                let ctx = {
+                    let keys: Vec<Option<(String, String)>> = non_group
+                        .iter()
+                        .map(|it| processor.item_group_key(it))
+                        .collect();
+                    let official: Vec<bool> = non_group
+                        .iter()
+                        .map(|it| processor.is_official(it))
+                        .collect();
+                    let mut source_counts: HashMap<String, usize> = HashMap::new();
+                    for key in keys.iter().filter_map(|k| k.as_ref().map(|(_, key)| key)) {
+                        *source_counts.entry(key.clone()).or_default() += 1;
                     }
-                }
+                    ChunkContext {
+                        keys,
+                        official,
+                        source_counts,
+                    }
+                };
                 // 已被"同类型批量"应用过的下标不再逐条询问
                 let mut decided: HashSet<usize> = HashSet::new();
                 for i in 0..non_group.len() {
@@ -313,7 +336,7 @@ impl ReportConsole {
                         &mut decided,
                         stats.total() + 1,
                         total,
-                        &source_counts,
+                        &ctx,
                     )?;
                 }
             }
@@ -422,16 +445,15 @@ impl ReportConsole {
         decided: &mut HashSet<usize>,
         index: i64,
         total: i64,
-        source_counts: &HashMap<String, usize>,
+        ctx: &ChunkContext,
     ) -> Result<RunStats, ProcessorError> {
-        let Some(view) = processor.item_view(item) else {
-            return Ok(RunStats::default());
-        };
-        if view.is_official {
+        // 官方内容直接自动通过:用预计算的标记,不构建详情
+        if ctx.official[idx] {
             processor.apply_action(item, "P", admin_id)?;
+            let (type_name, record_id) = processor.item_brief(item).unwrap_or_default();
             ui.info(&format!(
                 "--- [{}/{}] {} (举报ID: {}) --- 官方内容,自动通过",
-                index, total, view.type_name, view.record_id
+                index, total, type_name, record_id
             ));
             return Ok(RunStats {
                 passed: 1,
@@ -439,16 +461,19 @@ impl ReportConsole {
             });
         }
 
+        let Some(view) = processor.item_view(item) else {
+            return Ok(RunStats::default());
+        };
         ui.info(&format!(
             "--- [{}/{}] {} (举报ID: {}) ---",
             index, total, view.type_name, view.record_id
         ));
         // 同源聚合提醒 + 本会话内的历史处理
-        if let Some((group_type, key)) = processor.item_group_key(item) {
-            if let Some(&n) = source_counts.get(&key).filter(|&&n| n > 1) {
+        if let Some((group_type, key)) = &ctx.keys[idx] {
+            if let Some(&n) = ctx.source_counts.get(key).filter(|&&n| n > 1) {
                 ui.info(&format!("  [提示] 同源举报 x{}", n));
             }
-            if let Some(prev) = processor.saved_action_for_key(&group_type, &key) {
+            if let Some(prev) = processor.saved_action_for_key(group_type, key) {
                 ui.info(&format!("  [提示] 本内容此前处理: {}", action_name(&prev)));
             }
         }
@@ -467,9 +492,7 @@ impl ReportConsole {
                     .filter(|&j| {
                         ReportProcessor::item_report_type(&chunk[j])
                             == ReportProcessor::item_report_type(item)
-                            && !processor
-                                .item_view(&chunk[j])
-                                .is_some_and(|v| v.is_official)
+                            && !ctx.official[j]
                     })
                     .collect();
                 if !rest.is_empty()

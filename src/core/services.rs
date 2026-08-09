@@ -227,8 +227,10 @@ impl ReportProcessor {
         {
             return (c.pending, c.done);
         }
-        let pending = self.fetcher.get_total_reports(ReportStatus::ToBeDone);
-        let done = self.fetcher.get_total_reports(ReportStatus::Done);
+        // 两个状态在一次并行批次内取回,只需 1 个 RTT
+        let (pending, done) = self
+            .fetcher
+            .get_totals_pair(ReportStatus::ToBeDone, ReportStatus::Done);
         *cache = Some(TotalsCache {
             pending,
             done,
@@ -548,6 +550,26 @@ impl ReportProcessor {
                 .unwrap()
                 .mark_record_processed(&report_id.to_string());
         }
+    }
+
+    /// 轻量提取(类型名, 举报ID),供官方自动通过等无需详情的展示路径
+    pub fn item_brief(&self, item: &Value) -> Option<(String, String)> {
+        let report_type = Self::infer_report_type(item)?;
+        let config = self.fetcher.registry.get_config(report_type)?;
+        Some((config.name.clone(), Self::extract_record_id(item, config)))
+    }
+
+    /// 是否官方账号内容(应自动通过);轻量判定,不构建详情
+    pub fn is_official(&self, item: &Value) -> bool {
+        let Some(report_type) = Self::infer_report_type(item) else {
+            return false;
+        };
+        let Some(config) = self.fetcher.registry.get_config(report_type) else {
+            return false;
+        };
+        item.get(&config.user_id_field)
+            .and_then(value_to_i64)
+            .is_some_and(|uid| self.config.official_ids.contains(&uid))
     }
 
     /// 该条已处理记录是否由指定管理员处理(供 UI 过滤"仅我处理")

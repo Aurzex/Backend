@@ -1358,7 +1358,17 @@ impl PaginatedIter {
             let next_page = current_page + 1;
             let json = match self.request_page(next_page) {
                 Ok(json) => json,
-                Err(e) => return Some(Err(e)), // 请求失败,终止迭代并传递错误
+                Err(e) => {
+                    // 恢复当前页状态:瞬时错误后 next() 可重试同一页,而非把流置为 Finished 永久终止
+                    // (原实现此时 state 已是 Finished,单个页请求失败会截断整个数据流)
+                    self.state = IterState::Ready {
+                        current_page,
+                        current_page_data,
+                        current_index,
+                        total,
+                    };
+                    return Some(Err(e));
+                }
             };
 
             let data = Self::extract_page_data(&json, &self.data_pointer);
