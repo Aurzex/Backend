@@ -420,6 +420,8 @@ impl AuthProcessor {
         let response = client
             .build_request(HttpMethod::Post, "/admins/login", Some(BaseKey::Whale))
             .with_payload(payload)
+            // 保留 4xx/5xx 响应体,使上层能区分验证码错误与密码错误
+            .with_error_body()
             .send()?;
         client.response_to_json(response)
     }

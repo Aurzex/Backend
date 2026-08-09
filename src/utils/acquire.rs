@@ -476,6 +476,9 @@ pub struct KittyRequestBuilder {
     params: Vec<(String, String)>,
     payload: Option<Value>,
     headers: Vec<(String, String)>,
+    /// 是否将 4xx/5xx 状态码视为错误(ureq 默认行为)。
+    /// 置为 false 时保留错误响应体,供调用方读取服务器错误信息。
+    status_as_error: bool,
 }
 
 impl KittyRequestBuilder {
@@ -493,7 +496,14 @@ impl KittyRequestBuilder {
             params: Vec::new(),
             payload: None,
             headers: Vec::new(),
+            status_as_error: true,
         }
+    }
+
+    /// 保留 4xx/5xx 错误响应体,使 `send` 返回可读的响应(而非直接报错)
+    pub fn with_error_body(mut self) -> Self {
+        self.status_as_error = false;
+        self
     }
 
     /// 设置查询参数,多次调用将合并参数
@@ -544,40 +554,58 @@ impl KittyRequestBuilder {
         self
     }
 
-    /// 发送普通请求,返回响应
+    /// 发送普通请求(JSON 负载或空请求体),返回响应
     pub fn send(self) -> MewResult<Response<Body>> {
-        self.client.inner.send_request(
-            self.method,
-            &self.endpoint,
-            self.base_key,
-            &self.params,
-            self.payload.as_ref(),
-            &self.headers,
-        )
+        let body = match &self.payload {
+            Some(payload) => RequestBody::Json(payload),
+            None => RequestBody::Empty,
+        };
+        self.client.inner.send((&self).into(), body)
     }
 
     /// 发送请求但复用外部持有的请求体(借用,避免克隆),适用于分页等重复发送场景
     pub fn send_with_payload_ref(&self, payload: &Value) -> MewResult<Response<Body>> {
-        self.client.inner.send_request(
-            self.method,
-            &self.endpoint,
-            self.base_key,
-            &self.params,
-            Some(payload),
-            &self.headers,
-        )
+        let spec: RequestSpec<'_> = self.into();
+        self.client.inner.send(spec, RequestBody::Json(payload))
     }
 
     /// 发送 multipart/form-data 请求
     pub fn send_multipart(self, form: Form) -> MewResult<Response<Body>> {
-        self.client.inner.send_multipart_request(
-            self.method,
-            &self.endpoint,
-            self.base_key,
-            &self.params,
-            form,
-            &self.headers,
-        )
+        self.client
+            .inner
+            .send((&self).into(), RequestBody::Form(form))
+    }
+}
+
+// 请求体抽象
+/// 请求发送时的负载形态:JSON(借用)/ 表单(拥有)/ 空
+enum RequestBody<'a> {
+    Json(&'a Value),
+    Form(Form<'a>),
+    Empty,
+}
+
+// 请求参数聚合
+/// 聚合一次 HTTP 请求的元参数(方法/地址/查询/头),请求体由 `RequestBody` 单独承载
+struct RequestSpec<'a> {
+    method: HttpMethod,
+    endpoint: &'a str,
+    base_key: Option<BaseKey>,
+    params: &'a [(String, String)],
+    extra_headers: &'a [(String, String)],
+    status_as_error: bool,
+}
+
+impl<'a> From<&'a KittyRequestBuilder> for RequestSpec<'a> {
+    fn from(builder: &'a KittyRequestBuilder) -> Self {
+        RequestSpec {
+            method: builder.method,
+            endpoint: &builder.endpoint,
+            base_key: builder.base_key,
+            params: &builder.params,
+            extra_headers: &builder.headers,
+            status_as_error: builder.status_as_error,
+        }
     }
 }
 
@@ -734,43 +762,42 @@ impl KittyCore {
         }
     }
 
-    fn send_request(
-        &self,
-        method: HttpMethod,
-        endpoint: &str,
-        base_key: Option<BaseKey>,
-        params: &[(String, String)],
-        payload: Option<&Value>,
-        extra_headers: &[(String, String)],
-    ) -> MewResult<Response<Body>> {
-        let url = self.build_url(endpoint, base_key);
-        self.log_request(method, &url, params, payload);
+    /// 统一发送请求:按方法选择无体/有体构建器,按 `RequestBody` 决定负载形态
+    fn send(&self, spec: RequestSpec<'_>, body: RequestBody<'_>) -> MewResult<Response<Body>> {
+        let url = self.build_url(spec.endpoint, spec.base_key);
+        let payload = match &body {
+            RequestBody::Json(v) => Some(*v),
+            _ => None,
+        };
+        self.log_request(spec.method, &url, spec.params, payload);
 
-        let response = match method {
+        let response = match spec.method {
             // 无请求体方法: 直接发送
             HttpMethod::Get | HttpMethod::Delete | HttpMethod::Head => {
-                let builder = self.bodyless_builder(method, &url)?;
+                let builder = self.bodyless_builder(spec.method, &url)?;
                 let builder = Self::apply_to_request_builder(
                     builder,
                     self.auth.as_ref(),
-                    params,
-                    extra_headers,
+                    spec.params,
+                    spec.extra_headers,
                 );
+                let builder = Self::with_error_body_config(builder, spec.status_as_error);
                 builder.call()?
             }
-            // 带请求体方法: 有 payload 时发送 JSON,否则发送空请求体
+            // 带请求体方法: 按负载形态发送 JSON/表单/空请求体
             HttpMethod::Post | HttpMethod::Patch | HttpMethod::Put => {
-                let builder = self.bodied_builder(method, &url)?;
+                let builder = self.bodied_builder(spec.method, &url)?;
                 let builder = Self::apply_to_request_builder(
                     builder,
                     self.auth.as_ref(),
-                    params,
-                    extra_headers,
+                    spec.params,
+                    spec.extra_headers,
                 );
-                if let Some(payload) = payload {
-                    builder.send_json(payload)?
-                } else {
-                    builder.send_empty()?
+                let builder = Self::with_error_body_config(builder, spec.status_as_error);
+                match body {
+                    RequestBody::Json(payload) => builder.send_json(payload)?,
+                    RequestBody::Form(form) => builder.send(form)?,
+                    RequestBody::Empty => builder.send_empty()?,
                 }
             }
         };
@@ -779,26 +806,16 @@ impl KittyCore {
         Ok(response)
     }
 
-    fn send_multipart_request(
-        &self,
-        method: HttpMethod,
-        endpoint: &str,
-        base_key: Option<BaseKey>,
-        params: &[(String, String)],
-        form: Form,
-        extra_headers: &[(String, String)],
-    ) -> MewResult<Response<Body>> {
-        let url = self.build_url(endpoint, base_key);
-        self.log_request(method, &url, params, None); // multipart 无 JSON 负载
-
-        // 仅 POST/PUT/PATCH 支持 multipart, 其余方法会返回错误
-        let builder = self.bodied_builder(method, &url)?;
-        let builder =
-            Self::apply_to_request_builder(builder, self.auth.as_ref(), params, extra_headers);
-
-        let response = builder.send(form)?;
-        self.log_response(&url, &response)?;
-        Ok(response)
+    /// 需要保留错误响应体时,在请求级关闭 ureq 的 http_status_as_error
+    fn with_error_body_config<B>(
+        builder: RequestBuilder<B>,
+        status_as_error: bool,
+    ) -> RequestBuilder<B> {
+        if status_as_error {
+            builder
+        } else {
+            builder.config().http_status_as_error(false).build()
+        }
     }
 
     /// 将响应体解析为 JSON

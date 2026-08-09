@@ -19,6 +19,9 @@ pub enum ProcessorError {
     Json(#[from] serde_json::Error),
     #[error("External error: {0}")]
     Mew(#[from] acquire::MewError),
+    /// 用户在交互中主动中止(如按 Q 退出处理会话)
+    #[error("Aborted by user")]
+    Aborted,
 }
 
 // 评论配置 trait
@@ -103,22 +106,50 @@ pub(crate) struct ActionConfig {
     pub(crate) enabled: bool,
 }
 
+/// 动作键对应的中文名称
+pub(crate) fn action_name(key: &str) -> &'static str {
+    match key {
+        "D" => "删除",
+        "S" => "禁言7天",
+        "T" => "禁言3月",
+        "U" => "取消发布",
+        "P" => "通过",
+        "F" => "检查违规",
+        "J" => "跳过",
+        _ => "未知动作",
+    }
+}
+
+/// 决议/状态字符串对应的中文名称,用于展示已处理记录
+pub(crate) fn resolution_display_name(status: &str) -> String {
+    match status {
+        "PASS" => "通过".into(),
+        "DELETE" => "删除".into(),
+        "MUTE_SEVEN_DAYS" => "禁言7天".into(),
+        "MUTE_THREE_MONTHS" => "禁言3月".into(),
+        "UNLOAD" => "取消发布".into(),
+        "TOBEDONE" => "待处理".into(),
+        "DONE" => "已处理".into(),
+        s => s.to_string(),
+    }
+}
+
 impl ActionConfig {
     /// 由动作键构造配置(名称与状态取自内置映射)
     fn simple(key: &str) -> Self {
-        let (name, status) = match key {
-            "D" => ("删除", "DELETE"),
-            "S" => ("禁言7天", "MUTE_SEVEN_DAYS"),
-            "T" => ("禁言3月", "MUTE_THREE_MONTHS"),
-            "U" => ("取消发布", "UNLOAD"),
-            "P" => ("通过", "PASS"),
-            "F" => ("检查违规", "CHECK_VIOLATION"),
-            "J" => ("跳过", "SKIP"),
-            _ => (key, key),
+        let status = match key {
+            "D" => "DELETE",
+            "S" => "MUTE_SEVEN_DAYS",
+            "T" => "MUTE_THREE_MONTHS",
+            "U" => "UNLOAD",
+            "P" => "PASS",
+            "F" => "CHECK_VIOLATION",
+            "J" => "SKIP",
+            _ => key,
         };
         ActionConfig {
             key: key.into(),
-            name: name.into(),
+            name: action_name(key).into(),
             description: String::new(),
             status: status.into(),
             enabled: true,

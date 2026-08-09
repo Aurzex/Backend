@@ -9,8 +9,8 @@ use log::{error, info, warn};
 use serde_json::Value;
 
 use super::types::{
-    CommentConfig, ProcessorError, ReportTypeRegistry, SourceConfig, get_valid_input, html_to_text,
-    prompt_input, status_mapping, timestamp_to_string, value_to_i64, value_to_string,
+    CommentConfig, ProcessorError, ReportTypeRegistry, SourceConfig, action_name, get_valid_input,
+    html_to_text, prompt_input, status_mapping, timestamp_to_string, value_to_i64, value_to_string,
 };
 use crate::api::forum::{
     ForumActionHandler, ForumDataFetcher, ForumReportReasonId, ItemType, PostReportReasonId,
@@ -389,15 +389,16 @@ impl CommentProcessor {
 pub(crate) struct BatchGroup {
     pub(crate) group_type: String,
     pub(crate) group_key: String,
-    pub(crate) record_ids: Vec<String>,
+    /// 组内完整举报记录,保证跨 chunk 的组在阈值达成时仍能处理早期记录
+    pub(crate) items: Vec<Value>,
 }
 
 impl BatchGroup {
-    pub(crate) fn new(group_type: &str, group_key: &str, record_ids: Vec<String>) -> Self {
+    pub(crate) fn new(group_type: &str, group_key: &str, items: Vec<Value>) -> Self {
         BatchGroup {
             group_type: group_type.to_string(),
             group_key: group_key.to_string(),
-            record_ids,
+            items,
         }
     }
 }
@@ -796,6 +797,7 @@ impl Processor for DetailDisplayProcessor {
         _state: &mut ProcessingState,
     ) -> Result<(), ProcessorError> {
         if let Some(config) = &record.config {
+            info!("举报ID: {}", record.record_id);
             if let Some(display) = get_display_registry().get(record.report_type.as_str()) {
                 display.display(&record.item, config);
             } else {
@@ -1501,26 +1503,62 @@ impl Processor for ActionSelectionProcessor {
             return Ok(());
         }
 
-        // 提示与合法键集合在注册表内缓存,避免每条记录重建
-        let options = self.registry.action_options(&record.report_type);
-        let prompt = &options.prompt;
-        let valid_keys = &options.valid_keys;
+        // 以可用动作渲染编号菜单,支持数字/字母/回车默认/中止
+        let actions = self.registry.get_available_actions(&record.report_type);
+        if actions.is_empty() {
+            state.skip_reason = Some("该举报类型无可用操作".into());
+            state.processed = true;
+            return Ok(());
+        }
+        // 通过(P)作为回车默认,便于快速放行正常内容
+        let default_idx = actions.iter().position(|a| a.key == "P");
+        let type_name = record
+            .config
+            .as_ref()
+            .map(|c| c.name.as_str())
+            .unwrap_or(&record.report_type);
 
         loop {
-            let choice = get_valid_input(prompt, valid_keys);
-            match choice.as_str() {
-                "D" | "S" | "T" | "P" | "U" => {
-                    state.action = Some(choice.clone());
-                    if let Some(config) = &record.config {
-                        let report_id = config.get_report_id(&record.item)?;
-                        apply_action_by_key(config, report_id, record.admin_id, &choice)?;
-                        if let Some(resolution) = status_mapping().get(choice.as_str()) {
-                            info!("已应用操作: {} -> {}", choice, resolution);
+            println!("\n举报ID: {} | 类型: {}", record.record_id, type_name);
+            println!("请选择操作:");
+            for (i, a) in actions.iter().enumerate() {
+                let default_mark = if default_idx == Some(i) {
+                    " [回车默认]"
+                } else {
+                    ""
+                };
+                println!("  {}. {}{} ({})", i + 1, a.name, default_mark, a.key);
+            }
+            println!("  0. 中止本次处理 (Q)");
+            let input = prompt_input("> ");
+
+            let choice: Option<&str> = {
+                let trimmed = input.trim();
+                if trimmed.is_empty() {
+                    default_idx.map(|i| actions[i].key.as_str())
+                } else if trimmed == "0" || trimmed.eq_ignore_ascii_case("q") {
+                    return Err(ProcessorError::Aborted);
+                } else if let Ok(n) = trimmed.parse::<usize>() {
+                    if n >= 1 && n <= actions.len() {
+                        Some(actions[n - 1].key.as_str())
+                    } else {
+                        println!("序号超出范围,请重试");
+                        continue;
+                    }
+                } else {
+                    let up = trimmed.to_uppercase();
+                    match actions.iter().find(|a| a.key == up) {
+                        Some(a) => Some(a.key.as_str()),
+                        None => {
+                            println!("无效输入,请重试");
+                            continue;
                         }
                     }
-                    state.processed = true;
-                    break;
                 }
+            };
+
+            let Some(choice) = choice else { continue };
+            match choice {
                 "F" => {
                     if let Some(config) = &record.config
                         && let Some(ref special_check) = config.special_check
@@ -1539,7 +1577,23 @@ impl Processor for ActionSelectionProcessor {
                     info!("已跳过该举报");
                     break;
                 }
-                _ => unreachable!(),
+                key => {
+                    state.action = Some(key.to_string());
+                    if let Some(config) = &record.config {
+                        let report_id = config.get_report_id(&record.item)?;
+                        apply_action_by_key(config, report_id, record.admin_id, key)?;
+                        if let Some(resolution) = status_mapping().get(key) {
+                            info!(
+                                "已应用操作: {} ({}) -> {}",
+                                key,
+                                action_name(key),
+                                resolution
+                            );
+                        }
+                    }
+                    state.processed = true;
+                    break;
+                }
             }
         }
         Ok(())
