@@ -14,7 +14,7 @@ use super::pipeline::{
     apply_action_by_key, get_display_registry, get_source_type_map, global_action_registry,
 };
 use super::types::{
-    ProcessorError, ReportFetcher, ReportTypeRegistry, SourceConfig, bytes_to_human, html_to_text,
+    ProcessorError, ReportFetcher, SourceConfig, bytes_to_human, html_to_text,
     resolution_display_name, value_to_i64, value_to_string,
 };
 use crate::api::whale::{ReportStatus, Resolution};
@@ -84,7 +84,7 @@ impl FileProcessor {
                 let path = entry.path();
                 match Self::handle_file_upload(path.as_path(), save_path, method, max_size_bytes) {
                     Ok(url) => {
-                        results.insert(path.to_path_buf(), url);
+                        results.insert(path, url);
                     }
                     Err(e) => {
                         log_error!("上传失败 {}: {}", path.display(), e);
@@ -138,7 +138,7 @@ pub struct PendingSession<'a> {
     pending_groups: HashMap<GroupKey, Vec<Value>>,
 }
 
-impl<'a> PendingSession<'a> {
+impl PendingSession<'_> {
     /// 拉取下一块,返回(已达标批量组, 非组内项);流结束时返回 None
     pub fn next_chunk(&mut self) -> Option<(Vec<BatchGroup>, Vec<Value>)> {
         let chunk = self.chunks.next()?;
@@ -225,8 +225,7 @@ impl ReportProcessor {
                     .fetcher
                     .registry
                     .get_config(&rt)
-                    .map(|c| c.name.clone())
-                    .unwrap_or_else(|| rt.clone());
+                    .map_or_else(|| rt.clone(), |c| c.name.clone());
                 (rt, name)
             })
             .collect();
@@ -249,17 +248,17 @@ impl ReportProcessor {
 
     /// 生成单条举报的展示与决策信息
     pub fn item_view(&self, item: &Value) -> Option<ReportItemView> {
-        let report_type = self.infer_report_type(item)?;
+        let report_type = Self::infer_report_type(item)?;
         let config = self.fetcher.registry.get_config(report_type)?;
-        let record_id = self.extract_record_id(item, config);
+        let record_id = Self::extract_record_id(item, config);
         let is_official = item
             .get(&config.user_id_field)
             .and_then(value_to_i64)
             .is_some_and(|uid| self.config.official_ids.contains(&uid));
-        let details = get_display_registry()
-            .get(report_type)
-            .map(|d| d.display(item, config))
-            .unwrap_or_else(|| super::pipeline::generic_details(item, config));
+        let details = get_display_registry().get(report_type).map_or_else(
+            || super::pipeline::generic_details(item, config),
+            |d| d.display(item, config),
+        );
         let options = self.fetcher.registry.action_options(report_type);
         let actions: Vec<(String, String)> = options
             .actions
@@ -283,13 +282,13 @@ impl ReportProcessor {
     }
 
     /// 记录的举报类型键
-    pub fn item_report_type<'a>(&self, item: &'a Value) -> Option<&'a str> {
-        self.infer_report_type(item)
+    pub fn item_report_type(item: &Value) -> Option<&str> {
+        Self::infer_report_type(item)
     }
 
     /// 该类型是否支持违规检查
     pub fn supports_violation_check(&self, item: &Value) -> bool {
-        self.infer_report_type(item)
+        Self::infer_report_type(item)
             .and_then(|rt| self.fetcher.registry.get_config(rt))
             .and_then(|config| config.special_check)
             .is_some_and(|check| check(item))
@@ -307,7 +306,7 @@ impl ReportProcessor {
         action: &str,
         admin_id: i32,
     ) -> Result<(), ProcessorError> {
-        let Some(report_type) = self.infer_report_type(item) else {
+        let Some(report_type) = Self::infer_report_type(item) else {
             return Err(ProcessorError::Processing("无法识别举报类型".into()));
         };
         let Some(config) = self.fetcher.registry.get_config(report_type) else {
@@ -336,7 +335,7 @@ impl ReportProcessor {
         item: &Value,
         comment_limit: usize,
     ) -> Result<Vec<String>, ProcessorError> {
-        let Some(report_type) = self.infer_report_type(item) else {
+        let Some(report_type) = Self::infer_report_type(item) else {
             return Err(ProcessorError::Processing("无法识别举报类型".into()));
         };
         let Some(config) = self.fetcher.registry.get_config(report_type) else {
@@ -381,14 +380,14 @@ impl ReportProcessor {
         self.violation_checker.auto_report(violations)
     }
 
-    /// 一键通过所有待处理举报
-    pub fn pass_all(&self, admin_id: i32) -> Result<i64, ProcessorError> {
+    /// 一键通过所有待处理举报(逐条错误仅记录日志,不中断)
+    pub fn pass_all(&self, admin_id: i32) -> i64 {
         log_info!("=== 开始一键通过所有待处理举报 ===");
         let mut count = 0i64;
 
         for chunk in self.fetcher.fetch_reports_chunked(ReportStatus::ToBeDone) {
             for item in chunk {
-                if let Some(report_type) = self.infer_report_type(&item)
+                if let Some(report_type) = Self::infer_report_type(&item)
                     && let Some(cfg) = self.fetcher.registry.get_config(report_type)
                 {
                     let report_id = match cfg.get_report_id(&item) {
@@ -411,7 +410,7 @@ impl ReportProcessor {
         }
 
         log_info!("一键通过完成, 共通过 {} 条举报", count);
-        Ok(count)
+        count
     }
 
     // ---- 批量组 ----
@@ -433,22 +432,17 @@ impl ReportProcessor {
         );
     }
 
-    /// 将动作应用到批量组全部记录,返回成功数
-    pub fn apply_group(
-        &self,
-        group: &BatchGroup,
-        action: &str,
-        admin_id: i32,
-    ) -> Result<i64, ProcessorError> {
+    /// 将动作应用到批量组全部记录,返回成功数(逐条错误仅记录日志)
+    pub fn apply_group(&self, group: &BatchGroup, action: &str, admin_id: i32) -> i64 {
         let mut applied = 0i64;
         for item in &group.items {
-            let Some(report_type) = self.infer_report_type(item) else {
+            let Some(report_type) = Self::infer_report_type(item) else {
                 continue;
             };
             let Some(config) = self.fetcher.registry.get_config(report_type) else {
                 continue;
             };
-            let record_id = self.extract_record_id(item, config);
+            let record_id = Self::extract_record_id(item, config);
             if !self
                 .fetcher
                 .registry
@@ -461,7 +455,7 @@ impl ReportProcessor {
                 Err(e) => log_error!("批量应用失败 (id={}): {}", record_id, e),
             }
         }
-        Ok(applied)
+        applied
     }
 
     // ---- 已处理记录 ----
@@ -473,7 +467,7 @@ impl ReportProcessor {
 
     /// 生成已处理记录列表行
     pub fn done_row(&self, index: usize, item: &Value) -> String {
-        let Some(report_type) = self.infer_report_type(item) else {
+        let Some(report_type) = Self::infer_report_type(item) else {
             return format!("{:>3}. [未知类型]", index);
         };
         let Some(config) = self.fetcher.registry.get_config(report_type) else {
@@ -486,8 +480,7 @@ impl ReportProcessor {
         let status = item
             .get(&config.status_field)
             .and_then(|v| v.as_str())
-            .map(resolution_display_name)
-            .unwrap_or_else(|| "未知".into());
+            .map_or_else(|| "未知".into(), resolution_display_name);
         let admin = item
             .get(&config.admin_username_field)
             .map(value_to_string)
@@ -516,7 +509,7 @@ impl ReportProcessor {
 
     /// 已处理记录的详情展示行(处理结果/管理员/时间 + 标准详情)
     pub fn done_item_details(&self, item: &Value) -> Vec<String> {
-        let Some(report_type) = self.infer_report_type(item) else {
+        let Some(report_type) = Self::infer_report_type(item) else {
             return vec!["无法识别举报类型".into()];
         };
         let Some(config) = self.fetcher.registry.get_config(report_type) else {
@@ -562,12 +555,10 @@ impl ReportProcessor {
             lines.push(format!("处理时间: {}", time));
         }
         lines.push("----------------------------------------".into());
-        lines.extend(
-            get_display_registry()
-                .get(report_type)
-                .map(|d| d.display(item, config))
-                .unwrap_or_else(|| super::pipeline::generic_details(item, config)),
-        );
+        lines.extend(get_display_registry().get(report_type).map_or_else(
+            || super::pipeline::generic_details(item, config),
+            |d| d.display(item, config),
+        ));
         lines
     }
 
@@ -605,7 +596,7 @@ impl ReportProcessor {
     }
 
     fn extract_group_key(&self, item: &Value) -> Option<GroupKey> {
-        let rt = self.infer_report_type(item)?;
+        let rt = Self::infer_report_type(item)?;
         let config = self.fetcher.registry.get_config(rt)?;
         let record_id = item.get(&config.report_id_field).map(value_to_string)?;
         if record_id.is_empty() {
@@ -615,10 +606,7 @@ impl ReportProcessor {
             .get(&config.item_id_field)
             .map(value_to_string)
             .unwrap_or_default();
-        if !item_id.is_empty() {
-            // 分组键带上类型:不同举报类型(评论/作品/帖子)的 id 各自独立编号,可能撞号
-            Some(("item_id".into(), format!("{}:{}", rt, item_id)))
-        } else {
+        if item_id.is_empty() {
             let content_key = format!(
                 "{}:{}:{}",
                 item.get(&config.content_field)
@@ -630,18 +618,20 @@ impl ReportProcessor {
                     .unwrap_or_default()
             );
             Some(("content".into(), content_key))
+        } else {
+            // 分组键带上类型:不同举报类型(评论/作品/帖子)的 id 各自独立编号,可能撞号
+            Some(("item_id".into(), format!("{}:{}", rt, item_id)))
         }
     }
 
     /// 从举报记录中提取 report_id 字符串
-    fn extract_record_id(&self, item: &Value, config: &SourceConfig) -> String {
+    fn extract_record_id(item: &Value, config: &SourceConfig) -> String {
         item.get(&config.report_id_field)
-            .map(value_to_string)
-            .unwrap_or_else(|| "0".to_string())
+            .map_or_else(|| "0".to_string(), value_to_string)
     }
 
     /// 推断举报类型,返回字符串引用以减少分配
-    fn infer_report_type<'a>(&self, item: &'a Value) -> Option<&'a str> {
+    fn infer_report_type(item: &Value) -> Option<&str> {
         if let Some(t) = item.get("_report_type").and_then(|v| v.as_str()) {
             return Some(t);
         }

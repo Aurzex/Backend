@@ -86,9 +86,7 @@ fn main() {
     };
     println!("\n=== 启动举报处理控制台 ===");
     let processor = ReportProcessor::new();
-    if let Err(e) = ReportConsole.run(&mut ui, &processor, admin_id) {
-        eprintln!("举报处理控制台异常: {}", e);
-    }
+    ReportConsole::run(&mut ui, &processor, admin_id);
 }
 
 /// 管理员账密登录,验证码错误时自动重新获取验证码并重试

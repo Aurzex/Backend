@@ -286,7 +286,7 @@ impl ReportTypeRegistry {
     }
 
     pub(crate) fn get_config(&self, report_type: &str) -> Option<&SourceConfig> {
-        self.registry.get(report_type).map(|a| a.as_ref())
+        self.registry.get(report_type).map(Arc::as_ref)
     }
 
     /// 返回配置的 Arc 句柄,供处理上下文持有(零拷贝引用计数)
@@ -301,7 +301,10 @@ impl ReportTypeRegistry {
     /// 获取(或按举报类型缓存)动作选项:提示,合法键与有序动作列表
     /// 缓存避免交互处理时每条记录重建提示与动作集合
     pub(crate) fn action_options(&self, report_type: &str) -> Arc<ActionOptions> {
-        let mut cache = self.action_cache.lock().unwrap_or_else(|e| e.into_inner());
+        let mut cache = self
+            .action_cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(cached) = cache.get(report_type) {
             return Arc::clone(cached);
         }
@@ -350,7 +353,9 @@ impl ReportTypeRegistry {
 /// 注册辅助:包装分页迭代器为"总数"闭包
 fn total_from(mut paginated: acquire::PaginatedIter) -> Result<Value, ProcessorError> {
     paginated.fetch_metadata()?;
-    Ok(json!(paginated.total_items().unwrap_or(0) as i32))
+    Ok(json!(
+        i32::try_from(paginated.total_items().unwrap_or(0)).unwrap_or(i32::MAX)
+    ))
 }
 
 /// 注册辅助:包装分页迭代器为"生成器"闭包
@@ -436,8 +441,7 @@ impl ReportFetcher {
             cfg.special_check = Some(|item| {
                 item.get("comment_source")
                     .and_then(|v| v.as_str())
-                    .map(|s| s == "WORK_SHOP")
-                    .unwrap_or(false)
+                    .is_some_and(|s| s == "WORK_SHOP")
             });
             registry.register("shop_comment", cfg);
         }

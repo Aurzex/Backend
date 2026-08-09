@@ -38,7 +38,8 @@ impl Default for CheckConfig {
     fn default() -> Self {
         CheckConfig {
             official_ids: &[
-                128963, 629055, 203577, 859722, 148883, 2191000, 7492052, 387963, 3649031,
+                128_963, 629_055, 203_577, 859_722, 148_883, 2_191_000, 7_492_052, 387_963,
+                3_649_031,
             ],
             ad_keywords: &[
                 "codemao.cn/work",
@@ -261,8 +262,9 @@ impl CommentProcessStrategy for DuplicatesStrategy {
     ) {
         let threshold = params
             .get("duplicates")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(3) as usize;
+            .and_then(|v| v.as_u64())
+            .map(|v| usize::try_from(v).unwrap_or(usize::MAX))
+            .unwrap_or(3);
 
         let mut content_map: HashMap<(String, String), Vec<String>> = HashMap::new();
 
@@ -950,7 +952,6 @@ impl ViolationChecker {
 
     /// 流式获取详细评论,单条失败仅记录日志
     fn fetch_detailed_comments(
-        &self,
         source: CommentSource,
         source_id: i32,
         limit: usize,
@@ -988,12 +989,15 @@ impl ViolationChecker {
             .map_err(|_| ProcessorError::Processing(format!("未知来源类型: {}", source_type)))?;
 
         let total = DataQuery::new()
-            .count_comments(comment_source, source_id as i32)
+            .count_comments(comment_source, i32::try_from(source_id).unwrap_or(0))
             .unwrap_or(0);
         info!("该内容共有 {} 条评论", total);
 
-        let detailed_comments =
-            self.fetch_detailed_comments(comment_source, source_id as i32, comment_limit)?;
+        let detailed_comments = Self::fetch_detailed_comments(
+            comment_source,
+            i32::try_from(source_id).unwrap_or(0),
+            comment_limit,
+        )?;
 
         let pending = self.collect_pending_violations(&detailed_comments, source_type, source_id);
         let mut violations = Self::classify_violations(pending, self.config.spam_threshold);
@@ -1001,7 +1005,7 @@ impl ViolationChecker {
         if source_type == "forum"
             && let Some(uid) = user_id
         {
-            violations.extend(self.check_spam_posts(uid, title)?);
+            violations.extend(self.check_spam_posts(uid, title));
         }
 
         let violations: HashSet<String> = violations.into_iter().collect();
@@ -1013,7 +1017,7 @@ impl ViolationChecker {
         Ok(violations.into_iter().collect())
     }
 
-    fn check_spam_posts(&self, user_id: i64, title: &str) -> Result<Vec<String>, ProcessorError> {
+    fn check_spam_posts(&self, user_id: i64, title: &str) -> Vec<String> {
         let fetcher = ForumDataFetcher::new();
         let mut posts = Vec::new();
         for result in fetcher.search_posts_gen(title, None) {
@@ -1048,9 +1052,9 @@ impl ViolationChecker {
                     violations.push(format!("forum:{}:post:0:{}", post_id, post_id));
                 }
             }
-            return Ok(violations);
+            return violations;
         }
-        Ok(Vec::new())
+        Vec::new()
     }
 
     /// 用学生账号自动举报违规内容,返回成功数(纯函数,不交互;账号缺失时返回错误)
@@ -1071,7 +1075,7 @@ impl ViolationChecker {
 
         let violations: HashSet<String> = violations.iter().cloned().collect();
         let mut accounts = multi_account.accounts.clone();
-        let success = self.report_violations(&mut accounts, &violations)?;
+        let success = self.report_violations(&mut accounts, &violations);
         if let Err(e) = KittyFactory::global_client().switch_identity(Catsona::Judge) {
             warn!("切换回管理员身份失败: {}", e);
         }
@@ -1113,7 +1117,7 @@ impl ViolationChecker {
             return true; // 本周期已登录过
         }
         let (user, pass) = accounts[idx].clone();
-        match self.login_student(&user, &pass) {
+        match Self::login_student(&user, &pass) {
             Ok(()) => true,
             Err(e) => {
                 warn!("账号 {} 登录失败: {},移除", user, e);
@@ -1128,17 +1132,17 @@ impl ViolationChecker {
         }
     }
 
-    /// 用多账号轮流举报违规内容,返回成功数
+    /// 用多账号轮流举报违规内容,返回成功数(逐条错误仅记录日志)
     fn report_violations(
         &self,
         accounts: &mut Vec<(String, String)>,
         violations: &HashSet<String>,
-    ) -> Result<usize, ProcessorError> {
+    ) -> usize {
+        const REASON_CONTENT: &str = "违规内容";
         if accounts.is_empty() {
             info!("没有可用账号");
-            return Ok(0);
+            return 0;
         }
-        const REASON_CONTENT: &str = "违规内容";
         let violations_vec: Vec<_> = violations.iter().collect();
         let mut success = 0usize;
         let mut account_usage: HashMap<usize, usize> = HashMap::new();
@@ -1159,33 +1163,30 @@ impl ViolationChecker {
             ) {
                 continue;
             }
-            match self.execute_single_report(violation, REASON_CONTENT) {
-                Ok(_) => {
-                    success += 1;
-                    *account_usage.entry(chosen_idx).or_insert(0) += 1;
-                    info!(
-                        "[{}/{}] 举报成功: {}",
-                        idx + 1,
-                        violations_vec.len(),
-                        violation
-                    );
-                }
-                Err(e) => {
-                    error!(
-                        "[{}/{}] 举报失败: {} - {}",
-                        idx + 1,
-                        violations_vec.len(),
-                        violation,
-                        e
-                    );
-                }
+            if let Err(e) = self.execute_single_report(violation, REASON_CONTENT) {
+                error!(
+                    "[{}/{}] 举报失败: {} - {}",
+                    idx + 1,
+                    violations_vec.len(),
+                    violation,
+                    e
+                );
+            } else {
+                success += 1;
+                *account_usage.entry(chosen_idx).or_insert(0) += 1;
+                info!(
+                    "[{}/{}] 举报成功: {}",
+                    idx + 1,
+                    violations_vec.len(),
+                    violation
+                );
             }
             current_idx = (chosen_idx + 1) % accounts.len();
         }
-        Ok(success)
+        success
     }
 
-    fn login_student(&self, username: &str, password: &str) -> Result<(), ProcessorError> {
+    fn login_student(username: &str, password: &str) -> Result<(), ProcessorError> {
         crate::api::auth::LoginBuilder::new()
             .identity(username)
             .password(password)
@@ -1194,10 +1195,7 @@ impl ViolationChecker {
         Ok(())
     }
 
-    fn parse_violation(
-        &self,
-        violation: &str,
-    ) -> Result<(String, i64, String, i32, i32), ProcessorError> {
+    fn parse_violation(violation: &str) -> Result<(String, i64, String, i32, i32), ProcessorError> {
         let parts: Vec<&str> = violation.split(':').collect();
         if parts.len() != 5 {
             return Err(ProcessorError::Processing(format!(
@@ -1224,7 +1222,7 @@ impl ViolationChecker {
         violation: &str,
         reason_content: &str,
     ) -> Result<(), ProcessorError> {
-        let parsed = self.parse_violation(violation)?;
+        let parsed = Self::parse_violation(violation)?;
         let (source, source_id, violation_type, parent_id, content_id) = parsed;
         match violation_type.as_str() {
             "post" => {
@@ -1250,7 +1248,11 @@ impl ViolationChecker {
                 match source.as_str() {
                     "work" => {
                         CommentOperations::new()
-                            .execute_report_comment(source_id as i32, content_id, reason_content)
+                            .execute_report_comment(
+                                i32::try_from(source_id).unwrap_or(0),
+                                content_id,
+                                reason_content,
+                            )
                             .map_err(ProcessorError::from)?;
                     }
                     "forum" => {
@@ -1270,7 +1272,7 @@ impl ViolationChecker {
                             .map_err(ProcessorError::from)?;
                     }
                     "shop" => {
-                        let reporter_id = fastrand::i32(10000..=199999999);
+                        let reporter_id = fastrand::i32(10000..=199_999_999);
                         WorkshopActionHandler::new()
                             .execute_report_comment(ReportCommentArgs {
                                 comment_id: content_id,
