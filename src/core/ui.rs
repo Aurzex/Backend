@@ -244,7 +244,7 @@ impl ReportConsole {
         for line in &view.details {
             ui.info(line);
         }
-        let action = match Self::ask_action(ui, processor, admin_id, first, &view) {
+        let action = match Self::ask_action(ui, processor, first, &view) {
             ActionChoice::Apply(key) => key,
             ActionChoice::Skip => {
                 ui.info("已跳过该批量组");
@@ -289,7 +289,7 @@ impl ReportConsole {
         for line in &view.details {
             ui.info(line);
         }
-        match Self::ask_action(ui, processor, admin_id, item, &view) {
+        match Self::ask_action(ui, processor, item, &view) {
             ActionChoice::Apply(key) => {
                 processor.apply_action(item, &key, admin_id)?;
                 ui.info(&format!("  => 已处理: {}", action_name(&key)));
@@ -307,7 +307,6 @@ impl ReportConsole {
     fn ask_action(
         ui: &mut dyn ProcessorUi,
         processor: &ReportProcessor,
-        admin_id: i32,
         item: &serde_json::Value,
         view: &ReportItemView,
     ) -> ActionChoice {
@@ -380,7 +379,7 @@ impl ReportConsole {
                     Some(chunk) => {
                         visible_count += chunk
                             .iter()
-                            .filter(|v| Self::type_matches(processor, v, current_type.as_deref()))
+                            .filter(|v| Self::type_matches(v, current_type.as_deref()))
                             .count();
                         raw_items.extend(chunk);
                     }
@@ -420,7 +419,7 @@ impl ReportConsole {
                 let start = page * PAGE_SIZE;
                 for (i, item) in raw_items
                     .iter()
-                    .filter(|v| Self::type_matches(processor, v, current_type.as_deref()))
+                    .filter(|v| Self::type_matches(v, current_type.as_deref()))
                     .skip(start)
                     .take(PAGE_SIZE)
                     .enumerate()
@@ -440,7 +439,7 @@ impl ReportConsole {
                 } else if idx >= 1 && idx <= visible_count {
                     if let Some(item) = raw_items
                         .iter()
-                        .filter(|v| Self::type_matches(processor, v, current_type.as_deref()))
+                        .filter(|v| Self::type_matches(v, current_type.as_deref()))
                         .nth(idx - 1)
                     {
                         for line in processor.done_item_details(item) {
@@ -482,9 +481,7 @@ impl ReportConsole {
                         if changed {
                             visible_count = raw_items
                                 .iter()
-                                .filter(|v| {
-                                    Self::type_matches(processor, v, current_type.as_deref())
-                                })
+                                .filter(|v| Self::type_matches(v, current_type.as_deref()))
                                 .count();
                             page = 0;
                         }
@@ -497,11 +494,7 @@ impl ReportConsole {
     }
 
     /// 记录是否匹配当前类型过滤
-    fn type_matches(
-        processor: &ReportProcessor,
-        item: &serde_json::Value,
-        current: Option<&str>,
-    ) -> bool {
+    fn type_matches(item: &serde_json::Value, current: Option<&str>) -> bool {
         match current {
             Some(t) => ReportProcessor::item_report_type(item) == Some(t),
             None => true,
