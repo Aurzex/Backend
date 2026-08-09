@@ -7,7 +7,8 @@ use serde_json::Value;
 
 use crate::api::auth::{AuthProcessor, LoginHandler, LoginResult};
 use crate::core::services::ReportProcessor;
-use crate::core::types::{prompt_input, value_to_i64};
+use crate::core::types::value_to_i64;
+use crate::core::ui::{ConsoleUi, ProcessorUi};
 use crate::utils::data::PathConfig;
 
 struct ConsoleLogger;
@@ -28,9 +29,11 @@ fn main() {
     log::set_logger(&ConsoleLogger).unwrap();
     log::set_max_level(LevelFilter::Info);
 
+    let mut ui = ConsoleUi;
+
     // 1-2. 管理员登录(验证码错误时自动重新获取验证码重试)
     println!("=== 管理员登录 ===");
-    let result = match admin_login_with_retry() {
+    let result = match admin_login_with_retry(&mut ui) {
         Ok(r) => r,
         Err(msg) => {
             eprintln!("管理员登录失败: {}", msg);
@@ -83,13 +86,13 @@ fn main() {
     };
     println!("\n=== 启动举报处理控制台 ===");
     let processor = ReportProcessor::new();
-    if let Err(e) = processor.run_interactive(admin_id) {
+    if let Err(e) = processor.run_interactive(admin_id, &mut ui) {
         eprintln!("举报处理控制台异常: {}", e);
     }
 }
 
 /// 管理员账密登录,验证码错误时自动重新获取验证码并重试
-fn admin_login_with_retry() -> Result<LoginResult, String> {
+fn admin_login_with_retry(ui: &mut dyn ProcessorUi) -> Result<LoginResult, String> {
     const MAX_ATTEMPTS: usize = 3;
     let mut attempts = 0usize;
     let mut username = String::new();
@@ -112,10 +115,10 @@ fn admin_login_with_retry() -> Result<LoginResult, String> {
 
         // 用户名/密码只在首次尝试时询问,重试仅重新输入验证码
         if attempts == 1 {
-            username = prompt_input("管理员用户名: ");
-            password = prompt_input("管理员密码: ");
+            username = ui.input("管理员用户名: ");
+            password = ui.input("管理员密码: ");
         }
-        let captcha = prompt_input("请输入验证码: ");
+        let captcha = ui.input("请输入验证码: ");
 
         match LoginHandler::new().handle_admin_password(&username, &password, timestamp, &captcha) {
             Ok(result) => return Ok(result),
@@ -127,7 +130,7 @@ fn admin_login_with_retry() -> Result<LoginResult, String> {
                     return Err(msg);
                 }
                 if attempts >= MAX_ATTEMPTS {
-                    let again = prompt_input("多次验证码错误, 是否继续重试? (Y/N): ");
+                    let again = ui.input("多次验证码错误, 是否继续重试? (Y/N): ");
                     if !again.trim().eq_ignore_ascii_case("y") {
                         return Err(msg);
                     }

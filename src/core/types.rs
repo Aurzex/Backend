@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
-use std::io::{self, Write};
+use std::io;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::api::whale::{CommentSourceType, ReportStatus, WhaleReportFetcher, WorkSourceType};
@@ -27,25 +27,6 @@ pub enum ProcessorError {
 // 评论配置 trait
 pub trait CommentConfig {
     fn get_comments(&self, item_id: i64) -> Option<&[Value]>;
-}
-
-// 交互工具
-pub(crate) fn prompt_input(prompt: &str) -> String {
-    print!("{}", prompt);
-    io::stdout().flush().unwrap();
-    let mut input = String::new();
-    io::stdin().read_line(&mut input).unwrap();
-    input.trim().to_string()
-}
-
-pub(crate) fn get_valid_input(prompt: &str, valid_options: &HashSet<String>) -> String {
-    loop {
-        let input = prompt_input(prompt);
-        if valid_options.contains(&input.to_uppercase()) {
-            return input.to_uppercase();
-        }
-        println!("无效输入,请重试");
-    }
 }
 
 // 辅助函数
@@ -632,7 +613,7 @@ impl ReportFetcher {
                     let mut item = match result {
                         Ok(item) => item,
                         Err(e) => {
-                            eprintln!("Error fetching report data: {}", e);
+                            log::error!("Error fetching report data: {}", e);
                             break;
                         }
                     };

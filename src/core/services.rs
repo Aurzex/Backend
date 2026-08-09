@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use log::{error as log_error, info as log_info};
+
 use serde_json::Value;
 
 use super::pipeline::{
@@ -14,8 +16,9 @@ use super::pipeline::{
 };
 use super::types::{
     ProcessorError, ReportFetcher, ReportTypeRegistry, SourceConfig, action_name, bytes_to_human,
-    get_valid_input, html_to_text, prompt_input, resolution_display_name, value_to_string,
+    html_to_text, resolution_display_name, value_to_string,
 };
+use super::ui::ProcessorUi;
 use crate::api::whale::{ReportStatus, Resolution};
 use crate::utils::acquire::{FileUploader, KittyFactory};
 
@@ -38,7 +41,7 @@ impl FileProcessor {
 
         if file_size > max_size_bytes {
             let size_mb = file_size as f64 / 1024.0 / 1024.0;
-            println!(
+            log_error!(
                 "警告: 文件 {} 大小 {:.2} MB 超过 {} MB 限制, 跳过上传",
                 file_path.display(),
                 size_mb,
@@ -60,7 +63,7 @@ impl FileProcessor {
             .unwrap()
             .as_secs();
         let size_human = bytes_to_human(file_size);
-        println!(
+        log_info!(
             "上传成功: {} (文件: {}, 大小: {}, 时间戳: {})",
             url,
             file_path.display(),
@@ -86,7 +89,7 @@ impl FileProcessor {
                         results.insert(path.to_path_buf(), url);
                     }
                     Err(e) => {
-                        eprintln!("上传失败 {}: {}", path.display(), e);
+                        log_error!("上传失败 {}: {}", path.display(), e);
                     }
                 }
             }
@@ -152,44 +155,48 @@ impl ReportProcessor {
     }
 
     /// 交互式举报处理控制台:处理待办,浏览已处理记录,查看分布
-    pub fn run_interactive(&self, admin_id: i32) -> Result<(), ProcessorError> {
+    pub fn run_interactive(
+        &self,
+        admin_id: i32,
+        ui: &mut dyn ProcessorUi,
+    ) -> Result<(), ProcessorError> {
         loop {
             let todo = self.fetcher.get_total_reports(ReportStatus::ToBeDone);
             let done = self.fetcher.get_total_reports(ReportStatus::Done);
-            println!("\n=== 举报处理控制台 ===");
-            println!("待处理: {} 条 | 已处理: {} 条", todo, done);
-            println!("1. 处理待处理举报");
-            println!("2. 查看已处理记录");
-            println!("3. 待处理分布(按类型)");
-            println!("0. 退出");
-            let input = prompt_input("> ");
+            ui.info("\n=== 举报处理控制台 ===");
+            ui.info(&format!("待处理: {} 条 | 已处理: {} 条", todo, done));
+            ui.info("1. 处理待处理举报");
+            ui.info("2. 查看已处理记录");
+            ui.info("3. 待处理分布(按类型)");
+            ui.info("0. 退出");
+            let input = ui.input("> ");
             match input.trim() {
-                "1" => match self.process_all_reports(admin_id) {
-                    Ok(processed) => println!("本次共处理 {} 条举报", processed),
-                    Err(e) => eprintln!("处理失败: {}", e),
+                "1" => match self.process_all_reports(admin_id, ui) {
+                    Ok(processed) => ui.info(&format!("本次共处理 {} 条举报", processed)),
+                    Err(e) => ui.error(&format!("处理失败: {}", e)),
                 },
                 "2" => {
-                    if let Err(e) = self.view_processed_reports() {
-                        eprintln!("查看已处理记录失败: {}", e);
+                    if let Err(e) = self.view_processed_reports(ui) {
+                        ui.error(&format!("查看已处理记录失败: {}", e));
                     }
                 }
                 "3" => {
-                    if let Err(e) = self.show_backlog() {
-                        eprintln!("获取分布失败: {}", e);
+                    if let Err(e) = self.show_backlog(ui) {
+                        ui.error(&format!("获取分布失败: {}", e));
                     }
                 }
                 "0" | "q" | "Q" | "" => {
-                    println!("退出举报处理控制台");
+                    ui.info("退出举报处理控制台");
                     return Ok(());
                 }
-                _ => println!("无效输入,请重试"),
+                _ => ui.info("无效输入,请重试"),
             }
         }
     }
 
     /// 展示各举报类型的待处理数量
-    fn show_backlog(&self) -> Result<(), ProcessorError> {
-        println!("=== 待处理举报分布 ===");
+    fn show_backlog(&self, ui: &mut dyn ProcessorUi) -> Result<(), ProcessorError> {
+        ui.info("=== 待处理举报分布 ===");
         let mut total = 0i64;
         for report_type in self.fetcher.registry.get_all_types() {
             if let Some(cfg) = self.fetcher.registry.get_config(&report_type) {
@@ -197,31 +204,32 @@ impl ReportProcessor {
                     Ok(v) => {
                         let n = v.as_i64().unwrap_or(0);
                         total += n;
-                        println!("  {}: {}", cfg.name, n);
+                        ui.info(&format!("  {}: {}", cfg.name, n));
                     }
-                    Err(e) => println!("  {}: 获取失败 ({})", cfg.name, e),
+                    Err(e) => ui.info(&format!("  {}: 获取失败 ({})", cfg.name, e)),
                 }
             }
         }
-        println!("  合计: {}", total);
+        ui.info(&format!("  合计: {}", total));
         Ok(())
     }
 
-    pub fn process_all_reports(&self, admin_id: i32) -> Result<i64, ProcessorError> {
-        println!("=== 开始处理所有举报 ===");
+    pub fn process_all_reports(
+        &self,
+        admin_id: i32,
+        ui: &mut dyn ProcessorUi,
+    ) -> Result<i64, ProcessorError> {
+        log_info!("=== 开始处理所有举报 ===");
         self.reset_batch_state();
 
         let total = self.fetcher.get_total_reports(ReportStatus::ToBeDone);
-        println!("当前待处理举报总数: {}", total);
+        log_info!("当前待处理举报总数: {}", total);
         if total == 0 {
-            println!("没有待处理的举报");
+            log_info!("没有待处理的举报");
             return Ok(0);
         }
 
-        let choice = get_valid_input(
-            "是否一键全部通过? (Y/N)",
-            &["Y".into(), "N".into()].into_iter().collect(),
-        );
+        let choice = ui.choose("是否一键全部通过? (Y/N)", &["Y", "N"]);
         if choice == "Y" {
             return self.pass_all_pending(admin_id);
         }
@@ -229,15 +237,15 @@ impl ReportProcessor {
         let mut processed = 0i64;
 
         for chunk in self.fetcher.fetch_reports_chunked(ReportStatus::ToBeDone) {
-            println!(
+            log_info!(
                 "--- 本块 {} 条, 进度 {}/{} ---",
                 chunk.len(),
                 processed + 1,
                 total
             );
-            match self.process_chunk(&chunk, admin_id, &mut processed, total) {
+            match self.process_chunk(&chunk, admin_id, &mut processed, total, ui) {
                 Err(ProcessorError::Aborted) => {
-                    println!("已中止处理, 累计处理 {} 条", processed);
+                    log_info!("已中止处理, 累计处理 {} 条", processed);
                     return Ok(processed);
                 }
                 Err(e) => return Err(e),
@@ -246,9 +254,9 @@ impl ReportProcessor {
         }
 
         // 流结束:处理未达阈值的遗留组,不再留到下一周期
-        let leftover = match self.process_leftover_groups(admin_id) {
+        let leftover = match self.process_leftover_groups(admin_id, ui) {
             Err(ProcessorError::Aborted) => {
-                println!("已中止处理遗留组, 累计处理 {} 条", processed);
+                log_info!("已中止处理遗留组, 累计处理 {} 条", processed);
                 return Ok(processed);
             }
             Err(e) => return Err(e),
@@ -256,7 +264,7 @@ impl ReportProcessor {
         };
         processed += leftover;
 
-        println!("所有举报处理完成, 共处理 {} 条举报", processed);
+        log_info!("所有举报处理完成, 共处理 {} 条举报", processed);
         Ok(processed)
     }
 
@@ -267,19 +275,20 @@ impl ReportProcessor {
         admin_id: i32,
         processed: &mut i64,
         total: i64,
+        ui: &mut dyn ProcessorUi,
     ) -> Result<(), ProcessorError> {
         let (ready_groups, non_group) = self.split_chunk_items(chunk);
 
         for group in ready_groups {
-            let n = self.handle_single_batch_group(&group, admin_id)?;
+            let n = self.handle_single_batch_group(&group, admin_id, ui)?;
             *processed += n;
         }
 
         for item in &non_group {
-            let done = match self.process_single_item(item, admin_id, *processed + 1, total) {
+            let done = match self.process_single_item(item, admin_id, *processed + 1, total, ui) {
                 Err(ProcessorError::Aborted) => return Err(ProcessorError::Aborted),
                 Err(e) => {
-                    eprintln!("处理记录失败: {}, 跳过", e);
+                    log_error!("处理记录失败: {}, 跳过", e);
                     false
                 }
                 Ok(done) => done,
@@ -355,8 +364,9 @@ impl ReportProcessor {
         &self,
         group: &BatchGroup,
         admin_id: i32,
+        ui: &mut dyn ProcessorUi,
     ) -> Result<i64, ProcessorError> {
-        println!(
+        log_info!(
             "处理批量组 [{}] {} (共 {} 条举报)",
             group.group_type,
             group.group_key,
@@ -370,14 +380,14 @@ impl ReportProcessor {
             .get_batch_action(&group.group_type, &group.group_key);
 
         if let Some(action) = saved_action {
-            println!("应用保存的批量动作: {}", action_name(&action));
+            log_info!("应用保存的批量动作: {}", action_name(&action));
             return self.apply_action_to_items(&group.items, &action, admin_id);
         }
 
-        let Some(action) = self.ask_first_record_action(group, admin_id)? else {
+        let Some(action) = self.ask_first_record_action(group, admin_id, ui)? else {
             return Ok(0);
         };
-        println!(
+        log_info!(
             "批量组动作: {}, 应用到剩余 {} 条记录",
             action_name(&action),
             group.items.len().saturating_sub(1)
@@ -391,6 +401,7 @@ impl ReportProcessor {
         &self,
         group: &BatchGroup,
         admin_id: i32,
+        ui: &mut dyn ProcessorUi,
     ) -> Result<Option<String>, ProcessorError> {
         let Some(first_item) = group.items.first() else {
             return Ok(None);
@@ -404,7 +415,7 @@ impl ReportProcessor {
         };
         let record_id = self.extract_record_id(first_item, config_ref);
 
-        println!("--- 批量组首条记录 (举报ID: {}) ---", record_id);
+        log_info!("--- 批量组首条记录 (举报ID: {}) ---", record_id);
         let mut context = ProcessingContext::new(
             record_id,
             report_type.to_string(),
@@ -415,7 +426,7 @@ impl ReportProcessor {
         context.record.config = config;
 
         let pipeline = self.create_pipeline();
-        pipeline.execute(&mut context)?;
+        pipeline.execute(&mut context, ui)?;
 
         let action = context.state.action.clone();
         if let Some(action) = &action {
@@ -460,7 +471,7 @@ impl ReportProcessor {
                         .mark_record_processed(&record_id);
                 }
                 Err(e) => {
-                    eprintln!("批量应用失败 (id={}): {}", record_id, e);
+                    log_error!("批量应用失败 (id={}): {}", record_id, e);
                 }
             }
         }
@@ -474,6 +485,7 @@ impl ReportProcessor {
         admin_id: i32,
         index: i64,
         total: i64,
+        ui: &mut dyn ProcessorUi,
     ) -> Result<bool, ProcessorError> {
         let Some(report_type) = self.infer_report_type(item) else {
             return Ok(false);
@@ -487,9 +499,12 @@ impl ReportProcessor {
             return Ok(false);
         }
 
-        println!(
+        log_info!(
             "--- [{}/{}] {} (举报ID: {}) ---",
-            index, total, config.name, record_id
+            index,
+            total,
+            config.name,
+            record_id
         );
 
         let mut context = ProcessingContext::new(
@@ -501,11 +516,11 @@ impl ReportProcessor {
         context.record.config = self.fetcher.registry.get_config_arc(report_type);
 
         let pipeline = self.create_pipeline();
-        if let Err(e) = pipeline.execute(&mut context) {
+        if let Err(e) = pipeline.execute(&mut context, ui) {
             if matches!(e, ProcessorError::Aborted) {
                 return Err(e);
             }
-            eprintln!("处理记录 {} 失败: {}, 跳过", record_id, e);
+            log_error!("处理记录 {} 失败: {}, 跳过", record_id, e);
             return Ok(false);
         }
 
@@ -515,7 +530,7 @@ impl ReportProcessor {
                 .unwrap()
                 .mark_record_processed(&record_id);
             if let Some(action) = &context.state.action {
-                println!("  => 已处理: {}", action_name(action));
+                log_info!("  => 已处理: {}", action_name(action));
             }
             return Ok(true);
         }
@@ -523,7 +538,11 @@ impl ReportProcessor {
     }
 
     /// 流结束:处理所有未达阈值的遗留组
-    fn process_leftover_groups(&self, admin_id: i32) -> Result<i64, ProcessorError> {
+    fn process_leftover_groups(
+        &self,
+        admin_id: i32,
+        ui: &mut dyn ProcessorUi,
+    ) -> Result<i64, ProcessorError> {
         let remaining = self
             .pending_groups
             .lock()
@@ -533,15 +552,15 @@ impl ReportProcessor {
         let mut processed = 0i64;
         for ((group_type, group_key), items) in remaining {
             let group = BatchGroup::new(&group_type, &group_key, items);
-            processed += self.handle_single_batch_group(&group, admin_id)?;
+            processed += self.handle_single_batch_group(&group, admin_id, ui)?;
         }
         Ok(processed)
     }
 
     /// 分页浏览已处理记录,支持按举报类型过滤切换(如仅看工作室评论举报)
     /// 数据按需分块拉取:仅当翻页到未加载区域时才请求下一块,避免一次性拉全量造成卡顿
-    pub fn view_processed_reports(&self) -> Result<(), ProcessorError> {
-        println!("=== 已处理记录 ===");
+    pub fn view_processed_reports(&self, ui: &mut dyn ProcessorUi) -> Result<(), ProcessorError> {
+        ui.info("=== 已处理记录 ===");
         let mut type_options: Vec<(String, String)> = self
             .fetcher
             .registry
@@ -594,7 +613,7 @@ impl ReportProcessor {
                 })
                 .unwrap_or("全部");
             let page_count = visible_count.div_ceil(PAGE_SIZE).max(1);
-            println!(
+            ui.info(&format!(
                 "\n=== 已处理记录 (类型: {}, 第 {}/{} 页, 共 {} 条{}) ===",
                 filter_name,
                 page + 1,
@@ -605,7 +624,7 @@ impl ReportProcessor {
                 } else {
                     ", 按需加载更多"
                 }
-            );
+            ));
 
             if visible_count > 0 {
                 let start = page * PAGE_SIZE;
@@ -616,34 +635,34 @@ impl ReportProcessor {
                     .take(PAGE_SIZE)
                     .enumerate()
                 {
-                    println!("{}", self.format_done_row(start + i + 1, item));
+                    ui.info(&self.format_done_row(start + i + 1, item));
                 }
             } else {
-                println!("(该类型暂无已处理记录)");
+                ui.info("(该类型暂无已处理记录)");
             }
 
-            println!("[序号] 查看详情 | n 下一页 | p 上一页 | t 切换类型 | q 返回");
-            let input = prompt_input("> ");
+            ui.info("[序号] 查看详情 | n 下一页 | p 上一页 | t 切换类型 | q 返回");
+            let input = ui.input("> ");
             let trimmed = input.trim();
             if let Ok(idx) = trimmed.parse::<usize>() {
                 if visible_count == 0 {
-                    println!("当前无记录");
+                    ui.info("当前无记录");
                 } else if idx >= 1 && idx <= visible_count {
                     if let Some(item) = raw_items
                         .iter()
                         .filter(|v| self.type_filter_matches(v, &current_type))
                         .nth(idx - 1)
                     {
-                        self.display_done_item(item)?;
+                        self.display_done_item(item, ui)?;
                     }
                 } else {
-                    println!("序号超出范围");
+                    ui.info("序号超出范围");
                 }
             } else {
                 match trimmed.to_lowercase().as_str() {
                     "n" => {
                         if exhausted && page + 1 >= page_count {
-                            println!("已经是最后一页");
+                            ui.info("已经是最后一页");
                         } else {
                             page += 1;
                         }
@@ -652,11 +671,12 @@ impl ReportProcessor {
                         if page > 0 {
                             page -= 1;
                         } else {
-                            println!("已经是第一页");
+                            ui.info("已经是第一页");
                         }
                     }
                     "t" => {
-                        if let Some(new_type) = self.pick_report_type(&type_options, &current_type)
+                        if let Some(new_type) =
+                            self.pick_report_type(&type_options, &current_type, ui)
                         {
                             current_type = new_type;
                             visible_count = raw_items
@@ -667,7 +687,7 @@ impl ReportProcessor {
                         }
                     }
                     "q" | "" => break,
-                    _ => println!("无效输入,请重试"),
+                    _ => ui.info("无效输入,请重试"),
                 }
             }
         }
@@ -687,19 +707,20 @@ impl ReportProcessor {
         &self,
         type_options: &[(String, String)],
         current: &Option<String>,
+        ui: &mut dyn ProcessorUi,
     ) -> Option<Option<String>> {
-        println!("\n选择要查看的举报类型:");
-        println!("  0. 全部");
+        ui.info("\n选择要查看的举报类型:");
+        ui.info("  0. 全部");
         for (i, (rt, name)) in type_options.iter().enumerate() {
             let mark = if current.as_ref() == Some(rt) {
                 " (当前)"
             } else {
                 ""
             };
-            println!("  {}. {}{}", i + 1, name, mark);
+            ui.info(&format!("  {}. {}{}", i + 1, name, mark));
         }
-        println!("  回车返回");
-        let input = prompt_input("> ");
+        ui.info("  回车返回");
+        let input = ui.input("> ");
         let trimmed = input.trim();
         if trimmed.is_empty() {
             return None;
@@ -713,7 +734,7 @@ impl ReportProcessor {
         {
             return Some(Some(type_options[n - 1].0.clone()));
         }
-        println!("无效输入");
+        ui.info("无效输入");
         None
     }
 
@@ -761,13 +782,17 @@ impl ReportProcessor {
     }
 
     /// 展示单条已处理记录的完整详情
-    fn display_done_item(&self, item: &Value) -> Result<(), ProcessorError> {
+    fn display_done_item(
+        &self,
+        item: &Value,
+        ui: &mut dyn ProcessorUi,
+    ) -> Result<(), ProcessorError> {
         let Some(report_type) = self.infer_report_type(item) else {
-            println!("无法识别举报类型");
+            ui.info("无法识别举报类型");
             return Ok(());
         };
         let Some(config) = self.fetcher.registry.get_config(report_type) else {
-            println!("未知举报类型: {}", report_type);
+            ui.info(&format!("未知举报类型: {}", report_type));
             return Ok(());
         };
         let record_id = item
@@ -775,41 +800,41 @@ impl ReportProcessor {
             .map(value_to_string)
             .unwrap_or_default();
 
-        println!(
+        ui.info(&format!(
             "\n=== 已处理记录详情: {} (举报ID: {}) ===",
             config.name, record_id
-        );
+        ));
         if let Some(status) = item.get(&config.status_field).and_then(|v| v.as_str()) {
-            println!("处理结果: {}", resolution_display_name(status));
+            ui.info(&format!("处理结果: {}", resolution_display_name(status)));
         }
         if let Some(admin) = item
             .get(&config.admin_username_field)
             .map(value_to_string)
             .filter(|s| !s.is_empty())
         {
-            println!("处理管理员: {}", admin);
+            ui.info(&format!("处理管理员: {}", admin));
         } else if let Some(admin_id) = item
             .get(&config.admin_id_field)
             .map(value_to_string)
             .filter(|s| !s.is_empty())
         {
-            println!("处理管理员ID: {}", admin_id);
+            ui.info(&format!("处理管理员ID: {}", admin_id));
         }
         if let Some(time) = item
             .get(&config.created_at_field)
             .map(format_timestamp)
             .filter(|s| !s.is_empty())
         {
-            println!("举报时间: {}", time);
+            ui.info(&format!("举报时间: {}", time));
         }
         if let Some(time) = item
             .get("updated_at")
             .map(format_timestamp)
             .filter(|s| !s.is_empty())
         {
-            println!("处理时间: {}", time);
+            ui.info(&format!("处理时间: {}", time));
         }
-        println!("----------------------------------------");
+        ui.info("----------------------------------------");
 
         let record = ReportRecord {
             record_id,
@@ -822,7 +847,7 @@ impl ReportProcessor {
             user_id: None,
         };
         let mut state = ProcessingState::default();
-        DetailDisplayProcessor.process(&record, &mut state)?;
+        DetailDisplayProcessor.process(&record, &mut state, ui)?;
         Ok(())
     }
 
@@ -873,7 +898,7 @@ impl ReportProcessor {
     }
 
     fn pass_all_pending(&self, admin_id: i32) -> Result<i64, ProcessorError> {
-        println!("=== 开始一键通过所有待处理举报 ===");
+        log_info!("=== 开始一键通过所有待处理举报 ===");
         let mut count = 0i64;
 
         for chunk in self.fetcher.fetch_reports_chunked(ReportStatus::ToBeDone) {
@@ -884,7 +909,7 @@ impl ReportProcessor {
                     let report_id = match cfg.get_report_id(&item) {
                         Ok(id) => id,
                         Err(e) => {
-                            eprintln!("解析 report_id 失败: {}", e);
+                            log_error!("解析 report_id 失败: {}", e);
                             continue;
                         }
                     };
@@ -894,14 +919,14 @@ impl ReportProcessor {
                         registry.apply(&cfg.handle_method, report_id, admin_id, Resolution::Pass);
                     match result {
                         Ok(true) => count += 1,
-                        Ok(false) => eprintln!("一键通过返回 false (id={})", report_id),
-                        Err(e) => eprintln!("一键通过失败 (id={}): {}", report_id, e),
+                        Ok(false) => log_error!("一键通过返回 false (id={})", report_id),
+                        Err(e) => log_error!("一键通过失败 (id={}): {}", report_id, e),
                     }
                 }
             }
         }
 
-        println!("一键通过完成, 共通过 {} 条举报", count);
+        log_info!("一键通过完成, 共通过 {} 条举报", count);
         Ok(count)
     }
 

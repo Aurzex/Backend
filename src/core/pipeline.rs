@@ -9,9 +9,10 @@ use log::{error, info, warn};
 use serde_json::Value;
 
 use super::types::{
-    CommentConfig, ProcessorError, ReportTypeRegistry, SourceConfig, action_name, get_valid_input,
-    html_to_text, prompt_input, status_mapping, timestamp_to_string, value_to_i64, value_to_string,
+    CommentConfig, ProcessorError, ReportTypeRegistry, SourceConfig, action_name, html_to_text,
+    status_mapping, timestamp_to_string, value_to_i64, value_to_string,
 };
+use super::ui::ProcessorUi;
 use crate::api::forum::{
     ForumActionHandler, ForumDataFetcher, ForumReportReasonId, ItemType, PostReportReasonId,
 };
@@ -491,6 +492,7 @@ pub(crate) trait Processor: Send + Sync {
         &self,
         record: &ReportRecord,
         state: &mut ProcessingState,
+        ui: &mut dyn ProcessorUi,
     ) -> Result<(), ProcessorError>;
 }
 
@@ -795,6 +797,7 @@ impl Processor for DetailDisplayProcessor {
         &self,
         record: &ReportRecord,
         _state: &mut ProcessingState,
+        _ui: &mut dyn ProcessorUi,
     ) -> Result<(), ProcessorError> {
         if let Some(config) = &record.config {
             info!("举报ID: {}", record.record_id);
@@ -839,6 +842,7 @@ impl Processor for OfficialCheckProcessor {
         &self,
         record: &ReportRecord,
         state: &mut ProcessingState,
+        _ui: &mut dyn ProcessorUi,
     ) -> Result<(), ProcessorError> {
         let config = match &record.config {
             Some(c) => c,
@@ -1043,8 +1047,8 @@ impl ViolationChecker {
     }
 
     /// 交互询问评论获取数量,无效输入回退默认值
-    fn prompt_comment_limit(&self) -> usize {
-        let limit_str = prompt_input("输入要获取的评论数: ");
+    fn prompt_comment_limit(&self, ui: &mut dyn ProcessorUi) -> usize {
+        let limit_str = ui.input("输入要获取的评论数: ");
         limit_str
             .parse()
             .unwrap_or(self.config.comment_fetch_default_limit)
@@ -1078,6 +1082,7 @@ impl ViolationChecker {
         user_id: Option<i64>,
         title: &str,
         _config: &SourceConfig,
+        ui: &mut dyn ProcessorUi,
     ) -> Result<(), ProcessorError> {
         info!(
             "检查违规: source_id={}, type={}, board={}, user={:?}",
@@ -1093,7 +1098,7 @@ impl ViolationChecker {
             .unwrap_or(0);
         info!("该内容共有 {} 条评论", total);
 
-        let limit = self.prompt_comment_limit();
+        let limit = self.prompt_comment_limit(ui);
         let detailed_comments =
             self.fetch_detailed_comments(comment_source, source_id as i32, limit)?;
 
@@ -1113,7 +1118,7 @@ impl ViolationChecker {
         }
 
         info!("检测到 {} 条违规内容", violations.len());
-        self.process_auto_report(violations)
+        self.process_auto_report(violations, ui)
     }
 
     fn check_spam_posts(&self, user_id: i64, title: &str) -> Result<Vec<String>, ProcessorError> {
@@ -1156,7 +1161,11 @@ impl ViolationChecker {
         Ok(Vec::new())
     }
 
-    fn process_auto_report(&self, violations: HashSet<String>) -> Result<(), ProcessorError> {
+    fn process_auto_report(
+        &self,
+        violations: HashSet<String>,
+        ui: &mut dyn ProcessorUi,
+    ) -> Result<(), ProcessorError> {
         let mut multi_account = MultiAccount::new();
         let password_path = PathConfig::global().password_file_path();
         if password_path.exists() {
@@ -1169,10 +1178,7 @@ impl ViolationChecker {
             info!("未加载学生账号, 无法进行自动举报");
             return Ok(());
         }
-        let choice = get_valid_input(
-            "是否自动举报违规评论? (Y/N)",
-            &["Y".into(), "N".into()].into_iter().collect(),
-        );
+        let choice = ui.choose("是否自动举报违规评论? (Y/N)", &["Y", "N"]);
         if choice != "Y" {
             info!("自动举报操作已取消");
             return Ok(());
@@ -1425,7 +1431,11 @@ impl ActionSelectionProcessor {
         }
     }
 
-    fn check_violation(&self, record: &ReportRecord) -> Result<(), ProcessorError> {
+    fn check_violation(
+        &self,
+        record: &ReportRecord,
+        ui: &mut dyn ProcessorUi,
+    ) -> Result<(), ProcessorError> {
         info!("=== 开始检查违规 ===");
         let config = match &record.config {
             Some(c) => c.clone(),
@@ -1463,6 +1473,7 @@ impl ActionSelectionProcessor {
             user_id,
             title,
             &config,
+            ui,
         )?;
         info!("=== 检查结束 ===");
         Ok(())
@@ -1474,6 +1485,7 @@ impl Processor for ActionSelectionProcessor {
         &self,
         record: &ReportRecord,
         state: &mut ProcessingState,
+        ui: &mut dyn ProcessorUi,
     ) -> Result<(), ProcessorError> {
         if record.is_batch_mode {
             let config = record
@@ -1520,52 +1532,25 @@ impl Processor for ActionSelectionProcessor {
             .unwrap_or(&record.report_type);
 
         loop {
-            println!("\n举报ID: {} | 类型: {}", record.record_id, type_name);
-            println!("请选择操作:");
-            for (i, a) in actions.iter().enumerate() {
-                let default_mark = if default_idx == Some(i) {
-                    " [回车默认]"
-                } else {
-                    ""
-                };
-                println!("  {}. {}{} ({})", i + 1, a.name, default_mark, a.key);
-            }
-            println!("  0. 中止本次处理 (Q)");
-            let input = prompt_input("> ");
-
-            let choice: Option<&str> = {
-                let trimmed = input.trim();
-                if trimmed.is_empty() {
-                    default_idx.map(|i| actions[i].key.as_str())
-                } else if trimmed == "0" || trimmed.eq_ignore_ascii_case("q") {
-                    return Err(ProcessorError::Aborted);
-                } else if let Ok(n) = trimmed.parse::<usize>() {
-                    if n >= 1 && n <= actions.len() {
-                        Some(actions[n - 1].key.as_str())
-                    } else {
-                        println!("序号超出范围,请重试");
-                        continue;
-                    }
-                } else {
-                    let up = trimmed.to_uppercase();
-                    match actions.iter().find(|a| a.key == up) {
-                        Some(a) => Some(a.key.as_str()),
-                        None => {
-                            println!("无效输入,请重试");
-                            continue;
-                        }
-                    }
-                }
+            let title = format!(
+                "举报ID: {} | 类型: {}\n请选择操作:",
+                record.record_id, type_name
+            );
+            let menu_options: Vec<(&str, &str)> = actions
+                .iter()
+                .map(|a| (a.key.as_str(), a.name.as_str()))
+                .collect();
+            let Some(choice_idx) = ui.menu(&title, &menu_options, default_idx) else {
+                return Err(ProcessorError::Aborted);
             };
-
-            let Some(choice) = choice else { continue };
-            match choice {
+            let key = &actions[choice_idx].key;
+            match key.as_str() {
                 "F" => {
                     if let Some(config) = &record.config
-                        && let Some(ref special_check) = config.special_check
+                        && let Some(special_check) = config.special_check
                         && special_check(&record.item)
                     {
-                        self.check_violation(record)?;
+                        self.check_violation(record, ui)?;
                         info!("违规检查完成, 请选择处理动作");
                         continue;
                     }
@@ -1611,12 +1596,16 @@ impl ProcessingPipeline {
         ProcessingPipeline { processors }
     }
 
-    pub(crate) fn execute(&self, context: &mut ProcessingContext) -> Result<(), ProcessorError> {
+    pub(crate) fn execute(
+        &self,
+        context: &mut ProcessingContext,
+        ui: &mut dyn ProcessorUi,
+    ) -> Result<(), ProcessorError> {
         for processor in &self.processors {
             if context.state.processed || context.state.skip_reason.is_some() {
                 break;
             }
-            processor.process(&context.record, &mut context.state)?;
+            processor.process(&context.record, &mut context.state, ui)?;
         }
         Ok(())
     }
