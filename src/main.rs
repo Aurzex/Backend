@@ -8,7 +8,7 @@ use serde_json::Value;
 use crate::api::auth::{AuthProcessor, LoginHandler, LoginResult};
 use crate::core::services::ReportProcessor;
 use crate::core::types::value_to_i64;
-use crate::core::ui::{ConsoleUi, ProcessorUi};
+use crate::core::ui::{ConsoleUi, ProcessorUi, ReportConsole};
 use crate::utils::data::PathConfig;
 
 struct ConsoleLogger;
@@ -86,7 +86,7 @@ fn main() {
     };
     println!("\n=== 启动举报处理控制台 ===");
     let processor = ReportProcessor::new();
-    if let Err(e) = processor.run_interactive(admin_id, &mut ui) {
+    if let Err(e) = ReportConsole.run(&mut ui, &processor, admin_id) {
         eprintln!("举报处理控制台异常: {}", e);
     }
 }

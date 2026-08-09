@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 
@@ -10,9 +10,8 @@ use serde_json::Value;
 
 use super::types::{
     CommentConfig, ProcessorError, ReportTypeRegistry, SourceConfig, action_name, html_to_text,
-    status_mapping, timestamp_to_string, value_to_i64, value_to_string,
+    status_mapping, timestamp_to_string, value_to_string,
 };
-use super::ui::ProcessorUi;
 use crate::api::forum::{
     ForumActionHandler, ForumDataFetcher, ForumReportReasonId, ItemType, PostReportReasonId,
 };
@@ -88,7 +87,7 @@ impl Default for CheckConfig {
 // 静态映射与注册表
 /// 来源类型映射
 static SOURCE_TYPE_MAP: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
-fn get_source_type_map() -> &'static HashMap<&'static str, &'static str> {
+pub(crate) fn get_source_type_map() -> &'static HashMap<&'static str, &'static str> {
     SOURCE_TYPE_MAP.get_or_init(|| {
         HashMap::from([
             ("shop_comment", "shop"),
@@ -387,11 +386,11 @@ impl CommentProcessor {
 
 // 批量组与管理器
 #[derive(Debug, Clone)]
-pub(crate) struct BatchGroup {
-    pub(crate) group_type: String,
-    pub(crate) group_key: String,
+pub struct BatchGroup {
+    pub group_type: String,
+    pub group_key: String,
     /// 组内完整举报记录,保证跨 chunk 的组在阈值达成时仍能处理早期记录
-    pub(crate) items: Vec<Value>,
+    pub items: Vec<Value>,
 }
 
 impl BatchGroup {
@@ -439,61 +438,6 @@ impl BatchActionManager {
     pub(crate) fn clear_processed_records(&mut self) {
         self.processed_records.clear();
     }
-}
-
-// 处理上下文(不可变记录 + 可变状态)
-#[derive(Debug, Clone)]
-pub(crate) struct ReportRecord {
-    pub(crate) record_id: String,
-    pub(crate) report_type: String,
-    pub(crate) item: Value,
-    pub(crate) admin_id: i32,
-    pub(crate) is_batch_mode: bool,
-    pub(crate) is_reprocess_mode: bool,
-    /// Arc 共享配置:每条记录一条管道,避免逐记录深克隆整个 SourceConfig
-    pub(crate) config: Option<Arc<SourceConfig>>,
-    pub(crate) user_id: Option<i64>,
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct ProcessingState {
-    pub(crate) processed: bool,
-    pub(crate) action: Option<String>,
-    pub(crate) skip_reason: Option<String>,
-    pub(crate) messages: Vec<String>,
-}
-
-pub(crate) struct ProcessingContext {
-    pub(crate) record: ReportRecord,
-    pub(crate) state: ProcessingState,
-}
-
-impl ProcessingContext {
-    pub(crate) fn new(record_id: String, report_type: String, item: Value, admin_id: i32) -> Self {
-        ProcessingContext {
-            record: ReportRecord {
-                record_id,
-                report_type,
-                item,
-                admin_id,
-                is_batch_mode: false,
-                is_reprocess_mode: false,
-                config: None,
-                user_id: None,
-            },
-            state: ProcessingState::default(),
-        }
-    }
-}
-
-// 处理器接口
-pub(crate) trait Processor: Send + Sync {
-    fn process(
-        &self,
-        record: &ReportRecord,
-        state: &mut ProcessingState,
-        ui: &mut dyn ProcessorUi,
-    ) -> Result<(), ProcessorError>;
 }
 
 // 动作注册表(静态函数表)
@@ -582,7 +526,7 @@ pub(crate) fn apply_action_by_method(
 }
 
 /// 依据动作键查找 resolution 并执行处理动作,动作键不在映射中时静默跳过
-fn apply_action_by_key(
+pub(crate) fn apply_action_by_key(
     config: &SourceConfig,
     report_id: i32,
     admin_id: i32,
@@ -596,7 +540,8 @@ fn apply_action_by_key(
 
 // 详情展示(字段表驱动)
 pub(crate) trait ReportDisplay: Send + Sync {
-    fn display(&self, item: &Value, config: &SourceConfig);
+    /// 生成详情展示行(由外部 ui 层输出)
+    fn display(&self, item: &Value, config: &SourceConfig) -> Vec<String>;
 }
 
 /// 单个展示字段:标签,数据字段与可选格式化函数
@@ -647,31 +592,50 @@ fn html_content(v: &Value) -> String {
     html_to_text(v.as_str().unwrap_or(""))
 }
 
-/// 渲染单个字段,无格式化函数时仅输出字符串字段
-fn print_field(item: &Value, label: &str, field: &str, format: Option<fn(&Value) -> String>) {
-    if let Some(val) = item.get(field) {
-        let text = match format {
-            Some(f) => f(val),
-            None => match val.as_str() {
-                Some(s) => s.to_string(),
-                None => return,
-            },
-        };
-        info!("{}: {}", label, text);
-    }
+/// 渲染单个字段,无格式化函数时仅输出字符串字段;缺失时返回 None
+fn print_field(
+    item: &Value,
+    label: &str,
+    field: &str,
+    format: Option<fn(&Value) -> String>,
+) -> Option<String> {
+    let val = item.get(field)?;
+    let text = match format {
+        Some(f) => f(val),
+        None => val.as_str()?.to_string(),
+    };
+    Some(format!("{}: {}", label, text))
 }
 
-/// 渲染详情:统一遍历字段表,避免各 Display 重复宏定义
-fn render_details(item: &Value, config: &SourceConfig, fields: &[DisplayField<'_>]) {
-    info!("=== {} 详情 ===", config.name);
+/// 渲染详情行:统一遍历字段表,避免各 Display 重复定义
+fn render_details(item: &Value, config: &SourceConfig, fields: &[DisplayField<'_>]) -> Vec<String> {
+    let mut lines = vec![format!("=== {} 详情 ===", config.name)];
     for f in fields {
-        print_field(item, f.label, f.field, f.format);
+        if let Some(line) = print_field(item, f.label, f.field, f.format) {
+            lines.push(line);
+        }
     }
+    lines
+}
+
+/// 未注册类型时的通用详情行
+pub(crate) fn generic_details(item: &Value, config: &SourceConfig) -> Vec<String> {
+    render_details(
+        item,
+        config,
+        &[
+            DisplayField::raw("内容", &config.content_field),
+            DisplayField::raw("举报原因", &config.reason_field),
+            DisplayField::raw("举报描述", &config.description_field),
+            DisplayField::raw("用户昵称", &config.user_nickname_field),
+            DisplayField::formatted("举报时间", &config.created_at_field, timestamp_str),
+        ],
+    )
 }
 
 struct WorkWorkDisplay;
 impl ReportDisplay for WorkWorkDisplay {
-    fn display(&self, item: &Value, config: &SourceConfig) {
+    fn display(&self, item: &Value, config: &SourceConfig) -> Vec<String> {
         render_details(
             item,
             config,
@@ -686,13 +650,13 @@ impl ReportDisplay for WorkWorkDisplay {
                 DisplayField::raw("举报线索", &config.description_field),
                 DisplayField::formatted("举报时间", &config.created_at_field, timestamp_str),
             ],
-        );
+        )
     }
 }
 
 struct ShopCommentDisplay;
 impl ReportDisplay for ShopCommentDisplay {
-    fn display(&self, item: &Value, config: &SourceConfig) {
+    fn display(&self, item: &Value, config: &SourceConfig) -> Vec<String> {
         render_details(
             item,
             config,
@@ -707,56 +671,75 @@ impl ReportDisplay for ShopCommentDisplay {
                 DisplayField::raw("举报原因", &config.reason_field),
                 DisplayField::formatted("举报时间", &config.created_at_field, timestamp_str),
             ],
-        );
+        )
     }
 }
 
-/// 拉取并展示帖子正文,论坛帖子举报需要额外请求
-fn print_forum_post_content(item: &Value, config: &SourceConfig) {
-    if let Ok(post_id) = item
+/// 拉取帖子正文,论坛帖子举报需要额外请求;返回内容行
+fn forum_post_content_line(item: &Value, config: &SourceConfig) -> Option<String> {
+    let post_id = item
         .get(&config.source_id_field)
         .map(value_to_string)
         .unwrap_or_default()
         .parse::<i32>()
-    {
-        match ForumDataFetcher::new().fetch_single_post_details(post_id) {
-            Ok(details) => {
-                if let Some(content) = details.get("content").and_then(|v| v.as_str()) {
-                    info!("内容: {}", truncate_chars(&html_to_text(content), 200));
-                }
-            }
-            Err(e) => warn!("获取帖子详情失败: {}", e),
+        .ok()?;
+    match ForumDataFetcher::new().fetch_single_post_details(post_id) {
+        Ok(details) => details
+            .get("content")
+            .and_then(|v| v.as_str())
+            .map(|content| format!("内容: {}", truncate_chars(&html_to_text(content), 200))),
+        Err(e) => {
+            warn!("获取帖子详情失败: {}", e);
+            None
         }
     }
 }
 
 struct ForumPostDisplay;
 impl ReportDisplay for ForumPostDisplay {
-    fn display(&self, item: &Value, config: &SourceConfig) {
-        info!("=== {} 详情 ===", config.name);
-        print_field(item, "帖子作者", &config.user_nickname_field, None);
-        print_field(item, "作者链接", &config.user_id_field, Some(user_link));
-        print_forum_post_content(item, config);
-        print_field(
+    fn display(&self, item: &Value, config: &SourceConfig) -> Vec<String> {
+        let mut lines = vec![format!("=== {} 详情 ===", config.name)];
+        if let Some(line) = print_field(item, "帖子作者", &config.user_nickname_field, None) {
+            lines.push(line);
+        }
+        if let Some(line) = print_field(item, "作者链接", &config.user_id_field, Some(user_link))
+        {
+            lines.push(line);
+        }
+        if let Some(line) = forum_post_content_line(item, config) {
+            lines.push(line);
+        }
+        if let Some(line) = print_field(
             item,
             "标题",
             config.title_field.as_deref().unwrap_or(""),
             None,
-        );
-        print_field(item, "举报原因", &config.reason_field, None);
-        print_field(item, "举报线索", &config.description_field, None);
-        print_field(
+        ) {
+            lines.push(line);
+        }
+        for (label, field) in [
+            ("举报原因", config.reason_field.as_str()),
+            ("举报线索", config.description_field.as_str()),
+        ] {
+            if let Some(line) = print_field(item, label, field, None) {
+                lines.push(line);
+            }
+        }
+        if let Some(line) = print_field(
             item,
             "举报时间",
             &config.created_at_field,
             Some(timestamp_str),
-        );
+        ) {
+            lines.push(line);
+        }
+        lines
     }
 }
 
 struct ForumDiscussionDisplay;
 impl ReportDisplay for ForumDiscussionDisplay {
-    fn display(&self, item: &Value, config: &SourceConfig) {
+    fn display(&self, item: &Value, config: &SourceConfig) -> Vec<String> {
         render_details(
             item,
             config,
@@ -772,103 +755,22 @@ impl ReportDisplay for ForumDiscussionDisplay {
                 DisplayField::raw("举报原因", &config.reason_field),
                 DisplayField::formatted("举报时间", &config.created_at_field, timestamp_str),
             ],
-        );
+        )
     }
 }
 
 // 详情展示注册表
-static DISPLAY_REGISTRY: OnceLock<HashMap<&'static str, Box<dyn ReportDisplay>>> = OnceLock::new();
-fn get_display_registry() -> &'static HashMap<&'static str, Box<dyn ReportDisplay>> {
-    DISPLAY_REGISTRY.get_or_init(|| {
+static DISPLAY_REGISTRY: LazyLock<HashMap<&'static str, Box<dyn ReportDisplay>>> =
+    LazyLock::new(|| {
         let mut m: HashMap<&'static str, Box<dyn ReportDisplay>> = HashMap::new();
         m.insert("work_work", Box::new(WorkWorkDisplay));
         m.insert("shop_comment", Box::new(ShopCommentDisplay));
         m.insert("forum_post", Box::new(ForumPostDisplay));
         m.insert("forum_discussion", Box::new(ForumDiscussionDisplay));
         m
-    })
-}
-
-// 详情显示处理器
-pub(crate) struct DetailDisplayProcessor;
-
-impl Processor for DetailDisplayProcessor {
-    fn process(
-        &self,
-        record: &ReportRecord,
-        _state: &mut ProcessingState,
-        _ui: &mut dyn ProcessorUi,
-    ) -> Result<(), ProcessorError> {
-        if let Some(config) = &record.config {
-            info!("举报ID: {}", record.record_id);
-            if let Some(display) = get_display_registry().get(record.report_type.as_str()) {
-                display.display(&record.item, config);
-            } else {
-                // 回退通用展示
-                render_details(
-                    &record.item,
-                    config,
-                    &[
-                        DisplayField::raw("内容", &config.content_field),
-                        DisplayField::raw("举报原因", &config.reason_field),
-                        DisplayField::raw("举报描述", &config.description_field),
-                        DisplayField::raw("用户昵称", &config.user_nickname_field),
-                        DisplayField::formatted(
-                            "举报时间",
-                            &config.created_at_field,
-                            timestamp_str,
-                        ),
-                    ],
-                );
-            }
-        }
-        Ok(())
-    }
-}
-
-// 官方账号检查处理器
-pub(crate) struct OfficialCheckProcessor {
-    config: CheckConfig,
-}
-
-impl OfficialCheckProcessor {
-    pub(crate) fn new(config: CheckConfig) -> Self {
-        OfficialCheckProcessor { config }
-    }
-}
-
-impl Processor for OfficialCheckProcessor {
-    fn process(
-        &self,
-        record: &ReportRecord,
-        state: &mut ProcessingState,
-        _ui: &mut dyn ProcessorUi,
-    ) -> Result<(), ProcessorError> {
-        let config = match &record.config {
-            Some(c) => c,
-            None => return Ok(()),
-        };
-
-        let user_id = record
-            .item
-            .get(&config.user_id_field)
-            .and_then(value_to_i64);
-
-        if let Some(uid) = user_id
-            && self.config.official_ids.contains(&uid)
-        {
-            state.messages.push("官方内容,自动通过".into());
-            state.action = Some("P".into());
-            state.processed = true;
-
-            let report_id = config.get_report_id(&record.item)?;
-            apply_action_by_key(config, report_id, record.admin_id, "P")?;
-            state.messages.push("已自动通过官方内容".into());
-            info!("自动通过官方举报ID: {}", record.record_id);
-        }
-
-        Ok(())
-    }
+    });
+pub(crate) fn get_display_registry() -> &'static HashMap<&'static str, Box<dyn ReportDisplay>> {
+    &DISPLAY_REGISTRY
 }
 
 // 违规信息枚举
@@ -1046,14 +948,6 @@ impl ViolationChecker {
         ads
     }
 
-    /// 交互询问评论获取数量,无效输入回退默认值
-    fn prompt_comment_limit(&self, ui: &mut dyn ProcessorUi) -> usize {
-        let limit_str = ui.input("输入要获取的评论数: ");
-        limit_str
-            .parse()
-            .unwrap_or(self.config.comment_fetch_default_limit)
-    }
-
     /// 流式获取详细评论,单条失败仅记录日志
     fn fetch_detailed_comments(
         &self,
@@ -1074,16 +968,16 @@ impl ViolationChecker {
         Ok(comments)
     }
 
-    pub(crate) fn check_violation(
+    /// 检查违规,返回违规标识符列表(纯函数,不交互)
+    pub(crate) fn check_violations(
         &self,
         source_id: i64,
         source_type: &str,
         board_name: &str,
         user_id: Option<i64>,
         title: &str,
-        _config: &SourceConfig,
-        ui: &mut dyn ProcessorUi,
-    ) -> Result<(), ProcessorError> {
+        comment_limit: usize,
+    ) -> Result<Vec<String>, ProcessorError> {
         info!(
             "检查违规: source_id={}, type={}, board={}, user={:?}",
             source_id, source_type, board_name, user_id
@@ -1098,9 +992,8 @@ impl ViolationChecker {
             .unwrap_or(0);
         info!("该内容共有 {} 条评论", total);
 
-        let limit = self.prompt_comment_limit(ui);
         let detailed_comments =
-            self.fetch_detailed_comments(comment_source, source_id as i32, limit)?;
+            self.fetch_detailed_comments(comment_source, source_id as i32, comment_limit)?;
 
         let pending = self.collect_pending_violations(&detailed_comments, source_type, source_id);
         let mut violations = Self::classify_violations(pending, self.config.spam_threshold);
@@ -1114,11 +1007,10 @@ impl ViolationChecker {
         let violations: HashSet<String> = violations.into_iter().collect();
         if violations.is_empty() {
             info!("未检测到违规内容");
-            return Ok(());
+        } else {
+            info!("检测到 {} 条违规内容", violations.len());
         }
-
-        info!("检测到 {} 条违规内容", violations.len());
-        self.process_auto_report(violations, ui)
+        Ok(violations.into_iter().collect())
     }
 
     fn check_spam_posts(&self, user_id: i64, title: &str) -> Result<Vec<String>, ProcessorError> {
@@ -1161,36 +1053,30 @@ impl ViolationChecker {
         Ok(Vec::new())
     }
 
-    fn process_auto_report(
-        &self,
-        violations: HashSet<String>,
-        ui: &mut dyn ProcessorUi,
-    ) -> Result<(), ProcessorError> {
+    /// 用学生账号自动举报违规内容,返回成功数(纯函数,不交互;账号缺失时返回错误)
+    pub(crate) fn auto_report(&self, violations: &[String]) -> Result<usize, ProcessorError> {
         let mut multi_account = MultiAccount::new();
         let password_path = PathConfig::global().password_file_path();
-        if password_path.exists() {
-            multi_account.load_from_file(&password_path)?;
-        } else {
-            info!("未找到学生账号文件,跳过自动举报");
-            return Ok(());
+        if !password_path.exists() {
+            return Err(ProcessorError::Processing(
+                "未找到学生账号文件,无法自动举报".into(),
+            ));
         }
+        multi_account.load_from_file(&password_path)?;
         if multi_account.accounts.is_empty() {
-            info!("未加载学生账号, 无法进行自动举报");
-            return Ok(());
-        }
-        let choice = ui.choose("是否自动举报违规评论? (Y/N)", &["Y", "N"]);
-        if choice != "Y" {
-            info!("自动举报操作已取消");
-            return Ok(());
+            return Err(ProcessorError::Processing(
+                "未加载学生账号,无法自动举报".into(),
+            ));
         }
 
+        let violations: HashSet<String> = violations.iter().cloned().collect();
         let mut accounts = multi_account.accounts.clone();
         let success = self.report_violations(&mut accounts, &violations)?;
         if let Err(e) = KittyFactory::global_client().switch_identity(Catsona::Judge) {
             warn!("切换回管理员身份失败: {}", e);
         }
         info!("自动举报完成,成功 {}/{}", success, violations.len());
-        Ok(())
+        Ok(success)
     }
 
     /// 轮询选择一个未达举报上限的账号索引,无可用账号时返回 None
@@ -1408,222 +1294,6 @@ impl ViolationChecker {
             }
         }
         Ok(())
-    }
-}
-
-// 动作选择处理器
-pub(crate) struct ActionSelectionProcessor {
-    pub(crate) registry: Arc<ReportTypeRegistry>,
-    pub(crate) batch_manager: Arc<Mutex<BatchActionManager>>,
-    violation_checker: ViolationChecker,
-}
-
-impl ActionSelectionProcessor {
-    pub(crate) fn new(
-        registry: Arc<ReportTypeRegistry>,
-        batch_manager: Arc<Mutex<BatchActionManager>>,
-        check_config: CheckConfig,
-    ) -> Self {
-        ActionSelectionProcessor {
-            registry,
-            batch_manager,
-            violation_checker: ViolationChecker::new(check_config),
-        }
-    }
-
-    fn check_violation(
-        &self,
-        record: &ReportRecord,
-        ui: &mut dyn ProcessorUi,
-    ) -> Result<(), ProcessorError> {
-        info!("=== 开始检查违规 ===");
-        let config = match &record.config {
-            Some(c) => c.clone(),
-            None => return Ok(()),
-        };
-        let source_id = record
-            .item
-            .get(&config.source_id_field)
-            .and_then(value_to_i64)
-            .unwrap_or(0);
-        let board_name = config
-            .board_name_field
-            .as_ref()
-            .and_then(|field| record.item.get(field))
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let source_type = get_source_type_map()
-            .get(record.report_type.as_str())
-            .copied()
-            .unwrap_or("work");
-        let user_id = record
-            .item
-            .get(&config.user_id_field)
-            .and_then(value_to_i64);
-        let title = config
-            .title_field
-            .as_ref()
-            .and_then(|field| record.item.get(field))
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        self.violation_checker.check_violation(
-            source_id,
-            source_type,
-            board_name,
-            user_id,
-            title,
-            &config,
-            ui,
-        )?;
-        info!("=== 检查结束 ===");
-        Ok(())
-    }
-}
-
-impl Processor for ActionSelectionProcessor {
-    fn process(
-        &self,
-        record: &ReportRecord,
-        state: &mut ProcessingState,
-        ui: &mut dyn ProcessorUi,
-    ) -> Result<(), ProcessorError> {
-        if record.is_batch_mode {
-            let config = record
-                .config
-                .as_ref()
-                .ok_or_else(|| ProcessorError::Processing("批量模式缺少配置".into()))?;
-            let group_type = &record.report_type;
-            let group_key = &record.record_id;
-            let batch_action = self
-                .batch_manager
-                .lock()
-                .expect("批量管理器 Mutex 被污染")
-                .get_batch_action(group_type, group_key);
-
-            if let Some(action) = batch_action {
-                state.action = Some(action.clone());
-                let report_id = config.get_report_id(&record.item)?;
-                apply_action_by_key(config, report_id, record.admin_id, &action)?;
-                if let Some(resolution) = status_mapping().get(action.as_str()) {
-                    info!("批量应用操作: {} -> {}", action, resolution);
-                }
-                state.processed = true;
-            } else {
-                state.skip_reason = Some("批量模式未找到预设动作".into());
-                state.processed = true;
-            }
-            return Ok(());
-        }
-
-        // 以缓存的动作选项渲染编号菜单,支持数字/字母/回车默认/中止
-        let options = self.registry.action_options(&record.report_type);
-        let actions = &options.actions;
-        if actions.is_empty() {
-            state.skip_reason = Some("该举报类型无可用操作".into());
-            state.processed = true;
-            return Ok(());
-        }
-        // 通过(P)作为回车默认,便于快速放行正常内容
-        let default_idx = actions.iter().position(|a| a.key == "P");
-        let type_name = record
-            .config
-            .as_ref()
-            .map(|c| c.name.as_str())
-            .unwrap_or(&record.report_type);
-
-        loop {
-            let title = format!(
-                "举报ID: {} | 类型: {}\n请选择操作:",
-                record.record_id, type_name
-            );
-            let menu_options: Vec<(&str, &str)> = actions
-                .iter()
-                .map(|a| (a.key.as_str(), a.name.as_str()))
-                .collect();
-            let Some(choice_idx) = ui.menu(&title, &menu_options, default_idx) else {
-                return Err(ProcessorError::Aborted);
-            };
-            let key = &actions[choice_idx].key;
-            match key.as_str() {
-                "F" => {
-                    if let Some(config) = &record.config
-                        && let Some(special_check) = config.special_check
-                        && special_check(&record.item)
-                    {
-                        self.check_violation(record, ui)?;
-                        info!("违规检查完成, 请选择处理动作");
-                        continue;
-                    }
-                    info!("该类型不支持检查违规操作");
-                    continue;
-                }
-                "J" => {
-                    state.skip_reason = Some("用户选择跳过".into());
-                    state.processed = true;
-                    info!("已跳过该举报");
-                    break;
-                }
-                key => {
-                    state.action = Some(key.to_string());
-                    if let Some(config) = &record.config {
-                        let report_id = config.get_report_id(&record.item)?;
-                        apply_action_by_key(config, report_id, record.admin_id, key)?;
-                        if let Some(resolution) = status_mapping().get(key) {
-                            info!(
-                                "已应用操作: {} ({}) -> {}",
-                                key,
-                                action_name(key),
-                                resolution
-                            );
-                        }
-                    }
-                    state.processed = true;
-                    break;
-                }
-            }
-        }
-        Ok(())
-    }
-}
-
-// 处理管道
-pub(crate) struct ProcessingPipeline {
-    processors: Vec<Box<dyn Processor>>,
-}
-
-impl ProcessingPipeline {
-    pub(crate) fn new(processors: Vec<Box<dyn Processor>>) -> Self {
-        ProcessingPipeline { processors }
-    }
-
-    pub(crate) fn execute(
-        &self,
-        context: &mut ProcessingContext,
-        ui: &mut dyn ProcessorUi,
-    ) -> Result<(), ProcessorError> {
-        for processor in &self.processors {
-            if context.state.processed || context.state.skip_reason.is_some() {
-                break;
-            }
-            processor.process(&context.record, &mut context.state, ui)?;
-        }
-        Ok(())
-    }
-
-    pub(crate) fn create_default(
-        registry: Arc<ReportTypeRegistry>,
-        batch_manager: Arc<Mutex<BatchActionManager>>,
-        check_config: CheckConfig,
-    ) -> Self {
-        ProcessingPipeline::new(vec![
-            Box::new(OfficialCheckProcessor::new(check_config.clone())),
-            Box::new(DetailDisplayProcessor),
-            Box::new(ActionSelectionProcessor::new(
-                registry,
-                batch_manager,
-                check_config,
-            )),
-        ])
     }
 }
 
