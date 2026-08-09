@@ -164,12 +164,20 @@ impl ReportProcessor {
             println!("0. 退出");
             let input = prompt_input("> ");
             match input.trim() {
-                "1" => {
-                    let processed = self.process_all_reports(admin_id)?;
-                    println!("本次共处理 {} 条举报", processed);
+                "1" => match self.process_all_reports(admin_id) {
+                    Ok(processed) => println!("本次共处理 {} 条举报", processed),
+                    Err(e) => eprintln!("处理失败: {}", e),
+                },
+                "2" => {
+                    if let Err(e) = self.view_processed_reports() {
+                        eprintln!("查看已处理记录失败: {}", e);
+                    }
                 }
-                "2" => self.view_processed_reports()?,
-                "3" => self.show_backlog()?,
+                "3" => {
+                    if let Err(e) = self.show_backlog() {
+                        eprintln!("获取分布失败: {}", e);
+                    }
+                }
                 "0" | "q" | "Q" | "" => {
                     println!("退出举报处理控制台");
                     return Ok(());
@@ -325,7 +333,8 @@ impl ReportProcessor {
             .map(value_to_string)
             .unwrap_or_default();
         if !item_id.is_empty() {
-            Some(("item_id".into(), item_id))
+            // 分组键带上类型:不同举报类型(评论/作品/帖子)的 id 各自独立编号,可能撞号
+            Some(("item_id".into(), format!("{}:{}", rt, item_id)))
         } else {
             let content_key = format!(
                 "{}:{}:{}",
@@ -698,10 +707,11 @@ impl ReportProcessor {
         if trimmed == "0" {
             return Some(None);
         }
-        if let Ok(n) = trimmed.parse::<usize>() {
-            if n >= 1 && n <= type_options.len() {
-                return Some(Some(type_options[n - 1].0.clone()));
-            }
+        if let Ok(n) = trimmed.parse::<usize>()
+            && n >= 1
+            && n <= type_options.len()
+        {
+            return Some(Some(type_options[n - 1].0.clone()));
         }
         println!("无效输入");
         None

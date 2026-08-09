@@ -627,14 +627,12 @@ impl ReportFetcher {
 
                 let source = active.as_mut().unwrap();
                 let chunk_size = source.config.chunk_size;
-                let mut source_exhausted = false;
 
                 for result in &mut source.generator {
                     let mut item = match result {
                         Ok(item) => item,
                         Err(e) => {
                             eprintln!("Error fetching report data: {}", e);
-                            source_exhausted = true;
                             break;
                         }
                     };
