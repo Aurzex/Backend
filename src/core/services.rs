@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use log::{error as log_error, info as log_info};
@@ -147,17 +149,20 @@ pub struct ReportItemView {
     pub default_action: Option<String>,
 }
 
-/// 单次"处理待办"会话:持有分块流与跨 chunk 分组状态
+/// 单次"处理待办"会话:后台 worker 线程持续预取分块流,与用户决策并行;
+/// 同时持有跨 chunk 分组状态
 pub struct PendingSession<'a> {
     processor: &'a ReportProcessor,
-    chunks: Box<dyn Iterator<Item = Vec<Value>> + 'a>,
+    rx: mpsc::Receiver<Vec<Value>>,
     pending_groups: HashMap<GroupKey, Vec<Value>>,
+    /// 持有句柄;会话结束时 rx 被丢弃,worker 在 send 失败后自行退出
+    _worker: thread::JoinHandle<()>,
 }
 
 impl PendingSession<'_> {
     /// 拉取下一块,返回(已达标批量组, 非组内项);流结束时返回 None
     pub fn next_chunk(&mut self) -> Option<(Vec<BatchGroup>, Vec<Value>)> {
-        let chunk = self.chunks.next()?;
+        let chunk = self.rx.recv().ok()?;
         Some(self.processor.split_chunk(chunk, &mut self.pending_groups))
     }
 
@@ -177,6 +182,8 @@ pub struct ReportProcessor {
     violation_checker: ViolationChecker,
     config: CheckConfig,
     totals_cache: Mutex<Option<TotalsCache>>,
+    /// 串行化"身份切换(自动举报)"与"预取线程的在途请求",防止请求带错身份
+    network_lock: Arc<Mutex<()>>,
 }
 
 impl Default for ReportProcessor {
@@ -195,13 +202,15 @@ impl ReportProcessor {
     pub fn new_with_config(config: CheckConfig) -> Self {
         let fetcher = ReportFetcher::new();
         let batch_manager = Arc::new(Mutex::new(BatchActionManager::new()));
-        let violation_checker = ViolationChecker::new(config.clone());
+        let network_lock = Arc::new(Mutex::new(()));
+        let violation_checker = ViolationChecker::new(config.clone(), Arc::clone(&network_lock));
         ReportProcessor {
             fetcher,
             batch_manager,
             violation_checker,
             config,
             totals_cache: Mutex::new(None),
+            network_lock,
         }
     }
 
@@ -268,12 +277,32 @@ impl ReportProcessor {
 
     // ---- 待处理流 ----
 
-    /// 创建"处理待办"会话(分块流 + 跨 chunk 分组状态)
+    /// 创建"处理待办"会话:worker 线程持有流并预取(缓冲深度 1),
+    /// 用户阅读/决策期间网络持续忙碌;跨 chunk 分组状态在主线程维护
     pub fn pending_session(&self) -> PendingSession<'_> {
+        let (tx, rx) = mpsc::sync_channel(1);
+        let lock = Arc::clone(&self.network_lock);
+        let mut chunks = self.fetcher.fetch_reports_chunked(ReportStatus::ToBeDone);
+        let worker = thread::spawn(move || {
+            loop {
+                // 每次拉取持网络锁,避免与自动举报的身份切换交错
+                let chunk = {
+                    let _guard = lock
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    chunks.next()
+                };
+                let Some(chunk) = chunk else { break };
+                if tx.send(chunk).is_err() {
+                    break; // 会话已结束(rx 被丢弃)
+                }
+            }
+        });
         PendingSession {
             processor: self,
-            chunks: Box::new(self.fetcher.fetch_reports_chunked(ReportStatus::ToBeDone)),
+            rx,
             pending_groups: HashMap::new(),
+            _worker: worker,
         }
     }
 
@@ -375,7 +404,13 @@ impl ReportProcessor {
             )));
         }
         let report_id = config.get_report_id(item)?;
-        apply_action_by_key(config, report_id, admin_id, action)
+        apply_action_by_key(config, report_id, admin_id, action)?;
+        // 标记已决策:本次会话内不再重列(即使 API 状态尚未刷新)
+        self.batch_manager
+            .lock()
+            .unwrap()
+            .mark_record_processed(&report_id.to_string());
+        Ok(())
     }
 
     /// 检查违规,返回违规标识符列表(纯函数,不交互)
@@ -417,6 +452,7 @@ impl ReportProcessor {
         self.violation_checker.check_violations(
             source_id,
             source_type,
+            report_type,
             board_name,
             user_id,
             title,
@@ -450,7 +486,13 @@ impl ReportProcessor {
                     let result =
                         registry.apply(&cfg.handle_method, report_id, admin_id, Resolution::Pass);
                     match result {
-                        Ok(true) => count += 1,
+                        Ok(true) => {
+                            count += 1;
+                            self.batch_manager
+                                .lock()
+                                .unwrap()
+                                .mark_record_processed(&report_id.to_string());
+                        }
                         Ok(false) => log_error!("一键通过返回 false (id={})", report_id),
                         Err(e) => log_error!("一键通过失败 (id={}): {}", report_id, e),
                     }
@@ -482,6 +524,50 @@ impl ReportProcessor {
             &group.group_key,
             action,
         );
+    }
+
+    /// 按分组键查询本次会话已保存的动作(供 UI 展示同内容历史处理)
+    pub fn saved_action_for_key(&self, group_type: &str, group_key: &str) -> Option<String> {
+        self.batch_manager
+            .lock()
+            .unwrap()
+            .get_batch_action(group_type, group_key)
+    }
+
+    /// 标记单条记录为"已决策"(如跳过),本次会话内不再重列
+    pub fn mark_decided(&self, item: &Value) {
+        let Some(report_type) = Self::infer_report_type(item) else {
+            return;
+        };
+        let Some(config) = self.fetcher.registry.get_config(report_type) else {
+            return;
+        };
+        if let Ok(report_id) = config.get_report_id(item) {
+            self.batch_manager
+                .lock()
+                .unwrap()
+                .mark_record_processed(&report_id.to_string());
+        }
+    }
+
+    /// 该条已处理记录是否由指定管理员处理(供 UI 过滤"仅我处理")
+    pub fn item_handled_by(&self, item: &Value, admin_id: i32) -> bool {
+        let Some(report_type) = Self::infer_report_type(item) else {
+            return false;
+        };
+        let Some(config) = self.fetcher.registry.get_config(report_type) else {
+            return false;
+        };
+        item.get(&config.admin_id_field).and_then(value_to_i64) == Some(i64::from(admin_id))
+    }
+
+    /// 已处理记录的原始状态值(如 "PASS"),供 UI 按状态过滤
+    pub fn item_status_str(&self, item: &Value) -> Option<String> {
+        let report_type = Self::infer_report_type(item)?;
+        let config = self.fetcher.registry.get_config(report_type)?;
+        item.get(&config.status_field)
+            .and_then(|v| v.as_str())
+            .map(String::from)
     }
 
     /// 将动作应用到批量组全部记录,返回成功数(逐条错误仅记录日志)
@@ -527,8 +613,8 @@ impl ReportProcessor {
     // ---- 已处理记录 ----
 
     /// 已处理记录的分块流(惰性)
-    pub fn done_chunks(&self) -> Box<dyn Iterator<Item = Vec<Value>> + '_> {
-        Box::new(self.fetcher.fetch_reports_chunked(ReportStatus::Done))
+    pub fn done_chunks(&self) -> Box<dyn Iterator<Item = Vec<Value>> + Send> {
+        self.fetcher.fetch_reports_chunked(ReportStatus::Done)
     }
 
     /// 生成已处理记录列表行
@@ -643,7 +729,20 @@ impl ReportProcessor {
 
         // chunk 为自有所有权:条目直接移动进组,避免逐条深拷贝 JSON
         for item in chunk {
-            let Some(key) = self.extract_group_key(&item) else {
+            let Some((record_id, group_key)) = self.item_context(&item) else {
+                non_group.push(item);
+                continue;
+            };
+            // 本次会话已决策过的记录(如已跳过/已处理)不再重列
+            if self
+                .batch_manager
+                .lock()
+                .unwrap()
+                .is_record_processed(&record_id)
+            {
+                continue;
+            }
+            let Some(key) = group_key else {
                 non_group.push(item);
                 continue;
             };
@@ -662,18 +761,22 @@ impl ReportProcessor {
         (ready, non_group)
     }
 
-    fn extract_group_key(&self, item: &Value) -> Option<GroupKey> {
+    /// 提取记录的上下文:(report_id 字符串, 分组键);无法识别类型时返回 None
+    fn item_context(&self, item: &Value) -> Option<(String, Option<GroupKey>)> {
         let rt = Self::infer_report_type(item)?;
         let config = self.fetcher.registry.get_config(rt)?;
-        let record_id = item.get(&config.report_id_field).map(value_to_string)?;
+        let record_id = item
+            .get(&config.report_id_field)
+            .map(value_to_string)
+            .unwrap_or_default();
         if record_id.is_empty() {
-            return None;
+            return Some((record_id, None));
         }
         let item_id = item
             .get(&config.item_id_field)
             .map(value_to_string)
             .unwrap_or_default();
-        if item_id.is_empty() {
+        let key = if item_id.is_empty() {
             let content_key = format!(
                 "{}:{}:{}",
                 item.get(&config.content_field)
@@ -684,11 +787,17 @@ impl ReportProcessor {
                     .map(value_to_string)
                     .unwrap_or_default()
             );
-            Some(("content".into(), content_key))
+            ("content".into(), content_key)
         } else {
             // 分组键带上类型:不同举报类型(评论/作品/帖子)的 id 各自独立编号,可能撞号
-            Some(("item_id".into(), format!("{}:{}", rt, item_id)))
-        }
+            ("item_id".into(), format!("{}:{}", rt, item_id))
+        };
+        Some((record_id, Some(key)))
+    }
+
+    /// 记录的批量分组键(供 UI 展示同源聚合提醒)
+    pub fn item_group_key(&self, item: &Value) -> Option<(String, String)> {
+        self.item_context(item).and_then(|(_, key)| key)
     }
 
     /// 从举报记录中提取 report_id 字符串

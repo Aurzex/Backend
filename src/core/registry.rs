@@ -142,7 +142,7 @@ fn actions(keys: &[&str]) -> Vec<ActionConfig> {
 }
 
 pub(crate) type FetchGenerator =
-    fn(ReportStatus) -> Box<dyn Iterator<Item = Result<Value, ProcessorError>>>;
+    fn(ReportStatus) -> Box<dyn Iterator<Item = Result<Value, ProcessorError>> + Send>;
 pub(crate) type FetchTotal = fn(ReportStatus) -> Result<Value, ProcessorError>;
 
 #[derive(Clone, Debug)]
@@ -335,7 +335,7 @@ fn total_from(mut paginated: acquire::PaginatedIter) -> Result<Value, ProcessorE
 /// 注册辅助:包装分页迭代器为"生成器"闭包
 fn gen_from(
     paginated: acquire::PaginatedIter,
-) -> Box<dyn Iterator<Item = Result<Value, ProcessorError>>> {
+) -> Box<dyn Iterator<Item = Result<Value, ProcessorError>> + Send> {
     Box::new(paginated.map(|r| r.map_err(ProcessorError::from)))
 }
 
@@ -352,7 +352,7 @@ macro_rules! set_config_fields {
 struct ActiveSource {
     report_type: String,
     config: Arc<SourceConfig>,
-    generator: Box<dyn Iterator<Item = Result<Value, ProcessorError>>>,
+    generator: Box<dyn Iterator<Item = Result<Value, ProcessorError>> + Send>,
 }
 
 pub(crate) struct ReportFetcher {
@@ -503,6 +503,8 @@ impl ReportFetcher {
             cfg.title_field = Some("post_title".into());
             cfg.board_name_field = Some("board_name".into());
             cfg.board_id_field = Some("board_id".into());
+            // 支持检查违规:帖子评论广告/刷屏 + 作者刷帖
+            cfg.special_check = Some(|_| true);
             registry.register("forum_post", cfg);
         }
 
@@ -545,6 +547,8 @@ impl ReportFetcher {
             cfg.title_field = Some("post_title".into());
             cfg.board_name_field = Some("board_name".into());
             cfg.board_id_field = Some("board_id".into());
+            // 支持检查违规:讨论评论/回复的广告关键词与刷屏
+            cfg.special_check = Some(|_| true);
             registry.register("forum_discussion", cfg);
         }
 
@@ -553,16 +557,25 @@ impl ReportFetcher {
         }
     }
 
-    pub(crate) fn fetch_chunked(&self, status: ReportStatus) -> impl Iterator<Item = Vec<Value>> {
-        let report_types = self.registry.get_all_types();
-        let total_types = report_types.len();
+    pub(crate) fn fetch_chunked(
+        &self,
+        status: ReportStatus,
+    ) -> Box<dyn Iterator<Item = Vec<Value>> + Send> {
+        // 预取全部类型的配置 Arc,迭代器不再借用 self,可跨线程移动(供处理会话后台预取)
+        let sources: Vec<(String, Arc<SourceConfig>)> = self
+            .registry
+            .get_all_types()
+            .into_iter()
+            .filter_map(|rt| self.registry.get_config_arc(&rt).map(|cfg| (rt, cfg)))
+            .collect();
+        let total_types = sources.len();
         let mut type_index = 0;
         let mut pending_items: Vec<Value> = Vec::new();
         // 当前类型的生成器在闭包调用间保持,避免每个 chunk 都从头重建
         // (原实现每次重建会重复产出已有数据,类型数据超过 chunk_size 时陷入死循环)
         let mut active: Option<ActiveSource> = None;
 
-        std::iter::from_fn(move || {
+        Box::new(std::iter::from_fn(move || {
             let mut chunk = Vec::new();
             std::mem::swap(&mut chunk, &mut pending_items);
 
@@ -572,11 +585,8 @@ impl ReportFetcher {
                     if type_index >= total_types {
                         break;
                     }
-                    let report_type = report_types[type_index].clone();
-                    let Some(config) = self.registry.get_config_arc(&report_type) else {
-                        type_index += 1;
-                        continue;
-                    };
+                    let (report_type, config) = sources[type_index].clone();
+                    type_index += 1;
                     active = Some(ActiveSource {
                         report_type,
                         config: config.clone(),
@@ -622,17 +632,16 @@ impl ReportFetcher {
 
                 // 当前类型耗尽或出错,推进到下一类型
                 active = None;
-                type_index += 1;
             }
 
             if chunk.is_empty() { None } else { Some(chunk) }
-        })
+        }))
     }
 
     pub(crate) fn fetch_reports_chunked(
         &self,
         status: ReportStatus,
-    ) -> impl Iterator<Item = Vec<Value>> {
+    ) -> Box<dyn Iterator<Item = Vec<Value>> + Send> {
         self.fetch_chunked(status)
     }
 

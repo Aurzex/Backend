@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, LazyLock, Mutex};
 
 use log::{error, info, warn};
 use serde_json::Value;
@@ -147,12 +147,20 @@ pub(crate) struct BatchActionManager {
     processed_records: HashSet<String>,
 }
 
+/// 批量动作记忆与已决策记录的上限;超过后整体清空
+/// (两者都只是会话内的优化缓存,清空无副作用,仅失去记忆)
+const MAX_BATCH_ACTIONS: usize = 512;
+const MAX_PROCESSED_RECORDS: usize = 4096;
+
 impl BatchActionManager {
     pub(crate) fn new() -> Self {
         BatchActionManager::default()
     }
 
     pub(crate) fn save_batch_action(&mut self, group_type: &str, group_key: &str, action: &str) {
+        if self.batch_actions.len() >= MAX_BATCH_ACTIONS {
+            self.batch_actions.clear();
+        }
         self.batch_actions.insert(
             (group_type.to_string(), group_key.to_string()),
             action.to_string(),
@@ -166,6 +174,9 @@ impl BatchActionManager {
     }
 
     pub(crate) fn mark_record_processed(&mut self, record_id: &str) {
+        if self.processed_records.len() >= MAX_PROCESSED_RECORDS {
+            self.processed_records.clear();
+        }
         self.processed_records.insert(record_id.to_string());
     }
 
@@ -535,10 +546,12 @@ enum ViolationKind {
 pub(crate) struct ViolationChecker {
     config: CheckConfig,
     ad_keywords_cache: Arc<HashSet<String>>,
+    /// 与处理会话的预取线程共享:自动举报会切换全局身份,必须与在途请求互斥
+    network_lock: Arc<Mutex<()>>,
 }
 
 impl ViolationChecker {
-    pub(crate) fn new(config: CheckConfig) -> Self {
+    pub(crate) fn new(config: CheckConfig, network_lock: Arc<Mutex<()>>) -> Self {
         let ad_keywords_cache = Arc::new(
             config
                 .ad_keywords
@@ -549,6 +562,7 @@ impl ViolationChecker {
         ViolationChecker {
             config,
             ad_keywords_cache,
+            network_lock,
         }
     }
 
@@ -718,10 +732,12 @@ impl ViolationChecker {
     }
 
     /// 检查违规,返回违规标识符列表(纯函数,不交互)
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn check_violations(
         &self,
         source_id: i64,
         source_type: &str,
+        report_type: &str,
         board_name: &str,
         user_id: Option<i64>,
         title: &str,
@@ -750,7 +766,8 @@ impl ViolationChecker {
         let pending = self.collect_pending_violations(&detailed_comments, source_type, source_id);
         let mut violations = Self::classify_violations(pending, self.config.spam_threshold);
 
-        if source_type == "forum"
+        // 刷帖检查只针对帖子举报;讨论举报仅做评论广告/刷屏
+        if report_type == "forum_post"
             && let Some(uid) = user_id
         {
             violations.extend(self.check_spam_posts(uid, title));
@@ -807,6 +824,11 @@ impl ViolationChecker {
 
     /// 用学生账号自动举报违规内容,返回成功数(纯函数,不交互;账号缺失时返回错误)
     pub(crate) fn auto_report(&self, violations: &[String]) -> Result<usize, ProcessorError> {
+        // 全程持网络锁:登录与举报会切换全局身份,禁止与预取线程的在途请求交错
+        let _guard = self
+            .network_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut multi_account = MultiAccount::new();
         let password_path = PathConfig::global().password_file_path();
         if !password_path.exists() {
