@@ -432,7 +432,9 @@ impl AuthProcessor {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("系统时间错误")
-            .as_millis() as i64;
+            .as_millis()
+            .try_into()
+            .unwrap_or(i64::MAX);
 
         let client = self.client();
         let endpoint = format!("/admins/captcha/{}", timestamp);
@@ -1131,13 +1133,17 @@ impl CloudAuthenticator {
             let local_time = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .expect("系统时间错误")
-                .as_secs() as i64;
+                .as_secs()
+                .try_into()
+                .unwrap_or(i64::MAX);
             self.time_difference = local_time - server_time;
         }
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("系统时间错误")
-            .as_secs() as i64;
+            .as_secs()
+            .try_into()
+            .unwrap_or(i64::MAX);
         Ok(now - self.time_difference)
     }
 

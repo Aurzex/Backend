@@ -118,9 +118,14 @@ fn truncate_chars(s: &str, max_chars: usize) -> String {
 }
 
 fn build_identifier(source_type: &str, item_id: i64, data: &Value, is_reply: bool) -> String {
-    let content_id = data.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
+    let content_id = data
+        .get("id")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(0);
     let parent_id = if is_reply {
-        data.get("parent_id").and_then(|v| v.as_i64()).unwrap_or(0)
+        data.get("parent_id")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(0)
     } else {
         0
     };
@@ -138,7 +143,7 @@ fn for_each_comment_reply(comments: &[Value], mut handler: impl FnMut(&Value, bo
     for comment in comments {
         if comment
             .get("is_top")
-            .and_then(|v| v.as_bool())
+            .and_then(serde_json::Value::as_bool)
             .unwrap_or(false)
         {
             continue;
@@ -213,7 +218,7 @@ impl CommentProcessStrategy for AdsStrategy {
             .and_then(|v| v.as_array())
             .map(|arr| {
                 arr.iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_lowercase()))
+                    .filter_map(|v| v.as_str().map(str::to_lowercase))
                     .collect()
             })
             .unwrap_or_default();
@@ -262,9 +267,8 @@ impl CommentProcessStrategy for DuplicatesStrategy {
     ) {
         let threshold = params
             .get("duplicates")
-            .and_then(|v| v.as_u64())
-            .map(|v| usize::try_from(v).unwrap_or(usize::MAX))
-            .unwrap_or(3);
+            .and_then(serde_json::Value::as_u64)
+            .map_or(3, |v| usize::try_from(v).unwrap_or(usize::MAX));
 
         let mut content_map: HashMap<(String, String), Vec<String>> = HashMap::new();
 
@@ -328,7 +332,7 @@ impl StrategyFactory {
     }
 
     pub(crate) fn get(&self, name: &str) -> Option<&dyn CommentProcessStrategy> {
-        self.strategies.get(name).map(|b| b.as_ref())
+        self.strategies.get(name).map(std::convert::AsRef::as_ref)
     }
 
     pub(crate) fn get_all_strategy_types(&self) -> Vec<String> {
@@ -843,8 +847,11 @@ impl ViolationChecker {
             .unwrap_or("")
             .to_lowercase();
         // 延迟到命中 Duplicate 分支才构造字符串,避免广告等高频场景白算
-        let user_id = item.get("user_id").and_then(|v| v.as_i64());
-        let item_id = item.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
+        let user_id = item.get("user_id").and_then(serde_json::Value::as_i64);
+        let item_id = item
+            .get("id")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(0);
 
         if !content.is_empty() && ad_keywords.iter().any(|kw| content.contains(kw)) {
             return Some(ViolationKind::Ad {
@@ -887,7 +894,7 @@ impl ViolationChecker {
         for comment in comments {
             if comment
                 .get("is_top")
-                .and_then(|v| v.as_bool())
+                .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false)
             {
                 continue;
@@ -902,7 +909,10 @@ impl ViolationChecker {
             ) {
                 pending.push(v);
             }
-            let parent_comment_id = comment.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
+            let parent_comment_id = comment
+                .get("id")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(0);
             if let Some(replies) = comment.get("replies").and_then(|v| v.as_array()) {
                 for reply_value in replies {
                     if let Some(reply) = reply_value.as_object()
@@ -1034,7 +1044,7 @@ impl ViolationChecker {
             .filter(|p| {
                 p.get("user")
                     .and_then(|u| u.get("id"))
-                    .and_then(|v| v.as_i64())
+                    .and_then(serde_json::Value::as_i64)
                     == Some(user_id)
             })
             .collect();
@@ -1048,7 +1058,7 @@ impl ViolationChecker {
             );
             let mut violations = Vec::new();
             for post in user_posts {
-                if let Some(post_id) = post.get("id").and_then(|v| v.as_i64()) {
+                if let Some(post_id) = post.get("id").and_then(serde_json::Value::as_i64) {
                     violations.push(format!("forum:{}:post:0:{}", post_id, post_id));
                 }
             }

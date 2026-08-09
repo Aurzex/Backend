@@ -527,11 +527,15 @@ impl KittyRequestBuilder {
     ) -> Self {
         self.params.push((
             "limit".into(),
-            limit.unwrap_or(default_limit as i32).to_string(),
+            limit
+                .unwrap_or(i32::try_from(default_limit).unwrap_or(0))
+                .to_string(),
         ));
         self.params.push((
             "offset".into(),
-            offset.unwrap_or(DEFAULT_OFFSET as i32).to_string(),
+            offset
+                .unwrap_or(i32::try_from(DEFAULT_OFFSET).unwrap_or(0))
+                .to_string(),
         ));
         self
     }
@@ -1256,17 +1260,22 @@ impl PaginatedIter {
     }
 
     /// 从响应 JSON 中尝试提取总数(total),支持多种数字类型,并对浮点数做范围检查
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "转换前有非负且 usize 范围守卫"
+    )]
     fn try_extract_total(json: &Value, total_pointer: &str) -> Option<usize> {
         let value = json.pointer(total_pointer)?;
         value
             .as_u64()
-            .or_else(|| value.as_i64().map(|i| i as u64))
-            // 浮点数需检查非负且在 usize 范围内
+            .or_else(|| value.as_i64().and_then(|i| u64::try_from(i).ok()))
+            // 浮点数需检查非负且在 usize 范围内(守卫保证下方转换安全)
             .or_else(|| {
                 let f = value.as_f64()?;
                 (f >= 0.0 && f <= usize::MAX as f64).then_some(f as u64)
             })
-            .map(|n| n as usize)
+            .and_then(|n| usize::try_from(n).ok())
     }
 
     /// 惰性初始化:发送第一页请求,解析元数据并设置为 Ready 状态
@@ -1277,8 +1286,8 @@ impl PaginatedIter {
         // 若配置了响应中的实际每页大小键,则用服务器返回值覆盖 page_size
         if let Some(key) = &self.config.response_amount_key {
             let pointer = Self::key_to_pointer(key);
-            if let Some(n) = json.pointer(&pointer).and_then(|v| v.as_u64()) {
-                self.config.page_size = n as usize;
+            if let Some(n) = json.pointer(&pointer).and_then(serde_json::Value::as_u64) {
+                self.config.page_size = usize::try_from(n).unwrap_or(usize::MAX);
             }
         }
 
@@ -1810,12 +1819,11 @@ impl KittyFactory {
 /// 获取 13 位毫秒时间戳(本地时间)
 /// 若系统时间异常(早于 Unix 纪元),则返回 0 并记录警告
 pub fn current_timestamp_13() -> u128 {
-    match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
-        Ok(dur) => dur.as_millis(),
-        Err(_) => {
-            log::warn!("系统时间异常,无法获取时间戳,返回 0");
-            0
-        }
+    if let Ok(dur) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        dur.as_millis()
+    } else {
+        log::warn!("系统时间异常,无法获取时间戳,返回 0");
+        0
     }
 }
 

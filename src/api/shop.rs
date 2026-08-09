@@ -107,8 +107,10 @@ impl WorkshopDataFetcher {
             .with_param("offset", offset.unwrap_or(0).to_string())
             .with_param(
                 "sort",
-                sort.map(|v| v.join(","))
-                    .unwrap_or_else(|| "-created_at,-latest_joined_at".to_string()),
+                sort.map_or_else(
+                    || "-created_at,-latest_joined_at".to_string(),
+                    |v| v.join(","),
+                ),
             );
         self.send_and_parse(builder)
     }
@@ -137,18 +139,17 @@ impl WorkshopDataFetcher {
         sort: Option<Vec<String>>,
     ) -> MewResult<Value> {
         debug!("获取工作室详情列表");
-        let levels_str = levels
-            .map(|v| {
+        let levels_str = levels.map_or_else(
+            || "1,2,3,4".to_string(),
+            |v| {
                 v.iter()
-                    .map(|l| l.to_string())
+                    .map(std::string::ToString::to_string)
                     .collect::<Vec<_>>()
                     .join(",")
-            })
-            .unwrap_or_else(|| "1,2,3,4".to_string());
+            },
+        );
 
-        let sort_str = sort
-            .map(|v| v.join(","))
-            .unwrap_or_else(|| "-ordinal,-updated_at".to_string());
+        let sort_str = sort.map_or_else(|| "-ordinal,-updated_at".to_string(), |v| v.join(","));
 
         let builder = self
             .client

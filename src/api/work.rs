@@ -879,14 +879,20 @@ impl WoodWorkManager {
         // 更新项目
         self.create_wood_project(CreateWoodProjectArgs {
             work_name: project["work_name"].as_str(),
-            language_type: project["language_type"].as_i64().map(|v| v as i32),
-            run_mode: project["run_mode"].as_i64().map(|v| v as i32),
+            language_type: project["language_type"]
+                .as_i64()
+                .map(|v| i32::try_from(v).unwrap_or(0)),
+            run_mode: project["run_mode"]
+                .as_i64()
+                .map(|v| i32::try_from(v).unwrap_or(0)),
             files: Some(files),
             preview_code: project["preview_code"].as_str(),
             preview_url: project["preview_url"].as_str(),
             is_turn_on_debug: project["addition"]["isTurnOnDebug"].as_bool(),
             editor_mode: project["addition"]["editorMode"].as_str(),
-            update_time: project["update_time"].as_i64().map(|v| v as i32),
+            update_time: project["update_time"]
+                .as_i64()
+                .map(|v| i32::try_from(v).unwrap_or(0)),
         })
     }
 }

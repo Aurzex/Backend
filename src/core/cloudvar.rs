@@ -125,10 +125,9 @@ impl CloudValue {
         match v {
             Value::Number(n) => n
                 .as_i64()
-                .map(CloudValue::Number)
-                .unwrap_or_else(|| CloudValue::Text(n.to_string())),
+                .map_or_else(|| CloudValue::Text(n.to_string()), CloudValue::Number),
             Value::String(s) => CloudValue::Text(s.clone()),
-            Value::Bool(b) => CloudValue::Number(*b as i64),
+            Value::Bool(b) => CloudValue::Number(i64::from(*b)),
             other => CloudValue::Text(other.to_string()),
         }
     }
@@ -1203,13 +1202,12 @@ impl CloudVariable {
             .lock()
             .unwrap()
             .variable_mut(self.kind, &self.name)
-            .map(|v| {
+            .map_or(CallbackHandle(usize::MAX), |v| {
                 let id = v.next_cb_id;
                 v.next_cb_id += 1;
                 v.callbacks.push((id, Box::new(cb)));
                 CallbackHandle(id)
             })
-            .unwrap_or(CallbackHandle(usize::MAX))
     }
 
     /// 移除变更回调
@@ -1232,13 +1230,12 @@ impl CloudVariable {
             .lock()
             .unwrap()
             .variable_mut(self.kind, &self.name)
-            .map(|v| {
+            .map_or(CallbackHandle(usize::MAX), |v| {
                 let id = v.next_cb_id;
                 v.next_cb_id += 1;
                 v.ranking_callbacks.push((id, Box::new(cb)));
                 CallbackHandle(id)
             })
-            .unwrap_or(CallbackHandle(usize::MAX))
     }
 }
 
@@ -1265,8 +1262,7 @@ impl CloudList {
             .lock()
             .unwrap()
             .list(&self.name)
-            .map(|l| l.items.len())
-            .unwrap_or(0)
+            .map_or(0, |l| l.items.len())
     }
 
     /// 返回元素快照
@@ -1398,13 +1394,12 @@ impl CloudList {
             .lock()
             .unwrap()
             .list_mut(&self.name)
-            .map(|l| {
+            .map_or(CallbackHandle(usize::MAX), |l| {
                 let id = l.next_cb_id;
                 l.next_cb_id += 1;
                 l.change_callbacks.push((id, Box::new(cb)));
                 CallbackHandle(id)
             })
-            .unwrap_or(CallbackHandle(usize::MAX))
     }
 
     /// 注册列表操作回调(操作名,参数)
@@ -1418,7 +1413,7 @@ impl CloudList {
             .lock()
             .unwrap()
             .list_mut(&self.name)
-            .map(|l| {
+            .map_or(CallbackHandle(usize::MAX), |l| {
                 let id = l.next_cb_id;
                 l.next_cb_id += 1;
                 l.operation_callbacks
@@ -1427,7 +1422,6 @@ impl CloudList {
                     .push((id, Box::new(cb)));
                 CallbackHandle(id)
             })
-            .unwrap_or(CallbackHandle(usize::MAX))
     }
 
     /// 按句柄移除列表回调
@@ -1472,7 +1466,10 @@ fn execute_list_action(items: &mut Vec<CloudValue>, action: &ListAction) -> Opti
             let index = items.len() - 1;
             Some(ListOutcome {
                 op: "push".into(),
-                args: vec![v.clone(), CloudValue::Number(index as i64)],
+                args: vec![
+                    v.clone(),
+                    CloudValue::Number(i64::try_from(index).unwrap_or(0)),
+                ],
                 wire: json!({"action": "append", "value": v}),
             })
         }
@@ -1491,7 +1488,10 @@ fn execute_list_action(items: &mut Vec<CloudValue>, action: &ListAction) -> Opti
             items.insert(*index, v.clone());
             Some(ListOutcome {
                 op: "insert".into(),
-                args: vec![v.clone(), CloudValue::Number(*index as i64)],
+                args: vec![
+                    v.clone(),
+                    CloudValue::Number(i64::try_from(*index).unwrap_or(0)),
+                ],
                 wire: json!({"action": "insert", "nth": index + 1, "value": v}),
             })
         }
@@ -1499,7 +1499,10 @@ fn execute_list_action(items: &mut Vec<CloudValue>, action: &ListAction) -> Opti
             let popped = items.pop()?;
             Some(ListOutcome {
                 op: "pop".into(),
-                args: vec![popped, CloudValue::Number(items.len() as i64)],
+                args: vec![
+                    popped,
+                    CloudValue::Number(i64::try_from(items.len()).unwrap_or(0)),
+                ],
                 wire: json!({"action": "delete", "nth": "last"}),
             })
         }
@@ -1518,7 +1521,10 @@ fn execute_list_action(items: &mut Vec<CloudValue>, action: &ListAction) -> Opti
             let removed = items.remove(*index);
             Some(ListOutcome {
                 op: "remove".into(),
-                args: vec![removed, CloudValue::Number(*index as i64)],
+                args: vec![
+                    removed,
+                    CloudValue::Number(i64::try_from(*index).unwrap_or(0)),
+                ],
                 wire: json!({"action": "delete", "nth": index + 1}),
             })
         }
@@ -1538,7 +1544,11 @@ fn execute_list_action(items: &mut Vec<CloudValue>, action: &ListAction) -> Opti
             let old = std::mem::replace(&mut items[*index], v.clone());
             Some(ListOutcome {
                 op: "replace".into(),
-                args: vec![old, v.clone(), CloudValue::Number(*index as i64)],
+                args: vec![
+                    old,
+                    v.clone(),
+                    CloudValue::Number(i64::try_from(*index).unwrap_or(0)),
+                ],
                 wire: json!({"action": "replace", "nth": index + 1, "value": v}),
             })
         }
@@ -1555,7 +1565,7 @@ fn parse_list_action(op: &Value) -> Option<ListAction> {
         "insert" => {
             let nth = op.get("nth")?.as_i64()?;
             Some(ListAction::Insert(
-                nth.saturating_sub(1).max(0) as usize,
+                usize::try_from(nth.saturating_sub(1).max(0)).unwrap_or(0),
                 value()?,
             ))
         }
@@ -1563,7 +1573,7 @@ fn parse_list_action(op: &Value) -> Option<ListAction> {
             Some(Value::String(s)) if s == "last" => Some(ListAction::DeleteLast),
             Some(Value::String(s)) if s == "all" => Some(ListAction::DeleteAll),
             Some(Value::Number(n)) => {
-                let idx = n.as_i64()?.saturating_sub(1).max(0) as usize;
+                let idx = usize::try_from(n.as_i64()?.saturating_sub(1).max(0)).unwrap_or(0);
                 Some(ListAction::DeleteAt(idx))
             }
             _ => None,
@@ -1574,7 +1584,7 @@ fn parse_list_action(op: &Value) -> Option<ListAction> {
             match nth {
                 Value::String(s) if s == "last" => Some(ListAction::ReplaceLast(v)),
                 Value::Number(n) => {
-                    let idx = n.as_i64()?.saturating_sub(1).max(0) as usize;
+                    let idx = usize::try_from(n.as_i64()?.saturating_sub(1).max(0)).unwrap_or(0);
                     Some(ListAction::ReplaceAt(idx, v))
                 }
                 _ => None,
@@ -1593,10 +1603,10 @@ impl CloudInner {
                 .list_mut(name)
                 .ok_or_else(|| CloudError::ListNotFound(name.to_string()))?;
             // 仅在注册了整表变更回调时才克隆旧表,避免高频列表操作白拷贝整表
-            let old_items = if !list.change_callbacks.is_empty() {
-                Some(list.items.clone())
-            } else {
+            let old_items = if list.change_callbacks.is_empty() {
                 None
+            } else {
+                Some(list.items.clone())
             };
             let cvid = list.cvid.clone();
             let outcome = execute_list_action(&mut list.items, &action).ok_or_else(|| {
@@ -1623,10 +1633,10 @@ impl CloudInner {
                     continue;
                 };
                 // 仅在注册了整表变更回调时才克隆旧表
-                let old_items = if !list.change_callbacks.is_empty() {
-                    Some(list.items.clone())
-                } else {
+                let old_items = if list.change_callbacks.is_empty() {
                     None
+                } else {
+                    Some(list.items.clone())
                 };
                 let Some(outcome) = execute_list_action(&mut list.items, &action) else {
                     warn!("云端列表操作越界: cvid={cvid} op={op}");
@@ -2013,12 +2023,11 @@ struct RankingHandler;
 
 impl MessageHandler for RankingHandler {
     fn handle(&self, inner: &Arc<CloudInner>, payload: &Value) -> Result<()> {
-        let cvid = match inner.pending_rankings.lock().unwrap().pop_front() {
-            Some(cvid) => cvid,
-            None => {
-                warn!("收到排行榜数据但没有待处理的请求");
-                return Ok(());
-            }
+        let cvid = if let Some(cvid) = inner.pending_rankings.lock().unwrap().pop_front() {
+            cvid
+        } else {
+            warn!("收到排行榜数据但没有待处理的请求");
+            return Ok(());
         };
         let mut ranking = RankingData {
             cvid: cvid.clone(),
@@ -2415,7 +2424,7 @@ fn on_connection_lost(inner: Arc<CloudInner>) {
         let backoff = inner
             .reconnect_interval
             .saturating_mul(1u32 << (attempts - 1).min(5));
-        let delay = backoff.min(Duration::from_secs(300));
+        let delay = backoff.min(Duration::from_mins(5));
         info!("连接断开,第 {attempts} 次重连将于 {delay:?} 后进行");
         thread::sleep(delay);
         if inner.stopping.load(Ordering::Acquire) {
@@ -2461,7 +2470,7 @@ fn flush_loop(inner: Arc<CloudInner>) {
         };
         let send = |payload: String| -> bool {
             match tx.send(Message::text(payload)) {
-                Ok(_) => true,
+                Ok(()) => true,
                 Err(e) => {
                     warn!("批量上传发送失败: {e}");
                     false

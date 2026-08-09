@@ -66,12 +66,11 @@ fn main() {
     println!("{}", pretty(&admin_details));
 
     // 5. 自动提取管理员 ID,无需手动输入
-    let admin_id = match extract_admin_id(&admin_details) {
-        Some(id) => id,
-        None => {
-            eprintln!("无法从管理员信息中提取管理员ID, 请检查接口返回");
-            return;
-        }
+    let admin_id = if let Some(id) = extract_admin_id(&admin_details) {
+        id
+    } else {
+        eprintln!("无法从管理员信息中提取管理员ID, 请检查接口返回");
+        return;
     };
     let admin_name = admin_details
         .get("admin")
@@ -145,12 +144,11 @@ fn extract_admin_id(details: &Value) -> Option<i64> {
         let mut cur = details;
         let mut found = true;
         for &key in path {
-            match cur.get(key) {
-                Some(v) => cur = v,
-                None => {
-                    found = false;
-                    break;
-                }
+            if let Some(v) = cur.get(key) {
+                cur = v
+            } else {
+                found = false;
+                break;
             }
         }
         if found && let Some(id) = value_to_i64(cur) {

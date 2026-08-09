@@ -167,12 +167,11 @@ impl CommunityDataFetcher {
 
     /// 安全地从时间戳 JSON 中提取字符串值,若失败则记录警告并返回空字符串
     fn extract_time_string(json: &Value) -> String {
-        match json["data"].as_str() {
-            Some(s) => s.to_string(),
-            None => {
-                warn!("时间戳响应中缺少 'data' 字段或不是字符串: {:?}", json);
-                String::new()
-            }
+        if let Some(s) = json["data"].as_str() {
+            s.to_string()
+        } else {
+            warn!("时间戳响应中缺少 'data' 字段或不是字符串: {:?}", json);
+            String::new()
         }
     }
 

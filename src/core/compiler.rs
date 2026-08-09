@@ -89,7 +89,7 @@ impl ValueExt for Value {
 
     fn get_i64(&self, key: &str) -> Result<i64> {
         self.get(key)
-            .and_then(|v| v.as_i64())
+            .and_then(serde_json::Value::as_i64)
             .ok_or_else(|| DecompilerError::MissingField {
                 field: key.to_string(),
             })
@@ -97,7 +97,7 @@ impl ValueExt for Value {
 
     fn get_bool(&self, key: &str) -> Result<bool> {
         self.get(key)
-            .and_then(|v| v.as_bool())
+            .and_then(serde_json::Value::as_bool)
             .ok_or_else(|| DecompilerError::MissingField {
                 field: key.to_string(),
             })
@@ -120,7 +120,9 @@ impl ValueExt for Value {
     }
 
     fn get_i64_or_default(&self, key: &str, default: i64) -> i64 {
-        self.get(key).and_then(|v| v.as_i64()).unwrap_or(default)
+        self.get(key)
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(default)
     }
 
     fn get_str_or<'a>(&'a self, key: &str, default: &'a str) -> &'a str {
@@ -228,7 +230,7 @@ impl Default for DecompilerConfig {
 
         let mut text = HashMap::new();
         text.insert("name".to_string(), "TEXT".to_string());
-        text.insert("text".to_string(), "".to_string());
+        text.insert("text".to_string(), String::new());
         shadow_fields.insert("text".to_string(), text);
 
         let mut lists_get = HashMap::new();
@@ -253,7 +255,7 @@ impl Default for DecompilerConfig {
 
         let mut get_current_costume = HashMap::new();
         get_current_costume.insert("name".to_string(), "style_id".to_string());
-        get_current_costume.insert("text".to_string(), "".to_string());
+        get_current_costume.insert("text".to_string(), String::new());
         shadow_fields.insert("get_current_costume".to_string(), get_current_costume);
 
         let mut default_value = HashMap::new();
@@ -264,12 +266,12 @@ impl Default for DecompilerConfig {
 
         let mut get_current_scene = HashMap::new();
         get_current_scene.insert("name".to_string(), "scene".to_string());
-        get_current_scene.insert("text".to_string(), "".to_string());
+        get_current_scene.insert("text".to_string(), String::new());
         shadow_fields.insert("get_current_scene".to_string(), get_current_scene);
 
         let mut get_sensing_current_scene = HashMap::new();
         get_sensing_current_scene.insert("name".to_string(), "scene".to_string());
-        get_sensing_current_scene.insert("text".to_string(), "".to_string());
+        get_sensing_current_scene.insert("text".to_string(), String::new());
         shadow_fields.insert(
             "get_sensing_current_scene".to_string(),
             get_sensing_current_scene,
@@ -277,7 +279,7 @@ impl Default for DecompilerConfig {
 
         let mut shadow_text = HashMap::new();
         shadow_text.insert("name".to_string(), "TEXT".to_string());
-        shadow_text.insert("text".to_string(), "".to_string());
+        shadow_text.insert("text".to_string(), String::new());
         shadow_fields.insert("shadow_text".to_string(), shadow_text);
 
         let mut shadow_number = HashMap::new();
@@ -301,8 +303,8 @@ impl Default for DecompilerConfig {
         file_extensions.insert("KITTEN4".to_string(), ".bcm4".to_string());
         file_extensions.insert("COCO".to_string(), ".json".to_string());
         file_extensions.insert("NEKO".to_string(), ".bcmkn".to_string());
-        file_extensions.insert("NEMO".to_string(), "".to_string());
-        file_extensions.insert("WOOD".to_string(), "".to_string());
+        file_extensions.insert("NEMO".to_string(), String::new());
+        file_extensions.insert("WOOD".to_string(), String::new());
 
         let mut shadow_templates = HashMap::new();
         shadow_templates.insert(
@@ -361,7 +363,7 @@ impl Default for DecompilerConfig {
                 editable: true,
                 visible: "visible".to_string(),
                 extra_fields: vec![],
-                default_text: Some("".to_string()),
+                default_text: Some(String::new()),
                 use_custom_name: true,
                 main_field: Some("text".to_string()),
             },
@@ -427,7 +429,7 @@ impl Default for DecompilerConfig {
                 editable: true,
                 visible: "visible".to_string(),
                 extra_fields: vec![],
-                default_text: Some("".to_string()),
+                default_text: Some(String::new()),
                 use_custom_name: true,
                 main_field: Some("text".to_string()),
             },
@@ -438,7 +440,7 @@ impl Default for DecompilerConfig {
                 editable: true,
                 visible: "visible".to_string(),
                 extra_fields: vec![],
-                default_text: Some("".to_string()),
+                default_text: Some(String::new()),
                 use_custom_name: true,
                 main_field: Some("text".to_string()),
             },
@@ -449,7 +451,7 @@ impl Default for DecompilerConfig {
                 editable: true,
                 visible: "visible".to_string(),
                 extra_fields: vec![],
-                default_text: Some("".to_string()),
+                default_text: Some(String::new()),
                 use_custom_name: true,
                 main_field: Some("text".to_string()),
             },
@@ -474,7 +476,7 @@ impl Default for DecompilerConfig {
                 editable: true,
                 visible: "visible".to_string(),
                 extra_fields: vec![],
-                default_text: Some("".to_string()),
+                default_text: Some(String::new()),
                 use_custom_name: true,
                 main_field: Some("text".to_string()),
             },
@@ -1099,16 +1101,15 @@ impl<'a> BlockDecompilerCore<'a> {
         let output_type = self.compiled.get_i64_or_default("output_type", 0);
         let is_output = is_shadow || output_type > 0;
 
-        let location = self
-            .compiled
-            .get_array_opt("location")
-            .map(|arr| Value::Array(arr.clone()))
-            .unwrap_or_else(|| {
+        let location = self.compiled.get_array_opt("location").map_or_else(
+            || {
                 // 编译版无 location:按树形自动布局,避免全部重叠在 [0,0]
                 let loc = json!([context.layout_col, context.layout_row]);
                 context.layout_row += 70.0;
                 loc
-            });
+            },
+            |arr| Value::Array(arr.clone()),
+        );
 
         let mut block_value = json!({
             "id": id,
@@ -1191,8 +1192,7 @@ impl<'a> BlockDecompilerCore<'a> {
                 .compiled
                 .get("conditions")
                 .and_then(|v| v.as_array())
-                .map(|arr| arr.len())
-                .unwrap_or(0);
+                .map_or(0, std::vec::Vec::len);
 
             let parent_id = block_value
                 .get("id")
@@ -1728,7 +1728,7 @@ impl KittenDecompiler {
         let compiled_blocks = actor_compiled
             .get("compiled_block_map")
             .and_then(|v| v.as_object());
-        let estimated_blocks = compiled_blocks.map(|m| m.len() * 10 + 100).unwrap_or(256);
+        let estimated_blocks = compiled_blocks.map_or(256, |m| m.len() * 10 + 100);
         let functions_arc = Arc::clone(functions);
         // 移动前先提取 actor_info 中已有的注释,供注释回退使用
         let actor_existing_comments = actor_info
@@ -1826,7 +1826,7 @@ impl KittenDecompiler {
             .get("comments")
             .cloned()
             .unwrap_or_else(|| json!({}));
-        if comments.as_object().map(|o| o.is_empty()).unwrap_or(true)
+        if comments.as_object().is_none_or(serde_json::Map::is_empty)
             && let Some(existing) = actor_existing_comments
         {
             comments = existing;
@@ -1858,7 +1858,7 @@ impl KittenDecompiler {
         let compiled_blocks = actor_compiled
             .get("compiled_block_map")
             .and_then(|v| v.as_object());
-        let estimated_blocks = compiled_blocks.map(|m| m.len() * 10 + 100).unwrap_or(256);
+        let estimated_blocks = compiled_blocks.map_or(256, |m| m.len() * 10 + 100);
         // 场景同样使用全局函数表:函数可定义在某个场景(屏幕角色)中,
         // 被其它场景/角色调用(如"总移动设置4"定义在背景(3),调用在背景(1)),
         // 否则场景中的调用块会因找不到定义而被禁用
@@ -1952,7 +1952,7 @@ impl KittenDecompiler {
             .get("comments")
             .cloned()
             .unwrap_or_else(|| json!({}));
-        if comments.as_object().map(|o| o.is_empty()).unwrap_or(true)
+        if comments.as_object().is_none_or(serde_json::Map::is_empty)
             && let Some(existing) = scene_info
                 .get("block_data_json")
                 .and_then(|b| b.get("comments"))
@@ -2183,7 +2183,7 @@ impl<'a> XmlBlockWriter<'a> {
         // conditions → <value name="IF{i}">
         // 借用数组而非克隆:仅需迭代与长度
         let conditions = compiled.get("conditions").and_then(|v| v.as_array());
-        let conditions_len = conditions.map(|arr| arr.len()).unwrap_or(0);
+        let conditions_len = conditions.map_or(0, std::vec::Vec::len);
         if let Some(conditions) = conditions {
             for (i, c) in conditions.iter().enumerate() {
                 if c.is_object() {
@@ -2912,7 +2912,7 @@ impl<'a> WoodResourceManager<'a> {
             "type": "WOOD",
             "language_type": work_data.get_i64_or_default("language_type", 3),
             "run_mode": work_data.get_i64_or_default("run_mode", 0),
-            "code_visible": work_data.get("code_visible").and_then(|v| v.as_bool()).unwrap_or(true),
+            "code_visible": work_data.get("code_visible").and_then(serde_json::Value::as_bool).unwrap_or(true),
             "addition": work_data.get("addition").cloned().unwrap_or(json!({})),
         });
         FileService::write_json(&root_dir.join("work_info.json"), &info)
@@ -3034,7 +3034,7 @@ impl CocoDecompiler {
 
         let mut widget_map = work_obj
             .remove("widgetMap")
-            .filter(|v| v.is_object())
+            .filter(serde_json::Value::is_object)
             .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
         let screen_list = work_obj
             .remove("screenList")
@@ -3262,8 +3262,7 @@ impl<'a> IfBlockDecompiler<'a> {
         let conditions_count = compiled
             .get("conditions")
             .and_then(|v| v.as_array())
-            .map(|arr| arr.len())
-            .unwrap_or(0);
+            .map_or(0, std::vec::Vec::len);
         let behavior = BlockBehavior::If { conditions_count };
         let core = BlockDecompilerCore::new(compiled, behavior);
         Self { core, compiled }
@@ -3282,22 +3281,21 @@ impl<'a> BlockDecompiler<'a> for IfBlockDecompiler<'a> {
             .compiled
             .get("conditions")
             .and_then(|v| v.as_array())
-            .map(|arr| arr.len())
-            .unwrap_or(0);
+            .map_or(0, std::vec::Vec::len);
 
         // 根据方案8.1 修正 else 属性的判断
         let has_else = children.len() > conditions_len
-            && !children.last().map(|v| v.is_null()).unwrap_or(true);
+            && !children.last().is_none_or(serde_json::Value::is_null);
 
         if let Some(obj) = block_value.as_object_mut() {
             let mut shadows_mut = obj.get_mut("shadows").and_then(|s| s.as_object_mut());
             if let Some(shadows) = shadows_mut.as_mut() {
-                if !has_else {
-                    shadows.insert("EXTRA_ADD_ELSE".to_string(), json!(""));
-                } else {
+                if has_else {
                     // 编辑版:有 else 时 shadows 同时含 ELSE_TEXT 与 ELSE
                     shadows.insert("ELSE_TEXT".to_string(), json!(""));
                     shadows.insert("ELSE".to_string(), json!(""));
+                } else {
+                    shadows.insert("EXTRA_ADD_ELSE".to_string(), json!(""));
                 }
             }
             // 编辑版:有 else 时 mutation 标记 else="1",无 else 时为空字符串
@@ -3333,8 +3331,7 @@ impl<'a> BlockDecompiler<'a> for TextJoinDecompiler<'a> {
             .compiled
             .get("params")
             .and_then(|v| v.as_object())
-            .map(|obj| obj.len())
-            .unwrap_or(0);
+            .map_or(0, serde_json::Map::len);
         let mutation = format!(r#"<mutation items="{}"></mutation>"#, param_count);
         if let Some(obj) = block_value.as_object_mut() {
             obj.insert("mutation".to_string(), Value::String(mutation));
@@ -3364,8 +3361,7 @@ impl<'a> BlockDecompiler<'a> for AskAndChooseDecompiler<'a> {
             .compiled
             .get("params")
             .and_then(|v| v.as_object())
-            .map(|obj| obj.len())
-            .unwrap_or(0);
+            .map_or(0, serde_json::Map::len);
         let mutation = format!(r#"<mutation items="{}"></mutation>"#, item_count);
         if let Some(obj) = block_value.as_object_mut() {
             obj.insert("mutation".to_string(), Value::String(mutation));
@@ -3394,7 +3390,7 @@ impl<'a> BlockDecompiler<'a> for SetEntityShowHideDecompiler<'a> {
         let need_text = self
             .compiled
             .get("need_text")
-            .and_then(|v| v.as_bool())
+            .and_then(serde_json::Value::as_bool)
             .unwrap_or(false);
         let time_block_id = self
             .compiled
@@ -3433,8 +3429,7 @@ impl<'a> BlockDecompiler<'a> for TextSelectChangeableDecompiler<'a> {
             .compiled
             .get("params")
             .and_then(|v| v.as_object())
-            .map(|obj| obj.len())
-            .unwrap_or(0);
+            .map_or(0, serde_json::Map::len);
         let mutation = format!(r#"<mutation items="{}"></mutation>"#, item_count);
         if let Some(obj) = block_value.as_object_mut() {
             obj.insert("mutation".to_string(), Value::String(mutation));
@@ -3571,15 +3566,12 @@ impl<'a> BlockDecompiler<'a> for FunctionCallDecompiler<'a> {
         let mut block_value = self.core.decompile(context)?;
         let procedure_name = self.compiled.get_str_or("procedure_name", "");
 
-        let (def_id, disabled) = match context.functions.get(procedure_name) {
-            Some(func) => {
-                let id = func.get("id").and_then(|v| v.as_str()).unwrap_or("");
-                (id.to_string(), false)
-            }
-            None => {
-                error!("调用未定义的函数: {},将禁用该积木", procedure_name);
-                (String::new(), true)
-            }
+        let (def_id, disabled) = if let Some(func) = context.functions.get(procedure_name) {
+            let id = func.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            (id.to_string(), false)
+        } else {
+            error!("调用未定义的函数: {},将禁用该积木", procedure_name);
+            (String::new(), true)
         };
 
         let params = self
@@ -3598,7 +3590,7 @@ impl<'a> BlockDecompiler<'a> for FunctionCallDecompiler<'a> {
         mutation.push_str(&format!(r#" name="{}""#, procedure_name));
         mutation.push_str(&format!(r#" def_id="{}""#, def_id));
         mutation.push('>');
-        for (param_name, _) in params.iter() {
+        for (param_name, _) in &params {
             mutation.push_str(&format!(
                 r#"<procedures_2_parameter_shadow name="{}" value="0"></procedures_2_parameter_shadow>"#,
                 param_name
@@ -3656,11 +3648,9 @@ impl<'a> BlockDecompiler<'a> for FunctionCallDecompiler<'a> {
                             .create("default_value", Some(param_id), None);
                     shadows.insert(input_name, shadow_value);
                 }
-            } else {
-                if let Some(shadows) = block.get_mut("shadows").and_then(|s| s.as_object_mut()) {
-                    let shadow_value = context.shadow_builder.create("default_value", None, None);
-                    shadows.insert(input_name, shadow_value);
-                }
+            } else if let Some(shadows) = block.get_mut("shadows").and_then(|s| s.as_object_mut()) {
+                let shadow_value = context.shadow_builder.create("default_value", None, None);
+                shadows.insert(input_name, shadow_value);
             }
         }
 
@@ -3722,8 +3712,7 @@ fn create_block_decompiler<'a>(compiled: &'a Value) -> Box<dyn BlockDecompiler<'
             let item_count = compiled
                 .get("params")
                 .and_then(|v| v.as_object())
-                .map(|obj| obj.len())
-                .unwrap_or(0);
+                .map_or(0, serde_json::Map::len);
             let mutation = format!("<mutation items=\"{}\"></mutation>", item_count);
             Box::new(MutationDecompiler::new(compiled, mutation))
         }

@@ -245,7 +245,7 @@ impl CommentQueryBuilder {
     ) -> Vec<Result<JsonObject, DataQueryError>> {
         if source == CommentSource::Forum {
             ForumDataFetcher::new()
-                .fetch_reply_comments_gen(comment_id as i32, None)
+                .fetch_reply_comments_gen(i32::try_from(comment_id).unwrap_or(0), None)
                 .map(|r| {
                     r.map_err(DataQueryError::from).and_then(|v| {
                         v.as_object()
@@ -292,7 +292,7 @@ impl CommentQueryBuilder {
                 .get(user_field)
                 .and_then(|u| u.as_object())
                 .and_then(|u| u.get("id"))
-                .and_then(|id| id.as_i64())
+                .and_then(serde_json::Value::as_i64)
         };
 
         let mapped = raw_stream.flat_map(move |comment_result| {
@@ -309,12 +309,15 @@ impl CommentQueryBuilder {
                     .get("user")
                     .and_then(|u| u.as_object())
                     .and_then(|u| u.get("id"))
-                    .and_then(|id| id.as_i64())
+                    .and_then(serde_json::Value::as_i64)
             {
                 ids.push(Ok(uid.to_string()));
             }
 
-            let comment_id = comment.get("id").and_then(|id| id.as_i64()).unwrap_or(0);
+            let comment_id = comment
+                .get("id")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(0);
             let comment_obj = comment.as_object().cloned().unwrap_or_default();
             for reply in Self::reply_items(source, comment_id, &comment_obj) {
                 match reply {
@@ -348,7 +351,10 @@ impl CommentQueryBuilder {
                 Err(e) => return vec![Err(e)].into_iter(),
             };
             let mut ids: Vec<Result<String, DataQueryError>> = Vec::new();
-            let comment_id = comment.get("id").and_then(|id| id.as_i64()).unwrap_or(0);
+            let comment_id = comment
+                .get("id")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(0);
 
             if comment_id != 0 {
                 ids.push(Ok(comment_id.to_string()));
@@ -359,7 +365,9 @@ impl CommentQueryBuilder {
                 for reply in Self::reply_items(source, comment_id, comment_obj) {
                     match reply {
                         Ok(reply_obj) => {
-                            if let Some(rid) = reply_obj.get("id").and_then(|id| id.as_i64()) {
+                            if let Some(rid) =
+                                reply_obj.get("id").and_then(serde_json::Value::as_i64)
+                            {
                                 ids.push(Ok(format!("{}.{}", comment_id, rid)));
                             }
                         }
@@ -393,7 +401,7 @@ impl CommentQueryBuilder {
                 .get(user_field)
                 .and_then(|u| u.as_object())
                 .and_then(|u| u.get("id"))
-                .and_then(|id| id.as_i64())
+                .and_then(serde_json::Value::as_i64)
         };
 
         let mapped = raw_stream.map(move |comment_result| {
@@ -403,7 +411,7 @@ impl CommentQueryBuilder {
                 .ok_or_else(|| DataQueryError::ParseError("评论不是对象".into()))?;
             let comment_id = comment_obj
                 .get("id")
-                .and_then(|id| id.as_i64())
+                .and_then(serde_json::Value::as_i64)
                 .unwrap_or(0);
 
             // 收集该评论的所有回复(此处回复数量通常较少,收集为 Vec 可以接受)
@@ -444,7 +452,7 @@ impl CommentQueryBuilder {
                 Value::Bool(
                     comment_obj
                         .get("is_top")
-                        .and_then(|v| v.as_bool())
+                        .and_then(serde_json::Value::as_bool)
                         .unwrap_or(false),
                 ),
             );
@@ -540,7 +548,7 @@ impl DataQuery {
     ) -> Result<i32, DataQueryError> {
         let mut paginated = configure(client.build_paginated(endpoint).with_total_key(total_key));
         paginated.fetch_metadata().map_err(DataQueryError::from)?;
-        Ok(paginated.total_items().unwrap_or(0) as i32)
+        Ok(i32::try_from(paginated.total_items().unwrap_or(0)).unwrap_or(0))
     }
 
     /// 获取评论总数
@@ -634,7 +642,7 @@ impl DataQuery {
                 let items: &[Value] = val
                     .get("items")
                     .and_then(|i| i.as_array())
-                    .map(|a| a.as_slice())
+                    .map(std::vec::Vec::as_slice)
                     .unwrap_or(&[]);
                 let mapped: Vec<Result<JsonObject, DataQueryError>> = items
                     .iter()
@@ -672,26 +680,29 @@ impl DataQuery {
 
         for work_result in self.stream_works_from_both_sources(work_limit) {
             let work = work_result?;
-            if let Some(work_id) = work.get("work_id").and_then(|id| id.as_i64()) {
-                let comment_stream =
-                    self.stream_detailed_comments(CommentSource::Work, work_id as i32, Some(20))?;
+            if let Some(work_id) = work.get("work_id").and_then(serde_json::Value::as_i64) {
+                let comment_stream = self.stream_detailed_comments(
+                    CommentSource::Work,
+                    i32::try_from(work_id).unwrap_or(0),
+                    Some(20),
+                )?;
                 for comment_result in comment_stream {
                     let comment = comment_result?;
                     let user_id = comment.get("user_id").and_then(|v| {
                         if v.is_number() {
                             Some(v.to_string())
                         } else {
-                            v.as_str().map(|s| s.to_string())
+                            v.as_str().map(std::string::ToString::to_string)
                         }
                     });
                     let content = comment
                         .get("content")
                         .and_then(|c| c.as_str())
-                        .map(|s| s.to_string());
+                        .map(std::string::ToString::to_string);
                     let nickname = comment
                         .get("nickname")
                         .and_then(|n| n.as_str())
-                        .map(|s| s.to_string());
+                        .map(std::string::ToString::to_string);
 
                     if let (Some(uid), Some(cont), Some(nick)) = (user_id, content, nickname) {
                         let entry = user_comment_map
@@ -720,8 +731,14 @@ impl DataQuery {
             .collect();
 
         result.sort_by(|a, b| {
-            let ca = a.get("comment_count").and_then(|c| c.as_i64()).unwrap_or(0);
-            let cb = b.get("comment_count").and_then(|c| c.as_i64()).unwrap_or(0);
+            let ca = a
+                .get("comment_count")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(0);
+            let cb = b
+                .get("comment_count")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(0);
             cb.cmp(&ca)
         });
 
@@ -760,7 +777,8 @@ impl DataQuery {
                 .fetch_metadata()
                 .map_err(DataQueryError::from)?;
 
-            let comment_count = comment_paginated.total_items().unwrap_or(0) as i32;
+            let comment_count =
+                i32::try_from(comment_paginated.total_items().unwrap_or(0)).unwrap_or(0);
 
             // 获取作品举报总数
             let mut work_paginated = WhaleReportFetcher::new().fetch_work_reports_gen(
@@ -776,7 +794,7 @@ impl DataQuery {
                 .fetch_metadata()
                 .map_err(DataQueryError::from)?;
 
-            let work_count = work_paginated.total_items().unwrap_or(0) as i32;
+            let work_count = i32::try_from(work_paginated.total_items().unwrap_or(0)).unwrap_or(0);
 
             let total = comment_count + work_count;
 
@@ -796,7 +814,7 @@ impl DataQuery {
         let grand_total = total_comment_reports + total_work_reports;
         for stat in &mut stats {
             stat.percentage = if grand_total > 0 {
-                ((stat.total_reports as f64 / grand_total as f64) * 1000.0).round() / 10.0
+                ((f64::from(stat.total_reports) / f64::from(grand_total)) * 1000.0).round() / 10.0
             } else {
                 0.0
             };
@@ -805,7 +823,7 @@ impl DataQuery {
         stats.sort_by_key(|b| std::cmp::Reverse(b.total_reports));
 
         Ok(AdminReportStatistics {
-            total_admins: stats.len() as i32,
+            total_admins: i32::try_from(stats.len()).unwrap_or(0),
             total_comment_reports,
             total_work_reports,
             total_all_reports: grand_total,
@@ -829,14 +847,18 @@ impl DataQuery {
             let fan = fan_result.map_err(DataQueryError::from)?;
             total_fans += 1;
 
-            let total_likes = fan.get("total_likes").and_then(|l| l.as_i64()).unwrap_or(0) as i32;
+            let total_likes = fan
+                .get("total_likes")
+                .and_then(serde_json::Value::as_i64)
+                .map(|v| i32::try_from(v).unwrap_or(0))
+                .unwrap_or(0);
 
             if total_likes >= like_threshold {
                 let mut fan_obj = JsonObject::new();
-                if let Some(id) = fan.get("id").and_then(|i| i.as_i64()) {
+                if let Some(id) = fan.get("id").and_then(serde_json::Value::as_i64) {
                     fan_obj.insert("user_id".into(), Value::Number(id.into()));
                     let honors_result = UserDataFetcher::new()
-                        .fetch_user_honors(id as i32)
+                        .fetch_user_honors(i32::try_from(id).unwrap_or(0))
                         .map_err(DataQueryError::from);
                     if let Ok(ref honors_data) = honors_result {
                         if let Some(fans_total) = honors_data.get("fans_total") {
@@ -878,7 +900,7 @@ impl DataQuery {
             target_user_id: user_id,
             like_threshold,
             total_fans,
-            qualified_fans_count: qualified_fans.len() as i32,
+            qualified_fans_count: i32::try_from(qualified_fans.len()).unwrap_or(0),
             qualified_fans,
         })
     }
@@ -904,7 +926,9 @@ impl DataQuery {
                     Err(e) => return Some(Err(DataQueryError::from(e))),
                 };
 
-                let student_id = student.get("id").and_then(|i| i.as_i64())? as i32;
+                let student_id =
+                    i32::try_from(student.get("id").and_then(serde_json::Value::as_i64)?)
+                        .unwrap_or(0);
                 let username = student
                     .get("username")
                     .and_then(|u| u.as_str())?
@@ -937,7 +961,11 @@ impl DataQuery {
             .fetch_message_count(MessageMethod::Web)
             .map_err(DataQueryError::from)
         {
-            Ok(data) => data.get("count").and_then(|c| c.as_i64()).unwrap_or(0) as i32,
+            Ok(data) => data
+                .get("count")
+                .and_then(serde_json::Value::as_i64)
+                .map(|v| i32::try_from(v).unwrap_or(0))
+                .unwrap_or(0),
             Err(e) => return Box::new(std::iter::once(Err(e))),
         };
 
@@ -1022,15 +1050,19 @@ impl Iterator for CommunityReplyStream {
                     .flat_map(|arr| arr.iter().filter_map(|v| v.as_object().cloned()))
                     .collect();
 
-                let fetched_count = items.len() as i32;
+                let fetched_count = i32::try_from(items.len()).unwrap_or(0);
                 if fetched_count == 0 {
                     return None;
                 }
 
-                let take_count = fetched_count.min(self.remaining) as usize;
-                self.remaining -= take_count as i32;
+                let take_count = fetched_count.min(self.remaining);
+                self.remaining -= take_count;
                 self.offset += fetched_count; // 基于实际返回量推进偏移
-                self.buffer.extend(items.into_iter().take(take_count));
+                self.buffer.extend(
+                    items
+                        .into_iter()
+                        .take(usize::try_from(take_count).unwrap_or(0)),
+                );
                 self.buffer.pop_front().map(Ok)
             }
             Err(e) => Some(Err(DataQueryError::from(e))),

@@ -37,7 +37,7 @@ const PONG_MESSAGE: &str = "3";
 /// 等待 AI 开始回复的默认超时
 pub(crate) const DEFAULT_RESPONSE_START_TIMEOUT: Duration = Duration::from_secs(10);
 /// 等待回复完成的默认超时
-pub(crate) const DEFAULT_RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
+pub(crate) const DEFAULT_RESPONSE_TIMEOUT: Duration = Duration::from_mins(1);
 /// 连接建立等待超时
 pub(crate) const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -604,8 +604,7 @@ impl ChatEventHandler for ConnectAckHandler {
             inner.user_info.lock().unwrap().extend(data.clone());
             let chat_count = data
                 .get("chat_count")
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| "未知".into());
+                .map_or_else(|| "未知".into(), std::string::ToString::to_string);
             info!("连接确认 - 剩余对话次数: {chat_count}");
         }
         // 服务器可能重复确认,只发送一次 JOIN(帧格式与 Python 的 `42 ["join"]` 一致)
