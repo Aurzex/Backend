@@ -13,7 +13,7 @@ use super::pipeline::{
     BatchActionManager, BatchGroup, CheckConfig, ReportIdExt, ViolationChecker,
     apply_action_by_key, get_display_registry, get_source_type_map, global_action_registry,
 };
-use super::types::{
+use super::registry::{
     ProcessorError, ReportFetcher, SourceConfig, bytes_to_human, html_to_text,
     resolution_display_name, value_to_i64, value_to_string,
 };

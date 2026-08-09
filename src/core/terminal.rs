@@ -111,8 +111,8 @@ fn read_line(prompt: &str) -> String {
 // 内部引擎不感知任何交互。
 
 use crate::core::pipeline::BatchGroup;
+use crate::core::registry::{ProcessorError, action_name};
 use crate::core::services::{ReportItemView, ReportProcessor};
-use crate::core::types::{ProcessorError, action_name};
 
 /// 动作菜单的最终选择
 enum ActionChoice {

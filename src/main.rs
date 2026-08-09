@@ -6,9 +6,9 @@ use log::{LevelFilter, Log, Metadata, Record};
 use serde_json::Value;
 
 use crate::api::auth::{AuthProcessor, LoginHandler, LoginResult};
+use crate::core::registry::value_to_i64;
 use crate::core::services::ReportProcessor;
-use crate::core::types::value_to_i64;
-use crate::core::ui::{ConsoleUi, ProcessorUi, ReportConsole};
+use crate::core::terminal::{ConsoleUi, ProcessorUi, ReportConsole};
 use crate::utils::data::PathConfig;
 
 struct ConsoleLogger;

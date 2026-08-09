@@ -8,7 +8,7 @@ use std::time::Duration;
 use log::{error, info, warn};
 use serde_json::Value;
 
-use super::types::{
+use super::registry::{
     CommentConfig, ProcessorError, ReportTypeRegistry, SourceConfig, action_name, html_to_text,
     status_mapping, timestamp_to_string, value_to_string,
 };
