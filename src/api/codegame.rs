@@ -1,4 +1,6 @@
-use crate::utils::acquire::{BaseKey, ClientAccess, CodeMaoClient, HTTPStatus, HttpMethod, MewResult};
+use crate::utils::acquire::{
+    BaseKey, ClientAccess, CodeMaoClient, HTTPStatus, HttpMethod, MewResult,
+};
 use log::debug;
 use serde_json::{Value, json};
 
@@ -19,19 +21,21 @@ impl OverseaDataClient {
     /// 获取 Tiger 账号信息列表
     pub fn fetch_tiger_accounts(&self) -> MewResult<Value> {
         debug!("获取海外 Tiger 账号信息");
-        self.send_and_parse(
-            self.client
-                .build_request(HttpMethod::Get, "/tiger/accounts", Some(BaseKey::CodeGame)),
-        )
+        self.send_and_parse(self.client.build_request(
+            HttpMethod::Get,
+            "/tiger/accounts",
+            Some(BaseKey::CodeGame),
+        ))
     }
 
     /// 获取海外平台配置信息
     pub fn fetch_platform_config(&self) -> MewResult<Value> {
         debug!("获取海外平台配置");
-        self.send_and_parse(
-            self.client
-                .build_request(HttpMethod::Get, "/config", Some(BaseKey::CodeGame)),
-        )
+        self.send_and_parse(self.client.build_request(
+            HttpMethod::Get,
+            "/config",
+            Some(BaseKey::CodeGame),
+        ))
     }
 }
 

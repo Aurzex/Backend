@@ -746,64 +746,64 @@ impl DataQuery {
         }
 
         // 再按 chunk=8 并行提取评论;每线程维护本地 map,按线程顺序合并
-        let results: Vec<
-            Result<HashMap<String, (String, String, Vec<String>, i32)>, DataQueryError>,
-        > = thread::scope(|s| {
-            let mut handles = Vec::new();
-            for chunk in works.chunks(8) {
-                handles.push(s.spawn(move || {
-                    let mut local_map: HashMap<String, (String, String, Vec<String>, i32)> =
-                        HashMap::new();
-                    for work in chunk {
-                        if let Some(work_id) =
-                            work.get("work_id").and_then(serde_json::Value::as_i64)
-                        {
-                            let comment_stream = self.stream_detailed_comments(
-                                CommentSource::Work,
-                                i32::try_from(work_id).unwrap_or(0),
-                                Some(20),
-                            )?;
-                            for comment_result in comment_stream {
-                                let comment = comment_result?;
-                                let user_id = comment.get("user_id").and_then(|v| {
-                                    if v.is_number() {
-                                        Some(v.to_string())
-                                    } else {
-                                        v.as_str().map(std::string::ToString::to_string)
-                                    }
-                                });
-                                let content = comment
-                                    .get("content")
-                                    .and_then(|c| c.as_str())
-                                    .map(std::string::ToString::to_string);
-                                let nickname = comment
-                                    .get("nickname")
-                                    .and_then(|n| n.as_str())
-                                    .map(std::string::ToString::to_string);
+        type UserCommentAggregate = (String, String, Vec<String>, i32);
+        let results: Vec<Result<HashMap<String, UserCommentAggregate>, DataQueryError>> =
+            thread::scope(|s| {
+                let mut handles = Vec::new();
+                for chunk in works.chunks(8) {
+                    handles.push(s.spawn(move || {
+                        let mut local_map: HashMap<String, (String, String, Vec<String>, i32)> =
+                            HashMap::new();
+                        for work in chunk {
+                            if let Some(work_id) =
+                                work.get("work_id").and_then(serde_json::Value::as_i64)
+                            {
+                                let comment_stream = self.stream_detailed_comments(
+                                    CommentSource::Work,
+                                    i32::try_from(work_id).unwrap_or(0),
+                                    Some(20),
+                                )?;
+                                for comment_result in comment_stream {
+                                    let comment = comment_result?;
+                                    let user_id = comment.get("user_id").and_then(|v| {
+                                        if v.is_number() {
+                                            Some(v.to_string())
+                                        } else {
+                                            v.as_str().map(std::string::ToString::to_string)
+                                        }
+                                    });
+                                    let content = comment
+                                        .get("content")
+                                        .and_then(|c| c.as_str())
+                                        .map(std::string::ToString::to_string);
+                                    let nickname = comment
+                                        .get("nickname")
+                                        .and_then(|n| n.as_str())
+                                        .map(std::string::ToString::to_string);
 
-                                if let (Some(uid), Some(cont), Some(nick)) =
-                                    (user_id, content, nickname)
-                                {
-                                    let entry = local_map
-                                        .entry(uid.clone())
-                                        .or_insert_with(|| (uid, nick, Vec::new(), 0));
-                                    entry.2.push(cont);
-                                    entry.3 += 1;
+                                    if let (Some(uid), Some(cont), Some(nick)) =
+                                        (user_id, content, nickname)
+                                    {
+                                        let entry = local_map
+                                            .entry(uid.clone())
+                                            .or_insert_with(|| (uid, nick, Vec::new(), 0));
+                                        entry.2.push(cont);
+                                        entry.3 += 1;
+                                    }
                                 }
                             }
                         }
-                    }
-                    Ok(local_map)
-                }));
-            }
-            handles
-                .into_iter()
-                .map(|handle| match handle.join() {
-                    Ok(r) => r,
-                    Err(_) => Err(DataQueryError::ParseError("评论聚合线程 panic".into())),
-                })
-                .collect()
-        });
+                        Ok(local_map)
+                    }));
+                }
+                handles
+                    .into_iter()
+                    .map(|handle| match handle.join() {
+                        Ok(r) => r,
+                        Err(_) => Err(DataQueryError::ParseError("评论聚合线程 panic".into())),
+                    })
+                    .collect()
+            });
 
         // 按线程顺序合并;任一线程出错则返回第一个(线程顺序上的)错误
         let mut user_comment_map: HashMap<String, (String, String, Vec<String>, i32)> =

@@ -173,20 +173,22 @@ impl CoconutCloud {
     pub fn clear_dictionary(&self, dict_id: &str) -> MewResult<Value> {
         debug!("清空云字典: dict={}", dict_id);
         let endpoint = format!("/coconut/webdb/try/dict/clear/{}", dict_id);
-        self.send_and_parse(
-            self.client
-                .build_request(HttpMethod::Delete, &endpoint, Some(BaseKey::Creation)),
-        )
+        self.send_and_parse(self.client.build_request(
+            HttpMethod::Delete,
+            &endpoint,
+            Some(BaseKey::Creation),
+        ))
     }
 
     /// 获取云字典的所有键
     pub fn get_dictionary_keys(&self, dict_id: &str) -> MewResult<Value> {
         debug!("获取云字典所有键: dict={}", dict_id);
         let endpoint = format!("/coconut/webdb/try/dict/{}/keys", dict_id);
-        self.send_and_parse(
-            self.client
-                .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation)),
-        )
+        self.send_and_parse(self.client.build_request(
+            HttpMethod::Get,
+            &endpoint,
+            Some(BaseKey::Creation),
+        ))
     }
 
     /// 获取云字典中指定键的值
@@ -272,10 +274,11 @@ impl CoconutCloud {
     pub fn clear_table(&self, table_id: &str) -> MewResult<Value> {
         debug!("清空云数据表: table={}", table_id);
         let endpoint = format!("/coconut/clouddb/v2/runtime/{}/clear", table_id);
-        self.send_and_parse(
-            self.client
-                .build_request(HttpMethod::Put, &endpoint, Some(BaseKey::Creation)),
-        )
+        self.send_and_parse(self.client.build_request(
+            HttpMethod::Put,
+            &endpoint,
+            Some(BaseKey::Creation),
+        ))
     }
 
     /// 获取云数据表的行数

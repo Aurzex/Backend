@@ -376,7 +376,9 @@ impl KittyAuth for KittyIdentityManager {
     /// 切换使用 `Release` 存储,确保之前的 token 写入对后续 `current_token` 可见
     /// Blanky 可以无条件切换(不需要令牌),其他身份必须已持有令牌
     fn switch_identity(&self, identity: Catsona) -> MewResult<()> {
-        if identity != Catsona::Blanky && self.token_bowl.read().unwrap()[identity.index()].is_none() {
+        if identity != Catsona::Blanky
+            && self.token_bowl.read().unwrap()[identity.index()].is_none()
+        {
             return Err(MewError::Auth(format!(
                 "No token for identity {:?}",
                 identity
