@@ -376,9 +376,7 @@ impl KittyAuth for KittyIdentityManager {
     /// 切换使用 `Release` 存储,确保之前的 token 写入对后续 `current_token` 可见
     /// Blanky 可以无条件切换(不需要令牌),其他身份必须已持有令牌
     fn switch_identity(&self, identity: Catsona) -> MewResult<()> {
-        if identity != Catsona::Blanky
-            && self.token_bowl.read().unwrap()[identity.index()].is_none()
-        {
+        if identity != Catsona::Blanky && self.token_bowl.read().unwrap()[identity.index()].is_none() {
             return Err(MewError::Auth(format!(
                 "No token for identity {:?}",
                 identity
@@ -1217,8 +1215,17 @@ impl PaginatedIter {
     // 内部请求逻辑
 
     /// 构造指定页的请求参数:基础参数 + 分页参数
+    /// 过滤与分页键同名的基础参数,避免重复键(服务端对重复键的取值框架相关)
     fn build_params(&self, page: usize) -> Vec<(String, String)> {
-        let mut params = self.base_params.clone();
+        let mut params: Vec<(String, String)> = self
+            .base_params
+            .iter()
+            .filter(|(k, _)| {
+                Some(k.as_str()) != self.config.amount_key.as_deref()
+                    && Some(k.as_str()) != self.config.offset_key.as_deref()
+            })
+            .cloned()
+            .collect();
         if let Some(key) = &self.config.amount_key {
             params.push((key.clone(), self.config.page_size.to_string()));
         }
@@ -1347,8 +1354,9 @@ impl PaginatedIter {
                 return Some(Ok(item));
             }
 
-            // 已知总数且已取完,则不再请求下一页;总数未知时必须尝试
-            if total.is_some_and(|t| (current_page + 1) * self.config.page_size >= t) {
+            // 已知总数且累计产出已达总数,则不再请求下一页;总数未知时必须尝试。
+            // 按累计产出而非 (页号+1)*页大小 判定:页被服务端截断/过滤时不再提前终止
+            if total.is_some_and(|t| self.yielded >= t) {
                 return None;
             }
 
@@ -1815,13 +1823,26 @@ pub trait ClientAccess {
 
     /// 发送请求并检查响应状态码是否为预期值
     fn check_status(&self, builder: KittyRequestBuilder, expected: HTTPStatus) -> MewResult<bool> {
-        let response = builder.send()?;
-        Ok(response.status() == expected as u16)
+        let response = builder.with_error_body().send()?;
+        let status = response.status();
+        if status == expected as u16 {
+            return Ok(true);
+        }
+        if status.is_client_error() || status.is_server_error() {
+            let body = response.into_body().read_to_string().unwrap_or_default();
+            return Err(MewError::Other(format!("HTTP {status}: {body}")));
+        }
+        Ok(false)
     }
 
     /// 发送请求并将响应解析为 JSON
     fn send_and_parse(&self, builder: KittyRequestBuilder) -> MewResult<Value> {
-        let response = builder.send()?;
+        let response = builder.with_error_body().send()?;
+        let status = response.status();
+        if status.is_client_error() || status.is_server_error() {
+            let body = response.into_body().read_to_string().unwrap_or_default();
+            return Err(MewError::Other(format!("HTTP {status}: {body}")));
+        }
         self.client().response_to_json(response)
     }
 
@@ -1832,11 +1853,16 @@ pub trait ClientAccess {
         return_data: bool,
         expected: HTTPStatus,
     ) -> MewResult<Value> {
-        let response = builder.send()?;
+        let response = builder.with_error_body().send()?;
+        let status = response.status();
+        if status.is_client_error() || status.is_server_error() {
+            let body = response.into_body().read_to_string().unwrap_or_default();
+            return Err(MewError::Other(format!("HTTP {status}: {body}")));
+        }
         if return_data {
             self.client().response_to_json(response)
         } else {
-            Ok(serde_json::json!({ "success": response.status() == expected as u16 }))
+            Ok(serde_json::json!({ "success": status == expected as u16 }))
         }
     }
 }

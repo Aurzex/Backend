@@ -1,5 +1,6 @@
 use crate::utils::acquire::{
     BaseKey, Catsona, ClientAccess, CodeMaoClient, DEFAULT_PID, HttpMethod, MewError, MewResult,
+    current_timestamp_13,
 };
 use crate::utils::data::{CodeMaoFile, PathConfig, value_to_i64};
 use log::{debug, warn};
@@ -283,14 +284,15 @@ pub fn global_auth_manager() -> Arc<AuthManager> {
 
 // 辅助函数
 
-/// 通过任意 `ClientProvider` 获取服务器当前时间戳(毫秒)
+/// 通过任意 `ClientProvider` 获取服务器当前时间戳(秒)
 pub fn fetch_current_timestamp_with_provider(provider: &dyn ClientProvider) -> MewResult<i64> {
     let client = provider.client();
     let response = client
         .build_request(HttpMethod::Get, "/coconut/clouddb/currentTime", None)
         .send()?;
     let json = client.response_to_json(response)?;
-    Ok(json["data"].as_i64().unwrap_or(0))
+    // 服务端可能返回数字或数字字符串,统一经 value_to_i64 解析
+    Ok(value_to_i64(&json["data"]).unwrap_or(0))
 }
 
 /// 使用全局客户端获取当前时间戳
@@ -528,16 +530,13 @@ impl AuthProcessor {
         password: &str,
         pid: &str,
     ) -> MewResult<Value> {
-        let timestamp = self.fetch_current_timestamp()?;
+        // 登录票据时间戳使用本地毫秒(与官方客户端一致),不依赖服务器时钟
+        let timestamp = current_timestamp_13() as i64;
         let ticket_response = self.get_login_ticket(identity, timestamp, pid)?;
         let ticket = ticket_response["ticket"]
             .as_str()
             .ok_or_else(|| MewError::Auth("无法获取ticket".into()))?;
         self.get_login_security_info(identity, password, ticket, pid)
-    }
-
-    fn fetch_current_timestamp(&self) -> MewResult<i64> {
-        fetch_current_timestamp_with_provider(&*self.client_provider)
     }
 }
 
@@ -607,7 +606,11 @@ impl LoginHandler {
                     Err(MewError::Auth("v0 密码登录失败:未获取到token".into()))
                 }
             }
-            Err(e) => Err(MewError::Auth(format!("v0 登录失败: {}", e))),
+            Err(e) => match e {
+                // 保留底层错误变体(Http/Json/Io 等),便于调用方区分凭据与网络错误
+                MewError::Auth(msg) => Err(MewError::Auth(format!("v0 登录失败: {msg}"))),
+                other => Err(other),
+            },
         }
     }
 
@@ -639,7 +642,11 @@ impl LoginHandler {
                     Err(MewError::Auth("v1 密码登录失败:未获取到token".into()))
                 }
             }
-            Err(e) => Err(MewError::Auth(format!("v1 登录失败: {}", e))),
+            Err(e) => match e {
+                // 保留底层错误变体(Http/Json/Io 等),便于调用方区分凭据与网络错误
+                MewError::Auth(msg) => Err(MewError::Auth(format!("v1 登录失败: {msg}"))),
+                other => Err(other),
+            },
         }
     }
 
@@ -671,7 +678,11 @@ impl LoginHandler {
                     Err(MewError::Auth("v2 密码登录失败:未获取到token".into()))
                 }
             }
-            Err(e) => Err(MewError::Auth(format!("v2 登录失败: {}", e))),
+            Err(e) => match e {
+                // 保留底层错误变体(Http/Json/Io 等),便于调用方区分凭据与网络错误
+                MewError::Auth(msg) => Err(MewError::Auth(format!("v2 登录失败: {msg}"))),
+                other => Err(other),
+            },
         }
     }
 
@@ -735,7 +746,7 @@ impl LoginHandler {
             return Err(MewError::Auth("管理员密码不能为空".into()));
         }
         if captcha.trim().is_empty() {
-            return Err(MewError::Auth("验证码不能为空".into()));
+            return Err(MewError::Auth("验证码不能为空 (Captcha)".into()));
         }
 
         let response = self
@@ -766,9 +777,9 @@ impl LoginHandler {
             "Admin-Password-Error@Community-Admin" | "Param-Invalid@Common" => {
                 Err(MewError::Auth("管理员用户名或密码错误".into()))
             }
-            "Captcha-Error@Community-Admin" | "Captcha-Expired@Community-Admin" => {
-                Err(MewError::Auth(format!("验证码错误或已过期: {}", error_msg)))
-            }
+            "Captcha-Error@Community-Admin" | "Captcha-Expired@Community-Admin" => Err(
+                MewError::Auth(format!("验证码错误或已过期 (Captcha): {error_msg}")),
+            ),
             _ => Err(MewError::Auth(format!("管理员登录失败: {}", error_msg))),
         }
     }
@@ -1014,12 +1025,11 @@ impl AuthManager {
         };
 
         if result.success && result.auth_details.is_none() {
-            // 仅在尚未获取管理员详情时才请求
+            // 仅在尚未获取管理员详情时才请求;
+            // 与 handle_admin_token 一致,保存完整响应形态(AdminInfo::from_details 依赖)
             match self.processor.fetch_admin_details() {
                 Ok(dashboard) => {
-                    if let Some(admin_data) = dashboard.get("admin").cloned() {
-                        result = result.with_auth_details(admin_data);
-                    }
+                    result = result.with_auth_details(dashboard);
                 }
                 Err(e) => warn!("获取管理员详情失败: {}", e),
             }
@@ -1185,7 +1195,12 @@ impl CloudAuthenticator {
         let mut hasher = Sha256::new();
         hasher.update(sign_str.as_bytes());
         let result = hasher.finalize();
-        let sign: String = result.iter().map(|b| format!("{:02X}", b)).collect();
+        // 预分配一次,避免逐字节堆分配;保持大写(已实测与官方客户端一致)
+        let mut sign = String::with_capacity(64);
+        use std::fmt::Write as _;
+        for b in result.iter() {
+            let _ = write!(sign, "{b:02X}");
+        }
 
         let auth_json = json!({
             "sign": sign,

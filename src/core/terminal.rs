@@ -482,39 +482,49 @@ impl ReportConsole {
         }
         match Self::ask_action(ui, processor, item, &view) {
             ActionChoice::Apply(key) => {
-                processor.apply_action(item, &key, admin_id)?;
-                ui.info(&format!("  => 已处理: {}", action_name(&key)));
-                let mut st = RunStats::default();
-                st.record(&key, 1);
-                // 同类型批量应用(本 chunk 内未决策项;官方内容走自动通过,不纳入批量)
-                let rest: Vec<usize> = (idx + 1..chunk.len())
-                    .filter(|&j| !decided.contains(&j))
-                    .filter(|&j| {
-                        ReportProcessor::item_report_type(&chunk[j])
-                            == ReportProcessor::item_report_type(item)
-                            && !ctx.official[j]
-                    })
-                    .collect();
-                if !rest.is_empty()
-                    && ui.choose(
-                        &format!("是否对同类型剩余 {} 条应用相同动作? (Y/N)", rest.len()),
-                        &["Y", "N"],
-                    ) == "Y"
-                {
-                    let mut ok = 0i64;
-                    for &j in &rest {
-                        match processor.apply_action(&chunk[j], &key, admin_id) {
-                            Ok(()) => ok += 1,
-                            Err(e) => ui.error(&format!("批量应用失败: {}", e)),
+                match processor.apply_action(item, &key, admin_id) {
+                    Ok(()) => {
+                        ui.info(&format!("  => 已处理: {}", action_name(&key)));
+                        let mut st = RunStats::default();
+                        st.record(&key, 1);
+                        // 同类型批量应用(本 chunk 内未决策项;官方内容走自动通过,不纳入批量)
+                        let rest: Vec<usize> = (idx + 1..chunk.len())
+                            .filter(|&j| !decided.contains(&j))
+                            .filter(|&j| {
+                                ReportProcessor::item_report_type(&chunk[j])
+                                    == ReportProcessor::item_report_type(item)
+                                    && !ctx.official[j]
+                            })
+                            .collect();
+                        if !rest.is_empty()
+                            && ui.choose(
+                                &format!("是否对同类型剩余 {} 条应用相同动作? (Y/N)", rest.len()),
+                                &["Y", "N"],
+                            ) == "Y"
+                        {
+                            let mut ok = 0i64;
+                            for &j in &rest {
+                                match processor.apply_action(&chunk[j], &key, admin_id) {
+                                    Ok(()) => {
+                                        ok += 1;
+                                        decided.insert(j);
+                                    }
+                                    Err(e) => ui.error(&format!("批量应用失败: {}", e)),
+                                }
+                            }
+                            st.record(&key, ok);
+                            if ok > 0 {
+                                ui.info(&format!("  => 批量应用 {} 条", ok));
+                            }
                         }
-                        decided.insert(j);
+                        Ok(st)
                     }
-                    st.record(&key, ok);
-                    if ok > 0 {
-                        ui.info(&format!("  => 批量应用 {} 条", ok));
+                    Err(e) => {
+                        // 单条失败仅记录,不中断本会话其余举报(与批量路径语义一致)
+                        ui.error(&format!("处理失败: {}", e));
+                        Ok(RunStats::default())
                     }
                 }
-                Ok(st)
             }
             ActionChoice::Skip => {
                 processor.mark_decided(item);

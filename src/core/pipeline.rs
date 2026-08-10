@@ -289,7 +289,12 @@ pub(crate) fn apply_action_by_key(
     let resolution = action
         .resolution
         .ok_or_else(|| ProcessorError::Processing(format!("动作 {} 为非执行类动作", action_key)))?;
-    apply_action_by_method(&config.handle_method, report_id, admin_id, resolution)?;
+    // 服务端未确认(状态码非预期)时返回错误,避免记录被静默标记为已处理
+    if !apply_action_by_method(&config.handle_method, report_id, admin_id, resolution)? {
+        return Err(ProcessorError::Processing(format!(
+            "服务端未确认动作(状态码非预期): report_id={report_id}"
+        )));
+    }
     Ok(())
 }
 
@@ -823,10 +828,8 @@ impl ViolationChecker {
     /// 用学生账号自动举报违规内容,返回成功数(纯函数,不交互;账号缺失时返回错误)
     pub(crate) fn auto_report(&self, violations: &[String]) -> Result<usize, ProcessorError> {
         // 全程持网络锁:登录与举报会切换全局身份,禁止与预取线程的在途请求交错
-        let _guard = self
-            .network_lock
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _guard = self.network_lock.lock().unwrap();
+
         let mut multi_account = MultiAccount::new();
         let password_path = PathConfig::global().password_file_path();
         if !password_path.exists() {
@@ -880,12 +883,21 @@ impl ViolationChecker {
         account_usage: &mut HashMap<String, usize>,
         idx: usize,
         current_idx: &mut usize,
+        last_login: &mut Option<String>,
     ) -> bool {
         let (user, pass) = accounts[idx].clone();
+        // 同一账号刚登录过且网络锁全程持有:令牌槽未被其他线程切换,跳过重复登录
+        if last_login.as_deref() == Some(user.as_str()) {
+            return true;
+        }
         match Self::login_student(&user, &pass) {
-            Ok(()) => true,
+            Ok(()) => {
+                *last_login = Some(user.clone());
+                true
+            }
             Err(e) => {
                 warn!("账号 {} 登录失败: {},移除", user, e);
+                *last_login = None;
                 accounts.remove(idx);
                 account_usage.remove(&user);
                 if idx < *current_idx && *current_idx > 0 {
@@ -912,6 +924,8 @@ impl ViolationChecker {
         let mut success = 0usize;
         let mut account_usage: HashMap<String, usize> = HashMap::new();
         let mut current_idx = 0usize;
+        // 连续举报同一账号时跳过重复登录(网络锁全程持有,身份不会被他线程切换)
+        let mut last_login: Option<String> = None;
 
         for (idx, violation) in violations_vec.iter().enumerate() {
             let Some(chosen_idx) =
@@ -925,6 +939,7 @@ impl ViolationChecker {
                 &mut account_usage,
                 chosen_idx,
                 &mut current_idx,
+                &mut last_login,
             ) {
                 continue;
             }
@@ -938,7 +953,9 @@ impl ViolationChecker {
                 );
             } else {
                 success += 1;
-                *account_usage.entry(accounts[chosen_idx].0.clone()).or_insert(0) += 1;
+                *account_usage
+                    .entry(accounts[chosen_idx].0.clone())
+                    .or_insert(0) += 1;
                 info!(
                     "[{}/{}] 举报成功: {}",
                     idx + 1,

@@ -180,6 +180,69 @@ impl Default for CommentQueryBuilder {
     }
 }
 
+/// 分块并行映射评论流:每块至多 8 条主评论,仅论坛来源在线程内并行执行映射
+/// (其余来源回复内联、无网络开销,串行更省)。输出保持原顺序,错误项透传。
+fn map_comments_chunked<E, T, F>(
+    source: CommentSource,
+    mut raw: impl Iterator<Item = Result<Value, E>>,
+    f: F,
+) -> impl Iterator<Item = Result<T, E>>
+where
+    E: Send,
+    T: Send,
+    F: Fn(&Value) -> Vec<Result<T, E>> + Sync,
+{
+    const CHUNK: usize = 8;
+    let parallel = source == CommentSource::Forum;
+    let mut buf: Vec<Result<Value, E>> = Vec::with_capacity(CHUNK);
+    std::iter::from_fn(move || {
+        // 填满一块(或流结束)
+        while buf.len() < CHUNK {
+            match raw.next() {
+                Some(item) => buf.push(item),
+                None => break,
+            }
+        }
+        if buf.is_empty() {
+            return None;
+        }
+        let chunk = std::mem::take(&mut buf);
+        let items = if parallel && chunk.len() > 1 {
+            // 错误项保留原位,有效值在线程中并行映射后按原顺序合并
+            let mut slots: Vec<Option<Vec<Result<T, E>>>> = chunk.iter().map(|_| None).collect();
+            std::thread::scope(|s| {
+                for (slot, item) in slots.iter_mut().zip(&chunk) {
+                    if let Ok(v) = item {
+                        // 借用捕获(f 仅需 Sync);move 会按值捕获 F,要求 Send 且与顺序路径冲突
+                        let _ = s.spawn(|| {
+                            *slot = Some(f(v));
+                        });
+                    }
+                }
+            });
+            chunk
+                .into_iter()
+                .zip(slots)
+                .flat_map(|(item, slot)| match item {
+                    Err(e) => vec![Err(e)],
+                    Ok(_) => slot.unwrap_or_default(),
+                })
+                .collect()
+        } else {
+            let mut out = Vec::new();
+            for item in chunk {
+                match item {
+                    Ok(v) => out.extend(f(&v)),
+                    Err(e) => out.push(Err(e)),
+                }
+            }
+            out
+        };
+        Some(items)
+    })
+    .flatten()
+}
+
 impl CommentQueryBuilder {
     pub fn new() -> Self {
         Self {
@@ -296,12 +359,7 @@ impl CommentQueryBuilder {
                 .and_then(serde_json::Value::as_i64)
         };
 
-        let mapped = raw_stream.flat_map(move |comment_result| {
-            // 处理错误:直接返回包含单个 Err 的迭代器
-            let comment = match comment_result {
-                Ok(v) => v,
-                Err(e) => return vec![Err(e)].into_iter(),
-            };
+        let mapped = map_comments_chunked(source, raw_stream, move |comment| {
             let mut ids: Vec<Result<String, DataQueryError>> = Vec::new();
 
             // 主评论用户
@@ -319,18 +377,20 @@ impl CommentQueryBuilder {
                 .get("id")
                 .and_then(serde_json::Value::as_i64)
                 .unwrap_or(0);
-            let comment_obj = comment.as_object().cloned().unwrap_or_default();
-            for reply in Self::reply_items(source, comment_id, &comment_obj) {
-                match reply {
-                    Ok(reply_obj) => {
-                        if let Some(uid) = extract_reply_user_id(&reply_obj) {
-                            ids.push(Ok(uid.to_string()));
+            // 借用而非克隆:仅读取回复无需整对象深拷贝
+            if let Some(comment_obj) = comment.as_object() {
+                for reply in Self::reply_items(source, comment_id, comment_obj) {
+                    match reply {
+                        Ok(reply_obj) => {
+                            if let Some(uid) = extract_reply_user_id(&reply_obj) {
+                                ids.push(Ok(uid.to_string()));
+                            }
                         }
+                        Err(e) => ids.push(Err(e)),
                     }
-                    Err(e) => ids.push(Err(e)),
                 }
             }
-            ids.into_iter()
+            ids
         });
 
         Ok(Box::new(UniqueIter {
@@ -346,23 +406,18 @@ impl CommentQueryBuilder {
             .ok_or_else(|| DataQueryError::InvalidSource("未设置来源".into()))?;
         let raw_stream = self.build_raw_stream()?;
 
-        let mapped = raw_stream.flat_map(move |comment_result| {
-            let comment = match comment_result {
-                Ok(v) => v,
-                Err(e) => return vec![Err(e)].into_iter(),
-            };
+        let mapped = map_comments_chunked(source, raw_stream, move |comment| {
             let mut ids: Vec<Result<String, DataQueryError>> = Vec::new();
-            let comment_id = comment
-                .get("id")
-                .and_then(serde_json::Value::as_i64)
-                .unwrap_or(0);
+            if let Some(comment_obj) = comment.as_object() {
+                let comment_id = comment_obj
+                    .get("id")
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(0);
 
-            if comment_id != 0 {
-                ids.push(Ok(comment_id.to_string()));
-            }
+                if comment_id != 0 {
+                    ids.push(Ok(comment_id.to_string()));
+                }
 
-            let comment_obj = comment.as_object();
-            if let Some(comment_obj) = comment_obj {
                 for reply in Self::reply_items(source, comment_id, comment_obj) {
                     match reply {
                         Ok(reply_obj) => {
@@ -376,7 +431,7 @@ impl CommentQueryBuilder {
                     }
                 }
             }
-            ids.into_iter()
+            ids
         });
 
         Ok(Box::new(UniqueIter {
@@ -405,11 +460,11 @@ impl CommentQueryBuilder {
                 .and_then(serde_json::Value::as_i64)
         };
 
-        let mapped = raw_stream.map(move |comment_result| {
-            let comment = comment_result?;
-            let comment_obj = comment
-                .as_object()
-                .ok_or_else(|| DataQueryError::ParseError("评论不是对象".into()))?;
+        let mapped = map_comments_chunked(source, raw_stream, move |comment| {
+            let comment_obj = match comment.as_object() {
+                Some(obj) => obj,
+                None => return vec![Err(DataQueryError::ParseError("评论不是对象".into()))],
+            };
             let comment_id = comment_obj
                 .get("id")
                 .and_then(serde_json::Value::as_i64)
@@ -462,7 +517,7 @@ impl CommentQueryBuilder {
                 Value::Array(replies.into_iter().map(Value::Object).collect()),
             );
 
-            Ok(comment_data)
+            vec![Ok(comment_data)]
         });
 
         Ok(Box::new(mapped))
@@ -610,7 +665,11 @@ impl DataQuery {
 
     /// 合并 Nemo 和 Web 来源的作品数据流
     pub fn stream_works_from_both_sources(&self, limit: i32) -> JsonObjIter {
-        let per_source_limit = Some(limit / 2);
+        if limit <= 0 {
+            return Box::new(std::iter::empty());
+        }
+        // 奇数 limit 时两源各取 (limit+1)/2,合并处再截断,保证恰好 limit 条
+        let per_source_limit = Some((limit + 1) / 2);
 
         let nemo_field_mapping: HashMap<&str, &str> = [
             ("work_id", "work_id"),
@@ -672,7 +731,7 @@ impl DataQuery {
         let nemo_stream = process_result(nemo_result, nemo_field_mapping);
         let web_stream = process_result(web_result, web_field_mapping);
 
-        Box::new(nemo_stream.chain(web_stream))
+        Box::new(nemo_stream.chain(web_stream).take(limit as usize))
     }
 
     /// 流式聚合:从新作品中收集用户评论并统计(按 chunk=8 有界并行提取,按作品顺序合并)

@@ -391,7 +391,6 @@ impl EduDataFetcher {
         self.client
             .build_paginated(endpoint)
             .with_base_key(BaseKey::Education)
-            .with_iter_param("page", "1")
             .with_page_size(page_size)
             .with_pagination_method(PaginationMethod::Page)
             .with_offset_key("page")
@@ -468,14 +467,11 @@ impl EduDataFetcher {
     /// 获取班级简要列表
     pub fn fetch_classrooms_simple(&self) -> MewResult<Value> {
         debug!("获取班级简要列表");
-        self.send_and_parse(
-            self.client
-                .build_request(
-                    HttpMethod::Get,
-                    "/edu/zone/classes/simple",
-                    Some(BaseKey::Education),
-                ),
-        )
+        self.send_and_parse(self.client.build_request(
+            HttpMethod::Get,
+            "/edu/zone/classes/simple",
+            Some(BaseKey::Education),
+        ))
     }
 
     /// 班级详细信息分页迭代器,可按名称搜索
@@ -516,7 +512,6 @@ impl EduDataFetcher {
         self.client
             .build_paginated("/edu/zone/students")
             .with_base_key(BaseKey::Education)
-            .with_iter_param("page", "1")
             .with_page_size(100)
             .with_iter_payload(data)
             .with_iter_method(HttpMethod::Post)
@@ -760,12 +755,12 @@ impl EduDataFetcher {
             .with_iter_param("topicType", "all")
             .with_iter_param("topicId", "all")
             .with_iter_param("tagId", "all")
-            .with_iter_param("page", "1")
-            .with_page_size(150)
+            .with_page_size(100)
+            .with_response_amount_key("limit")
             .with_pagination_method(PaginationMethod::Page)
             .with_offset_key("page")
             .with_amount_key("limit")
-            .with_limit(limit.unwrap_or(150));
+            .with_limit(limit.unwrap_or(100));
         paginated = Self::add_timestamp_to_paginated(paginated);
         paginated
     }

@@ -219,6 +219,8 @@ struct ChatInner {
     /// 发送端(读线程独占 WebSocket)
     tx: Mutex<Option<mpsc::Sender<Message>>>,
     read_join: Mutex<Option<JoinHandle<()>>>,
+    /// 串行化连接建立,避免并发 connect() 双建
+    connect_lock: Mutex<()>,
     session_id: Mutex<Option<String>>,
     search_session: Mutex<Option<String>>,
     user_id: Mutex<Option<i64>>,
@@ -281,6 +283,7 @@ impl ChatBuilder {
             completed_round: AtomicU64::new(0),
             tx: Mutex::new(None),
             read_join: Mutex::new(None),
+            connect_lock: Mutex::new(()),
             session_id: Mutex::new(None),
             search_session: Mutex::new(None),
             user_id: Mutex::new(None),
@@ -303,6 +306,8 @@ impl ChatClient {
         if self.inner.token.is_empty() {
             return Err(ChatError::MissingToken);
         }
+        // 检查与建立均在临界区内,避免并发 connect 双建连接
+        let _connect_guard = self.inner.connect_lock.lock().unwrap();
         if self.inner.connected.load(Ordering::Acquire) {
             return Ok(true);
         }
@@ -379,6 +384,11 @@ impl ChatClient {
         }
         if !self.wait_for_response(response_timeout) {
             return Err(ChatError::Timeout("回复超时".into()));
+        }
+        // 回复中途断连时收尾会清空 receiving,等待谓词立即通过;
+        // 此处校验连接,避免把半截回复当作成功返回
+        if !self.is_connected() {
+            return Err(ChatError::Timeout("连接已断开,回复不完整".into()));
         }
         Ok(self.current_response())
     }
@@ -932,7 +942,8 @@ fn read_loop(inner: Arc<ChatInner>, mut ws: Ws, rx: mpsc::Receiver<Message>) {
         inner.receiving.store(false, Ordering::Release);
     });
     *inner.tx.lock().unwrap() = None;
-    if was_connected {
+    // 主动 close() 已置 stopping,不触发虚假的断连错误回调
+    if was_connected && !inner.stopping.load(Ordering::Acquire) {
         info!("AI 对话连接已断开");
         emit_stream(&inner, "连接已断开", ChatEventType::Error);
     }

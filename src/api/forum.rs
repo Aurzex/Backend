@@ -143,7 +143,6 @@ impl ForumDataFetcher {
     ) -> PaginatedIter {
         self.client
             .build_paginated(endpoint)
-            .with_iter_param("page", "1")
             .with_page_size(page_size)
             .with_pagination_method(PaginationMethod::Page)
             .with_amount_key("limit")
@@ -211,19 +210,21 @@ impl ForumDataFetcher {
     /// 获取我的帖子/回复数量
     pub fn fetch_my_post_num(&self) -> MewResult<Value> {
         debug!("获取我的帖子数量");
-        self.send_and_parse(
-            self.client
-                .build_request(HttpMethod::Get, "/web/forums/posts/mine/count", None),
-        )
+        self.send_and_parse(self.client.build_request(
+            HttpMethod::Get,
+            "/web/forums/posts/mine/count",
+            None,
+        ))
     }
 
     /// 获取所有板块简要信息
     pub fn fetch_post_boards(&self) -> MewResult<Value> {
         debug!("获取所有板块信息");
-        self.send_and_parse(
-            self.client
-                .build_request(HttpMethod::Get, "/web/forums/boards/simples/all", None),
-        )
+        self.send_and_parse(self.client.build_request(
+            HttpMethod::Get,
+            "/web/forums/boards/simples/all",
+            None,
+        ))
     }
 
     /// 获取单个板块详细信息
@@ -236,10 +237,11 @@ impl ForumDataFetcher {
     /// 获取所有热门帖子 ID
     pub fn fetch_hot_posts_ids(&self) -> MewResult<Value> {
         debug!("获取热门帖子ID");
-        self.send_and_parse(
-            self.client
-                .build_request(HttpMethod::Get, "/web/forums/posts/hots/all", None),
-        )
+        self.send_and_parse(self.client.build_request(
+            HttpMethod::Get,
+            "/web/forums/posts/hots/all",
+            None,
+        ))
     }
 
     /// 获取顶部公告(默认 4 条)
@@ -281,10 +283,11 @@ impl ForumDataFetcher {
     /// 获取帖子举报原因列表
     pub fn fetch_report_reasons(&self) -> MewResult<Value> {
         debug!("获取举报原因列表");
-        self.send_and_parse(
-            self.client
-                .build_request(HttpMethod::Get, "/web/reports/posts/reasons/all", None),
-        )
+        self.send_and_parse(self.client.build_request(
+            HttpMethod::Get,
+            "/web/reports/posts/reasons/all",
+            None,
+        ))
     }
 
     /// 按标题搜索帖子分页迭代器

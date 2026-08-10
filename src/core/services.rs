@@ -220,10 +220,8 @@ impl ReportProcessor {
 
     /// 未处理与已处理总数(短时缓存;任何处理动作后自动失效,保证下次展示即时刷新)
     pub fn totals(&self) -> (i64, i64) {
-        let mut cache = self
-            .totals_cache
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut cache = self.totals_cache.lock().unwrap();
+
         if let Some(c) = cache.as_ref()
             && c.fresh()
         {
@@ -253,10 +251,7 @@ impl ReportProcessor {
 
     /// 使总数缓存失效,由处理动作调用,保证菜单展示即时刷新
     fn invalidate_totals(&self) {
-        self.totals_cache
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take();
+        self.totals_cache.lock().unwrap().take();
     }
 
     /// 举报类型选项 (类型键, 类型名),按名称排序
@@ -291,9 +286,8 @@ impl ReportProcessor {
             loop {
                 // 每次拉取持网络锁,避免与自动举报的身份切换交错
                 let chunk = {
-                    let _guard = lock
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    let _guard = lock.lock().unwrap();
+
                     chunks.next()
                 };
                 let Some(chunk) = chunk else { break };
@@ -412,7 +406,7 @@ impl ReportProcessor {
         // 标记已决策:本次会话内不再重列(即使 API 状态尚未刷新)
         self.batch_manager
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .unwrap()
             .mark_record_processed(&report_id.to_string());
         Ok(())
     }
@@ -494,7 +488,7 @@ impl ReportProcessor {
                             count += 1;
                             self.batch_manager
                                 .lock()
-                                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                .unwrap()
                                 .mark_record_processed(&report_id.to_string());
                         }
                         Ok(false) => log_error!("一键通过返回 false (id={})", report_id),
@@ -517,23 +511,24 @@ impl ReportProcessor {
     pub fn group_saved_action(&self, group: &BatchGroup) -> Option<String> {
         self.batch_manager
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .unwrap()
             .get_batch_action(&group.group_type, &group.group_key)
     }
 
     /// 保存批量组动作(同内容后续遇到时自动应用)
     pub fn save_group_action(&self, group: &BatchGroup, action: &str) {
-        self.batch_manager
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .save_batch_action(&group.group_type, &group.group_key, action);
+        self.batch_manager.lock().unwrap().save_batch_action(
+            &group.group_type,
+            &group.group_key,
+            action,
+        );
     }
 
     /// 按分组键查询本次会话已保存的动作(供 UI 展示同内容历史处理)
     pub fn saved_action_for_key(&self, group_type: &str, group_key: &str) -> Option<String> {
         self.batch_manager
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .unwrap()
             .get_batch_action(group_type, group_key)
     }
 
@@ -548,7 +543,7 @@ impl ReportProcessor {
         if let Ok(report_id) = config.get_report_id(item) {
             self.batch_manager
                 .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .unwrap()
                 .mark_record_processed(&report_id.to_string());
         }
     }
@@ -751,10 +746,7 @@ impl ReportProcessor {
         let mut non_group = Vec::new();
 
         // 锁在循环外一次性持有:本函数内无嵌套加锁,guard 可跨迭代复用
-        let batch_guard = self
-            .batch_manager
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let batch_guard = self.batch_manager.lock().unwrap();
 
         // chunk 为自有所有权:条目直接移动进组,避免逐条深拷贝 JSON
         for item in chunk {

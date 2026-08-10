@@ -919,8 +919,7 @@ impl CocoWorkManager {
         self.client
             .build_paginated("/coconut/web/widget/list")
             .with_iter_param("TIME", timestamp.to_string())
-            .with_iter_param("current_page", "1")
-            .with_iter_param("page_size", "100")
+            .with_page_size(100)
             .with_total_key("data.total")
             .with_data_key("data.items")
             .with_pagination_method(PaginationMethod::Page)
@@ -1101,8 +1100,7 @@ impl CollaborationManager {
             .build_paginated(&endpoint)
             .with_base_key(BaseKey::Collaboration)
             .with_iter_param("TIME", timestamp.to_string())
-            .with_iter_param("current_page", "1")
-            .with_iter_param("page_size", "100")
+            .with_page_size(100)
             .with_total_key("data.total")
             .with_data_key("data.items")
             .with_pagination_method(PaginationMethod::Page)
@@ -1154,8 +1152,7 @@ impl CollaborationManager {
             .build_paginated("/coll/coco/coll_works")
             .with_base_key(BaseKey::Collaboration)
             .with_iter_param("TIME", timestamp.to_string())
-            .with_iter_param("current_page", "1")
-            .with_iter_param("page_size", "40")
+            .with_page_size(40)
             .with_total_key("data.total")
             .with_data_key("data.items")
             .with_pagination_method(PaginationMethod::Page)
@@ -2122,7 +2119,8 @@ impl WorkDataFetcher {
         limit: Option<usize>,
     ) -> PaginatedIter {
         debug!("获取KN回收站迭代器");
-        self.build_paginated("/neko/works/v2/list/user", 24, limit.unwrap_or(24))
+        self.build_paginated("/neko/works/v2/list/user", 15, limit.unwrap_or(15))
+            .with_response_amount_key("page_size")
             .with_iter_param("name", name.unwrap_or(""))
             .with_iter_param("status", "-99")
             .with_iter_param(
@@ -2143,7 +2141,8 @@ impl WorkDataFetcher {
         limit: Option<usize>,
     ) -> PaginatedIter {
         debug!("搜索KN作品: name={}", name);
-        self.build_paginated("/neko/works/v2/list/user", 24, limit.unwrap_or(24))
+        self.build_paginated("/neko/works/v2/list/user", 15, limit.unwrap_or(15))
+            .with_response_amount_key("page_size")
             .with_iter_param("name", name)
             .with_iter_param("status", status.unwrap_or(1).to_string())
             .with_iter_param(
@@ -2161,7 +2160,8 @@ impl WorkDataFetcher {
         limit: Option<usize>,
     ) -> PaginatedIter {
         debug!("搜索已发布KN作品: name={}", name);
-        self.build_paginated("/neko/works/list/user/published", 24, limit.unwrap_or(24))
+        self.build_paginated("/neko/works/list/user/published", 15, limit.unwrap_or(15))
+            .with_response_amount_key("page_size")
             .with_iter_param("name", name)
             .with_iter_param(
                 "work_business_classify",

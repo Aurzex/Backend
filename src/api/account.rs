@@ -429,9 +429,9 @@ impl AccountManager {
     /// 获取用户协议列表
     pub fn fetch_agreements(&self) -> MewResult<Value> {
         debug!("获取用户协议");
-        let builder = self
-            .client
-            .build_request(HttpMethod::Get, "/tiger/v3/web/accounts/agreements", None);
+        let builder =
+            self.client
+                .build_request(HttpMethod::Get, "/tiger/v3/web/accounts/agreements", None);
         self.send_and_parse(builder)
     }
 
@@ -648,7 +648,7 @@ impl AccountManager {
     }
 
     /// 更新手机号码
-    pub fn update_phone_number(&self, captcha: i32, phonenum: &str) -> MewResult<Value> {
+    pub fn update_phone_number(&self, captcha: &str, phonenum: &str) -> MewResult<Value> {
         debug!("更新手机号: phonenum={}", phonenum);
         let payload = json!({
             "phone_number": phonenum,

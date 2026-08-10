@@ -277,10 +277,8 @@ impl ReportTypeRegistry {
     /// 获取(或按举报类型缓存)动作选项:提示,合法键与有序动作列表
     /// 缓存避免交互处理时每条记录重建提示与动作集合
     pub(crate) fn action_options(&self, report_type: &str) -> Arc<ActionOptions> {
-        let mut cache = self
-            .action_cache
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut cache = self.action_cache.lock().unwrap();
+
         if let Some(cached) = cache.get(report_type) {
             return Arc::clone(cached);
         }
@@ -386,7 +384,7 @@ impl ReportFetcher {
                         status,
                         None,
                         None,
-                        Some(100),
+                        None,
                     ))
                 },
             );
@@ -436,7 +434,7 @@ impl ReportFetcher {
                         status,
                         None,
                         None,
-                        Some(100),
+                        None,
                     ))
                 },
             );
@@ -472,13 +470,10 @@ impl ReportFetcher {
                     )
                 },
                 |status| {
-                    gen_from(WhaleReportFetcher::new().fetch_post_reports_gen(
-                        status,
-                        None,
-                        None,
-                        None,
-                        Some(100),
-                    ))
+                    gen_from(
+                        WhaleReportFetcher::new()
+                            .fetch_post_reports_gen(status, None, None, None, None),
+                    )
                 },
             );
             set_config_fields!(
@@ -516,13 +511,10 @@ impl ReportFetcher {
                     )
                 },
                 |status| {
-                    gen_from(WhaleReportFetcher::new().fetch_discussion_reports_gen(
-                        status,
-                        None,
-                        None,
-                        None,
-                        Some(100),
-                    ))
+                    gen_from(
+                        WhaleReportFetcher::new()
+                            .fetch_discussion_reports_gen(status, None, None, None, None),
+                    )
                 },
             );
             set_config_fields!(
@@ -753,5 +745,4 @@ mod tests {
                 .all(|v| { v.get("_report_type").and_then(|s| s.as_str()) == Some("test_type") })
         );
     }
-
 }

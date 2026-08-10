@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::TcpStream;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
@@ -620,7 +620,6 @@ struct CloudInner {
     /// Socket.IO 握手已完成(收到 40),flush 线程据此判断可安全发送
     io_ready: AtomicBool,
     online_users: AtomicI64,
-    reconnect_attempts: AtomicUsize,
     /// JOIN 消息已发送标记(防止重复 join 被服务器拒绝)
     join_sent: AtomicBool,
     /// 发送端:读线程持有 WebSocket 独占,写操作经 channel 转发
@@ -745,7 +744,6 @@ impl CloudBuilder {
             data_ready: AtomicBool::new(false),
             io_ready: AtomicBool::new(false),
             online_users: AtomicI64::new(0),
-            reconnect_attempts: AtomicUsize::new(0),
             join_sent: AtomicBool::new(false),
             tx: Mutex::new(None),
             read_join: Mutex::new(None),
@@ -770,6 +768,13 @@ impl CloudConnection {
         // 串行化建立过程,避免并发 connect() 双建
         let _connect_guard = self.inner.connect_lock.lock().unwrap();
         if self.inner.connected.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        // 自动重连循环正在退避中(connected=false 但未停止且开启重连)时,
+        // 由重连循环独占建立;此处直接返回可避免 reset_state 清空断线期间排队命令
+        if self.inner.auto_reconnect.load(Ordering::Acquire)
+            && !self.inner.stopping.load(Ordering::Acquire)
+        {
             return Ok(());
         }
         self.reset_state();
@@ -830,10 +835,20 @@ impl CloudConnection {
             let _ = tx.send(Message::Close(None));
         }
         drop(inner.tx.lock().unwrap().take());
-        if let Some(handle) = inner.read_join.lock().unwrap().take() {
+        // 先取出句柄并释放锁再 join:if-let 临时守卫存活到 join 结束,
+        // 与 establish_locked 写回句柄互等形成死锁窗口
+        let read_handle = {
+            let mut guard = inner.read_join.lock().unwrap();
+            guard.take()
+        };
+        if let Some(handle) = read_handle {
             let _ = handle.join();
         }
-        if let Some(handle) = inner.flush_join.lock().unwrap().take() {
+        let flush_handle = {
+            let mut guard = inner.flush_join.lock().unwrap();
+            guard.take()
+        };
+        if let Some(handle) = flush_handle {
             let _ = handle.join();
         }
         inner.commands.lock().unwrap().clear();
@@ -1035,21 +1050,14 @@ impl CloudConnection {
             .variable(VarKind::Private, variable_name)
             .map(|v| v.cvid.clone())
             .ok_or_else(|| CloudError::VariableNotFound(variable_name.to_string()))?;
-        self.inner
-            .pending_rankings
-            .lock()
-            .unwrap()
-            .push_back(cvid.clone());
-        // 手工构造载荷,将 cvid 移入(零拷贝),避免 json! 的额外克隆
+        // 先发送再入队:入队顺序与 wire 发送顺序一致,消除并发请求的响应错配主窗口
+        // (协议无请求关联 ID,极端并发下仍可能错配,属协议限制)
         let mut payload = serde_json::Map::new();
-        payload.insert("cvid".into(), Value::String(cvid));
+        payload.insert("cvid".into(), Value::String(cvid.clone()));
         payload.insert("limit".into(), Value::from(limit));
         payload.insert("order_type".into(), Value::from(order));
-        if let Err(e) = self.send_event("list_ranking", &Value::Object(payload)) {
-            // 发送失败时回滚待处理队列,避免后续排行榜结果错配
-            self.inner.pending_rankings.lock().unwrap().pop_back();
-            return Err(e);
-        }
+        self.send_event("list_ranking", &Value::Object(payload))?;
+        self.inner.pending_rankings.lock().unwrap().push_back(cvid);
         Ok(())
     }
 
@@ -1827,9 +1835,8 @@ fn handle_frame(inner: &Arc<CloudInner>, text: &str) -> Result<()> {
             inner.notify.notify_with(|| {
                 inner.connected.store(true, Ordering::Release);
                 inner.io_ready.store(true, Ordering::Release);
-                inner.reconnect_attempts.store(0, Ordering::Release);
             });
-            emit_connection_event(inner, ConnectionEvent::Opened);
+            // Opened 事件已在 establish_locked 发出,此处只处理握手确认;
             // 服务器可能重复回 40,只发送一次 JOIN
             if inner.join_sent.swap(true, Ordering::AcqRel) {
                 return Ok(());
@@ -1884,6 +1891,29 @@ impl MessageHandler for AllDataHandler {
                     warn!("创建数据项失败: {e}");
                 }
             }
+            // 快照剪枝:移除快照中已不存在的本地条目,避免断线期间被服务端删除的
+            // 变量/列表残留本地;保留条目经 create_* 按名 upsert,回调不受影响
+            let keep: HashSet<&str> = items
+                .iter()
+                .filter_map(|it| it.get("cvid").and_then(Value::as_str))
+                .collect();
+            let mut store = inner.state.lock().unwrap();
+            store
+                .private_vars
+                .retain(|_, v| keep.contains(v.cvid.as_str()));
+            store
+                .public_vars
+                .retain(|_, v| keep.contains(v.cvid.as_str()));
+            store.lists.retain(|_, v| keep.contains(v.cvid.as_str()));
+            store
+                .private_cvid
+                .retain(|cvid, _| keep.contains(cvid.as_str()));
+            store
+                .public_cvid
+                .retain(|cvid, _| keep.contains(cvid.as_str()));
+            store
+                .list_cvid
+                .retain(|cvid, _| keep.contains(cvid.as_str()));
         } else {
             warn!(
                 "list_variables_done 载荷不是数组: {}",
@@ -1925,6 +1955,20 @@ struct UpdatePrivateVarHandler;
 
 impl MessageHandler for UpdatePrivateVarHandler {
     fn handle(&self, inner: &Arc<CloudInner>, payload: &Value) -> Result<()> {
+        // 兼容数组(与客户端发送格式及公有通道一致)与单对象两种回显形态
+        if let Some(items) = payload.as_array() {
+            for item in items {
+                Self::apply_one(inner, item);
+            }
+        } else {
+            Self::apply_one(inner, payload);
+        }
+        Ok(())
+    }
+}
+
+impl UpdatePrivateVarHandler {
+    fn apply_one(inner: &Arc<CloudInner>, payload: &Value) {
         if let (Some(cvid), Some(value)) = (
             payload.get("cvid").and_then(Value::as_str),
             payload.get("value"),
@@ -1941,7 +1985,6 @@ impl MessageHandler for UpdatePrivateVarHandler {
                 emit_variable_change(inner, VarKind::Private, cvid, &old, &new_value, "cloud");
             }
         }
-        Ok(())
     }
 }
 
@@ -2279,6 +2322,10 @@ fn establish(inner: &Arc<CloudInner>) -> Result<()> {
 
 /// 建立 WebSocket 连接并启动读线程(调用方须持有 connect_lock)
 fn establish_locked(inner: &Arc<CloudInner>) -> Result<()> {
+    // 锁内复查:自动重连循环唤醒后与手动 connect() 竞态时,已建立的连接不被覆盖
+    if inner.connected.load(Ordering::Acquire) {
+        return Ok(());
+    }
     let (auth_type, stag) = inner.editor.query_params();
     let url = format!(
         "{CLOUD_WS_BASE_URL}?session_id={}&authorization_type={auth_type}&stag={stag}&EIO=3&transport=websocket",
@@ -2310,13 +2357,14 @@ fn establish_locked(inner: &Arc<CloudInner>) -> Result<()> {
         );
     }
 
-    let (mut ws, response) = connect(request)?;
+    let (mut ws, response) = connect(request).inspect_err(|e| {
+        emit_connection_event(inner, ConnectionEvent::Error(e.to_string()));
+    })?;
     // WebSocket 升级成功返回 HTTP 101 Switching Protocols
     if response.status() != tungstenite::http::StatusCode::SWITCHING_PROTOCOLS {
-        return Err(CloudError::Handshake(format!(
-            "HTTP 状态: {}",
-            response.status()
-        )));
+        let err = CloudError::Handshake(format!("HTTP 状态: {}", response.status()));
+        emit_connection_event(inner, ConnectionEvent::Error(err.to_string()));
+        return Err(err);
     }
     // 设置底层流读取超时:read 周期性苏醒,避免服务器静默时发送通道饥饿
     let _ = set_stream_read_timeout(ws.get_mut(), Duration::from_millis(200));
@@ -2327,7 +2375,6 @@ fn establish_locked(inner: &Arc<CloudInner>) -> Result<()> {
     inner.io_ready.store(false, Ordering::Release);
     inner.notify.notify_with(|| {
         inner.connected.store(true, Ordering::Release);
-        inner.reconnect_attempts.store(0, Ordering::Release);
     });
     inner.join_sent.store(false, Ordering::Release);
     emit_connection_event(inner, ConnectionEvent::Opened);

@@ -2,6 +2,7 @@ use crate::utils::acquire::{
     BaseKey, ClientAccess, CodeMaoClient, HTTPStatus, HttpMethod, MewResult, PaginatedIter,
     PaginationMethod,
 };
+use crate::utils::data::value_to_i64;
 use log::{debug, warn};
 use serde_json::{Value, json};
 
@@ -159,20 +160,21 @@ impl CommunityDataFetcher {
     /// 从 `/coconut/clouddb/currentTime` 获取 10 位时间戳,返回原始 JSON
     /// 内部复用,避免代码重复
     fn raw_timestamp_10(&self) -> MewResult<Value> {
-        self.send_and_parse(
-            self.client
-                .build_request(HttpMethod::Get, "/coconut/clouddb/currentTime", None),
-        )
+        self.send_and_parse(self.client.build_request(
+            HttpMethod::Get,
+            "/coconut/clouddb/currentTime",
+            None,
+        ))
     }
 
-    /// 安全地从时间戳 JSON 中提取字符串值,若失败则记录警告并返回空字符串
+    /// 安全地从时间戳 JSON 中提取数值(兼容数字与数字字符串),失败则记录警告并返回空字符串
     fn extract_time_string(json: &Value) -> String {
-        if let Some(s) = json["data"].as_str() {
-            s.to_string()
-        } else {
-            warn!("时间戳响应中缺少 'data' 字段或不是字符串: {:?}", json);
-            String::new()
-        }
+        value_to_i64(&json["data"])
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| {
+                warn!("时间戳响应中缺少 'data' 字段或不是数字: {:?}", json);
+                String::new()
+            })
     }
 
     // 公共方法
@@ -180,10 +182,11 @@ impl CommunityDataFetcher {
     /// 获取随机昵称
     pub fn fetch_random_nickname(&self) -> MewResult<Value> {
         debug!("获取随机昵称");
-        self.send_and_parse(
-            self.client
-                .build_request(HttpMethod::Get, "/api/user/random/nickname", None),
-        )
+        self.send_and_parse(self.client.build_request(
+            HttpMethod::Get,
+            "/api/user/random/nickname",
+            None,
+        ))
     }
 
     /// 获取新消息数量(根据平台)
@@ -193,10 +196,7 @@ impl CommunityDataFetcher {
             MessageMethod::Nemo => "/nemo/v2/user/message/count",
         };
         debug!("获取消息数量, 平台: {:?}", method);
-        self.send_and_parse(
-            self.client
-                .build_request(HttpMethod::Get, endpoint, None),
-        )
+        self.send_and_parse(self.client.build_request(HttpMethod::Get, endpoint, None))
     }
 
     /// 获取指定类型的回复列表
@@ -231,28 +231,27 @@ impl CommunityDataFetcher {
         let extra_url = if types == "like" { "1" } else { "3" };
         let endpoint = format!("/nemo/v2/user/message/{}", extra_url);
         debug!("获取Nemo消息: type={}, endpoint={}", types, endpoint);
-        self.send_and_parse(
-            self.client
-                .build_request(HttpMethod::Get, &endpoint, None),
-        )
+        self.send_and_parse(self.client.build_request(HttpMethod::Get, &endpoint, None))
     }
 
     /// 获取 PC 客户端最新版本信息
     pub fn fetch_pc_client(&self) -> MewResult<Value> {
         debug!("获取PC客户端更新");
-        self.send_and_parse(
-            self.client
-                .build_request(HttpMethod::Get, "/tiger/pc_client/releases/latest", None),
-        )
+        self.send_and_parse(self.client.build_request(
+            HttpMethod::Get,
+            "/tiger/pc_client/releases/latest",
+            None,
+        ))
     }
 
     /// 获取点个猫更新信息
     pub fn fetch_pickcat_update(&self) -> MewResult<Value> {
         debug!("获取点个猫更新");
-        self.send_and_parse(
-            self.client
-                .build_request(HttpMethod::Get, "/updatev2/appsdk", Some(BaseKey::Update)),
-        )
+        self.send_and_parse(self.client.build_request(
+            HttpMethod::Get,
+            "/updatev2/appsdk",
+            Some(BaseKey::Update),
+        ))
     }
 
     /// 获取 Kitten4 更新信息
@@ -331,10 +330,11 @@ impl CommunityDataFetcher {
     /// 获取 13 位时间戳(独立接口)
     pub fn fetch_current_timestamp_13(&self) -> MewResult<Value> {
         debug!("获取13位时间戳");
-        self.send_and_parse(
-            self.client
-                .build_request(HttpMethod::Get, "/time/current", Some(BaseKey::Time)),
-        )
+        self.send_and_parse(self.client.build_request(
+            HttpMethod::Get,
+            "/time/current",
+            Some(BaseKey::Time),
+        ))
     }
 
     /// 获取 Web 端头图
@@ -364,45 +364,41 @@ impl CommunityDataFetcher {
     /// 获取 Coco 端头图
     pub fn fetch_coco_banners(&self) -> MewResult<Value> {
         debug!("获取Coco端头图");
-        self.send_and_parse(
-            self.client
-                .build_request(
-                    HttpMethod::Get,
-                    "/coconut/banner/list",
-                    Some(BaseKey::Creation),
-                ),
-        )
+        self.send_and_parse(self.client.build_request(
+            HttpMethod::Get,
+            "/coconut/banner/list",
+            Some(BaseKey::Creation),
+        ))
     }
 
     /// 获取 Coco 话题
     pub fn fetch_coco_topic(&self) -> MewResult<Value> {
         debug!("获取Coco话题");
-        self.send_and_parse(
-            self.client
-                .build_request(
-                    HttpMethod::Get,
-                    "/coconut/topic/list",
-                    Some(BaseKey::Creation),
-                ),
-        )
+        self.send_and_parse(self.client.build_request(
+            HttpMethod::Get,
+            "/coconut/topic/list",
+            Some(BaseKey::Creation),
+        ))
     }
 
     /// 获取举报原因列表
     pub fn fetch_report_reasons(&self) -> MewResult<Value> {
         debug!("获取举报原因");
-        self.send_and_parse(
-            self.client
-                .build_request(HttpMethod::Get, "/web/reports/reasons/all", None),
-        )
+        self.send_and_parse(self.client.build_request(
+            HttpMethod::Get,
+            "/web/reports/reasons/all",
+            None,
+        ))
     }
 
     /// 获取 Nemo 配置
     pub fn fetch_nemo_config(&self) -> MewResult<Value> {
         debug!("获取Nemo配置");
-        self.send_and_parse(
-            self.client
-                .build_request(HttpMethod::Get, "/config", Some(BaseKey::Nemo)),
-        )
+        self.send_and_parse(self.client.build_request(
+            HttpMethod::Get,
+            "/config",
+            Some(BaseKey::Nemo),
+        ))
     }
 
     /// 获取社区配置
@@ -417,14 +413,11 @@ impl CommunityDataFetcher {
     /// 获取编程猫客户端配置
     pub fn fetch_client_config(&self) -> MewResult<Value> {
         debug!("获取客户端配置");
-        self.send_and_parse(
-            self.client
-                .build_request(
-                    HttpMethod::Get,
-                    "/new/client_config.json",
-                    Some(BaseKey::Player),
-                ),
-        )
+        self.send_and_parse(self.client.build_request(
+            HttpMethod::Get,
+            "/new/client_config.json",
+            Some(BaseKey::Player),
+        ))
     }
 
     /// 获取编程猫首页推荐作品
@@ -455,10 +448,11 @@ impl CommunityDataFetcher {
     /// 获取 Nemo 系统推荐池
     pub fn fetch_recommended_works_nemo(&self) -> MewResult<Value> {
         debug!("获取Nemo推荐池");
-        self.send_and_parse(
-            self.client
-                .build_request(HttpMethod::Get, "/nemo/v2/system/recommended/pool", None),
-        )
+        self.send_and_parse(self.client.build_request(
+            HttpMethod::Get,
+            "/nemo/v2/system/recommended/pool",
+            None,
+        ))
     }
 
     /// 获取作品频道列表
@@ -496,36 +490,31 @@ impl CommunityDataFetcher {
     /// 获取社区星推荐用户
     pub fn fetch_recommended_users(&self) -> MewResult<Value> {
         debug!("获取推荐用户");
-        self.send_and_parse(
-            self.client
-                .build_request(HttpMethod::Get, "/web/users/recommended", None),
-        )
+        self.send_and_parse(self.client.build_request(
+            HttpMethod::Get,
+            "/web/users/recommended",
+            None,
+        ))
     }
 
     /// 获取训练师小课堂内容
     pub fn fetch_training_courses(&self) -> MewResult<Value> {
         debug!("获取训练师小课堂");
-        self.send_and_parse(
-            self.client
-                .build_request(
-                    HttpMethod::Get,
-                    "https://backend.box3.fun/diversion/codemao/post",
-                    None,
-                ),
-        )
+        self.send_and_parse(self.client.build_request(
+            HttpMethod::Get,
+            "https://backend.box3.fun/diversion/codemao/post",
+            None,
+        ))
     }
 
     /// 获取 KN 课程
     pub fn fetch_kn_courses(&self) -> MewResult<Value> {
         debug!("获取KN课程");
-        self.send_and_parse(
-            self.client
-                .build_request(
-                    HttpMethod::Get,
-                    "/creation-tools/v1/home/especially/course",
-                    None,
-                ),
-        )
+        self.send_and_parse(self.client.build_request(
+            HttpMethod::Get,
+            "/creation-tools/v1/home/especially/course",
+            None,
+        ))
     }
 
     /// KN 公开课分页迭代器
@@ -560,23 +549,17 @@ impl CommunityDataFetcher {
             status_type.as_str()
         );
         debug!("获取社区状态: {:?}", status_type);
-        self.send_and_parse(
-            self.client
-                .build_request(HttpMethod::Get, &endpoint, None),
-        )
+        self.send_and_parse(self.client.build_request(HttpMethod::Get, &endpoint, None))
     }
 
     /// 获取 Kitten 编辑页精选活动
     pub fn fetch_kitten_activities(&self) -> MewResult<Value> {
         debug!("获取Kitten活动");
-        self.send_and_parse(
-            self.client
-                .build_request(
-                    HttpMethod::Get,
-                    "/kitten/activity/choiceness/list",
-                    Some(BaseKey::Creation),
-                ),
-        )
+        self.send_and_parse(self.client.build_request(
+            HttpMethod::Get,
+            "/kitten/activity/choiceness/list",
+            Some(BaseKey::Creation),
+        ))
     }
 
     /// Nemo 端教程合集分页迭代器
@@ -615,20 +598,14 @@ impl CommunityDataFetcher {
     pub fn fetch_board_unread_count(&self, board_id: i32) -> MewResult<Value> {
         let endpoint = format!("/web/forums/boards/{}/unread-count", board_id);
         debug!("获取板块未读数: board_id={}", board_id);
-        self.send_and_parse(
-            self.client
-                .build_request(HttpMethod::Get, &endpoint, None),
-        )
+        self.send_and_parse(self.client.build_request(HttpMethod::Get, &endpoint, None))
     }
 
     /// 获取活动(工作室)信息
     pub fn fetch_studio_info(&self, studio_id: i32) -> MewResult<Value> {
         let endpoint = format!("/web/studios/{}", studio_id);
         debug!("获取活动信息: studio_id={}", studio_id);
-        self.send_and_parse(
-            self.client
-                .build_request(HttpMethod::Get, &endpoint, None),
-        )
+        self.send_and_parse(self.client.build_request(HttpMethod::Get, &endpoint, None))
     }
 
     /// 活动帖子分页迭代器
@@ -676,10 +653,11 @@ impl CommunityDataFetcher {
     /// 获取旧版作品标签
     pub fn fetch_work_labels(&self) -> MewResult<Value> {
         debug!("获取作品标签");
-        self.send_and_parse(
-            self.client
-                .build_request(HttpMethod::Get, "/api/work/label/list", None),
-        )
+        self.send_and_parse(self.client.build_request(
+            HttpMethod::Get,
+            "/api/work/label/list",
+            None,
+        ))
     }
 
     /// 获取旧版标签分类

@@ -119,8 +119,9 @@ fn admin_login_with_retry(ui: &mut dyn ProcessorUi) -> Result<LoginResult, Strin
             Err(e) => {
                 let msg = e.to_string();
                 eprintln!("管理员登录失败: {}", msg);
-                // 仅验证码类错误重试;密码错误/网络错误等直接终止
-                if !msg.contains("验证码") {
+                // 仅验证码类错误重试(以 auth.rs 注入的稳定标记判定,不依赖中文文案);
+                // 密码错误/网络错误等直接终止
+                if !msg.contains("(Captcha)") {
                     return Err(msg);
                 }
                 if attempts >= MAX_ATTEMPTS {
