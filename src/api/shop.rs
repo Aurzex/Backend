@@ -329,8 +329,7 @@ impl WorkshopActionHandler {
             .client
             .build_request(HttpMethod::Post, "/web/work_shops/create", None)
             .with_payload(payload);
-        let response = builder.send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(builder)
     }
 
     /// 解散工作室

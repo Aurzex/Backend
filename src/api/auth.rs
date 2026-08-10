@@ -1,7 +1,7 @@
 use crate::utils::acquire::{
-    BaseKey, Catsona, CodeMaoClient, DEFAULT_PID, HttpMethod, MewError, MewResult,
+    BaseKey, Catsona, ClientAccess, CodeMaoClient, DEFAULT_PID, HttpMethod, MewError, MewResult,
 };
-use crate::utils::data::{CodeMaoFile, PathConfig};
+use crate::utils::data::{CodeMaoFile, PathConfig, value_to_i64};
 use log::{debug, warn};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -208,6 +208,30 @@ impl LoginResult {
     }
 }
 
+/// 管理员信息(`GET /admins/info` 响应的 `admin` 对象)
+#[derive(Debug, Clone)]
+pub struct AdminInfo {
+    pub id: i64,
+    pub username: String,
+    pub role_name: String,
+    pub full_name: String,
+}
+
+impl AdminInfo {
+    /// 从 `GET /admins/info` 响应中提取管理员信息。
+    /// 固定读取 `admin` 对象下的 id/username/role_name/full_name 四个字段,
+    /// 不做任何形态回退尝试;任一字段缺失或类型不符时返回 None。
+    pub fn from_details(details: &Value) -> Option<AdminInfo> {
+        let admin = details.get("admin")?;
+        Some(AdminInfo {
+            id: value_to_i64(admin.get("id")?)?,
+            username: admin.get("username")?.as_str()?.to_string(),
+            role_name: admin.get("role_name")?.as_str()?.to_string(),
+            full_name: admin.get("full_name")?.as_str()?.to_string(),
+        })
+    }
+}
+
 // 客户端提供者特质
 
 /// 抽象客户端提供者,便于依赖注入和测试
@@ -341,10 +365,11 @@ impl AuthProcessor {
     /// 获取管理员后台信息(需已设置管理员令牌)
     pub fn fetch_admin_details(&self) -> MewResult<Value> {
         let client = self.client();
-        let response = client
-            .build_request(HttpMethod::Get, "/admins/info", Some(BaseKey::Whale))
-            .send()?;
-        client.response_to_json(response)
+        self.send_and_parse(client.build_request(
+            HttpMethod::Get,
+            "/admins/info",
+            Some(BaseKey::Whale),
+        ))
     }
 
     /// 获取登录 ticket(用于新版登录流程)
@@ -355,15 +380,15 @@ impl AuthProcessor {
             "pid": pid,
             "timestamp": timestamp,
         });
-        let response = client
-            .build_request(
-                HttpMethod::Post,
-                "/captcha/rule/v3",
-                Some(BaseKey::OpenService),
-            )
-            .with_payload(payload)
-            .send()?;
-        client.response_to_json(response)
+        self.send_and_parse(
+            client
+                .build_request(
+                    HttpMethod::Post,
+                    "/captcha/rule/v3",
+                    Some(BaseKey::OpenService),
+                )
+                .with_payload(payload),
+        )
     }
 
     /// 发送安全登录请求(v2 密码登录)
@@ -417,13 +442,13 @@ impl AuthProcessor {
             "key": key,
             "code": code,
         });
-        let response = client
-            .build_request(HttpMethod::Post, "/admins/login", Some(BaseKey::Whale))
-            .with_payload(payload)
-            // 保留 4xx/5xx 响应体,使上层能区分验证码错误与密码错误
-            .with_error_body()
-            .send()?;
-        client.response_to_json(response)
+        self.send_and_parse(
+            client
+                .build_request(HttpMethod::Post, "/admins/login", Some(BaseKey::Whale))
+                .with_payload(payload)
+                // 保留 4xx/5xx 响应体,使上层能区分验证码错误与密码错误
+                .with_error_body(),
+        )
     }
 
     /// 获取管理员验证码图片并保存到文件
@@ -469,11 +494,11 @@ impl AuthProcessor {
             "password": password,
             "pid": pid,
         });
-        let response = client
-            .build_request(HttpMethod::Post, "/tiger/accounts/login", None)
-            .with_payload(payload)
-            .send()?;
-        client.response_to_json(response)
+        self.send_and_parse(
+            client
+                .build_request(HttpMethod::Post, "/tiger/accounts/login", None)
+                .with_payload(payload),
+        )
     }
 
     /// v1 密码登录请求
@@ -489,11 +514,11 @@ impl AuthProcessor {
             "password": password,
             "pid": pid,
         });
-        let response = client
-            .build_request(HttpMethod::Post, "/tiger/v3/web/accounts/login", None)
-            .with_payload(payload)
-            .send()?;
-        client.response_to_json(response)
+        self.send_and_parse(
+            client
+                .build_request(HttpMethod::Post, "/tiger/v3/web/accounts/login", None)
+                .with_payload(payload),
+        )
     }
 
     /// v2 密码登录(带 ticket 的安全流程)
@@ -519,6 +544,12 @@ impl AuthProcessor {
 impl Default for AuthProcessor {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl ClientAccess for AuthProcessor {
+    fn client(&self) -> &CodeMaoClient {
+        self.client_provider.client()
     }
 }
 
@@ -1269,6 +1300,35 @@ impl LoginBuilder {
             captcha: self.captcha,
         };
         self.auth_manager.login(&credentials, self.prefer_method)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AdminInfo;
+    use serde_json::json;
+
+    #[test]
+    fn admin_info_from_details_reads_fixed_fields() {
+        let v =
+            json!({"admin": {"id": 42, "username": "u1", "role_name": "r1", "full_name": "F1"}});
+        let info = AdminInfo::from_details(&v).expect("固定字段应可提取");
+        assert_eq!(info.id, 42);
+        assert_eq!(info.username, "u1");
+        assert_eq!(info.role_name, "r1");
+        assert_eq!(info.full_name, "F1");
+    }
+
+    #[test]
+    fn admin_info_from_details_rejects_missing_fields() {
+        assert!(AdminInfo::from_details(&json!({"admin": {"id": 42}})).is_none());
+        assert!(AdminInfo::from_details(&json!({"id": 42})).is_none());
+        assert!(
+            AdminInfo::from_details(
+                &json!({"admin": {"id": "x", "username": "u", "role_name": "r", "full_name": "f"}})
+            )
+            .is_none()
+        );
     }
 }
 

@@ -650,17 +650,22 @@ impl BookActionHandler {
         };
         debug!("图鉴点赞: book_id={}, like={}", book_id, like);
         let endpoint = format!("/api/sprite/praise/{}", book_id);
-        let response = self.client.build_request(method, &endpoint, None).send()?;
-        if return_data {
-            self.client.response_to_json(response)
-        } else {
-            Ok(json!({ "success": response.status() == HTTPStatus::Ok as u16 }))
-        }
+        self.send_maybe_parse(
+            self.client.build_request(method, &endpoint, None),
+            return_data,
+            HTTPStatus::Ok,
+        )
     }
 }
 
 impl Default for BookActionHandler {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl ClientAccess for BookActionHandler {
+    fn client(&self) -> &CodeMaoClient {
+        self.client
     }
 }

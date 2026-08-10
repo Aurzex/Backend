@@ -783,39 +783,38 @@ impl ViolationChecker {
 
     fn check_spam_posts(&self, user_id: i64, title: &str) -> Vec<String> {
         let fetcher = ForumDataFetcher::new();
-        let mut posts = Vec::new();
+        let threshold = self.config.spam_threshold;
+        let mut matches = 0usize;
+        let mut violations = Vec::new();
         for result in fetcher.search_posts_gen(title, None) {
             match result {
-                Ok(post) => posts.push(post),
+                Ok(post) => {
+                    if post
+                        .get("user")
+                        .and_then(|u| u.get("id"))
+                        .and_then(serde_json::Value::as_i64)
+                        == Some(user_id)
+                    {
+                        matches += 1;
+                        if let Some(post_id) = post.get("id").and_then(serde_json::Value::as_i64) {
+                            violations.push(format!("forum:{}:post:0:{}", post_id, post_id));
+                        }
+                        if matches >= threshold {
+                            break;
+                        }
+                    }
+                }
                 Err(e) => {
                     error!("搜索帖子失败: {}", e);
                     break;
                 }
             }
         }
-        let user_posts: Vec<&Value> = posts
-            .iter()
-            .filter(|p| {
-                p.get("user")
-                    .and_then(|u| u.get("id"))
-                    .and_then(serde_json::Value::as_i64)
-                    == Some(user_id)
-            })
-            .collect();
-        let threshold = self.config.spam_threshold;
-        if user_posts.len() >= threshold {
+        if matches >= threshold {
             warn!(
                 "警告: 用户 {} 已连续发布标题为[{}]的帖子 {} 次 (疑似刷屏)",
-                user_id,
-                title,
-                user_posts.len()
+                user_id, title, matches
             );
-            let mut violations = Vec::new();
-            for post in user_posts {
-                if let Some(post_id) = post.get("id").and_then(serde_json::Value::as_i64) {
-                    violations.push(format!("forum:{}:post:0:{}", post_id, post_id));
-                }
-            }
             return violations;
         }
         Vec::new()
@@ -856,7 +855,7 @@ impl ViolationChecker {
     fn select_report_account(
         &self,
         accounts: &[(String, String)],
-        account_usage: &HashMap<usize, usize>,
+        account_usage: &HashMap<String, usize>,
         current_idx: &mut usize,
     ) -> Option<usize> {
         if accounts.is_empty() {
@@ -865,7 +864,7 @@ impl ViolationChecker {
         let start = *current_idx % accounts.len();
         for offset in 0..accounts.len() {
             let idx = (start + offset) % accounts.len();
-            let usage = account_usage.get(&idx).copied().unwrap_or(0);
+            let usage = account_usage.get(&accounts[idx].0).copied().unwrap_or(0);
             if usage < self.config.max_reports_per_account {
                 *current_idx = idx;
                 return Some(idx);
@@ -878,20 +877,17 @@ impl ViolationChecker {
     fn ensure_account_login(
         &self,
         accounts: &mut Vec<(String, String)>,
-        account_usage: &mut HashMap<usize, usize>,
+        account_usage: &mut HashMap<String, usize>,
         idx: usize,
         current_idx: &mut usize,
     ) -> bool {
-        if account_usage.get(&idx).copied().unwrap_or(0) > 0 {
-            return true; // 本周期已登录过
-        }
         let (user, pass) = accounts[idx].clone();
         match Self::login_student(&user, &pass) {
             Ok(()) => true,
             Err(e) => {
                 warn!("账号 {} 登录失败: {},移除", user, e);
                 accounts.remove(idx);
-                account_usage.remove(&idx);
+                account_usage.remove(&user);
                 if idx < *current_idx && *current_idx > 0 {
                     *current_idx -= 1;
                 }
@@ -914,7 +910,7 @@ impl ViolationChecker {
         }
         let violations_vec: Vec<_> = violations.iter().collect();
         let mut success = 0usize;
-        let mut account_usage: HashMap<usize, usize> = HashMap::new();
+        let mut account_usage: HashMap<String, usize> = HashMap::new();
         let mut current_idx = 0usize;
 
         for (idx, violation) in violations_vec.iter().enumerate() {
@@ -942,7 +938,7 @@ impl ViolationChecker {
                 );
             } else {
                 success += 1;
-                *account_usage.entry(chosen_idx).or_insert(0) += 1;
+                *account_usage.entry(accounts[chosen_idx].0.clone()).or_insert(0) += 1;
                 info!(
                     "[{}/{}] 举报成功: {}",
                     idx + 1,

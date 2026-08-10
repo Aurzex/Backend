@@ -18,10 +18,11 @@ use super::pipeline::{
 };
 use super::registry::{
     ProcessorError, ReportFetcher, SourceConfig, bytes_to_human, html_to_text,
-    resolution_display_name, value_to_i64, value_to_string,
+    resolution_display_name, value_to_string,
 };
 use crate::api::whale::{ReportStatus, Resolution};
 use crate::utils::acquire::{FileUploader, KittyFactory};
+use crate::utils::data::value_to_i64;
 
 /// 批量分组的键:(分组类型, 分组键)
 type GroupKey = (String, String);
@@ -411,7 +412,7 @@ impl ReportProcessor {
         // 标记已决策:本次会话内不再重列(即使 API 状态尚未刷新)
         self.batch_manager
             .lock()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .mark_record_processed(&report_id.to_string());
         Ok(())
     }
@@ -493,7 +494,7 @@ impl ReportProcessor {
                             count += 1;
                             self.batch_manager
                                 .lock()
-                                .unwrap()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner)
                                 .mark_record_processed(&report_id.to_string());
                         }
                         Ok(false) => log_error!("一键通过返回 false (id={})", report_id),
@@ -516,7 +517,7 @@ impl ReportProcessor {
     pub fn group_saved_action(&self, group: &BatchGroup) -> Option<String> {
         self.batch_manager
             .lock()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get_batch_action(&group.group_type, &group.group_key)
     }
 
@@ -532,7 +533,7 @@ impl ReportProcessor {
     pub fn saved_action_for_key(&self, group_type: &str, group_key: &str) -> Option<String> {
         self.batch_manager
             .lock()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get_batch_action(group_type, group_key)
     }
 
@@ -547,7 +548,7 @@ impl ReportProcessor {
         if let Ok(report_id) = config.get_report_id(item) {
             self.batch_manager
                 .lock()
-                .unwrap()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .mark_record_processed(&report_id.to_string());
         }
     }
@@ -749,6 +750,12 @@ impl ReportProcessor {
         let mut ready = Vec::new();
         let mut non_group = Vec::new();
 
+        // 锁在循环外一次性持有:本函数内无嵌套加锁,guard 可跨迭代复用
+        let batch_guard = self
+            .batch_manager
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
         // chunk 为自有所有权:条目直接移动进组,避免逐条深拷贝 JSON
         for item in chunk {
             let Some((record_id, group_key)) = self.item_context(&item) else {
@@ -756,12 +763,7 @@ impl ReportProcessor {
                 continue;
             };
             // 本次会话已决策过的记录(如已跳过/已处理)不再重列
-            if self
-                .batch_manager
-                .lock()
-                .unwrap()
-                .is_record_processed(&record_id)
-            {
+            if batch_guard.is_record_processed(&record_id) {
                 continue;
             }
             let Some(key) = group_key else {

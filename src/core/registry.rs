@@ -38,14 +38,6 @@ pub(crate) fn value_to_string(v: &serde_json::Value) -> String {
     }
 }
 
-pub(crate) fn value_to_i64(v: &serde_json::Value) -> Option<i64> {
-    match v {
-        serde_json::Value::Number(n) => n.as_i64(),
-        serde_json::Value::String(s) => s.parse().ok(),
-        _ => None,
-    }
-}
-
 /// 将时间戳转换为字符串表示
 pub(crate) fn timestamp_to_string(ts: &serde_json::Value) -> String {
     if let Some(secs) = ts.as_i64()
@@ -677,26 +669,6 @@ impl ReportFetcher {
         self.fetch_chunked(status)
     }
 
-    pub(crate) fn get_total_reports(&self, status: ReportStatus) -> i64 {
-        // 各举报类型的总数接口相互独立,并行请求把 N 次串行 RTT 压到一次
-        let total = &AtomicI64::new(0);
-        thread::scope(|s| {
-            for rtype in self.registry.get_all_types() {
-                let Some(config) = self.registry.get_config(&rtype) else {
-                    continue;
-                };
-                let fetch_total = config.fetch_total; // fn 指针:Copy + Send
-                s.spawn(move || match fetch_total(status) {
-                    Ok(result) => {
-                        total.fetch_add(result.as_i64().unwrap_or(0), Ordering::Relaxed);
-                    }
-                    Err(e) => log::error!("获取 {} 总数失败: {}", rtype, e),
-                });
-            }
-        });
-        total.load(Ordering::Relaxed)
-    }
-
     /// 一次并行批次同时取两个状态的总数(菜单渲染只需 1 个 RTT)
     pub(crate) fn get_totals_pair(&self, a: ReportStatus, b: ReportStatus) -> (i64, i64) {
         let ta = &AtomicI64::new(0);
@@ -782,25 +754,4 @@ mod tests {
         );
     }
 
-    /// 并行总数查询:各类型总数正确求和(fetch_total 为 fn 指针,不能捕获,
-    /// 用相同常量注册两个类型,总和 2*N 证明并行分支的结果全部被累加)
-    #[test]
-    fn get_total_reports_sums_across_types() {
-        let mut registry = ReportTypeRegistry::new();
-        for name in ["type_a", "type_b"] {
-            let cfg = SourceConfig::base(
-                name,
-                "execute_process_comment_report",
-                |_| Ok(Value::from(10i64)),
-                |_| Box::new(std::iter::empty()),
-            );
-            registry.register(name, cfg);
-        }
-
-        let fetcher = ReportFetcher {
-            registry: Arc::new(registry),
-        };
-        assert_eq!(fetcher.get_total_reports(ReportStatus::ToBeDone), 20);
-        assert_eq!(fetcher.get_total_reports(ReportStatus::Done), 20);
-    }
 }

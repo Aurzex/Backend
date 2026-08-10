@@ -675,47 +675,89 @@ impl DataQuery {
         Box::new(nemo_stream.chain(web_stream))
     }
 
-    /// 流式聚合:从新作品中收集用户评论并统计,无需预先收集所有作品
+    /// 流式聚合:从新作品中收集用户评论并统计(按 chunk=8 有界并行提取,按作品顺序合并)
     pub fn aggregate_user_comments_from_works(
         &self,
         work_limit: i32,
     ) -> Result<Vec<JsonObject>, DataQueryError> {
+        // 先串行收集作品(任一流错误直接返回,与现状一致)
+        let mut works: Vec<JsonObject> = Vec::new();
+        for work_result in self.stream_works_from_both_sources(work_limit) {
+            works.push(work_result?);
+        }
+
+        // 再按 chunk=8 并行提取评论;每线程维护本地 map,按线程顺序合并
+        let results: Vec<
+            Result<HashMap<String, (String, String, Vec<String>, i32)>, DataQueryError>,
+        > = thread::scope(|s| {
+            let mut handles = Vec::new();
+            for chunk in works.chunks(8) {
+                handles.push(s.spawn(move || {
+                    let mut local_map: HashMap<String, (String, String, Vec<String>, i32)> =
+                        HashMap::new();
+                    for work in chunk {
+                        if let Some(work_id) =
+                            work.get("work_id").and_then(serde_json::Value::as_i64)
+                        {
+                            let comment_stream = self.stream_detailed_comments(
+                                CommentSource::Work,
+                                i32::try_from(work_id).unwrap_or(0),
+                                Some(20),
+                            )?;
+                            for comment_result in comment_stream {
+                                let comment = comment_result?;
+                                let user_id = comment.get("user_id").and_then(|v| {
+                                    if v.is_number() {
+                                        Some(v.to_string())
+                                    } else {
+                                        v.as_str().map(std::string::ToString::to_string)
+                                    }
+                                });
+                                let content = comment
+                                    .get("content")
+                                    .and_then(|c| c.as_str())
+                                    .map(std::string::ToString::to_string);
+                                let nickname = comment
+                                    .get("nickname")
+                                    .and_then(|n| n.as_str())
+                                    .map(std::string::ToString::to_string);
+
+                                if let (Some(uid), Some(cont), Some(nick)) =
+                                    (user_id, content, nickname)
+                                {
+                                    let entry = local_map
+                                        .entry(uid.clone())
+                                        .or_insert_with(|| (uid, nick, Vec::new(), 0));
+                                    entry.2.push(cont);
+                                    entry.3 += 1;
+                                }
+                            }
+                        }
+                    }
+                    Ok(local_map)
+                }));
+            }
+            handles
+                .into_iter()
+                .map(|handle| match handle.join() {
+                    Ok(r) => r,
+                    Err(_) => Err(DataQueryError::ParseError("评论聚合线程 panic".into())),
+                })
+                .collect()
+        });
+
+        // 按线程顺序合并;任一线程出错则返回第一个(线程顺序上的)错误
         let mut user_comment_map: HashMap<String, (String, String, Vec<String>, i32)> =
             HashMap::new();
-
-        for work_result in self.stream_works_from_both_sources(work_limit) {
-            let work = work_result?;
-            if let Some(work_id) = work.get("work_id").and_then(serde_json::Value::as_i64) {
-                let comment_stream = self.stream_detailed_comments(
-                    CommentSource::Work,
-                    i32::try_from(work_id).unwrap_or(0),
-                    Some(20),
-                )?;
-                for comment_result in comment_stream {
-                    let comment = comment_result?;
-                    let user_id = comment.get("user_id").and_then(|v| {
-                        if v.is_number() {
-                            Some(v.to_string())
-                        } else {
-                            v.as_str().map(std::string::ToString::to_string)
-                        }
-                    });
-                    let content = comment
-                        .get("content")
-                        .and_then(|c| c.as_str())
-                        .map(std::string::ToString::to_string);
-                    let nickname = comment
-                        .get("nickname")
-                        .and_then(|n| n.as_str())
-                        .map(std::string::ToString::to_string);
-
-                    if let (Some(uid), Some(cont), Some(nick)) = (user_id, content, nickname) {
-                        let entry = user_comment_map
-                            .entry(uid.clone())
-                            .or_insert_with(|| (uid, nick, Vec::new(), 0));
-                        entry.2.push(cont);
-                        entry.3 += 1;
-                    }
+        for r in results {
+            {
+                let local_map = r?;
+                for (uid, (_u, nick, comments, count)) in local_map {
+                    let entry = user_comment_map
+                        .entry(uid.clone())
+                        .or_insert_with(|| (uid, nick, Vec::new(), 0));
+                    entry.2.extend(comments);
+                    entry.3 += count;
                 }
             }
         }
@@ -861,7 +903,7 @@ impl DataQuery {
     }
 
     /// 获取粉丝统计(基于点赞数阈值)
-    /// 注意:为每个符合条件的粉丝单独查询荣誉数据(N+1 请求),需评估性能影响
+    /// 注意:为每个符合条件的粉丝单独查询荣誉数据(N+1 请求),按 chunk=16 有界并行执行
     pub fn compute_fans_by_like_threshold(
         &self,
         user_id: i32,
@@ -869,8 +911,9 @@ impl DataQuery {
     ) -> Result<FanByLikesStatistics, DataQueryError> {
         let fans_stream = UserDataFetcher::new().fetch_followers_gen(user_id, None);
 
-        let mut qualified_fans = Vec::new();
         let mut total_fans = 0;
+        // 第一段(串行,无 HTTP):按流序过滤出达标的粉丝,保留 (id, fan, total_likes) 三元组
+        let mut qualified: Vec<(i64, Value, i64)> = Vec::new();
 
         for fan_result in fans_stream {
             let fan = fan_result.map_err(DataQueryError::from)?;
@@ -881,49 +924,67 @@ impl DataQuery {
                 .and_then(serde_json::Value::as_i64)
                 .unwrap_or(0);
 
-            if total_likes >= like_threshold as i64 {
-                let mut fan_obj = JsonObject::new();
-                if let Some(id) = fan.get("id").and_then(serde_json::Value::as_i64) {
-                    fan_obj.insert("user_id".into(), Value::Number(id.into()));
-                    // 荣誉数据为尽力而为:ID 超出 i32 范围或请求失败时输出 N/A
-                    let honors_data = i32::try_from(id)
-                        .ok()
-                        .and_then(|id32| UserDataFetcher::new().fetch_user_honors(id32).ok());
-                    if let Some(ref honors_data) = honors_data {
-                        if let Some(fans_total) = honors_data.get("fans_total") {
-                            fan_obj.insert("fans_total".into(), fans_total.clone());
-                        } else {
-                            fan_obj.insert("fans_total".into(), Value::String("N/A".into()));
-                        }
-                        if let Some(collected_total) = honors_data.get("collected_total") {
-                            fan_obj.insert("collected_total".into(), collected_total.clone());
-                        } else {
-                            fan_obj.insert("collected_total".into(), Value::String("N/A".into()));
-                        }
-                        if let Some(author_level) = honors_data.get("author_level") {
-                            fan_obj.insert("author_level".into(), author_level.clone());
-                        } else {
-                            fan_obj.insert("author_level".into(), Value::String("N/A".into()));
-                        }
-                    } else {
-                        fan_obj.insert("fans_total".into(), Value::String("N/A".into()));
-                        fan_obj.insert("collected_total".into(), Value::String("N/A".into()));
-                        fan_obj.insert("author_level".into(), Value::String("N/A".into()));
-                    }
-                    if let Some(nickname) = fan.get("nickname") {
-                        fan_obj.insert("nickname".into(), nickname.clone());
-                    }
-                    fan_obj.insert("total_likes".into(), Value::Number(total_likes.into()));
-                    fan_obj.insert(
-                        "n_works".into(),
-                        fan.get("n_works")
-                            .cloned()
-                            .unwrap_or(Value::Number(0.into())),
-                    );
-                    qualified_fans.push(fan_obj);
-                }
+            if total_likes >= like_threshold as i64
+                && let Some(id) = fan.get("id").and_then(serde_json::Value::as_i64)
+            {
+                qualified.push((id, fan, total_likes));
             }
         }
+
+        // 第二段:按 chunk=16 并行查询荣誉数据(尽力而为),结果按流序写回
+        let mut results: Vec<Option<JsonObject>> = vec![None; qualified.len()];
+        thread::scope(|s| {
+            let mut remaining: &mut [Option<JsonObject>] = &mut results[..];
+            for chunk in qualified.chunks(16) {
+                let (head, tail) = remaining.split_at_mut(chunk.len());
+                remaining = tail;
+                s.spawn(move || {
+                    for (i, (id, fan, total_likes)) in chunk.iter().enumerate() {
+                        let mut fan_obj = JsonObject::new();
+                        fan_obj.insert("user_id".into(), Value::Number((*id).into()));
+                        // 荣誉数据为尽力而为:ID 超出 i32 范围或请求失败时输出 N/A
+                        let honors_data = i32::try_from(*id)
+                            .ok()
+                            .and_then(|id32| UserDataFetcher::new().fetch_user_honors(id32).ok());
+                        if let Some(ref honors_data) = honors_data {
+                            if let Some(fans_total) = honors_data.get("fans_total") {
+                                fan_obj.insert("fans_total".into(), fans_total.clone());
+                            } else {
+                                fan_obj.insert("fans_total".into(), Value::String("N/A".into()));
+                            }
+                            if let Some(collected_total) = honors_data.get("collected_total") {
+                                fan_obj.insert("collected_total".into(), collected_total.clone());
+                            } else {
+                                fan_obj
+                                    .insert("collected_total".into(), Value::String("N/A".into()));
+                            }
+                            if let Some(author_level) = honors_data.get("author_level") {
+                                fan_obj.insert("author_level".into(), author_level.clone());
+                            } else {
+                                fan_obj.insert("author_level".into(), Value::String("N/A".into()));
+                            }
+                        } else {
+                            fan_obj.insert("fans_total".into(), Value::String("N/A".into()));
+                            fan_obj.insert("collected_total".into(), Value::String("N/A".into()));
+                            fan_obj.insert("author_level".into(), Value::String("N/A".into()));
+                        }
+                        if let Some(nickname) = fan.get("nickname") {
+                            fan_obj.insert("nickname".into(), nickname.clone());
+                        }
+                        fan_obj.insert("total_likes".into(), Value::Number((*total_likes).into()));
+                        fan_obj.insert(
+                            "n_works".into(),
+                            fan.get("n_works")
+                                .cloned()
+                                .unwrap_or(Value::Number(0.into())),
+                        );
+                        head[i] = Some(fan_obj);
+                    }
+                });
+            }
+        });
+
+        let qualified_fans: Vec<JsonObject> = results.into_iter().flatten().collect();
 
         Ok(FanByLikesStatistics {
             target_user_id: user_id,

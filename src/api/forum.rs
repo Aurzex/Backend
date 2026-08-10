@@ -163,23 +163,18 @@ impl ForumDataFetcher {
             .iter()
             .map(std::string::ToString::to_string)
             .collect();
-        let response = self
-            .client
-            .build_request(HttpMethod::Get, "/web/forums/posts/all", None)
-            .with_param("ids", ids_str.join(","))
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(HttpMethod::Get, "/web/forums/posts/all", None)
+                .with_param("ids", ids_str.join(",")),
+        )
     }
 
     /// 获取单个帖子详情
     pub fn fetch_single_post_details(&self, post_id: i32) -> MewResult<Value> {
         debug!("获取帖子详情: post_id={}", post_id);
         let endpoint = format!("/web/forums/posts/{}/details", post_id);
-        let response = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, None)
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(self.client.build_request(HttpMethod::Get, &endpoint, None))
     }
 
     /// 帖子回帖分页迭代器
@@ -216,65 +211,56 @@ impl ForumDataFetcher {
     /// 获取我的帖子/回复数量
     pub fn fetch_my_post_num(&self) -> MewResult<Value> {
         debug!("获取我的帖子数量");
-        let response = self
-            .client
-            .build_request(HttpMethod::Get, "/web/forums/posts/mine/count", None)
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(HttpMethod::Get, "/web/forums/posts/mine/count", None),
+        )
     }
 
     /// 获取所有板块简要信息
     pub fn fetch_post_boards(&self) -> MewResult<Value> {
         debug!("获取所有板块信息");
-        let response = self
-            .client
-            .build_request(HttpMethod::Get, "/web/forums/boards/simples/all", None)
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(HttpMethod::Get, "/web/forums/boards/simples/all", None),
+        )
     }
 
     /// 获取单个板块详细信息
     pub fn fetch_board_details(&self, board_id: i32) -> MewResult<Value> {
         debug!("获取板块详情: board_id={}", board_id);
         let endpoint = format!("/web/forums/boards/{}", board_id);
-        let response = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, None)
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(self.client.build_request(HttpMethod::Get, &endpoint, None))
     }
 
     /// 获取所有热门帖子 ID
     pub fn fetch_hot_posts_ids(&self) -> MewResult<Value> {
         debug!("获取热门帖子ID");
-        let response = self
-            .client
-            .build_request(HttpMethod::Get, "/web/forums/posts/hots/all", None)
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(HttpMethod::Get, "/web/forums/posts/hots/all", None),
+        )
     }
 
     /// 获取顶部公告(默认 4 条)
     pub fn fetch_top_notices(&self, limit: Option<i32>) -> MewResult<Value> {
         debug!("获取顶部公告: limit={:?}", limit);
-        let response = self
-            .client
-            .build_request(HttpMethod::Get, "/web/forums/notice-boards", None)
-            .with_param("limit", limit.unwrap_or(4).to_string())
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(HttpMethod::Get, "/web/forums/notice-boards", None)
+                .with_param("limit", limit.unwrap_or(4).to_string()),
+        )
     }
 
     /// 获取论坛精选内容
     pub fn fetch_key_content(&self, content_key: &str, limit: Option<i32>) -> MewResult<Value> {
         debug!("获取精选内容: key={}, limit={:?}", content_key, limit);
-        let response = self
-            .client
-            .build_request(HttpMethod::Get, "/web/contents/get-key", None)
-            .with_param("content_key", content_key)
-            .with_param("limit", limit.unwrap_or(4).to_string())
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(HttpMethod::Get, "/web/contents/get-key", None)
+                .with_param("content_key", content_key)
+                .with_param("limit", limit.unwrap_or(4).to_string()),
+        )
     }
 
     /// 获取精品合集帖子
@@ -284,23 +270,21 @@ impl ForumDataFetcher {
         offset: Option<i32>,
     ) -> MewResult<Value> {
         debug!("获取精品合集: limit={:?}, offset={:?}", limit, offset);
-        let response = self
-            .client
-            .build_request(HttpMethod::Get, "/web/forums/posts/selections", None)
-            .with_param("limit", limit.unwrap_or(20).to_string())
-            .with_param("offset", offset.unwrap_or(0).to_string())
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(HttpMethod::Get, "/web/forums/posts/selections", None)
+                .with_param("limit", limit.unwrap_or(20).to_string())
+                .with_param("offset", offset.unwrap_or(0).to_string()),
+        )
     }
 
     /// 获取帖子举报原因列表
     pub fn fetch_report_reasons(&self) -> MewResult<Value> {
         debug!("获取举报原因列表");
-        let response = self
-            .client
-            .build_request(HttpMethod::Get, "/web/reports/posts/reasons/all", None)
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(HttpMethod::Get, "/web/reports/posts/reasons/all", None),
+        )
     }
 
     /// 按标题搜索帖子分页迭代器

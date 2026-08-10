@@ -655,7 +655,7 @@ impl KittyCore {
         params: &[(String, String)],
         payload: Option<&Value>,
     ) {
-        if !self.config.log_requests {
+        if !self.config.log_requests || !log::log_enabled!(log::Level::Debug) {
             return;
         }
         debug!("========== 网络请求信息 ==========");
@@ -689,7 +689,7 @@ impl KittyCore {
     }
 
     fn log_response(&self, url: &str, response: &Response<Body>) -> MewResult<()> {
-        if !self.config.log_requests {
+        if !self.config.log_requests || !log::log_enabled!(log::Level::Debug) {
             return Ok(());
         }
 
@@ -824,14 +824,14 @@ impl KittyCore {
         let mut body = response.into_body();
         let bytes = body.read_to_vec()?;
         if bytes.is_empty() {
-            if self.config.log_requests {
+            if self.config.log_requests && log::log_enabled!(log::Level::Debug) {
                 debug!("响应体: (空)");
             }
             return Ok(Value::Null);
         }
 
         let json: Value = serde_json::from_slice(&bytes)?;
-        if self.config.log_requests {
+        if self.config.log_requests && log::log_enabled!(log::Level::Debug) {
             debug!("---------- 响应体 (JSON) ----------");
             if let Ok(pretty) = serde_json::to_string_pretty(&json) {
                 for line in pretty.lines() {
@@ -847,7 +847,7 @@ impl KittyCore {
     fn response_to_string(&self, response: Response<Body>) -> MewResult<String> {
         let mut body = response.into_body();
         let text = body.read_to_string()?;
-        if self.config.log_requests {
+        if self.config.log_requests && log::log_enabled!(log::Level::Debug) {
             debug!("---------- 响应体 (文本) ----------");
             if text.len() > 1000 {
                 let preview: String = text.chars().take(1000).collect();
@@ -865,7 +865,7 @@ impl KittyCore {
     fn response_to_binary(&self, response: Response<Body>) -> MewResult<Vec<u8>> {
         let mut body = response.into_body();
         let data = body.read_to_vec()?;
-        if self.config.log_requests {
+        if self.config.log_requests && log::log_enabled!(log::Level::Debug) {
             debug!("---------- 响应体 (二进制) ----------");
             debug!("  大小: {} 字节", data.len());
             if let Ok(text) = std::str::from_utf8(&data) {
@@ -1249,10 +1249,10 @@ impl PaginatedIter {
     }
 
     /// 从响应 JSON 中提取数据数组,缺失或类型不符时返回空数组
-    fn extract_page_data(json: &Value, data_pointer: &str) -> Vec<Value> {
-        json.pointer(data_pointer)
-            .and_then(|v| v.as_array())
-            .cloned()
+    fn take_page_data(json: &mut Value, data_pointer: &str) -> Vec<Value> {
+        json.pointer_mut(data_pointer)
+            .and_then(|v| v.as_array_mut())
+            .map(std::mem::take)
             .unwrap_or_default()
     }
 
@@ -1277,7 +1277,7 @@ impl PaginatedIter {
 
     /// 惰性初始化:发送第一页请求,解析元数据并设置为 Ready 状态
     fn initialize(&mut self) -> MewResult<()> {
-        let json = self.request_page(0)?;
+        let mut json = self.request_page(0)?;
         let total = Self::try_extract_total(&json, &self.total_pointer);
 
         // 若配置了响应中的实际每页大小键,则用服务器返回值覆盖 page_size
@@ -1288,7 +1288,7 @@ impl PaginatedIter {
             }
         }
 
-        let data = Self::extract_page_data(&json, &self.data_pointer);
+        let data = Self::take_page_data(&mut json, &self.data_pointer);
         self.state = IterState::Ready {
             current_page: 0,
             current_page_data: data,
@@ -1320,7 +1320,7 @@ impl PaginatedIter {
             let state = std::mem::replace(&mut self.state, IterState::Finished);
             let IterState::Ready {
                 current_page,
-                current_page_data,
+                mut current_page_data,
                 current_index,
                 total,
             } = state
@@ -1336,7 +1336,7 @@ impl PaginatedIter {
 
             // 当前页还有数据,直接返回
             if current_index < current_page_data.len() {
-                let item = current_page_data[current_index].clone();
+                let item = std::mem::replace(&mut current_page_data[current_index], Value::Null);
                 self.state = IterState::Ready {
                     current_page,
                     current_page_data,
@@ -1353,7 +1353,7 @@ impl PaginatedIter {
             }
 
             let next_page = current_page + 1;
-            let json = match self.request_page(next_page) {
+            let mut json = match self.request_page(next_page) {
                 Ok(json) => json,
                 Err(e) => {
                     // 恢复当前页状态:瞬时错误后 next() 可重试同一页,而非把流置为 Finished 永久终止
@@ -1368,7 +1368,7 @@ impl PaginatedIter {
                 }
             };
 
-            let data = Self::extract_page_data(&json, &self.data_pointer);
+            let data = Self::take_page_data(&mut json, &self.data_pointer);
             if data.is_empty() {
                 return None; // 空数据表示结束
             }

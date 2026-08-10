@@ -359,16 +359,15 @@ impl AccountManager {
 
         let payload = Value::Object(data);
 
-        let response = self
+        let builder = self
             .client
             .build_request(
                 HttpMethod::Post,
                 "/tiger/v3/web/accounts/register/phone/with-agreement",
                 None,
             )
-            .with_payload(payload)
-            .send()?;
-        self.client.response_to_json(response)
+            .with_payload(payload);
+        self.send_and_parse(builder)
     }
 
     /// 更新个人资料详细信息
@@ -430,11 +429,10 @@ impl AccountManager {
     /// 获取用户协议列表
     pub fn fetch_agreements(&self) -> MewResult<Value> {
         debug!("获取用户协议");
-        let response = self
+        let builder = self
             .client
-            .build_request(HttpMethod::Get, "/tiger/v3/web/accounts/agreements", None)
-            .send()?;
-        self.client.response_to_json(response)
+            .build_request(HttpMethod::Get, "/tiger/v3/web/accounts/agreements", None);
+        self.send_and_parse(builder)
     }
 
     /// 获取待签署协议列表
@@ -650,7 +648,7 @@ impl AccountManager {
     }
 
     /// 更新手机号码
-    pub fn update_phone_number(&self, captcha: i32, phonenum: i32) -> MewResult<Value> {
+    pub fn update_phone_number(&self, captcha: i32, phonenum: &str) -> MewResult<Value> {
         debug!("更新手机号: phonenum={}", phonenum);
         let payload = json!({
             "phone_number": phonenum,
@@ -668,7 +666,7 @@ impl AccountManager {
     }
 
     /// 验证手机号码是否一致
-    pub fn validate_phone_number(&self, phone_num: i32) -> MewResult<Value> {
+    pub fn validate_phone_number(&self, phone_num: &str) -> MewResult<Value> {
         debug!("验证手机号: phone_num={}", phone_num);
         let builder = self
             .client
@@ -677,15 +675,15 @@ impl AccountManager {
                 "/web/users/phone_number/is_consistent",
                 None,
             )
-            .with_param("phone_number", phone_num.to_string());
+            .with_param("phone_number", phone_num);
         self.send_and_parse(builder)
     }
 
     /// 请求更换手机号验证码
     pub fn execute_request_phone_change_verification(
         &self,
-        old_phonenum: i32,
-        new_phonenum: i32,
+        old_phonenum: &str,
+        new_phonenum: &str,
     ) -> MewResult<bool> {
         debug!(
             "请求更换手机号验证码: old={}, new={}",

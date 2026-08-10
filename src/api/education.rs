@@ -73,16 +73,15 @@ impl EduUserAction {
     pub fn create_class(&self, name: &str) -> MewResult<Value> {
         debug!("创建班级: name={}", name);
         let data = json!({ "name": name });
-        let response = self
-            .client
-            .build_request(
-                HttpMethod::Post,
-                "/edu/zone/class",
-                Some(BaseKey::Education),
-            )
-            .with_payload(data)
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(
+                    HttpMethod::Post,
+                    "/edu/zone/class",
+                    Some(BaseKey::Education),
+                )
+                .with_payload(data),
+        )
     }
 
     /// 重命名班级
@@ -127,28 +126,26 @@ impl EduUserAction {
     pub fn reset_student_password(&self, stu_id: i32) -> MewResult<Value> {
         debug!("重置学生密码: stu_id={}", stu_id);
         let endpoint = format!("/edu/zone/students/{}/password", stu_id);
-        let response = self
-            .client
-            .build_request(HttpMethod::Patch, &endpoint, Some(BaseKey::Education))
-            .with_payload(json!({}))
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(HttpMethod::Patch, &endpoint, Some(BaseKey::Education))
+                .with_payload(json!({})),
+        )
     }
 
     /// 批量重置学生密码
     pub fn execute_bulk_reset_passwords(&self, stu_list: &[i32]) -> MewResult<Value> {
         debug!("批量重置密码: students={:?}", stu_list);
         let data = json!({ "student_id": stu_list });
-        let response = self
-            .client
-            .build_request(
-                HttpMethod::Patch,
-                "/edu/zone/students/password",
-                Some(BaseKey::Education),
-            )
-            .with_payload(data)
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(
+                    HttpMethod::Patch,
+                    "/edu/zone/students/password",
+                    Some(BaseKey::Education),
+                )
+                .with_payload(data),
+        )
     }
 
     /// 从班级移除学生
@@ -177,20 +174,17 @@ impl EduUserAction {
             "description": description,
             "name": name
         });
-        let response = self
-            .client
-            .build_request(
-                method,
-                "/edu/zone/lesson/customized/packages",
-                Some(BaseKey::Education),
-            )
-            .with_payload(data)
-            .send()?;
-        if return_data {
-            self.client.response_to_json(response)
-        } else {
-            Ok(json!({ "success": response.status() == HTTPStatus::Ok as u16 }))
-        }
+        self.send_maybe_parse(
+            self.client
+                .build_request(
+                    method,
+                    "/edu/zone/lesson/customized/packages",
+                    Some(BaseKey::Education),
+                )
+                .with_payload(data),
+            return_data,
+            HTTPStatus::Ok,
+        )
     }
 
     /// 删除作品
@@ -219,31 +213,29 @@ impl EduUserAction {
     pub fn fetch_activity_package_details(&self, package_id: i32) -> MewResult<Value> {
         debug!("获取活动包详情: package_id={}", package_id);
         let data = json!({ "packageId": package_id });
-        let response = self
-            .client
-            .build_request(
-                HttpMethod::Post,
-                "/edu/zone/activity/open/package",
-                Some(BaseKey::Education),
-            )
-            .with_payload(data)
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(
+                    HttpMethod::Post,
+                    "/edu/zone/activity/open/package",
+                    Some(BaseKey::Education),
+                )
+                .with_payload(data),
+        )
     }
 
     /// 获取活动包列表
     pub fn fetch_activity_packages(&self) -> MewResult<Value> {
         debug!("获取活动包列表");
-        let response = self
-            .client
-            .build_request(
-                HttpMethod::Post,
-                "/edu/zone/activity/list/activity/package",
-                Some(BaseKey::Education),
-            )
-            .with_payload(json!({}))
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(
+                    HttpMethod::Post,
+                    "/edu/zone/activity/list/activity/package",
+                    Some(BaseKey::Education),
+                )
+                .with_payload(json!({})),
+        )
     }
 
     /// 标记所有消息为已读
@@ -476,15 +468,14 @@ impl EduDataFetcher {
     /// 获取班级简要列表
     pub fn fetch_classrooms_simple(&self) -> MewResult<Value> {
         debug!("获取班级简要列表");
-        let response = self
-            .client
-            .build_request(
-                HttpMethod::Get,
-                "/edu/zone/classes/simple",
-                Some(BaseKey::Education),
-            )
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(
+                    HttpMethod::Get,
+                    "/edu/zone/classes/simple",
+                    Some(BaseKey::Education),
+                ),
+        )
     }
 
     /// 班级详细信息分页迭代器,可按名称搜索
@@ -838,12 +829,7 @@ impl EduDataFetcher {
             .client
             .build_request(method, &endpoint, Some(BaseKey::Education));
         let builder = Self::add_timestamp_to_builder(builder);
-        let response = builder.send()?;
-        if method == HttpMethod::Get {
-            self.client.response_to_json(response)
-        } else {
-            Ok(json!({ "success": response.status() == HTTPStatus::Ok as u16 }))
-        }
+        self.send_maybe_parse(builder, method == HttpMethod::Get, HTTPStatus::Ok)
     }
 
     /// 获取自定义课程包内容
@@ -893,16 +879,15 @@ impl EduDataFetcher {
     pub fn fetch_organization_ids(&self) -> MewResult<Value> {
         debug!("获取组织ID列表");
         let timestamp = current_timestamp_13();
-        let response = self
-            .client
-            .build_request(
-                HttpMethod::Get,
-                "https://static.codemao.cn/teacher-edu/organization_ids.json",
-                Some(BaseKey::Education),
-            )
-            .with_param("CMTIME", timestamp.to_string())
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(
+                    HttpMethod::Get,
+                    "https://static.codemao.cn/teacher-edu/organization_ids.json",
+                    Some(BaseKey::Education),
+                )
+                .with_param("CMTIME", timestamp.to_string()),
+        )
     }
 
     // 数据分析相关

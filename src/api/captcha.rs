@@ -124,13 +124,16 @@ impl CaptchaManager {
     }
 
     /// 防水墙票据校验
-    pub fn verify_waterproof_wall_ticket(&self, _ticket: Value) -> MewResult<Value> {
+    pub fn verify_waterproof_wall_ticket(&self, ticket: Value) -> MewResult<Value> {
         debug!("校验防水墙票据");
-        let builder = self.client.build_request(
-            HttpMethod::Post,
-            "/tiger/captcha/graph/tickets/waterproof-wall",
-            None,
-        );
+        let builder = self
+            .client
+            .build_request(
+                HttpMethod::Post,
+                "/tiger/captcha/graph/tickets/waterproof-wall",
+                None,
+            )
+            .with_payload(ticket);
         self.send_and_parse(builder)
     }
 }

@@ -1,4 +1,4 @@
-use crate::utils::acquire::{BaseKey, CodeMaoClient, HTTPStatus, HttpMethod, MewResult};
+use crate::utils::acquire::{BaseKey, ClientAccess, CodeMaoClient, HTTPStatus, HttpMethod, MewResult};
 use log::debug;
 use serde_json::{Value, json};
 
@@ -19,21 +19,19 @@ impl OverseaDataClient {
     /// 获取 Tiger 账号信息列表
     pub fn fetch_tiger_accounts(&self) -> MewResult<Value> {
         debug!("获取海外 Tiger 账号信息");
-        let response = self
-            .client
-            .build_request(HttpMethod::Get, "/tiger/accounts", Some(BaseKey::CodeGame))
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(HttpMethod::Get, "/tiger/accounts", Some(BaseKey::CodeGame)),
+        )
     }
 
     /// 获取海外平台配置信息
     pub fn fetch_platform_config(&self) -> MewResult<Value> {
         debug!("获取海外平台配置");
-        let response = self
-            .client
-            .build_request(HttpMethod::Get, "/config", Some(BaseKey::CodeGame))
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(HttpMethod::Get, "/config", Some(BaseKey::CodeGame)),
+        )
     }
 }
 
@@ -97,17 +95,16 @@ impl UserActionHandler {
             "邮箱注册 - email: {}, language: {}, pid: {}",
             email, language_str, pid_val
         );
-        let response = self
-            .client
-            .build_request(
-                HttpMethod::Post,
-                "/tiger/accounts/register/email",
-                Some(BaseKey::CodeGame),
-            )
-            .with_payload(payload)
-            .send()?;
-
-        Ok(response.status() == HTTPStatus::Created as u16)
+        self.check_status(
+            self.client
+                .build_request(
+                    HttpMethod::Post,
+                    "/tiger/accounts/register/email",
+                    Some(BaseKey::CodeGame),
+                )
+                .with_payload(payload),
+            HTTPStatus::Created,
+        )
     }
 
     /// 使用身份(邮箱或用户名)和密码登录
@@ -125,22 +122,33 @@ impl UserActionHandler {
         });
 
         debug!("身份登录 - identity: {}, pid: {}", identity, pid_val);
-        let response = self
-            .client
-            .build_request(
-                HttpMethod::Post,
-                "/tiger/accounts/login",
-                Some(BaseKey::CodeGame),
-            )
-            .with_payload(payload)
-            .send()?;
-
-        Ok(response.status() == HTTPStatus::Ok as u16)
+        self.check_status(
+            self.client
+                .build_request(
+                    HttpMethod::Post,
+                    "/tiger/accounts/login",
+                    Some(BaseKey::CodeGame),
+                )
+                .with_payload(payload),
+            HTTPStatus::Ok,
+        )
     }
 }
 
 impl Default for UserActionHandler {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl ClientAccess for OverseaDataClient {
+    fn client(&self) -> &CodeMaoClient {
+        self.client
+    }
+}
+
+impl ClientAccess for UserActionHandler {
+    fn client(&self) -> &CodeMaoClient {
+        self.client
     }
 }

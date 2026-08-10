@@ -1,5 +1,5 @@
 use crate::utils::acquire::{
-    BaseKey, CodeMaoClient, HTTPStatus, HttpMethod, KittyRequestBuilder, MewError, MewResult,
+    BaseKey, ClientAccess, CodeMaoClient, HTTPStatus, HttpMethod, MewError, MewResult,
     PaginatedIter, PaginationMethod, current_timestamp_13,
 };
 use log::debug;
@@ -156,12 +156,6 @@ impl WhaleReportFetcher {
     }
 
     // 私有辅助
-
-    /// 为请求构建器附加当前时间戳参数 `TIME`
-    fn add_timestamp_to_builder(builder: KittyRequestBuilder) -> KittyRequestBuilder {
-        let timestamp = current_timestamp_13();
-        builder.with_param("TIME", timestamp.to_string())
-    }
 
     /// 为分页迭代器附加当前时间戳参数 `TIME`
     fn add_timestamp_to_paginated(paginated: PaginatedIter) -> PaginatedIter {
@@ -323,12 +317,11 @@ impl ReportHandler {
             "admin_id": admin_id,
             "status": resolution,
         });
-        let response = self
+        let builder = self
             .client
             .build_request(HttpMethod::Patch, endpoint, Some(BaseKey::Whale))
-            .with_payload(payload)
-            .send()?;
-        Ok(response.status() == HTTPStatus::NoContent as u16)
+            .with_payload(payload);
+        self.check_status(builder, HTTPStatus::NoContent)
     }
 
     // 公共方法
@@ -405,5 +398,19 @@ impl ReportHandler {
 impl Default for ReportHandler {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// 共享请求辅助(ClientAccess)
+
+impl ClientAccess for WhaleReportFetcher {
+    fn client(&self) -> &CodeMaoClient {
+        self.client
+    }
+}
+
+impl ClientAccess for ReportHandler {
+    fn client(&self) -> &CodeMaoClient {
+        self.client
     }
 }

@@ -429,6 +429,8 @@ impl DataStore {
         cvid: &HashMap<String, String>,
         key: &str,
     ) -> Option<&'a mut VariableData> {
+        // 注:返回 'a 借用,先 contains_key 再 get_mut 是安全 Rust 下唯一
+        // 不引入闭包借用冲突的写法;单次哈希会因借用覆盖整个函数体而无法编译
         if vars.contains_key(key) {
             return vars.get_mut(key);
         }
@@ -447,6 +449,7 @@ impl DataStore {
     }
 
     fn list_mut(&mut self, key: &str) -> Option<&mut ListData> {
+        // 注:同 variable_in,返回 'a 借用下无法安全单次哈希
         if self.lists.contains_key(key) {
             return self.lists.get_mut(key);
         }
@@ -764,12 +767,14 @@ impl CloudBuilder {
 impl CloudConnection {
     /// 建立云存储 WebSocket 连接(后台读线程 + 批量上传线程)
     pub fn connect(&self) -> Result<()> {
+        // 串行化建立过程,避免并发 connect() 双建
+        let _connect_guard = self.inner.connect_lock.lock().unwrap();
         if self.inner.connected.load(Ordering::Acquire) {
             return Ok(());
         }
         self.reset_state();
         self.inner.stopping.store(false, Ordering::Release);
-        establish(&self.inner)?;
+        establish_locked(&self.inner)?;
         // 批量上传线程随首次连接启动,随 close 结束
         if self.inner.flush_join.lock().unwrap().is_none() {
             let inner = self.inner.clone();
@@ -2269,6 +2274,11 @@ fn truncate(text: &str, max: usize) -> String {
 fn establish(inner: &Arc<CloudInner>) -> Result<()> {
     // 串行化建立过程,避免 connect() 与自动重连竞态产生双读线程
     let _connect_guard = inner.connect_lock.lock().unwrap();
+    establish_locked(inner)
+}
+
+/// 建立 WebSocket 连接并启动读线程(调用方须持有 connect_lock)
+fn establish_locked(inner: &Arc<CloudInner>) -> Result<()> {
     let (auth_type, stag) = inner.editor.query_params();
     let url = format!(
         "{CLOUD_WS_BASE_URL}?session_id={}&authorization_type={auth_type}&stag={stag}&EIO=3&transport=websocket",
@@ -2454,10 +2464,15 @@ fn flush_loop(inner: Arc<CloudInner>) {
             }
             continue;
         }
-        let merged = merge_commands(batch);
         let Some(tx) = inner.tx.lock().unwrap().clone() else {
+            warn!("云连接未就绪, {} 条命令保留待上传", batch.len());
+            let mut queue = inner.commands.lock().unwrap();
+            for cmd in batch.into_iter().rev() {
+                queue.push_front(cmd);
+            }
             continue;
         };
+        let merged = merge_commands(batch.clone());
         let send = |payload: String| -> bool {
             match tx.send(Message::text(payload)) {
                 Ok(()) => true,
@@ -2467,27 +2482,45 @@ fn flush_loop(inner: Arc<CloudInner>) {
                 }
             }
         };
+        let mut failed = false;
         if !merged.private_updates.is_empty() {
             let frame = format!(
                 "{EVENT_MESSAGE_PREFIX}{}",
                 serde_json::to_string(&("update_private_vars", &merged.private_updates)).unwrap()
             );
-            send(frame);
+            if !send(frame) {
+                failed = true;
+            }
         }
-        if !merged.public_updates.is_empty() {
+        if !failed && !merged.public_updates.is_empty() {
             let frame = format!(
                 "{EVENT_MESSAGE_PREFIX}{}",
                 serde_json::to_string(&("update_vars", &merged.public_updates)).unwrap()
             );
-            send(frame);
+            if !send(frame) {
+                failed = true;
+            }
         }
         let list_count = merged.list_updates.len();
-        for (cvid, ops) in merged.list_updates {
-            let frame = format!(
-                "{EVENT_MESSAGE_PREFIX}{}",
-                serde_json::to_string(&("update_lists", json!({ cvid: ops }))).unwrap()
-            );
-            send(frame);
+        if !failed {
+            for (cvid, ops) in merged.list_updates {
+                let frame = format!(
+                    "{EVENT_MESSAGE_PREFIX}{}",
+                    serde_json::to_string(&("update_lists", json!({ cvid: ops }))).unwrap()
+                );
+                if !send(frame) {
+                    failed = true;
+                    break;
+                }
+            }
+        }
+        if failed {
+            warn!("批量上传发送失败, {} 条命令回退待上传", batch.len());
+            let mut queue = inner.commands.lock().unwrap();
+            for cmd in batch.into_iter().rev() {
+                queue.push_front(cmd);
+            }
+            continue;
         }
         debug!(
             "批量上传完成: 私有 {} 公有 {} 列表 {list_count}",

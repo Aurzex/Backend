@@ -5,8 +5,7 @@ mod utils;
 use log::{LevelFilter, Log, Metadata, Record};
 use serde_json::Value;
 
-use crate::api::auth::{AuthProcessor, LoginHandler, LoginResult};
-use crate::core::registry::value_to_i64;
+use crate::api::auth::{AdminInfo, AuthProcessor, LoginHandler, LoginResult};
 use crate::core::services::ReportProcessor;
 use crate::core::terminal::{ConsoleUi, ProcessorUi, ReportConsole};
 use crate::utils::data::PathConfig;
@@ -66,20 +65,18 @@ fn main() {
     println!("{}", pretty(&admin_details));
 
     // 5. 自动提取管理员 ID,无需手动输入
-    let admin_id = if let Some(id) = extract_admin_id(&admin_details) {
-        id
-    } else {
-        eprintln!("无法从管理员信息中提取管理员ID, 请检查接口返回");
-        return;
+    let admin_info = match AdminInfo::from_details(&admin_details) {
+        Some(info) => info,
+        None => {
+            eprintln!(
+                "无法从管理员信息中提取管理员ID(缺少 admin.id/username/role_name/full_name), 请检查接口返回"
+            );
+            return;
+        }
     };
-    let admin_name = admin_details
-        .get("admin")
-        .and_then(|a| a.get("full_name"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("未知");
-    println!("管理员: {} (ID {})", admin_name, admin_id);
+    println!("管理员: {} (ID {})", admin_info.full_name, admin_info.id);
 
-    let Ok(admin_id) = i32::try_from(admin_id) else {
+    let Ok(admin_id) = i32::try_from(admin_info.id) else {
         eprintln!("管理员ID超出范围");
         return;
     };
@@ -135,27 +132,6 @@ fn admin_login_with_retry(ui: &mut dyn ProcessorUi) -> Result<LoginResult, Strin
             }
         }
     }
-}
-
-/// 从管理员信息中提取管理员 ID,依次尝试 admin.id / id / admin
-fn extract_admin_id(details: &Value) -> Option<i64> {
-    let paths: [&[&str]; 3] = [&["admin", "id"], &["id"], &["admin"]];
-    for path in paths {
-        let mut cur = details;
-        let mut found = true;
-        for &key in path {
-            if let Some(v) = cur.get(key) {
-                cur = v
-            } else {
-                found = false;
-                break;
-            }
-        }
-        if found && let Some(id) = value_to_i64(cur) {
-            return Some(id);
-        }
-    }
-    None
 }
 
 fn pretty(v: &Value) -> String {

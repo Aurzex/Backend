@@ -153,3 +153,12 @@ impl CodeMaoFile {
         Self::write_text(path, &content)
     }
 }
+
+/// 将 JSON 值转为 i64(数字直接取,字符串尝试解析)
+pub fn value_to_i64(v: &serde_json::Value) -> Option<i64> {
+    match v {
+        serde_json::Value::Number(n) => n.as_i64(),
+        serde_json::Value::String(s) => s.parse().ok(),
+        _ => None,
+    }
+}

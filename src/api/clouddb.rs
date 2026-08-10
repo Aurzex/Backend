@@ -1,4 +1,4 @@
-use crate::utils::acquire::{BaseKey, CodeMaoClient, HttpMethod, MewResult};
+use crate::utils::acquire::{BaseKey, ClientAccess, CodeMaoClient, HttpMethod, MewResult};
 use log::debug;
 use serde_json::{Value, json};
 
@@ -19,47 +19,44 @@ impl Ranking {
     /// 更新排行榜(全量更新)
     pub fn update_ranking_list(&self, data: Value) -> MewResult<Value> {
         debug!("正在全量更新排行榜");
-        let response = self
-            .client
-            .build_request(
-                HttpMethod::Put,
-                "/neko/ranking-list/fullUpdate",
-                Some(BaseKey::Creation),
-            )
-            .with_payload(data)
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(
+                    HttpMethod::Put,
+                    "/neko/ranking-list/fullUpdate",
+                    Some(BaseKey::Creation),
+                )
+                .with_payload(data),
+        )
     }
 
     /// 清空指定排行榜
     pub fn clear_ranking_list(&self, ranking_id: &str) -> MewResult<Value> {
         debug!("清空排行榜: id={}", ranking_id);
-        let response = self
-            .client
-            .build_request(
-                HttpMethod::Put,
-                "/neko/ranking-list/clear",
-                Some(BaseKey::Creation),
-            )
-            .with_param("id", ranking_id)
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(
+                    HttpMethod::Put,
+                    "/neko/ranking-list/clear",
+                    Some(BaseKey::Creation),
+                )
+                .with_param("id", ranking_id),
+        )
     }
 
     /// 获取排行榜记录
     pub fn fetch_ranking_records(&self, ranking_id: &str, work_id: i32) -> MewResult<Value> {
         debug!("获取排行榜记录: id={}, work_id={}", ranking_id, work_id);
-        let response = self
-            .client
-            .build_request(
-                HttpMethod::Get,
-                "/neko/ranking-list/record/list",
-                Some(BaseKey::Creation),
-            )
-            .with_param("id", ranking_id)
-            .with_param("work_id", work_id.to_string())
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(
+                    HttpMethod::Get,
+                    "/neko/ranking-list/record/list",
+                    Some(BaseKey::Creation),
+                )
+                .with_param("id", ranking_id)
+                .with_param("work_id", work_id.to_string()),
+        )
     }
 
     /// 添加排行榜记录
@@ -75,44 +72,41 @@ impl Ranking {
             "id": ranking_id,
         });
         debug!("添加排行榜记录: {:?}", data);
-        let response = self
-            .client
-            .build_request(
-                HttpMethod::Post,
-                "/neko/ranking-list/record",
-                Some(BaseKey::Creation),
-            )
-            .with_payload(data)
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(
+                    HttpMethod::Post,
+                    "/neko/ranking-list/record",
+                    Some(BaseKey::Creation),
+                )
+                .with_payload(data),
+        )
     }
 
     /// 创建新排行榜
     pub fn create_ranking_list(&self, data: Value) -> MewResult<Value> {
         debug!("创建排行榜: {:?}", data);
-        let response = self
-            .client
-            .build_request(
-                HttpMethod::Post,
-                "/neko/ranking-list",
-                Some(BaseKey::Creation),
-            )
-            .with_payload(data)
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(
+                    HttpMethod::Post,
+                    "/neko/ranking-list",
+                    Some(BaseKey::Creation),
+                )
+                .with_payload(data),
+        )
     }
 
     /// 删除排行榜
     pub fn delete_ranking_list(&self, ranking_id: &str, work_id: i32) -> MewResult<Value> {
         let endpoint = format!("/neko/ranking-list/{}", ranking_id);
         debug!("删除排行榜: id={}, work_id={}", ranking_id, work_id);
-        let response = self
-            .client
-            .build_request(HttpMethod::Delete, &endpoint, Some(BaseKey::Creation))
-            .with_param("id", ranking_id)
-            .with_param("work_id", work_id.to_string())
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(HttpMethod::Delete, &endpoint, Some(BaseKey::Creation))
+                .with_param("id", ranking_id)
+                .with_param("work_id", work_id.to_string()),
+        )
     }
 }
 
@@ -157,58 +151,53 @@ impl CoconutCloud {
             dict_id, key, type_name
         );
         let endpoint = format!("/coconut/webdb/try/dict/{}/set", dict_id);
-        let response = self
-            .client
-            .build_request(HttpMethod::Post, &endpoint, Some(BaseKey::Creation))
-            .with_payload(data)
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(HttpMethod::Post, &endpoint, Some(BaseKey::Creation))
+                .with_payload(data),
+        )
     }
 
     /// 删除云字典中的键
     pub fn delete_dictionary_key(&self, dict_id: &str, key: &str) -> MewResult<Value> {
         debug!("删除云字典键: dict={}, key={}", dict_id, key);
         let endpoint = format!("/coconut/webdb/try/dict/{}/remove", dict_id);
-        let response = self
-            .client
-            .build_request(HttpMethod::Delete, &endpoint, Some(BaseKey::Creation))
-            .with_param("key", key)
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(HttpMethod::Delete, &endpoint, Some(BaseKey::Creation))
+                .with_param("key", key),
+        )
     }
 
     /// 清空云字典
     pub fn clear_dictionary(&self, dict_id: &str) -> MewResult<Value> {
         debug!("清空云字典: dict={}", dict_id);
         let endpoint = format!("/coconut/webdb/try/dict/clear/{}", dict_id);
-        let response = self
-            .client
-            .build_request(HttpMethod::Delete, &endpoint, Some(BaseKey::Creation))
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(HttpMethod::Delete, &endpoint, Some(BaseKey::Creation)),
+        )
     }
 
     /// 获取云字典的所有键
     pub fn get_dictionary_keys(&self, dict_id: &str) -> MewResult<Value> {
         debug!("获取云字典所有键: dict={}", dict_id);
         let endpoint = format!("/coconut/webdb/try/dict/{}/keys", dict_id);
-        let response = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation))
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation)),
+        )
     }
 
     /// 获取云字典中指定键的值
     pub fn get_dictionary_value(&self, dict_id: &str, key: &str) -> MewResult<Value> {
         debug!("获取云字典值: dict={}, key={}", dict_id, key);
         let endpoint = format!("/coconut/webdb/try/dict/{}/getvalue", dict_id);
-        let response = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation))
-            .with_param("key", key)
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation))
+                .with_param("key", key),
+        )
     }
 
     /// 查询云数据表
@@ -220,12 +209,11 @@ impl CoconutCloud {
         });
         debug!("查询云数据表: table={}", table_id);
         let endpoint = format!("/coconut/clouddb/runtime/{}/select", table_id);
-        let response = self
-            .client
-            .build_request(HttpMethod::Post, &endpoint, Some(BaseKey::Creation))
-            .with_payload(data)
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(HttpMethod::Post, &endpoint, Some(BaseKey::Creation))
+                .with_payload(data),
+        )
     }
 
     /// 更新云数据表行
@@ -243,12 +231,11 @@ impl CoconutCloud {
         });
         debug!("更新云数据表: table={}", table_id);
         let endpoint = format!("/coconut/clouddb/runtime/{}/update", table_id);
-        let response = self
-            .client
-            .build_request(HttpMethod::Put, &endpoint, Some(BaseKey::Creation))
-            .with_payload(data)
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(HttpMethod::Put, &endpoint, Some(BaseKey::Creation))
+                .with_payload(data),
+        )
     }
 
     /// 插入云数据表行
@@ -258,12 +245,11 @@ impl CoconutCloud {
         });
         debug!("插入云数据表: table={}", table_id);
         let endpoint = format!("/coconut/clouddb/runtime/{}/insert", table_id);
-        let response = self
-            .client
-            .build_request(HttpMethod::Post, &endpoint, Some(BaseKey::Creation))
-            .with_payload(data)
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(HttpMethod::Post, &endpoint, Some(BaseKey::Creation))
+                .with_payload(data),
+        )
     }
 
     /// 删除云数据表行
@@ -275,63 +261,58 @@ impl CoconutCloud {
         });
         debug!("删除云数据表行: table={}", table_id);
         let endpoint = format!("/coconut/clouddb/runtime/{}/delete", table_id);
-        let response = self
-            .client
-            .build_request(HttpMethod::Put, &endpoint, Some(BaseKey::Creation))
-            .with_payload(data)
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(HttpMethod::Put, &endpoint, Some(BaseKey::Creation))
+                .with_payload(data),
+        )
     }
 
     /// 清空云数据表
     pub fn clear_table(&self, table_id: &str) -> MewResult<Value> {
         debug!("清空云数据表: table={}", table_id);
         let endpoint = format!("/coconut/clouddb/v2/runtime/{}/clear", table_id);
-        let response = self
-            .client
-            .build_request(HttpMethod::Put, &endpoint, Some(BaseKey::Creation))
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(HttpMethod::Put, &endpoint, Some(BaseKey::Creation)),
+        )
     }
 
     /// 获取云数据表的行数
     pub fn get_table_row_count(&self, table_id: &str) -> MewResult<Value> {
         debug!("获取数据表行数: table={}", table_id);
         let endpoint = format!("/coconut/clouddb/runtime/{}/count", table_id);
-        let response = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation))
-            .with_param("type", "RECORD")
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation))
+                .with_param("type", "RECORD"),
+        )
     }
 
     /// 获取多个云数据表的信息
     pub fn get_table_info(&self, table_ids: &[String]) -> MewResult<Value> {
         let ids_str = table_ids.join(",");
         debug!("获取数据表信息: ids={}", ids_str);
-        let response = self
-            .client
-            .build_request(
-                HttpMethod::Get,
-                "/coconut/clouddb/v2/runtime/list",
-                Some(BaseKey::Creation),
-            )
-            .with_param("db_ids", ids_str)
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(
+                    HttpMethod::Get,
+                    "/coconut/clouddb/v2/runtime/list",
+                    Some(BaseKey::Creation),
+                )
+                .with_param("db_ids", ids_str),
+        )
     }
 
     /// 加载作品数据(H5 或社区版)
     pub fn load_work_data(&self, work_id: i32, channel: &str) -> MewResult<Value> {
         debug!("加载作品数据: work_id={}, channel={}", work_id, channel);
         let endpoint = format!("/coconut/web/work/{}/load", work_id);
-        let response = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation))
-            .with_param("channel", channel)
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation))
+                .with_param("channel", channel),
+        )
     }
 }
 
@@ -373,8 +354,7 @@ impl CoconutCloudAdmin {
             builder = builder.with_param("type", (db_type_val as i32).to_string());
         }
         debug!("获取用户数据库列表: type={:?}", db_type);
-        let response = builder.send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(builder)
     }
 
     /// 获取用户云数据库详细信息列表
@@ -391,38 +371,35 @@ impl CoconutCloudAdmin {
             builder = builder.with_param("type", (db_type_val as i32).to_string());
         }
         debug!("获取用户数据库详情: type={:?}", db_type);
-        let response = builder.send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(builder)
     }
 
     /// 获取作品关联的云字典列表
     pub fn list_work_dicts(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取作品云字典: work_id={}", work_id);
-        let response = self
-            .client
-            .build_request(
-                HttpMethod::Get,
-                "/coconut/webdb/admin/dict",
-                Some(BaseKey::Creation),
-            )
-            .with_param("work_id", work_id.to_string())
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(
+                    HttpMethod::Get,
+                    "/coconut/webdb/admin/dict",
+                    Some(BaseKey::Creation),
+                )
+                .with_param("work_id", work_id.to_string()),
+        )
     }
 
     /// 按类型获取云字典列表
     pub fn list_work_dicts_by_type(&self, dict_type: i32) -> MewResult<Value> {
         debug!("按类型获取云字典: type={}", dict_type);
-        let response = self
-            .client
-            .build_request(
-                HttpMethod::Get,
-                "/coconut/webdb/admin/dict",
-                Some(BaseKey::Creation),
-            )
-            .with_param("type", dict_type.to_string())
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(
+                    HttpMethod::Get,
+                    "/coconut/webdb/admin/dict",
+                    Some(BaseKey::Creation),
+                )
+                .with_param("type", dict_type.to_string()),
+        )
     }
 
     /// 获取云字典条目列表(分页)
@@ -440,14 +417,13 @@ impl CoconutCloudAdmin {
             "获取字典条目: dict={}, work={}, offset={}, limit={}",
             dict_id, work_id, offset_val, limit_val
         );
-        let response = self
-            .client
-            .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation))
-            .with_param("work_id", work_id.to_string())
-            .with_param("offset", offset_val.to_string())
-            .with_param("limit", limit_val.to_string())
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation))
+                .with_param("work_id", work_id.to_string())
+                .with_param("offset", offset_val.to_string())
+                .with_param("limit", limit_val.to_string()),
+        )
     }
 
     /// 迁移云字典环境
@@ -458,21 +434,38 @@ impl CoconutCloudAdmin {
             "to_env": to_env,
         });
         debug!("迁移云字典: db={}, from={}, to={}", db_id, from_env, to_env);
-        let response = self
-            .client
-            .build_request(
-                HttpMethod::Put,
-                "/coconut/webdb/admin/dict/migrate",
-                Some(BaseKey::Creation),
-            )
-            .with_payload(data)
-            .send()?;
-        self.client.response_to_json(response)
+        self.send_and_parse(
+            self.client
+                .build_request(
+                    HttpMethod::Put,
+                    "/coconut/webdb/admin/dict/migrate",
+                    Some(BaseKey::Creation),
+                )
+                .with_payload(data),
+        )
     }
 }
 
 impl Default for CoconutCloudAdmin {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl ClientAccess for Ranking {
+    fn client(&self) -> &CodeMaoClient {
+        self.client
+    }
+}
+
+impl ClientAccess for CoconutCloud {
+    fn client(&self) -> &CodeMaoClient {
+        self.client
+    }
+}
+
+impl ClientAccess for CoconutCloudAdmin {
+    fn client(&self) -> &CodeMaoClient {
+        self.client
     }
 }

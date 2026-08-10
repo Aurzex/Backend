@@ -28,22 +28,6 @@ impl SelectMethod {
     }
 }
 
-/// 发布状态
-#[derive(Debug, Clone, Copy)]
-pub enum PublishStatus {
-    Published,
-    Unpublished,
-}
-
-impl PublishStatus {
-    fn as_str(&self) -> &'static str {
-        match self {
-            PublishStatus::Published => "PUBLISHED",
-            PublishStatus::Unpublished => "UNPUBLISHED",
-        }
-    }
-}
-
 /// 作品类型
 #[derive(Debug, Clone, Copy)]
 pub enum WorkType {
@@ -1590,24 +1574,6 @@ impl SampleManager {
         }
     }
 
-    /// 获取 Kitten N 示例详情
-    pub fn fetch_sample_detail(&self, params: Vec<(String, String)>) -> MewResult<Value> {
-        debug!("获取示例详情: params={:?}", params);
-        let timestamp = current_timestamp_13();
-        let mut builder = self
-            .client
-            .build_request(
-                HttpMethod::Get,
-                "/neko/sample/detail",
-                Some(BaseKey::Creation),
-            )
-            .with_param("TIME", timestamp.to_string());
-        for (key, value) in params {
-            builder = builder.with_param(key, value);
-        }
-        self.send_and_parse(builder)
-    }
-
     /// 获取示例列表
     pub fn fetch_sample_list(&self, subject_id: &str) -> MewResult<Value> {
         debug!("获取示例列表: subject_id={}", subject_id);
@@ -1704,16 +1670,6 @@ impl WorkDataFetcher {
     pub fn fetch_kn_publish_status(&self, work_id: i32) -> MewResult<Value> {
         debug!("获取KN作品发布状态: work_id={}", work_id);
         let endpoint = format!("/neko/community/work/detail/{}", work_id);
-        let builder =
-            self.client
-                .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
-        self.send_and_parse(builder)
-    }
-
-    /// 获取 KN 作品状态
-    pub fn fetch_kn_work_state(&self, work_id: i32) -> MewResult<Value> {
-        debug!("获取KN作品状态: work_id={}", work_id);
-        let endpoint = format!("/neko/works/status/{}", work_id);
         let builder =
             self.client
                 .build_request(HttpMethod::Get, &endpoint, Some(BaseKey::Creation));
