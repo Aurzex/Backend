@@ -1,9 +1,15 @@
 use crate::utils::acquire::{
-    BaseKey, ClientAccess, CodeMaoClient, HTTPStatus, HttpMethod, KittyRequestBuilder, MewResult,
-    PaginatedIter, PaginationMethod, current_timestamp_13,
+    BaseKey, ClientAccess, CodeMaoClient, DEFAULT_LIMIT, HTTPStatus, HttpMethod,
+    KittyRequestBuilder, MewResult, PaginatedIter, PaginationMethod, current_timestamp_13,
 };
 use log::debug;
 use serde_json::{Value, json};
+
+// 分页单页上限(各端点服务端契约)
+const NOTICE_PAGE_SIZE: usize = 10;
+const CLASS_STUDENT_PAGE_SIZE: usize = 100;
+const MANAGED_WORK_PAGE_SIZE: usize = 50;
+const LESSON_PACKAGE_PAGE_SIZE: usize = 100;
 
 // 教育用户操作
 
@@ -279,12 +285,7 @@ impl EduUserAction {
     }
 
     /// 邀请学生加入班级
-    pub fn invite_to_class(
-        &self,
-        class_id: i32,
-        types: &str,
-        identity: Value,
-    ) -> MewResult<bool> {
+    pub fn invite_to_class(&self, class_id: i32, types: &str, identity: Value) -> MewResult<bool> {
         debug!("邀请学生加入班级: class_id={}, type={}", class_id, types);
         let data = json!({
             "identity": identity,
@@ -311,10 +312,7 @@ impl EduUserAction {
     }
 
     /// 完善教师信息
-    pub fn improve_teacher_info(
-        &self,
-        args: ImproveTeacherInfoArgs<'_>,
-    ) -> MewResult<bool> {
+    pub fn improve_teacher_info(&self, args: ImproveTeacherInfoArgs<'_>) -> MewResult<bool> {
         debug!("完善教师信息: user_id={}", args.user_id);
         let data = json!({
             "id": args.user_id,
@@ -428,7 +426,7 @@ impl EduDataFetcher {
             .with_pagination_method(PaginationMethod::Page)
             .with_offset_key("page")
             .with_amount_key("limit")
-            .with_limit(limit.unwrap_or(10));
+            .with_limit(limit.unwrap_or(NOTICE_PAGE_SIZE));
         paginated = Self::add_timestamp_to_paginated(paginated);
         paginated
     }
@@ -444,7 +442,7 @@ impl EduDataFetcher {
             .with_pagination_method(PaginationMethod::Page)
             .with_offset_key("page")
             .with_amount_key("limit")
-            .with_limit(limit.unwrap_or(10));
+            .with_limit(limit.unwrap_or(NOTICE_PAGE_SIZE));
         paginated = Self::add_timestamp_to_paginated(paginated);
         paginated
     }
@@ -486,7 +484,7 @@ impl EduDataFetcher {
             .with_pagination_method(PaginationMethod::Page)
             .with_offset_key("page")
             .with_amount_key("limit")
-            .with_limit(limit.unwrap_or(20))
+            .with_limit(limit.unwrap_or(DEFAULT_LIMIT))
             .with_response_amount_key("limit"); // 服务器返回的实际每页大小键
         if let Some(name) = class_name {
             paginated = paginated.with_iter_param("class_name", name);
@@ -506,7 +504,7 @@ impl EduDataFetcher {
             .with_pagination_method(PaginationMethod::Page)
             .with_offset_key("page")
             .with_amount_key("limit")
-            .with_limit(limit.unwrap_or(10));
+            .with_limit(limit.unwrap_or(NOTICE_PAGE_SIZE));
         paginated = Self::add_timestamp_to_paginated(paginated);
         paginated
     }
@@ -525,7 +523,7 @@ impl EduDataFetcher {
             .with_pagination_method(PaginationMethod::Page)
             .with_offset_key("page")
             .with_amount_key("limit")
-            .with_limit(limit.unwrap_or(100))
+            .with_limit(limit.unwrap_or(CLASS_STUDENT_PAGE_SIZE))
     }
 
     /// 获取导航菜单
@@ -665,7 +663,7 @@ impl EduDataFetcher {
             .with_pagination_method(PaginationMethod::Page)
             .with_offset_key("page")
             .with_amount_key("limit")
-            .with_limit(limit.unwrap_or(50))
+            .with_limit(limit.unwrap_or(MANAGED_WORK_PAGE_SIZE))
             .with_response_amount_key("limit");
         paginated = Self::add_timestamp_to_paginated(paginated);
         paginated
@@ -682,7 +680,7 @@ impl EduDataFetcher {
             .with_pagination_method(PaginationMethod::Page)
             .with_offset_key("page")
             .with_amount_key("limit")
-            .with_limit(limit.unwrap_or(50))
+            .with_limit(limit.unwrap_or(MANAGED_WORK_PAGE_SIZE))
             .with_response_amount_key("limit");
         paginated = Self::add_timestamp_to_paginated(paginated);
         paginated
@@ -699,7 +697,7 @@ impl EduDataFetcher {
             .with_pagination_method(PaginationMethod::Page)
             .with_offset_key("page")
             .with_amount_key("limit")
-            .with_limit(limit.unwrap_or(50))
+            .with_limit(limit.unwrap_or(MANAGED_WORK_PAGE_SIZE))
             .with_response_amount_key("limit");
         paginated = Self::add_timestamp_to_paginated(paginated);
         paginated
@@ -743,7 +741,7 @@ impl EduDataFetcher {
             .with_pagination_method(PaginationMethod::Page)
             .with_offset_key("page")
             .with_amount_key("limit")
-            .with_limit(limit.unwrap_or(10));
+            .with_limit(limit.unwrap_or(NOTICE_PAGE_SIZE));
         paginated = Self::add_timestamp_to_paginated(paginated);
         paginated
     }
@@ -791,7 +789,7 @@ impl EduDataFetcher {
             .with_pagination_method(PaginationMethod::Page)
             .with_offset_key("page")
             .with_amount_key("limit")
-            .with_limit(limit.unwrap_or(100));
+            .with_limit(limit.unwrap_or(LESSON_PACKAGE_PAGE_SIZE));
         paginated = Self::add_timestamp_to_paginated(paginated);
         paginated
     }
@@ -859,7 +857,8 @@ impl EduDataFetcher {
             .client
             .build_request(method, &endpoint, Some(BaseKey::Education));
         let builder = Self::add_timestamp_to_builder(builder);
-        self.send_maybe_parse(builder, method == HttpMethod::Get, HTTPStatus::Ok)
+        let return_data = method == HttpMethod::Get;
+        self.send_maybe_parse(builder, return_data, HTTPStatus::Ok)
     }
 
     /// 获取自定义课程包内容

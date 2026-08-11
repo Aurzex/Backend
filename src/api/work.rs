@@ -190,12 +190,7 @@ impl BaseWorkOperations {
     }
 
     /// 举报作品
-    pub fn report_work(
-        &self,
-        work_id: i32,
-        describe: &str,
-        reason: &str,
-    ) -> MewResult<bool> {
+    pub fn report_work(&self, work_id: i32, describe: &str, reason: &str) -> MewResult<bool> {
         debug!("举报作品: work_id={}, reason={}", work_id, reason);
         let data = json!({
             "work_id": work_id,
@@ -360,12 +355,7 @@ impl CommentOperations {
     }
 
     /// 举报作品评论
-    pub fn report_comment(
-        &self,
-        work_id: i32,
-        comment_id: i32,
-        reason: &str,
-    ) -> MewResult<bool> {
+    pub fn report_comment(&self, work_id: i32, comment_id: i32, reason: &str) -> MewResult<bool> {
         debug!(
             "举报评论: work_id={}, comment_id={}, reason={}",
             work_id, comment_id, reason
@@ -1143,11 +1133,7 @@ impl CollaborationManager {
     }
 
     /// 启用 Kitten/Coco 作品协作功能
-    pub fn enable_collaboration(
-        &self,
-        work_id: i32,
-        work_type: CollabWorkType,
-    ) -> MewResult<bool> {
+    pub fn enable_collaboration(&self, work_id: i32, work_type: CollabWorkType) -> MewResult<bool> {
         debug!("启用协作: work_id={}, type={:?}", work_id, work_type);
         let endpoint = format!("/coll/{}/{}", work_type.as_str(), work_id);
         let builder = self
@@ -1620,9 +1606,6 @@ impl WorkDataFetcher {
             client: CodeMaoClient::global(),
         }
     }
-
-    /// 构建带时间戳的基础分页迭代器
-    // 作品详情
 
     /// 获取作品详细信息
     pub fn fetch_work_details(&self, work_id: i32) -> MewResult<Value> {

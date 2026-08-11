@@ -1,9 +1,13 @@
 use crate::utils::acquire::{
-    ClientAccess, CodeMaoClient, HTTPStatus, HttpMethod, MewError, MewResult, PaginatedIter,
-    PaginationMethod,
+    ClientAccess, CodeMaoClient, DEFAULT_LIMIT, DEFAULT_PAGE_SIZE, HTTPStatus, HttpMethod,
+    MewError, MewResult, PaginatedIter, PaginationMethod,
 };
 use log::debug;
 use serde_json::{Value, json};
+
+// 分页单页上限(各端点服务端契约)
+const REPLY_PAGE_SIZE: usize = 10;
+const POST_DETAIL_PAGE_SIZE: usize = 4;
 
 // 枚举定义
 
@@ -140,10 +144,7 @@ impl ForumDataFetcher {
             return Err(MewError::Other("数据长度需小于 20".into()));
         }
         debug!("批量获取帖子详情: count={}", post_ids.len());
-        let ids_str: Vec<String> = post_ids
-            .iter()
-            .map(std::string::ToString::to_string)
-            .collect();
+        let ids_str: Vec<String> = post_ids.iter().map(|v| v.to_string()).collect();
         self.send_and_parse(
             self.client
                 .build_request(HttpMethod::Get, "/web/forums/posts/all", None)
@@ -174,8 +175,8 @@ impl ForumDataFetcher {
             .with_pagination_method(PaginationMethod::Page)
             .with_amount_key("limit")
             .with_offset_key("page")
-            .with_limit(limit.unwrap_or(15))
-            .with_iter_param("sort", sort.unwrap_or_else(|| "-created_at".to_string()))
+            .with_limit(limit.unwrap_or(DEFAULT_PAGE_SIZE))
+            .with_iter_param("sort", sort.unwrap_or("-created_at".to_string()))
             .with_total_key("total")
     }
 
@@ -190,7 +191,7 @@ impl ForumDataFetcher {
             .with_pagination_method(PaginationMethod::Page)
             .with_amount_key("limit")
             .with_offset_key("page")
-            .with_limit(limit.unwrap_or(10))
+            .with_limit(limit.unwrap_or(REPLY_PAGE_SIZE))
     }
 
     /// 我的帖子(创建/回复)分页迭代器
@@ -204,7 +205,7 @@ impl ForumDataFetcher {
             .with_pagination_method(PaginationMethod::Page)
             .with_amount_key("limit")
             .with_offset_key("page")
-            .with_limit(limit.unwrap_or(10))
+            .with_limit(limit.unwrap_or(REPLY_PAGE_SIZE))
     }
 
     /// 获取我的帖子/回复数量
@@ -250,7 +251,10 @@ impl ForumDataFetcher {
         self.send_and_parse(
             self.client
                 .build_request(HttpMethod::Get, "/web/forums/notice-boards", None)
-                .with_param("limit", limit.unwrap_or(4).to_string()),
+                .with_param(
+                    "limit",
+                    limit.unwrap_or(POST_DETAIL_PAGE_SIZE as i32).to_string(),
+                ),
         )
     }
 
@@ -261,7 +265,10 @@ impl ForumDataFetcher {
             self.client
                 .build_request(HttpMethod::Get, "/web/contents/get-key", None)
                 .with_param("content_key", content_key)
-                .with_param("limit", limit.unwrap_or(4).to_string()),
+                .with_param(
+                    "limit",
+                    limit.unwrap_or(POST_DETAIL_PAGE_SIZE as i32).to_string(),
+                ),
         )
     }
 
@@ -275,7 +282,7 @@ impl ForumDataFetcher {
         self.send_and_parse(
             self.client
                 .build_request(HttpMethod::Get, "/web/forums/posts/selections", None)
-                .with_param("limit", limit.unwrap_or(20).to_string())
+                .with_param("limit", limit.unwrap_or(DEFAULT_LIMIT as i32).to_string())
                 .with_param("offset", offset.unwrap_or(0).to_string()),
         )
     }
@@ -300,7 +307,7 @@ impl ForumDataFetcher {
             .with_pagination_method(PaginationMethod::Page)
             .with_amount_key("limit")
             .with_offset_key("page")
-            .with_limit(limit.unwrap_or(20))
+            .with_limit(limit.unwrap_or(DEFAULT_LIMIT))
             .with_iter_param("title", title)
     }
 
@@ -322,7 +329,7 @@ impl ForumDataFetcher {
             .with_pagination_method(PaginationMethod::Page)
             .with_amount_key("limit")
             .with_offset_key("page")
-            .with_limit(limit.unwrap_or(15))
+            .with_limit(limit.unwrap_or(DEFAULT_PAGE_SIZE))
             .with_total_key("total")
     }
 
@@ -336,7 +343,7 @@ impl ForumDataFetcher {
             .with_pagination_method(PaginationMethod::Page)
             .with_amount_key("limit")
             .with_offset_key("page")
-            .with_limit(limit.unwrap_or(10))
+            .with_limit(limit.unwrap_or(REPLY_PAGE_SIZE))
     }
 }
 

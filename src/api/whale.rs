@@ -157,16 +157,11 @@ impl WhaleReportFetcher {
 
     // 私有辅助
 
-    /// 为分页迭代器附加当前时间戳参数 `TIME`
-    fn add_timestamp_to_paginated(paginated: PaginatedIter) -> PaginatedIter {
-        let timestamp = current_timestamp_13();
-        paginated.with_iter_param("TIME", timestamp.to_string())
-    }
-
-    /// 构建基础举报分页迭代器
+    /// 构建基础举报分页迭代器(TIME 恒置首)
     fn build_report_paginated(&self, endpoint: &str, default_limit: usize) -> PaginatedIter {
         self.client
             .build_paginated(endpoint)
+            .with_iter_param("TIME", current_timestamp_13().to_string())
             .with_base_key(BaseKey::Whale)
             .with_page_size(15)
             .with_pagination_method(PaginationMethod::Offset)
@@ -209,7 +204,7 @@ impl WhaleReportFetcher {
 
         paginated =
             Self::apply_optional_filter(paginated, filter_type.map(|f| f.as_str()), target_id);
-        paginated = Self::add_timestamp_to_paginated(paginated);
+
         paginated
     }
 
@@ -233,7 +228,7 @@ impl WhaleReportFetcher {
 
         paginated =
             Self::apply_optional_filter(paginated, filter_type.map(|f| f.as_str()), target_id);
-        paginated = Self::add_timestamp_to_paginated(paginated);
+
         paginated
     }
 
@@ -257,7 +252,7 @@ impl WhaleReportFetcher {
 
         paginated =
             Self::apply_optional_filter(paginated, filter_type.map(|f| f.as_str()), target_id);
-        paginated = Self::add_timestamp_to_paginated(paginated);
+
         paginated
     }
 
@@ -284,7 +279,7 @@ impl WhaleReportFetcher {
 
         paginated =
             Self::apply_optional_filter(paginated, filter_type.map(|f| f.as_str()), target_id);
-        paginated = Self::add_timestamp_to_paginated(paginated);
+
         paginated
     }
 }

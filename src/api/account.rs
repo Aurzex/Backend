@@ -583,12 +583,7 @@ impl AccountManager {
     // ---- 手机号 ----
 
     /// 绑定手机号(PUT 或 POST)
-    pub fn bind_phone(
-        &self,
-        method: HttpMethod,
-        phone: &str,
-        captcha: &str,
-    ) -> MewResult<Value> {
+    pub fn bind_phone(&self, method: HttpMethod, phone: &str, captcha: &str) -> MewResult<Value> {
         debug!("绑定手机号: phone={}", phone);
         let payload = json!({ "phone": phone, "captcha": captcha });
         let builder = self

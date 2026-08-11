@@ -291,7 +291,7 @@ pub fn fetch_current_timestamp_with_provider(provider: &dyn ClientProvider) -> M
         .send()?;
     let json = client.response_to_json(response)?;
     // 服务端可能返回数字或数字字符串,统一经 value_to_i64 解析
-    Ok(json.get("data").and_then(|v| value_to_i64(v)).unwrap_or(0))
+    Ok(json.get("data").and_then(value_to_i64).unwrap_or(0))
 }
 
 /// 使用全局客户端获取当前时间戳
@@ -1293,6 +1293,12 @@ impl LoginBuilder {
     }
 }
 
+impl Default for LoginBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::AdminInfo;
@@ -1319,11 +1325,5 @@ mod tests {
             )
             .is_none()
         );
-    }
-}
-
-impl Default for LoginBuilder {
-    fn default() -> Self {
-        Self::new()
     }
 }

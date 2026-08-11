@@ -1,8 +1,13 @@
 use crate::utils::acquire::{
-    ClientAccess, CodeMaoClient, HTTPStatus, HttpMethod, MewResult, PaginatedIter,
+    ClientAccess, CodeMaoClient, DEFAULT_LIMIT, DEFAULT_PAGE_SIZE, HTTPStatus, HttpMethod,
+    MewResult, PaginatedIter,
 };
 use log::debug;
 use serde_json::{Value, json};
+
+// 分页单页上限(各端点服务端契约)
+const WORKSHOP_SEARCH_PAGE_SIZE: usize = 14;
+const WORKSHOP_MEMBER_PAGE_SIZE: usize = 40;
 
 // 工作室相关枚举
 
@@ -103,7 +108,12 @@ impl WorkshopDataFetcher {
             .build_request(HttpMethod::Get, "/web/work-shops/search", None)
             .with_param("level", level.unwrap_or(4).to_string())
             .with_param("works_limit", works_limit.unwrap_or(4).to_string())
-            .with_param("limit", limit.unwrap_or(14).to_string())
+            .with_param(
+                "limit",
+                limit
+                    .unwrap_or(WORKSHOP_SEARCH_PAGE_SIZE as i32)
+                    .to_string(),
+            )
             .with_param("offset", offset.unwrap_or(0).to_string())
             .with_param(
                 "sort",
@@ -127,7 +137,7 @@ impl WorkshopDataFetcher {
             .build_paginated(&endpoint)
             .with_page_size(40)
             .with_total_key("total")
-            .with_limit(limit.unwrap_or(40))
+            .with_limit(limit.unwrap_or(WORKSHOP_MEMBER_PAGE_SIZE))
     }
 
     /// 获取工作室详情列表(含成员和作品)
@@ -143,7 +153,7 @@ impl WorkshopDataFetcher {
             || "1,2,3,4".to_string(),
             |v| {
                 v.iter()
-                    .map(std::string::ToString::to_string)
+                    .map(|v| v.to_string())
                     .collect::<Vec<_>>()
                     .join(",")
             },
@@ -174,9 +184,9 @@ impl WorkshopDataFetcher {
         self.client
             .build_paginated(&endpoint)
             .with_iter_param("source", source.unwrap_or(Source::WorkShop).as_str())
-            .with_iter_param("sort", sort.unwrap_or_else(|| "-created_at".to_string()))
+            .with_iter_param("sort", sort.unwrap_or("-created_at".to_string()))
             .with_page_size(20)
-            .with_limit(limit.unwrap_or(15))
+            .with_limit(limit.unwrap_or(DEFAULT_PAGE_SIZE))
     }
 
     /// 工作室投稿作品分页迭代器
@@ -195,13 +205,10 @@ impl WorkshopDataFetcher {
         self.client
             .build_paginated(&endpoint)
             .with_page_size(20)
-            .with_iter_param(
-                "sort",
-                sort.unwrap_or_else(|| "-created_at,-id".to_string()),
-            )
+            .with_iter_param("sort", sort.unwrap_or("-created_at,-id".to_string()))
             .with_iter_param("user_id", user_id.to_string())
             .with_iter_param("work_subject_id", workshop_id.to_string())
-            .with_limit(limit.unwrap_or(20))
+            .with_limit(limit.unwrap_or(DEFAULT_LIMIT))
     }
 
     /// 获取与工作室的关系
@@ -221,7 +228,7 @@ impl WorkshopDataFetcher {
         self.client
             .build_paginated(&endpoint)
             .with_page_size(20)
-            .with_limit(limit.unwrap_or(20))
+            .with_limit(limit.unwrap_or(DEFAULT_LIMIT))
     }
 
     /// 获取工作室待审核成员列表
@@ -242,7 +249,12 @@ impl WorkshopDataFetcher {
                 "/web/work_shops/users/unaudited/list",
                 None,
             )
-            .with_param("limit", limit.unwrap_or(40).to_string())
+            .with_param(
+                "limit",
+                limit
+                    .unwrap_or(WORKSHOP_MEMBER_PAGE_SIZE as i32)
+                    .to_string(),
+            )
             .with_param("offset", offset.unwrap_or(0).to_string())
             .with_param("id", workshop_id.to_string());
         self.send_and_parse(builder)

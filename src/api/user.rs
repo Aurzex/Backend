@@ -1,8 +1,14 @@
 use crate::utils::acquire::{
-    BaseKey, ClientAccess, CodeMaoClient, HTTPStatus, HttpMethod, MewResult, PaginatedIter,
+    BaseKey, ClientAccess, CodeMaoClient, DEFAULT_LIMIT, DEFAULT_PAGE_SIZE, HTTPStatus, HttpMethod,
+    MewResult, PaginatedIter,
 };
 use log::debug;
 use serde_json::{Value, json};
+
+// 分页单页上限(各端点服务端契约)
+const CENTER_LIST_PAGE_SIZE: usize = 5;
+const WORK_LIST_PAGE_SIZE: usize = 30;
+const COMMENT_PAGE_SIZE: usize = 10;
 
 // 用户相关枚举
 
@@ -127,9 +133,6 @@ impl UserDataFetcher {
     }
 
     // 私有辅助
-
-    /// 构建基础分页迭代器,设置页大小和默认限制
-    // 公共方法
 
     // 公共方法
 
@@ -366,7 +369,7 @@ impl UserDataFetcher {
             .with_iter_param("user_id", user_id.to_string())
             .with_page_size(5)
             .with_total_key("total")
-            .with_limit(limit.unwrap_or(5))
+            .with_limit(limit.unwrap_or(CENTER_LIST_PAGE_SIZE))
     }
 
     /// 搜索用户作品(Nemo 端)
@@ -387,7 +390,10 @@ impl UserDataFetcher {
             .with_param("query", query)
             .with_param("query_type", query_type.unwrap_or("name"))
             .with_param("page", page.unwrap_or(1).to_string())
-            .with_param("limit", limit.unwrap_or(10).to_string());
+            .with_param(
+                "limit",
+                limit.unwrap_or(COMMENT_PAGE_SIZE as i32).to_string(),
+            );
         self.send_and_parse(builder)
     }
 
@@ -402,7 +408,10 @@ impl UserDataFetcher {
         let builder = self
             .client
             .build_request(HttpMethod::Get, "/creation-tools/v1/works/list/user", None)
-            .with_param("limit", limit.unwrap_or(10).to_string())
+            .with_param(
+                "limit",
+                limit.unwrap_or(COMMENT_PAGE_SIZE as i32).to_string(),
+            )
             .with_param("offset", offset.unwrap_or(0).to_string())
             .with_param("work_type", types.as_value().to_string());
         self.send_and_parse(builder)
@@ -428,7 +437,7 @@ impl UserDataFetcher {
         self.client
             .build_paginated("/nemo/v2/works/list/user/published")
             .with_page_size(15)
-            .with_limit(limit.unwrap_or(15))
+            .with_limit(limit.unwrap_or(DEFAULT_PAGE_SIZE))
     }
 
     /// 用户 KN 作品分页迭代器
@@ -447,7 +456,7 @@ impl UserDataFetcher {
             .client
             .build_paginated(url)
             .with_page_size(15)
-            .with_limit(limit.unwrap_or(15))
+            .with_limit(limit.unwrap_or(DEFAULT_PAGE_SIZE))
             .with_base_key(BaseKey::Creation);
         if let Some(extra) = extra_params {
             for (key, value) in extra {
@@ -479,7 +488,7 @@ impl UserDataFetcher {
             )
             .with_iter_param("published_status", status.as_str())
             .with_base_key(BaseKey::Creation)
-            .with_limit(limit.unwrap_or(30))
+            .with_limit(limit.unwrap_or(WORK_LIST_PAGE_SIZE))
     }
 
     /// 用户 Nemo 作品分页迭代器
@@ -493,7 +502,7 @@ impl UserDataFetcher {
             .build_paginated("/creation-tools/v1/works/list")
             .with_page_size(30)
             .with_iter_param("published_status", status.as_str())
-            .with_limit(limit.unwrap_or(30))
+            .with_limit(limit.unwrap_or(WORK_LIST_PAGE_SIZE))
     }
 
     /// 用户海龟编辑器作品分页迭代器
@@ -518,7 +527,7 @@ impl UserDataFetcher {
             )
             .with_iter_param("published_status", status.as_str())
             .with_base_key(BaseKey::Creation)
-            .with_limit(limit.unwrap_or(30))
+            .with_limit(limit.unwrap_or(WORK_LIST_PAGE_SIZE))
     }
 
     /// 用户 Box 作品分页迭代器
@@ -538,7 +547,7 @@ impl UserDataFetcher {
             )
             .with_iter_param("published_status", status.as_str())
             .with_base_key(BaseKey::Creation)
-            .with_limit(limit.unwrap_or(30))
+            .with_limit(limit.unwrap_or(WORK_LIST_PAGE_SIZE))
     }
 
     /// 用户小说分页迭代器
@@ -555,7 +564,7 @@ impl UserDataFetcher {
                 "fiction_status",
                 fiction_status.unwrap_or(WorkShowStatus::Show).as_str(),
             )
-            .with_limit(limit.unwrap_or(30))
+            .with_limit(limit.unwrap_or(WORK_LIST_PAGE_SIZE))
     }
 
     /// 用户 Coco 作品分页迭代器
@@ -577,7 +586,7 @@ impl UserDataFetcher {
             .with_data_key("data.items")
             .with_total_key("data.total")
             .with_base_key(BaseKey::Creation)
-            .with_limit(limit.unwrap_or(30));
+            .with_limit(limit.unwrap_or(WORK_LIST_PAGE_SIZE));
         if let Some(pub_val) = published {
             paginated = paginated.with_iter_param("published", pub_val.to_string());
         }
@@ -594,7 +603,7 @@ impl UserDataFetcher {
                 "/coconut/web/work/list/all",
                 Some(BaseKey::Creation),
             )
-            .with_param("limit", limit.unwrap_or(20).to_string());
+            .with_param("limit", limit.unwrap_or(DEFAULT_LIMIT as i32).to_string());
         self.send_and_parse(builder)
     }
 
@@ -606,7 +615,7 @@ impl UserDataFetcher {
             .with_iter_param("user_id", user_id.to_string())
             .with_page_size(15)
             .with_total_key("total")
-            .with_limit(limit.unwrap_or(15))
+            .with_limit(limit.unwrap_or(DEFAULT_PAGE_SIZE))
     }
 
     /// 用户关注列表分页迭代器
@@ -617,7 +626,7 @@ impl UserDataFetcher {
             .with_iter_param("user_id", user_id.to_string())
             .with_page_size(15)
             .with_total_key("total")
-            .with_limit(limit.unwrap_or(15))
+            .with_limit(limit.unwrap_or(DEFAULT_PAGE_SIZE))
     }
 
     /// 获取用户已发布作品
@@ -634,7 +643,10 @@ impl UserDataFetcher {
             .build_request(HttpMethod::Get, "/web/api/user/works/published", None)
             .with_param("user_id", user_id.to_string())
             .with_param("types", types_str.join(","))
-            .with_param("limit", limit.unwrap_or(10).to_string());
+            .with_param(
+                "limit",
+                limit.unwrap_or(COMMENT_PAGE_SIZE as i32).to_string(),
+            );
         self.send_and_parse(builder)
     }
 
@@ -672,7 +684,10 @@ impl UserDataFetcher {
             .build_request(HttpMethod::Get, "/web/api/user/works/collection", None)
             .with_param("user_id", user_id.to_string())
             .with_param("types", types_str.join(","))
-            .with_param("limit", limit.unwrap_or(10).to_string());
+            .with_param(
+                "limit",
+                limit.unwrap_or(COMMENT_PAGE_SIZE as i32).to_string(),
+            );
         self.send_and_parse(builder)
     }
 
@@ -684,7 +699,7 @@ impl UserDataFetcher {
             .with_iter_param("user_id", user_id.to_string())
             .with_page_size(5)
             .with_total_key("total")
-            .with_limit(limit.unwrap_or(5))
+            .with_limit(limit.unwrap_or(CENTER_LIST_PAGE_SIZE))
     }
 
     /// 获取用户头像框列表

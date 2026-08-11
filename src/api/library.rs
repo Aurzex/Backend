@@ -1,6 +1,12 @@
-use crate::utils::acquire::{ClientAccess, CodeMaoClient, HTTPStatus, HttpMethod, MewResult};
+use crate::utils::acquire::{
+    ClientAccess, CodeMaoClient, DEFAULT_LIMIT, HTTPStatus, HttpMethod, MewResult,
+};
 use log::debug;
 use serde_json::{Value, json};
+
+// 分页单页上限(各端点服务端契约)
+const NOVEL_LIST_PAGE_SIZE: usize = 10;
+const NOVEL_DETAIL_ITEMS: usize = 200;
 
 // 小说相关枚举
 
@@ -189,7 +195,7 @@ impl NovelDataFetcher {
             .with_param("type_id", (category_id as i32).to_string())
             .with_param("status", (status as i32).to_string())
             .with_param("page", page.unwrap_or(1).to_string())
-            .with_param("limit", limit.unwrap_or(20).to_string());
+            .with_param("limit", limit.unwrap_or(DEFAULT_LIMIT as i32).to_string());
         self.send_and_parse(builder)
     }
 
@@ -200,7 +206,10 @@ impl NovelDataFetcher {
             .client
             .build_request(HttpMethod::Get, "/web/fanfic/collection", None)
             .with_param("page", page.unwrap_or(1).to_string())
-            .with_param("limit", limit.unwrap_or(10).to_string());
+            .with_param(
+                "limit",
+                limit.unwrap_or(NOVEL_LIST_PAGE_SIZE as i32).to_string(),
+            );
         self.send_and_parse(builder)
     }
 
@@ -236,7 +245,10 @@ impl NovelDataFetcher {
             .client
             .build_request(HttpMethod::Get, &endpoint, None)
             .with_param("page", page.unwrap_or(0).to_string())
-            .with_param("limit", limit.unwrap_or(10).to_string());
+            .with_param(
+                "limit",
+                limit.unwrap_or(NOVEL_LIST_PAGE_SIZE as i32).to_string(),
+            );
         self.send_and_parse(builder)
     }
 
@@ -256,7 +268,10 @@ impl NovelDataFetcher {
             .build_request(HttpMethod::Get, "/api/fanfic/list/search", None)
             .with_param("searchContent", keyword)
             .with_param("page", page.unwrap_or(0).to_string())
-            .with_param("limit", limit.unwrap_or(10).to_string());
+            .with_param(
+                "limit",
+                limit.unwrap_or(NOVEL_LIST_PAGE_SIZE as i32).to_string(),
+            );
         self.send_and_parse(builder)
     }
 
@@ -275,7 +290,10 @@ impl NovelDataFetcher {
         let builder = self
             .client
             .build_request(HttpMethod::Get, &endpoint, None)
-            .with_param("amount_items", limit.unwrap_or(200).to_string())
+            .with_param(
+                "amount_items",
+                limit.unwrap_or(NOVEL_DETAIL_ITEMS as i32).to_string(),
+            )
             .with_param("page_number", page.unwrap_or(1).to_string());
         self.send_and_parse(builder)
     }
@@ -286,7 +304,10 @@ impl NovelDataFetcher {
         let builder = self
             .client
             .build_request(HttpMethod::Get, "/web/fanfic/my", None)
-            .with_param("amount_items", limit.unwrap_or(200).to_string())
+            .with_param(
+                "amount_items",
+                limit.unwrap_or(NOVEL_DETAIL_ITEMS as i32).to_string(),
+            )
             .with_param("page_number", page.unwrap_or(1).to_string());
         self.send_and_parse(builder)
     }
@@ -301,7 +322,10 @@ impl NovelDataFetcher {
         let builder = self
             .client
             .build_request(HttpMethod::Get, "/web/fanfic/section/deleted", None)
-            .with_param("amount_items", limit.unwrap_or(200).to_string())
+            .with_param(
+                "amount_items",
+                limit.unwrap_or(NOVEL_DETAIL_ITEMS as i32).to_string(),
+            )
             .with_param("page_number", page.unwrap_or(1).to_string());
         self.send_and_parse(builder)
     }

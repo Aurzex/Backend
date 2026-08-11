@@ -663,7 +663,7 @@ impl WorkInfo {
             .file_extensions
             .get(self.work_type.as_str())
             .cloned()
-            .unwrap_or_else(|| ".json".to_string())
+            .unwrap_or(".json".to_string())
     }
 }
 

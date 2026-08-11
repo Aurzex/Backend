@@ -1,10 +1,17 @@
 use crate::utils::acquire::{
-    BaseKey, ClientAccess, CodeMaoClient, HTTPStatus, HttpMethod, MewResult, PaginatedIter,
-    PaginationMethod,
+    BaseKey, ClientAccess, CodeMaoClient, DEFAULT_LIMIT, DEFAULT_PAGE_SIZE, HTTPStatus, HttpMethod,
+    MewResult, PaginatedIter, PaginationMethod,
 };
 use crate::utils::data::value_to_i64;
 use log::{debug, warn};
 use serde_json::{Value, json};
+
+// 分页单页上限(各端点服务端契约)
+const MESSAGE_PAGE_SIZE: usize = 15;
+const COURSE_LIST_PAGE_SIZE: usize = 10;
+const COURSE_PACKAGE_PAGE_SIZE: usize = 50;
+const STUDIO_POST_PAGE_SIZE: usize = 24;
+const STUDIO_COURSE_PAGE_SIZE: usize = 100;
 
 // 枚举定义
 
@@ -170,7 +177,7 @@ impl CommunityDataFetcher {
     /// 安全地从时间戳 JSON 中提取数值(兼容数字与数字字符串),失败则记录警告并返回空字符串
     fn extract_time_string(json: &Value) -> String {
         json.get("data")
-            .and_then(|v| value_to_i64(v))
+            .and_then(value_to_i64)
             .map(|v| v.to_string())
             .unwrap_or_else(|| {
                 warn!("时间戳响应中缺少 'data' 字段或不是数字: {:?}", json);
@@ -224,7 +231,7 @@ impl CommunityDataFetcher {
             .with_pagination_method(PaginationMethod::Offset)
             .with_total_key("total")
             .with_data_key("items")
-            .with_limit(limit.unwrap_or(15))
+            .with_limit(limit.unwrap_or(DEFAULT_PAGE_SIZE))
     }
 
     /// 获取 Nemo 消息(喜欢或评论)
@@ -526,7 +533,7 @@ impl CommunityDataFetcher {
             .with_total_key("total_course")
             .with_data_key("course_page.items")
             .with_base_key(BaseKey::Creation)
-            .with_limit(limit.unwrap_or(10))
+            .with_limit(limit.unwrap_or(COURSE_LIST_PAGE_SIZE))
     }
 
     /// 获取 KN 模板作品
@@ -569,7 +576,7 @@ impl CommunityDataFetcher {
             .build_paginated("/creation-tools/v1/course/package/list")
             .with_page_size(50)
             .with_iter_param("platform", platform.to_string())
-            .with_limit(limit.unwrap_or(50))
+            .with_limit(limit.unwrap_or(COURSE_PACKAGE_PAGE_SIZE))
     }
 
     /// Nemo 教程详情分页迭代器
@@ -583,7 +590,7 @@ impl CommunityDataFetcher {
             .with_iter_param("course_package_id", course_package_id.to_string())
             .with_page_size(50)
             .with_data_key("course_page.items")
-            .with_limit(limit.unwrap_or(50))
+            .with_limit(limit.unwrap_or(COURSE_PACKAGE_PAGE_SIZE))
     }
 
     /// 教学计划分页迭代器
@@ -616,7 +623,7 @@ impl CommunityDataFetcher {
             .with_page_size(50)
             .with_iter_param("studio_id", studio_id.to_string())
             .with_iter_param("sort", "-created_at")
-            .with_limit(limit.unwrap_or(24))
+            .with_limit(limit.unwrap_or(STUDIO_POST_PAGE_SIZE))
     }
 
     /// 活动教程分页迭代器
@@ -625,7 +632,7 @@ impl CommunityDataFetcher {
         self.client
             .build_paginated(&endpoint)
             .with_page_size(50)
-            .with_limit(limit.unwrap_or(100))
+            .with_limit(limit.unwrap_or(STUDIO_COURSE_PAGE_SIZE))
     }
 
     /// 活动作品分页迭代器
@@ -635,7 +642,7 @@ impl CommunityDataFetcher {
             .build_paginated(&endpoint)
             .with_page_size(50)
             .with_iter_param("sort", "-n_likes")
-            .with_limit(limit.unwrap_or(24))
+            .with_limit(limit.unwrap_or(STUDIO_POST_PAGE_SIZE))
     }
 
     /// 活动参与者分页迭代器
@@ -648,7 +655,7 @@ impl CommunityDataFetcher {
         self.client
             .build_paginated(&endpoint)
             .with_page_size(50)
-            .with_limit(limit.unwrap_or(24))
+            .with_limit(limit.unwrap_or(STUDIO_POST_PAGE_SIZE))
     }
 
     /// 获取旧版作品标签
@@ -786,7 +793,7 @@ impl UserAction {
             .with_page_size(1)
             .with_iter_param("read_status", read_status.as_str())
             .with_iter_param("sort", "-created_at")
-            .with_limit(limit.unwrap_or(10))
+            .with_limit(limit.unwrap_or(COURSE_LIST_PAGE_SIZE))
     }
 }
 

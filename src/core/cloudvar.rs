@@ -1379,7 +1379,7 @@ impl CloudList {
             .map(|l| {
                 l.items
                     .iter()
-                    .map(ToString::to_string)
+                    .map(|v| v.to_string())
                     .collect::<Vec<_>>()
                     .join(separator)
             })

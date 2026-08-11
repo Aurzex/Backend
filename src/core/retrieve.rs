@@ -16,8 +16,13 @@ use crate::api::whale::{
 };
 use crate::api::work::{NemoWorkType, WorkDataFetcher};
 use crate::utils::acquire::{
-    BaseKey, Catsona, CodeMaoClient, MewError, PaginatedIter, PaginationMethod,
+    BaseKey, Catsona, CodeMaoClient, DEFAULT_PAGE_SIZE, MewError, PaginatedIter, PaginationMethod,
 };
+
+// 评论流默认值与上限(各语义独立:用户上限/每作品抽样/分页元数据)
+const DEFAULT_COMMENT_STREAM_LIMIT: usize = 500;
+const MAX_COMMENT_STREAM_LIMIT: usize = 1000;
+const COMMENT_DETAIL_PER_WORK: usize = 20;
 
 // 错误类型
 
@@ -275,8 +280,10 @@ impl CommentQueryBuilder {
         let target_id = self
             .target_id
             .ok_or_else(|| DataQueryError::InvalidSource("未设置源ID".into()))?;
-        const MAX_COMMENTS: usize = 1000;
-        let safe_limit = self.limit.unwrap_or(500).min(MAX_COMMENTS);
+        let safe_limit = self
+            .limit
+            .unwrap_or(DEFAULT_COMMENT_STREAM_LIMIT)
+            .min(MAX_COMMENT_STREAM_LIMIT);
 
         match source {
             CommentSource::Work => {
@@ -625,7 +632,7 @@ impl DataQuery {
                 "total",
                 |p| {
                     p.with_base_key(BaseKey::Default)
-                        .with_page_size(15)
+                        .with_page_size(DEFAULT_PAGE_SIZE)
                         .with_pagination_method(PaginationMethod::Offset)
                         .with_offset_key("offset")
                         .with_amount_key("limit")
@@ -636,7 +643,7 @@ impl DataQuery {
                     p.with_base_key(BaseKey::Default)
                         .with_iter_param("source", "WORK_SHOP")
                         .with_iter_param("sort", "-created_at")
-                        .with_page_size(15)
+                        .with_page_size(DEFAULT_PAGE_SIZE)
                         .with_pagination_method(PaginationMethod::Offset)
                         .with_offset_key("offset")
                         .with_amount_key("limit")
@@ -649,7 +656,7 @@ impl DataQuery {
             CommentSource::Forum => {
                 let configure = |p: PaginatedIter| {
                     p.with_base_key(BaseKey::Default)
-                        .with_page_size(15)
+                        .with_page_size(DEFAULT_PAGE_SIZE)
                         .with_pagination_method(PaginationMethod::Offset)
                         .with_offset_key("offset")
                         .with_amount_key("limit")
@@ -761,7 +768,7 @@ impl DataQuery {
                                 let comment_stream = self.stream_detailed_comments(
                                     CommentSource::Work,
                                     i32::try_from(work_id).unwrap_or(0),
-                                    Some(20),
+                                    Some(COMMENT_DETAIL_PER_WORK),
                                 )?;
                                 for comment_result in comment_stream {
                                     let comment = comment_result?;
@@ -769,17 +776,17 @@ impl DataQuery {
                                         if v.is_number() {
                                             Some(v.to_string())
                                         } else {
-                                            v.as_str().map(std::string::ToString::to_string)
+                                            v.as_str().map(|v| v.to_string())
                                         }
                                     });
                                     let content = comment
                                         .get("content")
                                         .and_then(|c| c.as_str())
-                                        .map(std::string::ToString::to_string);
+                                        .map(|v| v.to_string());
                                     let nickname = comment
                                         .get("nickname")
                                         .and_then(|n| n.as_str())
-                                        .map(std::string::ToString::to_string);
+                                        .map(|v| v.to_string());
 
                                     if let (Some(uid), Some(cont), Some(nick)) =
                                         (user_id, content, nickname)
