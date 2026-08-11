@@ -10,6 +10,7 @@ use crate::api::whale::{
     CommentSourceType, ReportStatus, Resolution, WhaleReportFetcher, WorkSourceType,
 };
 use crate::utils::acquire;
+use log::error;
 
 use serde_json::{Value, json};
 
@@ -615,7 +616,7 @@ impl ReportFetcher {
                             match recovered {
                                 Some(v) => v,
                                 None => {
-                                    log::error!("获取举报数据失败: {}, 跳过该类型余下数据", e);
+                                    error!("获取举报数据失败: {}, 跳过该类型余下数据", e);
                                     break;
                                 }
                             }
@@ -677,13 +678,13 @@ impl ReportFetcher {
                     Ok(result) => {
                         ta.fetch_add(result.as_i64().unwrap_or(0), Ordering::Relaxed);
                     }
-                    Err(e) => log::error!("获取 {} 总数失败: {}", rtype_a, e),
+                    Err(e) => error!("获取 {} 总数失败: {}", rtype_a, e),
                 });
                 s.spawn(move || match fetch_total(b) {
                     Ok(result) => {
                         tb.fetch_add(result.as_i64().unwrap_or(0), Ordering::Relaxed);
                     }
-                    Err(e) => log::error!("获取 {} 总数失败: {}", rtype_b, e),
+                    Err(e) => error!("获取 {} 总数失败: {}", rtype_b, e),
                 });
             }
         });

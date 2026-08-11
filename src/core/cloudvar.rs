@@ -1719,7 +1719,14 @@ impl CloudInner {
             let old = std::mem::replace(&mut var.value, new_value.clone());
             (var.cvid.clone(), old)
         };
-        emit_variable_change(self, kind, name, &old_value, &new_value, "local");
+        emit_variable_change(
+            self,
+            kind,
+            name,
+            &old_value,
+            &new_value,
+            ChangeSource::Local,
+        );
         let command = match kind {
             VarKind::Private => CommandFactory::update_private_variable(&cvid, &new_value),
             VarKind::Public => CommandFactory::update_public_variable(&cvid, &new_value),
@@ -1740,7 +1747,7 @@ fn emit_variable_change(
     key: &str,
     old: &CloudValue,
     new: &CloudValue,
-    source: &str,
+    source: ChangeSource,
 ) {
     let callbacks = {
         let mut store = inner.state.lock().unwrap();
@@ -1749,8 +1756,9 @@ fn emit_variable_change(
             None => return,
         }
     };
+    let source_str = source.as_str();
     for (_, cb) in &callbacks {
-        if let Err(e) = catch_unwind(AssertUnwindSafe(|| cb(old, new, source))) {
+        if let Err(e) = catch_unwind(AssertUnwindSafe(|| cb(old, new, source_str))) {
             warn!("变量变更回调 panic: {e:?}");
         }
     }
@@ -1982,7 +1990,14 @@ impl UpdatePrivateVarHandler {
                 }
             };
             if let Some(old) = old {
-                emit_variable_change(inner, VarKind::Private, cvid, &old, &new_value, "cloud");
+                emit_variable_change(
+                    inner,
+                    VarKind::Private,
+                    cvid,
+                    &old,
+                    &new_value,
+                    ChangeSource::Cloud,
+                );
             }
         }
     }
@@ -2016,7 +2031,7 @@ impl MessageHandler for UpdatePublicVarHandler {
                             cvid,
                             &old,
                             &new_value,
-                            "cloud",
+                            ChangeSource::Cloud,
                         );
                     }
                 }
@@ -2239,7 +2254,7 @@ fn send_inner_text(inner: &Arc<CloudInner>, payload: &str) -> Result<()> {
         .lock()
         .unwrap()
         .clone()
-        .ok_or(CloudError::NotConnected)?;
+        .ok_or_else(|| CloudError::NotConnected)?;
     tx.send(Message::text(payload))?;
     Ok(())
 }

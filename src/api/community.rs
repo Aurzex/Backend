@@ -169,7 +169,8 @@ impl CommunityDataFetcher {
 
     /// 安全地从时间戳 JSON 中提取数值(兼容数字与数字字符串),失败则记录警告并返回空字符串
     fn extract_time_string(json: &Value) -> String {
-        value_to_i64(&json["data"])
+        json.get("data")
+            .and_then(|v| value_to_i64(v))
             .map(|v| v.to_string())
             .unwrap_or_else(|| {
                 warn!("时间戳响应中缺少 'data' 字段或不是数字: {:?}", json);
@@ -753,7 +754,7 @@ impl UserAction {
     }
 
     /// 签订 Nemo 友好协议
-    pub fn execute_sign_agreement(&self) -> MewResult<bool> {
+    pub fn sign_agreement(&self) -> MewResult<bool> {
         debug!("签订友好协议");
         self.check_status(
             self.client

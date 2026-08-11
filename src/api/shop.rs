@@ -78,7 +78,7 @@ impl WorkshopDataFetcher {
     }
 
     /// 获取工作室详细信息
-    pub fn fetch_workshop_details(&self, workshop_id: &str) -> MewResult<Value> {
+    pub fn fetch_workshop_details(&self, workshop_id: i32) -> MewResult<Value> {
         debug!("获取工作室详情: workshop_id={}", workshop_id);
         let endpoint = format!("/web/shops/{}", workshop_id);
         let builder = self.client.build_request(HttpMethod::Get, &endpoint, None);
@@ -294,7 +294,7 @@ impl WorkshopActionHandler {
     pub fn update_workshop_details(
         &self,
         description: &str,
-        workshop_id: &str,
+        workshop_id: i32,
         name: &str,
         preview_url: &str,
     ) -> MewResult<bool> {
@@ -372,7 +372,7 @@ impl WorkshopActionHandler {
     }
 
     /// 申请加入工作室
-    pub fn execute_apply_to_join(&self, workshop_id: i32, qq: Option<&str>) -> MewResult<bool> {
+    pub fn apply_to_join(&self, workshop_id: i32, qq: Option<&str>) -> MewResult<bool> {
         debug!("申请加入工作室: workshop_id={}", workshop_id);
         let payload = json!({
             "id": workshop_id,
@@ -386,7 +386,7 @@ impl WorkshopActionHandler {
     }
 
     /// 审核加入工作室的申请
-    pub fn execute_review_join_application(
+    pub fn review_join_application(
         &self,
         workshop_id: i32,
         status: AuditStatus,
@@ -409,7 +409,7 @@ impl WorkshopActionHandler {
     }
 
     /// 举报讨论区下的评论
-    pub fn execute_report_comment(&self, args: ReportCommentArgs<'_>) -> MewResult<bool> {
+    pub fn report_comment(&self, args: ReportCommentArgs<'_>) -> MewResult<bool> {
         debug!(
             "举报评论: comment_id={}, reason_id={:?}",
             args.comment_id, args.reason_id

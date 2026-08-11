@@ -327,7 +327,7 @@ impl ReportHandler {
     // 公共方法
 
     /// 处理帖子举报
-    pub fn execute_process_post_report(
+    pub fn process_post_report(
         &self,
         report_id: i32,
         admin_id: i32,
@@ -342,7 +342,7 @@ impl ReportHandler {
     }
 
     /// 处理讨论区举报
-    pub fn execute_process_discussion_report(
+    pub fn process_discussion_report(
         &self,
         report_id: i32,
         admin_id: i32,
@@ -357,7 +357,7 @@ impl ReportHandler {
     }
 
     /// 处理评论举报
-    pub fn execute_process_comment_report(
+    pub fn process_comment_report(
         &self,
         report_id: i32,
         admin_id: i32,
@@ -372,7 +372,7 @@ impl ReportHandler {
     }
 
     /// 处理作品举报(仅支持 Pass/Delete/Unload/Tobedone)
-    pub fn execute_process_work_report(
+    pub fn process_work_report(
         &self,
         report_id: i32,
         admin_id: i32,

@@ -16,6 +16,8 @@ use tungstenite::http::HeaderValue;
 use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{WebSocket, connect};
 
+use crate::utils::acquire::generate_random_id;
+
 /// WebSocket 流类型别名(tungstenite + rustls)
 type WsStream = MaybeTlsStream<TcpStream>;
 type Ws = WebSocket<WsStream>;
@@ -289,7 +291,10 @@ impl ChatBuilder {
             user_id: Mutex::new(None),
             user_info: Mutex::new(HashMap::new()),
             current_response: Mutex::new(String::new()),
-            conversation_id: Mutex::new(generate_session_id()),
+            conversation_id: Mutex::new(generate_random_id(
+                8,
+                b"abcdefghijklmnopqrstuvwxyz0123456789",
+            )),
             history: Mutex::new(Vec::new()),
             callbacks: Mutex::new(CallbackStore::default()),
             notify: Notify::default(),
@@ -428,7 +433,8 @@ impl ChatClient {
 
     /// 创建新对话(清空历史并生成新会话 ID)
     pub fn new_conversation(&self) {
-        *self.inner.conversation_id.lock().unwrap() = generate_session_id();
+        *self.inner.conversation_id.lock().unwrap() =
+            generate_random_id(8, b"abcdefghijklmnopqrstuvwxyz0123456789");
         self.inner.history.lock().unwrap().clear();
         info!("新对话已创建");
     }
@@ -492,7 +498,7 @@ impl ChatClient {
             .lock()
             .unwrap()
             .clone()
-            .ok_or(ChatError::NotConnected)?;
+            .ok_or_else(|| ChatError::NotConnected)?;
         tx.send(Message::text(payload)).map_err(ChatError::from)
     }
 }
@@ -584,14 +590,6 @@ pub(crate) fn parse_chat_ack(payload: &Value) -> Option<StreamEvent> {
         )),
         _ => None,
     }
-}
-
-/// 生成 8 位会话/客户端 ID(与 Python `_generate_session_id` 一致)
-fn generate_session_id() -> String {
-    const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
-    (0..8)
-        .map(|_| CHARSET[fastrand::usize(0..CHARSET.len())] as char)
-        .collect()
 }
 
 // 事件处理策略
@@ -791,7 +789,7 @@ fn send_event_on(inner: &Arc<ChatInner>, name: &str, payload: &Value) -> Result<
         .lock()
         .unwrap()
         .clone()
-        .ok_or(ChatError::NotConnected)?;
+        .ok_or_else(|| ChatError::NotConnected)?;
     tx.send(Message::text(frame)).map_err(ChatError::from)
 }
 
@@ -826,7 +824,7 @@ fn send_raw(inner: &Arc<ChatInner>, payload: &str) -> Result<()> {
         .lock()
         .unwrap()
         .clone()
-        .ok_or(ChatError::NotConnected)?;
+        .ok_or_else(|| ChatError::NotConnected)?;
     tx.send(Message::text(payload)).map_err(ChatError::from)
 }
 

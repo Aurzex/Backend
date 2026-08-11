@@ -135,7 +135,7 @@ impl BaseWorkOperations {
     }
 
     /// 关注或取消关注用户
-    pub fn execute_toggle_follow(&self, user_id: i32, method: SelectMethod) -> MewResult<bool> {
+    pub fn toggle_follow(&self, user_id: i32, method: SelectMethod) -> MewResult<bool> {
         debug!("切换关注状态: user_id={}, method={:?}", user_id, method);
         let endpoint = format!("/nemo/v2/user/{}/follow", user_id);
         let builder = self
@@ -146,7 +146,7 @@ impl BaseWorkOperations {
     }
 
     /// 收藏或取消收藏作品
-    pub fn execute_toggle_collection(&self, work_id: i32, method: SelectMethod) -> MewResult<bool> {
+    pub fn toggle_collection(&self, work_id: i32, method: SelectMethod) -> MewResult<bool> {
         debug!("切换收藏状态: work_id={}, method={:?}", work_id, method);
         let endpoint = format!("/nemo/v2/works/{}/collection", work_id);
         let builder = self
@@ -157,7 +157,7 @@ impl BaseWorkOperations {
     }
 
     /// 点赞或取消点赞作品
-    pub fn execute_toggle_like(&self, work_id: i32, method: SelectMethod) -> MewResult<bool> {
+    pub fn toggle_like(&self, work_id: i32, method: SelectMethod) -> MewResult<bool> {
         debug!("切换点赞状态: work_id={}, method={:?}", work_id, method);
         let endpoint = format!("/nemo/v2/works/{}/like", work_id);
         let builder = self
@@ -168,7 +168,7 @@ impl BaseWorkOperations {
     }
 
     /// 再创作作品
-    pub fn execute_fork_work(&self, work_id: i32) -> MewResult<bool> {
+    pub fn fork_work(&self, work_id: i32) -> MewResult<bool> {
         debug!("再创作作品: work_id={}", work_id);
         let endpoint = format!("/nemo/v2/works/{}/fork", work_id);
         let builder = self
@@ -179,7 +179,7 @@ impl BaseWorkOperations {
     }
 
     /// 分享作品
-    pub fn execute_share_work(&self, work_id: i32) -> MewResult<bool> {
+    pub fn share_work(&self, work_id: i32) -> MewResult<bool> {
         debug!("分享作品: work_id={}", work_id);
         let endpoint = format!("/nemo/v2/works/{}/share", work_id);
         let builder = self
@@ -190,7 +190,7 @@ impl BaseWorkOperations {
     }
 
     /// 举报作品
-    pub fn execute_report_work(
+    pub fn report_work(
         &self,
         work_id: i32,
         describe: &str,
@@ -316,7 +316,7 @@ impl CommentOperations {
     }
 
     /// 置顶或取消置顶评论
-    pub fn execute_toggle_comment_pin(
+    pub fn toggle_comment_pin(
         &self,
         method: HttpMethod,
         work_id: i32,
@@ -338,7 +338,7 @@ impl CommentOperations {
     }
 
     /// 点赞或取消点赞评论
-    pub fn execute_toggle_comment_like(
+    pub fn toggle_comment_like(
         &self,
         work_id: i32,
         comment_id: i32,
@@ -360,7 +360,7 @@ impl CommentOperations {
     }
 
     /// 举报作品评论
-    pub fn execute_report_comment(
+    pub fn report_comment(
         &self,
         work_id: i32,
         comment_id: i32,
@@ -460,7 +460,7 @@ impl KittenWorkManager {
     }
 
     /// 发布 Kitten 作品
-    pub fn execute_publish_kitten_work(&self, args: PublishKittenWorkArgs<'_>) -> MewResult<bool> {
+    pub fn publish_kitten_work(&self, args: PublishKittenWorkArgs<'_>) -> MewResult<bool> {
         debug!(
             "发布Kitten作品: work_id={}, name={}",
             args.work_id, args.name
@@ -498,7 +498,7 @@ impl KittenWorkManager {
     }
 
     /// 取消发布作品
-    pub fn execute_unpublish_work(&self, work_id: i32) -> MewResult<bool> {
+    pub fn unpublish_work(&self, work_id: i32) -> MewResult<bool> {
         debug!("取消发布作品: work_id={}", work_id);
         let endpoint = format!("/tiger/work/{}/unpublish", work_id);
         let builder = self
@@ -509,7 +509,7 @@ impl KittenWorkManager {
     }
 
     /// 通过 Web 端取消发布作品
-    pub fn execute_unpublish_work_web(&self, work_id: i32) -> MewResult<bool> {
+    pub fn unpublish_work_web(&self, work_id: i32) -> MewResult<bool> {
         debug!("Web端取消发布作品: work_id={}", work_id);
         let endpoint = format!("/web/works/r2/unpublish/{}", work_id);
         let builder = self
@@ -520,7 +520,7 @@ impl KittenWorkManager {
     }
 
     /// 清空 Kitten 作品回收站
-    pub fn execute_empty_kitten_trash(&self) -> MewResult<bool> {
+    pub fn empty_kitten_trash(&self) -> MewResult<bool> {
         debug!("清空Kitten回收站");
         let builder = self.client.build_request(
             HttpMethod::Delete,
@@ -621,7 +621,7 @@ impl NekoWorkManager {
     }
 
     /// 发布 KN 作品
-    pub fn execute_publish_kn_work(&self, args: PublishKnWorkArgs<'_>) -> MewResult<bool> {
+    pub fn publish_kn_work(&self, args: PublishKnWorkArgs<'_>) -> MewResult<bool> {
         debug!("发布KN作品: work_id={}, name={}", args.work_id, args.name);
         let endpoint = format!("/neko/community/work/publish/{}", args.work_id);
         let payload = json!({
@@ -657,7 +657,7 @@ impl NekoWorkManager {
     }
 
     /// 取消发布 KN 作品
-    pub fn execute_unpublish_kn_work(&self, work_id: i32) -> MewResult<bool> {
+    pub fn unpublish_kn_work(&self, work_id: i32) -> MewResult<bool> {
         debug!("取消发布KN作品: work_id={}", work_id);
         let endpoint = format!("/neko/community/work/unpublish/{}", work_id);
         let builder =
@@ -667,7 +667,7 @@ impl NekoWorkManager {
     }
 
     /// 清空 KN 作品回收站
-    pub fn execute_empty_kn_trash(&self) -> MewResult<bool> {
+    pub fn empty_kn_trash(&self) -> MewResult<bool> {
         debug!("清空KN回收站");
         let builder = self.client.build_request(
             HttpMethod::Delete,
@@ -678,7 +678,7 @@ impl NekoWorkManager {
     }
 
     /// 恢复 KN 回收站作品
-    pub fn execute_recover_kn_trash(&self, work_id: i32) -> MewResult<bool> {
+    pub fn recover_kn_trash(&self, work_id: i32) -> MewResult<bool> {
         debug!("恢复KN回收站作品: work_id={}", work_id);
         let endpoint = format!("/neko/works/{}/recover", work_id);
         let builder =
@@ -847,7 +847,11 @@ impl WoodWorkManager {
         );
         // 先获取现有项目
         let project = self.fetch_wood_project(work_id)?;
-        let mut files = project["files"].as_array().cloned().unwrap_or_default();
+        let mut files = project
+            .get("files")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
 
         let file_data = json!({
             "work_id": work_id,
@@ -862,20 +866,29 @@ impl WoodWorkManager {
 
         // 更新项目
         self.create_wood_project(CreateWoodProjectArgs {
-            work_name: project["work_name"].as_str(),
-            language_type: project["language_type"]
-                .as_i64()
+            work_name: project.get("work_name").and_then(Value::as_str),
+            language_type: project
+                .get("language_type")
+                .and_then(Value::as_i64)
                 .map(|v| i32::try_from(v).unwrap_or(0)),
-            run_mode: project["run_mode"]
-                .as_i64()
+            run_mode: project
+                .get("run_mode")
+                .and_then(Value::as_i64)
                 .map(|v| i32::try_from(v).unwrap_or(0)),
             files: Some(files),
-            preview_code: project["preview_code"].as_str(),
-            preview_url: project["preview_url"].as_str(),
-            is_turn_on_debug: project["addition"]["isTurnOnDebug"].as_bool(),
-            editor_mode: project["addition"]["editorMode"].as_str(),
-            update_time: project["update_time"]
-                .as_i64()
+            preview_code: project.get("preview_code").and_then(Value::as_str),
+            preview_url: project.get("preview_url").and_then(Value::as_str),
+            is_turn_on_debug: project
+                .get("addition")
+                .and_then(|v| v.get("isTurnOnDebug"))
+                .and_then(Value::as_bool),
+            editor_mode: project
+                .get("addition")
+                .and_then(|v| v.get("editorMode"))
+                .and_then(Value::as_str),
+            update_time: project
+                .get("update_time")
+                .and_then(Value::as_i64)
                 .map(|v| i32::try_from(v).unwrap_or(0)),
         })
     }
@@ -969,7 +982,7 @@ impl CocoWorkManager {
     }
 
     /// 更新 Coco 作品
-    pub fn execute_update_coco_work(
+    pub fn update_coco_work(
         &self,
         work_id: i32,
         work_name: &str,
@@ -999,7 +1012,7 @@ impl CocoWorkManager {
     }
 
     /// 发布 Coco 作品
-    pub fn execute_publish_coco_work(
+    pub fn publish_coco_work(
         &self,
         work_id: i32,
         work_name: &str,
@@ -1130,7 +1143,7 @@ impl CollaborationManager {
     }
 
     /// 启用 Kitten/Coco 作品协作功能
-    pub fn execute_enable_collaboration(
+    pub fn enable_collaboration(
         &self,
         work_id: i32,
         work_type: CollabWorkType,
@@ -1609,20 +1622,6 @@ impl WorkDataFetcher {
     }
 
     /// 构建带时间戳的基础分页迭代器
-    fn build_paginated(
-        &self,
-        endpoint: &str,
-        page_size: usize,
-        default_limit: usize,
-    ) -> PaginatedIter {
-        let timestamp = current_timestamp_13();
-        self.client
-            .build_paginated(endpoint)
-            .with_iter_param("TIME", timestamp.to_string())
-            .with_page_size(page_size)
-            .with_limit(default_limit)
-    }
-
     // 作品详情
 
     /// 获取作品详细信息
@@ -1743,7 +1742,11 @@ impl WorkDataFetcher {
     pub fn fetch_work_comments_gen(&self, work_id: i32, limit: Option<usize>) -> PaginatedIter {
         debug!("获取作品评论迭代器: work_id={}", work_id);
         let endpoint = format!("/creation-tools/v1/works/{}/comments", work_id);
-        self.build_paginated(&endpoint, 15, limit.unwrap_or(15))
+        self.client
+            .build_paginated(&endpoint)
+            .with_iter_param("TIME", current_timestamp_13().to_string())
+            .with_page_size(15)
+            .with_limit(limit.unwrap_or(15))
             .with_total_key("page_total")
     }
 
@@ -2066,7 +2069,11 @@ impl WorkDataFetcher {
         limit: Option<usize>,
     ) -> PaginatedIter {
         debug!("获取Kitten回收站迭代器: version={:?}", version);
-        self.build_paginated("/tiger/work/recycle/list", 30, limit.unwrap_or(30))
+        self.client
+            .build_paginated("/tiger/work/recycle/list")
+            .with_iter_param("TIME", current_timestamp_13().to_string())
+            .with_page_size(30)
+            .with_limit(limit.unwrap_or(30))
             .with_iter_param("version_no", version.as_str())
             .with_iter_param("work_status", work_status.unwrap_or("CYCLED"))
             .with_base_key(BaseKey::Creation)
@@ -2081,7 +2088,11 @@ impl WorkDataFetcher {
         limit: Option<usize>,
     ) -> PaginatedIter {
         debug!("获取海龟编辑器回收站迭代器");
-        self.build_paginated("/wood/comm/work/list", 30, limit.unwrap_or(30))
+        self.client
+            .build_paginated("/wood/comm/work/list")
+            .with_iter_param("TIME", current_timestamp_13().to_string())
+            .with_page_size(30)
+            .with_limit(limit.unwrap_or(30))
             .with_iter_param("language_type", language_type.unwrap_or(0).to_string())
             .with_iter_param("work_status", work_status.unwrap_or("CYCLED"))
             .with_iter_param("published_status", published_status.unwrap_or("undefined"))
@@ -2095,7 +2106,11 @@ impl WorkDataFetcher {
         limit: Option<usize>,
     ) -> PaginatedIter {
         debug!("获取代码岛回收站迭代器");
-        self.build_paginated("/box/v2/work/list", 30, limit.unwrap_or(30))
+        self.client
+            .build_paginated("/box/v2/work/list")
+            .with_iter_param("TIME", current_timestamp_13().to_string())
+            .with_page_size(30)
+            .with_limit(limit.unwrap_or(30))
             .with_iter_param("work_status", work_status.unwrap_or("CYCLED"))
             .with_base_key(BaseKey::Creation)
     }
@@ -2107,7 +2122,11 @@ impl WorkDataFetcher {
         limit: Option<usize>,
     ) -> PaginatedIter {
         debug!("获取小说回收站迭代器");
-        self.build_paginated("/web/fanfic/my/new", 30, limit.unwrap_or(30))
+        self.client
+            .build_paginated("/web/fanfic/my/new")
+            .with_iter_param("TIME", current_timestamp_13().to_string())
+            .with_page_size(30)
+            .with_limit(limit.unwrap_or(30))
             .with_iter_param("fiction_status", fiction_status.unwrap_or("CYCLED"))
     }
 
@@ -2119,7 +2138,11 @@ impl WorkDataFetcher {
         limit: Option<usize>,
     ) -> PaginatedIter {
         debug!("获取KN回收站迭代器");
-        self.build_paginated("/neko/works/v2/list/user", 15, limit.unwrap_or(15))
+        self.client
+            .build_paginated("/neko/works/v2/list/user")
+            .with_iter_param("TIME", current_timestamp_13().to_string())
+            .with_page_size(15)
+            .with_limit(limit.unwrap_or(15))
             .with_response_amount_key("page_size")
             .with_iter_param("name", name.unwrap_or(""))
             .with_iter_param("status", "-99")
@@ -2141,7 +2164,11 @@ impl WorkDataFetcher {
         limit: Option<usize>,
     ) -> PaginatedIter {
         debug!("搜索KN作品: name={}", name);
-        self.build_paginated("/neko/works/v2/list/user", 15, limit.unwrap_or(15))
+        self.client
+            .build_paginated("/neko/works/v2/list/user")
+            .with_iter_param("TIME", current_timestamp_13().to_string())
+            .with_page_size(15)
+            .with_limit(limit.unwrap_or(15))
             .with_response_amount_key("page_size")
             .with_iter_param("name", name)
             .with_iter_param("status", status.unwrap_or(1).to_string())
@@ -2160,7 +2187,11 @@ impl WorkDataFetcher {
         limit: Option<usize>,
     ) -> PaginatedIter {
         debug!("搜索已发布KN作品: name={}", name);
-        self.build_paginated("/neko/works/list/user/published", 15, limit.unwrap_or(15))
+        self.client
+            .build_paginated("/neko/works/list/user/published")
+            .with_iter_param("TIME", current_timestamp_13().to_string())
+            .with_page_size(15)
+            .with_limit(limit.unwrap_or(15))
             .with_response_amount_key("page_size")
             .with_iter_param("name", name)
             .with_iter_param(

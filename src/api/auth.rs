@@ -1,6 +1,6 @@
 use crate::utils::acquire::{
     BaseKey, Catsona, ClientAccess, CodeMaoClient, DEFAULT_PID, HttpMethod, MewError, MewResult,
-    current_timestamp_13,
+    current_timestamp_13, current_timestamp_secs, generate_random_id,
 };
 use crate::utils::data::{CodeMaoFile, PathConfig, value_to_i64};
 use log::{debug, warn};
@@ -8,7 +8,6 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use std::sync::{Arc, OnceLock};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 // 枚举定义
 
@@ -292,7 +291,7 @@ pub fn fetch_current_timestamp_with_provider(provider: &dyn ClientProvider) -> M
         .send()?;
     let json = client.response_to_json(response)?;
     // 服务端可能返回数字或数字字符串,统一经 value_to_i64 解析
-    Ok(value_to_i64(&json["data"]).unwrap_or(0))
+    Ok(json.get("data").and_then(|v| value_to_i64(v)).unwrap_or(0))
 }
 
 /// 使用全局客户端获取当前时间戳
@@ -456,12 +455,7 @@ impl AuthProcessor {
     /// 获取管理员验证码图片并保存到文件
     /// 返回时间戳,供后续登录使用
     pub fn fetch_admin_captcha(&self) -> MewResult<i64> {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("系统时间错误")
-            .as_millis()
-            .try_into()
-            .unwrap_or(i64::MAX);
+        let timestamp = current_timestamp_13() as i64;
 
         let client = self.client();
         let endpoint = format!("/admins/captcha/{}", timestamp);
@@ -533,8 +527,9 @@ impl AuthProcessor {
         // 登录票据时间戳使用本地毫秒(与官方客户端一致),不依赖服务器时钟
         let timestamp = current_timestamp_13() as i64;
         let ticket_response = self.get_login_ticket(identity, timestamp, pid)?;
-        let ticket = ticket_response["ticket"]
-            .as_str()
+        let ticket = ticket_response
+            .get("ticket")
+            .and_then(Value::as_str)
             .ok_or_else(|| MewError::Auth("无法获取ticket".into()))?;
         self.get_login_security_info(identity, password, ticket, pid)
     }
@@ -1038,7 +1033,7 @@ impl AuthManager {
     }
 
     /// v0 登出
-    pub fn execute_logout_v0(&self) -> MewResult<bool> {
+    pub fn logout_v0(&self) -> MewResult<bool> {
         let client = self.client();
         let response = client
             .build_request(HttpMethod::Post, "/tiger/accounts/logout", None)
@@ -1048,7 +1043,7 @@ impl AuthManager {
     }
 
     /// v1/v2 登出,`method` 为 "web" 或 "mobile"
-    pub fn execute_logout_v12(&self, method: &str) -> MewResult<bool> {
+    pub fn logout_v12(&self, method: &str) -> MewResult<bool> {
         let client = self.client();
         let endpoint = format!("/tiger/v3/{}/accounts/logout", method);
         let response = client
@@ -1086,9 +1081,9 @@ impl AuthManager {
     /// 显式指定方式退出登录
     pub fn logout_with(&self, method: LogoutMethod) -> MewResult<bool> {
         let ok = match method {
-            LogoutMethod::V0 => self.execute_logout_v0()?,
-            LogoutMethod::Web => self.execute_logout_v12("web")?,
-            LogoutMethod::Mobile => self.execute_logout_v12("mobile")?,
+            LogoutMethod::V0 => self.logout_v0()?,
+            LogoutMethod::Web => self.logout_v12("web")?,
+            LogoutMethod::Mobile => self.logout_v12("mobile")?,
             LogoutMethod::Admin => self.admin_logout()?,
         };
         if ok {
@@ -1140,7 +1135,7 @@ impl CloudAuthenticator {
         provider: Box<dyn ClientProvider>,
         authorization_token: Option<String>,
     ) -> Self {
-        let client_id = Self::generate_client_id(8);
+        let client_id = generate_random_id(8, b"abcdefghijklmnopqrstuvwxyz0123456789");
         Self {
             client_provider: provider,
             authorization_token,
@@ -1157,34 +1152,14 @@ impl CloudAuthenticator {
         self.client_provider.client()
     }
 
-    fn generate_client_id(length: usize) -> String {
-        const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
-        (0..length)
-            .map(|_| {
-                let idx = fastrand::usize(0..CHARSET.len());
-                CHARSET[idx] as char
-            })
-            .collect()
-    }
-
     /// 获取校准后的时间戳(秒),首次调用会计算时差
     pub fn get_calibrated_timestamp(&mut self) -> MewResult<i64> {
         if self.time_difference == 0 {
             let server_time = fetch_current_timestamp_with_provider(&*self.client_provider)?;
-            let local_time = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("系统时间错误")
-                .as_secs()
-                .try_into()
-                .unwrap_or(i64::MAX);
+            let local_time = current_timestamp_secs();
             self.time_difference = local_time - server_time;
         }
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("系统时间错误")
-            .as_secs()
-            .try_into()
-            .unwrap_or(i64::MAX);
+        let now = current_timestamp_secs();
         Ok(now - self.time_difference)
     }
 

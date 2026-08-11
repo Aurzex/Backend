@@ -14,7 +14,7 @@ use ureq::unversioned::multipart::Form;
 use ureq::{Agent, Body, RequestBuilder};
 
 // 引入日志宏(库使用者需自行选择日志实现,如 env_logger)
-use log::debug;
+use log::{debug, warn};
 
 // 错误定义(使用 thiserror)
 #[derive(ThisError, Debug)]
@@ -136,7 +136,7 @@ impl FromStr for BaseKey {
             "update" => Ok(BaseKey::Update),
             "kn_cdn" => Ok(BaseKey::KnCdn),
             "wechat_sbp" => Ok(BaseKey::WeChatSbp),
-            _ => Err(MewError::Other(format!("invalid base key: {}", s))),
+            _ => Err(MewError::Other(format!("无效的基础 URL 键: {}", s))),
         }
     }
 }
@@ -745,9 +745,7 @@ impl KittyCore {
             HttpMethod::Get => Ok(self.agent.get(url)),
             HttpMethod::Delete => Ok(self.agent.delete(url)),
             HttpMethod::Head => Ok(self.agent.head(url)),
-            _ => Err(MewError::Other(
-                "HTTP method does not support a request body".into(),
-            )),
+            _ => Err(MewError::Other("该 HTTP 方法不支持请求体".into())),
         }
     }
 
@@ -757,9 +755,7 @@ impl KittyCore {
             HttpMethod::Post => Ok(self.agent.post(url)),
             HttpMethod::Patch => Ok(self.agent.patch(url)),
             HttpMethod::Put => Ok(self.agent.put(url)),
-            _ => Err(MewError::Other(
-                "HTTP method requires a request body".into(),
-            )),
+            _ => Err(MewError::Other("该 HTTP 方法需要请求体".into())),
         }
     }
 
@@ -1680,12 +1676,19 @@ struct UploadTokenInfo {
 }
 
 // 辅助函数
+
+/// 生成指定长度、指定字符集的随机 ID
+/// 字符集由调用方给定(如上传文件名用全字符集,客户端/会话 ID 用小写字母+数字)
+pub fn generate_random_id(length: usize, charset: &[u8]) -> String {
+    (0..length)
+        .map(|_| charset[fastrand::usize(0..charset.len())] as char)
+        .collect()
+}
+
+/// 生成指定长度的随机字母数字串(62 字符集,用于上传文件名等)
 fn generate_meow_id(length: usize) -> String {
     const CHARSET: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-
-    (0..length)
-        .map(|_| CHARSET[fastrand::usize(0..CHARSET.len())] as char)
-        .collect()
+    generate_random_id(length, CHARSET)
 }
 
 // HTTP 状态码枚举
@@ -1810,9 +1813,15 @@ pub fn current_timestamp_13() -> u128 {
     if let Ok(dur) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
         dur.as_millis()
     } else {
-        log::warn!("系统时间异常,无法获取时间戳,返回 0");
+        warn!("系统时间异常,无法获取时间戳,返回 0");
         0
     }
+}
+
+/// 获取秒级时间戳(本地时间)
+/// 基于 `current_timestamp_13` 换算,系统时间异常时同样返回 0
+pub fn current_timestamp_secs() -> i64 {
+    (current_timestamp_13() / 1000) as i64
 }
 
 // 共享请求辅助(trait)

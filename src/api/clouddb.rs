@@ -181,7 +181,7 @@ impl CoconutCloud {
     }
 
     /// 获取云字典的所有键
-    pub fn get_dictionary_keys(&self, dict_id: &str) -> MewResult<Value> {
+    pub fn fetch_dictionary_keys(&self, dict_id: &str) -> MewResult<Value> {
         debug!("获取云字典所有键: dict={}", dict_id);
         let endpoint = format!("/coconut/webdb/try/dict/{}/keys", dict_id);
         self.send_and_parse(self.client.build_request(
@@ -192,7 +192,7 @@ impl CoconutCloud {
     }
 
     /// 获取云字典中指定键的值
-    pub fn get_dictionary_value(&self, dict_id: &str, key: &str) -> MewResult<Value> {
+    pub fn fetch_dictionary_value(&self, dict_id: &str, key: &str) -> MewResult<Value> {
         debug!("获取云字典值: dict={}, key={}", dict_id, key);
         let endpoint = format!("/coconut/webdb/try/dict/{}/getvalue", dict_id);
         self.send_and_parse(
@@ -282,7 +282,7 @@ impl CoconutCloud {
     }
 
     /// 获取云数据表的行数
-    pub fn get_table_row_count(&self, table_id: &str) -> MewResult<Value> {
+    pub fn fetch_table_row_count(&self, table_id: &str) -> MewResult<Value> {
         debug!("获取数据表行数: table={}", table_id);
         let endpoint = format!("/coconut/clouddb/runtime/{}/count", table_id);
         self.send_and_parse(
@@ -293,7 +293,7 @@ impl CoconutCloud {
     }
 
     /// 获取多个云数据表的信息
-    pub fn get_table_info(&self, table_ids: &[String]) -> MewResult<Value> {
+    pub fn fetch_table_info(&self, table_ids: &[String]) -> MewResult<Value> {
         let ids_str = table_ids.join(",");
         debug!("获取数据表信息: ids={}", ids_str);
         self.send_and_parse(
@@ -406,7 +406,7 @@ impl CoconutCloudAdmin {
     }
 
     /// 获取云字典条目列表(分页)
-    pub fn get_dict_entries(
+    pub fn fetch_dict_entries(
         &self,
         dict_id: i32,
         work_id: i32,

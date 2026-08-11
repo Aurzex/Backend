@@ -334,7 +334,7 @@ impl NovelActionHandler {
     }
 
     /// 收藏 / 取消收藏小说
-    pub fn execute_toggle_novel_favorite(&self, novel_id: i32, favorite: bool) -> MewResult<Value> {
+    pub fn toggle_novel_favorite(&self, novel_id: i32, favorite: bool) -> MewResult<Value> {
         let method = if favorite {
             HttpMethod::Post
         } else {
@@ -364,7 +364,7 @@ impl NovelActionHandler {
     }
 
     /// 点赞 / 取消点赞小说评论
-    pub fn execute_toggle_comment_like(
+    pub fn toggle_comment_like(
         &self,
         comment_id: i32,
         like: bool,
@@ -637,7 +637,7 @@ impl BookActionHandler {
     }
 
     /// 点赞 / 取消点赞图鉴
-    pub fn execute_toggle_book_like(
+    pub fn toggle_book_like(
         &self,
         book_id: i32,
         like: bool,

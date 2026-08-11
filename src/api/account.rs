@@ -494,7 +494,7 @@ impl AccountManager {
     }
 
     /// 解绑 QQ(DELETE 或 POST)
-    pub fn execute_unbind_qq(&self, method: HttpMethod) -> MewResult<Value> {
+    pub fn unbind_qq(&self, method: HttpMethod) -> MewResult<Value> {
         debug!("解绑QQ: method={:?}", method);
         let builder =
             self.client
@@ -533,7 +533,7 @@ impl AccountManager {
     }
 
     /// 解绑微信(DELETE 或 POST)
-    pub fn execute_unbind_wechat(&self, method: HttpMethod) -> MewResult<Value> {
+    pub fn unbind_wechat(&self, method: HttpMethod) -> MewResult<Value> {
         debug!("解绑微信: method={:?}", method);
         let builder =
             self.client
@@ -583,7 +583,7 @@ impl AccountManager {
     // ---- 手机号 ----
 
     /// 绑定手机号(PUT 或 POST)
-    pub fn execute_bind_phone(
+    pub fn bind_phone(
         &self,
         method: HttpMethod,
         phone: &str,
@@ -680,7 +680,7 @@ impl AccountManager {
     }
 
     /// 请求更换手机号验证码
-    pub fn execute_request_phone_change_verification(
+    pub fn request_phone_change_verification(
         &self,
         old_phonenum: &str,
         new_phonenum: &str,
@@ -722,7 +722,7 @@ impl AccountManager {
     }
 
     /// 通过手机号修改密码(PUT 或 POST)
-    pub fn execute_change_password_by_phone(
+    pub fn change_password_by_phone(
         &self,
         method: HttpMethod,
         phone: &str,
@@ -767,7 +767,7 @@ impl AccountManager {
     }
 
     /// 初始化密码(PUT 或 POST)
-    pub fn execute_init_password(&self, method: HttpMethod, password: &str) -> MewResult<Value> {
+    pub fn init_password(&self, method: HttpMethod, password: &str) -> MewResult<Value> {
         debug!("初始化密码");
         let payload = json!({ "password": password });
         let builder = self
@@ -811,7 +811,7 @@ impl AccountManager {
     }
 
     /// 设置用户名(PUT 或 PATCH)
-    pub fn execute_set_username(&self, method: HttpMethod, username: &str) -> MewResult<Value> {
+    pub fn set_username(&self, method: HttpMethod, username: &str) -> MewResult<Value> {
         debug!("设置用户名: username={}", username);
         let payload = json!({ "username": username });
         let builder = self

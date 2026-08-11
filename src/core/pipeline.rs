@@ -223,22 +223,14 @@ impl ActionRegistry {
         register_report_handler!(
             handlers,
             "execute_process_comment_report",
-            execute_process_comment_report
+            process_comment_report
         );
-        register_report_handler!(
-            handlers,
-            "execute_process_work_report",
-            execute_process_work_report
-        );
-        register_report_handler!(
-            handlers,
-            "execute_process_post_report",
-            execute_process_post_report
-        );
+        register_report_handler!(handlers, "execute_process_work_report", process_work_report);
+        register_report_handler!(handlers, "execute_process_post_report", process_post_report);
         register_report_handler!(
             handlers,
             "execute_process_discussion_report",
-            execute_process_discussion_report
+            process_discussion_report
         );
         ActionRegistry { handlers }
     }
@@ -1022,7 +1014,7 @@ impl ViolationChecker {
             }
             "work" => {
                 BaseWorkOperations::new()
-                    .execute_report_work(content_id, reason_content, reason_content)
+                    .report_work(content_id, reason_content, reason_content)
                     .map_err(ProcessorError::from)?;
             }
             "comment" | "reply" => {
@@ -1036,7 +1028,7 @@ impl ViolationChecker {
                             ))
                         })?;
                         CommentOperations::new()
-                            .execute_report_comment(work_id, content_id, reason_content)
+                            .report_comment(work_id, content_id, reason_content)
                             .map_err(ProcessorError::from)?;
                     }
                     "forum" => {
@@ -1058,7 +1050,7 @@ impl ViolationChecker {
                     "shop" => {
                         let reporter_id = fastrand::i32(10000..=199_999_999);
                         WorkshopActionHandler::new()
-                            .execute_report_comment(ReportCommentArgs {
+                            .report_comment(ReportCommentArgs {
                                 comment_id: content_id,
                                 reason_content,
                                 reason_id: WorkShopReportReasonId::Reason7,

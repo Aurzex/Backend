@@ -134,7 +134,7 @@ impl EduUserAction {
     }
 
     /// 批量重置学生密码
-    pub fn execute_bulk_reset_passwords(&self, stu_list: &[i32]) -> MewResult<Value> {
+    pub fn bulk_reset_passwords(&self, stu_list: &[i32]) -> MewResult<Value> {
         debug!("批量重置密码: students={:?}", stu_list);
         let data = json!({ "student_id": stu_list });
         self.send_and_parse(
@@ -199,7 +199,7 @@ impl EduUserAction {
     }
 
     /// 将学生转移到未分班
-    pub fn execute_transfer_to_unassigned(&self, class_id: i32, stu_id: i32) -> MewResult<bool> {
+    pub fn transfer_to_unassigned(&self, class_id: i32, stu_id: i32) -> MewResult<bool> {
         debug!("转移学生到未分班: class_id={}, stu_id={}", class_id, stu_id);
         let endpoint = format!("/edu/zone/class/{}/students", class_id);
         let builder = self
@@ -239,7 +239,7 @@ impl EduUserAction {
     }
 
     /// 标记所有消息为已读
-    pub fn execute_mark_all_messages_as_read(&self) -> MewResult<bool> {
+    pub fn mark_all_messages_as_read(&self) -> MewResult<bool> {
         debug!("标记所有消息为已读");
         let builder = self
             .client
@@ -253,7 +253,7 @@ impl EduUserAction {
     }
 
     /// 为学生作品评分
-    pub fn execute_grade_student_work(&self, args: GradeStudentWorkArgs<'_>) -> MewResult<bool> {
+    pub fn grade_student_work(&self, args: GradeStudentWorkArgs<'_>) -> MewResult<bool> {
         debug!(
             "评分作品: work_id={}, name={}",
             args.work_id, args.work_name
@@ -279,7 +279,7 @@ impl EduUserAction {
     }
 
     /// 邀请学生加入班级
-    pub fn execute_invite_to_class(
+    pub fn invite_to_class(
         &self,
         class_id: i32,
         types: &str,
@@ -300,7 +300,7 @@ impl EduUserAction {
     }
 
     /// 接受班级邀请
-    pub fn execute_accept_class_invite(&self, message_id: i32) -> MewResult<bool> {
+    pub fn accept_class_invite(&self, message_id: i32) -> MewResult<bool> {
         debug!("接受班级邀请: message_id={}", message_id);
         let endpoint = format!("/edu/zone/invite/student/message/{}/accept", message_id);
         let builder = self
@@ -311,7 +311,7 @@ impl EduUserAction {
     }
 
     /// 完善教师信息
-    pub fn execute_improve_teacher_info(
+    pub fn improve_teacher_info(
         &self,
         args: ImproveTeacherInfoArgs<'_>,
     ) -> MewResult<bool> {
@@ -381,23 +381,6 @@ impl EduDataFetcher {
         paginated.with_iter_param("TIME", timestamp.to_string())
     }
 
-    /// 构建一个基础分页迭代器,使用 Page 分页方式,初始页码 1
-    fn build_paginated(
-        &self,
-        endpoint: &str,
-        page_size: usize,
-        default_limit: usize,
-    ) -> PaginatedIter {
-        self.client
-            .build_paginated(endpoint)
-            .with_base_key(BaseKey::Education)
-            .with_page_size(page_size)
-            .with_pagination_method(PaginationMethod::Page)
-            .with_offset_key("page")
-            .with_amount_key("limit")
-            .with_limit(default_limit)
-    }
-
     // 公共方法
 
     /// 获取用户基本信息
@@ -437,8 +420,15 @@ impl EduDataFetcher {
     /// 系统通知分页迭代器
     pub fn fetch_notices_gen(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取系统通知迭代器");
-        let mut paginated =
-            self.build_paginated("/edu/zone/system/message/list", 10, limit.unwrap_or(10));
+        let mut paginated = self
+            .client
+            .build_paginated("/edu/zone/system/message/list")
+            .with_base_key(BaseKey::Education)
+            .with_page_size(10)
+            .with_pagination_method(PaginationMethod::Page)
+            .with_offset_key("page")
+            .with_amount_key("limit")
+            .with_limit(limit.unwrap_or(10));
         paginated = Self::add_timestamp_to_paginated(paginated);
         paginated
     }
@@ -446,8 +436,15 @@ impl EduDataFetcher {
     /// 教师提醒消息分页迭代器
     pub fn fetch_reminders_gen(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取教师提醒迭代器");
-        let mut paginated =
-            self.build_paginated("/edu/zone/invite/teacher/messages", 10, limit.unwrap_or(10));
+        let mut paginated = self
+            .client
+            .build_paginated("/edu/zone/invite/teacher/messages")
+            .with_base_key(BaseKey::Education)
+            .with_page_size(10)
+            .with_pagination_method(PaginationMethod::Page)
+            .with_offset_key("page")
+            .with_amount_key("limit")
+            .with_limit(limit.unwrap_or(10));
         paginated = Self::add_timestamp_to_paginated(paginated);
         paginated
     }
@@ -482,11 +479,14 @@ impl EduDataFetcher {
     ) -> PaginatedIter {
         debug!("获取班级详细迭代器: class_name={:?}", class_name);
         let mut paginated = self
-            .build_paginated(
-                "/edu/zone/classes/",
-                20, // 默认页面大小 20
-                limit.unwrap_or(20),
-            )
+            .client
+            .build_paginated("/edu/zone/classes/")
+            .with_base_key(BaseKey::Education)
+            .with_page_size(20) // 默认页面大小 20
+            .with_pagination_method(PaginationMethod::Page)
+            .with_offset_key("page")
+            .with_amount_key("limit")
+            .with_limit(limit.unwrap_or(20))
             .with_response_amount_key("limit"); // 服务器返回的实际每页大小键
         if let Some(name) = class_name {
             paginated = paginated.with_iter_param("class_name", name);
@@ -498,8 +498,15 @@ impl EduDataFetcher {
     /// 学生移除记录分页迭代器
     pub fn fetch_student_removal_records_gen(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取学生移除记录迭代器");
-        let mut paginated =
-            self.build_paginated("/edu/zone/student/remove/record", 10, limit.unwrap_or(10));
+        let mut paginated = self
+            .client
+            .build_paginated("/edu/zone/student/remove/record")
+            .with_base_key(BaseKey::Education)
+            .with_page_size(10)
+            .with_pagination_method(PaginationMethod::Page)
+            .with_offset_key("page")
+            .with_amount_key("limit")
+            .with_limit(limit.unwrap_or(10));
         paginated = Self::add_timestamp_to_paginated(paginated);
         paginated
     }
@@ -651,11 +658,14 @@ impl EduDataFetcher {
     pub fn fetch_all_works_gen(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取所有作品迭代器");
         let mut paginated = self
-            .build_paginated(
-                "/edu/zone/work/manager/student/works",
-                50,
-                limit.unwrap_or(50),
-            )
+            .client
+            .build_paginated("/edu/zone/work/manager/student/works")
+            .with_base_key(BaseKey::Education)
+            .with_page_size(50)
+            .with_pagination_method(PaginationMethod::Page)
+            .with_offset_key("page")
+            .with_amount_key("limit")
+            .with_limit(limit.unwrap_or(50))
             .with_response_amount_key("limit");
         paginated = Self::add_timestamp_to_paginated(paginated);
         paginated
@@ -665,7 +675,14 @@ impl EduDataFetcher {
     pub fn fetch_managed_works_gen(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取管理作品迭代器");
         let mut paginated = self
-            .build_paginated("/edu/zone/work/manager/works", 50, limit.unwrap_or(50))
+            .client
+            .build_paginated("/edu/zone/work/manager/works")
+            .with_base_key(BaseKey::Education)
+            .with_page_size(50)
+            .with_pagination_method(PaginationMethod::Page)
+            .with_offset_key("page")
+            .with_amount_key("limit")
+            .with_limit(limit.unwrap_or(50))
             .with_response_amount_key("limit");
         paginated = Self::add_timestamp_to_paginated(paginated);
         paginated
@@ -675,7 +692,14 @@ impl EduDataFetcher {
     pub fn fetch_personal_works_gen(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取个人作品迭代器");
         let mut paginated = self
-            .build_paginated("/edu/zone/work/manager/self/works", 50, limit.unwrap_or(50))
+            .client
+            .build_paginated("/edu/zone/work/manager/self/works")
+            .with_base_key(BaseKey::Education)
+            .with_page_size(50)
+            .with_pagination_method(PaginationMethod::Page)
+            .with_offset_key("page")
+            .with_amount_key("limit")
+            .with_limit(limit.unwrap_or(50))
             .with_response_amount_key("limit");
         paginated = Self::add_timestamp_to_paginated(paginated);
         paginated
@@ -711,8 +735,15 @@ impl EduDataFetcher {
     /// 教学记录分页迭代器
     pub fn fetch_teaching_records_gen(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取教学记录迭代器");
-        let mut paginated =
-            self.build_paginated("/edu/zone/teaching/record/list", 10, limit.unwrap_or(10));
+        let mut paginated = self
+            .client
+            .build_paginated("/edu/zone/teaching/record/list")
+            .with_base_key(BaseKey::Education)
+            .with_page_size(10)
+            .with_pagination_method(PaginationMethod::Page)
+            .with_offset_key("page")
+            .with_amount_key("limit")
+            .with_limit(limit.unwrap_or(10));
         paginated = Self::add_timestamp_to_paginated(paginated);
         paginated
     }
@@ -800,11 +831,15 @@ impl EduDataFetcher {
     /// 自定义课程包分页迭代器
     pub fn fetch_custom_lesson_packages_gen(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取自定义课程包迭代器");
-        let mut paginated = self.build_paginated(
-            "/edu/zone/lesson/offical/packages",
-            100,
-            limit.unwrap_or(100),
-        );
+        let mut paginated = self
+            .client
+            .build_paginated("/edu/zone/lesson/offical/packages")
+            .with_base_key(BaseKey::Education)
+            .with_page_size(100)
+            .with_pagination_method(PaginationMethod::Page)
+            .with_offset_key("page")
+            .with_amount_key("limit")
+            .with_limit(limit.unwrap_or(100));
         paginated = Self::add_timestamp_to_paginated(paginated);
         paginated
     }

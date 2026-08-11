@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
-use log::{error as log_error, info as log_info};
+use log::{error, info};
 
 use serde_json::Value;
 
@@ -21,7 +21,7 @@ use super::registry::{
     resolution_display_name, value_to_string,
 };
 use crate::api::whale::{ReportStatus, Resolution};
-use crate::utils::acquire::{FileUploader, KittyFactory};
+use crate::utils::acquire::{FileUploader, KittyFactory, current_timestamp_secs};
 use crate::utils::data::value_to_i64;
 
 /// 批量分组的键:(分组类型, 分组键)
@@ -59,7 +59,7 @@ impl FileProcessor {
 
         if file_size > max_size_bytes {
             let size_mb = file_size as f64 / 1024.0 / 1024.0;
-            log_error!(
+            error!(
                 "警告: 文件 {} 大小 {:.2} MB 超过 {} MB 限制, 跳过上传",
                 file_path.display(),
                 size_mb,
@@ -76,12 +76,9 @@ impl FileProcessor {
         let uploader = FileUploader::new(client);
         let url = uploader.upload(file_path, method, save_path)?;
 
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let timestamp = current_timestamp_secs();
         let size_human = bytes_to_human(file_size);
-        log_info!(
+        info!(
             "上传成功: {} (文件: {}, 大小: {}, 时间戳: {})",
             url,
             file_path.display(),
@@ -107,7 +104,7 @@ impl FileProcessor {
                         results.insert(path, url);
                     }
                     Err(e) => {
-                        log_error!("上传失败 {}: {}", path.display(), e);
+                        error!("上传失败 {}: {}", path.display(), e);
                     }
                 }
             }
@@ -465,7 +462,7 @@ impl ReportProcessor {
 
     /// 一键通过所有待处理举报(逐条错误仅记录日志,不中断)
     pub fn pass_all(&self, admin_id: i32) -> i64 {
-        log_info!("=== 开始一键通过所有待处理举报 ===");
+        info!("=== 开始一键通过所有待处理举报 ===");
         let mut count = 0i64;
 
         for chunk in self.fetcher.fetch_reports_chunked(ReportStatus::ToBeDone) {
@@ -476,7 +473,7 @@ impl ReportProcessor {
                     let report_id = match cfg.get_report_id(&item) {
                         Ok(id) => id,
                         Err(e) => {
-                            log_error!("解析 report_id 失败: {}", e);
+                            error!("解析 report_id 失败: {}", e);
                             continue;
                         }
                     };
@@ -491,14 +488,14 @@ impl ReportProcessor {
                                 .unwrap()
                                 .mark_record_processed(&report_id.to_string());
                         }
-                        Ok(false) => log_error!("一键通过返回 false (id={})", report_id),
-                        Err(e) => log_error!("一键通过失败 (id={}): {}", report_id, e),
+                        Ok(false) => error!("一键通过返回 false (id={})", report_id),
+                        Err(e) => error!("一键通过失败 (id={}): {}", report_id, e),
                     }
                 }
             }
         }
 
-        log_info!("一键通过完成, 共通过 {} 条举报", count);
+        info!("一键通过完成, 共通过 {} 条举报", count);
         if count > 0 {
             self.invalidate_totals();
         }
@@ -615,7 +612,7 @@ impl ReportProcessor {
             }
             match self.execute_action(report_type, config, item, action, admin_id) {
                 Ok(()) => applied += 1,
-                Err(e) => log_error!(
+                Err(e) => error!(
                     "批量应用失败 (id={}): {}",
                     Self::extract_record_id(item, config),
                     e

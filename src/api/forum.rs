@@ -132,24 +132,6 @@ impl ForumDataFetcher {
         }
     }
 
-    // 私有辅助
-
-    /// 构建基础分页迭代器,使用 Page 分页方式,初始页码 1
-    fn build_paginated(
-        &self,
-        endpoint: &str,
-        page_size: usize,
-        default_limit: usize,
-    ) -> PaginatedIter {
-        self.client
-            .build_paginated(endpoint)
-            .with_page_size(page_size)
-            .with_pagination_method(PaginationMethod::Page)
-            .with_amount_key("limit")
-            .with_offset_key("page")
-            .with_limit(default_limit)
-    }
-
     // 公共方法
 
     /// 批量获取帖子详情(最多 19 个)
@@ -186,7 +168,13 @@ impl ForumDataFetcher {
         let endpoint = format!("/web/forums/posts/{}/replies", post_id);
         debug!("获取回帖迭代器: post_id={}, sort={:?}", post_id, sort);
 
-        self.build_paginated(&endpoint, 10, limit.unwrap_or(15))
+        self.client
+            .build_paginated(&endpoint)
+            .with_page_size(10)
+            .with_pagination_method(PaginationMethod::Page)
+            .with_amount_key("limit")
+            .with_offset_key("page")
+            .with_limit(limit.unwrap_or(15))
             .with_iter_param("sort", sort.unwrap_or_else(|| "-created_at".to_string()))
             .with_total_key("total")
     }
@@ -196,7 +184,13 @@ impl ForumDataFetcher {
         let endpoint = format!("/web/forums/replies/{}/comments", reply_id);
         debug!("获取评论迭代器: reply_id={}", reply_id);
 
-        self.build_paginated(&endpoint, 10, limit.unwrap_or(10))
+        self.client
+            .build_paginated(&endpoint)
+            .with_page_size(10)
+            .with_pagination_method(PaginationMethod::Page)
+            .with_amount_key("limit")
+            .with_offset_key("page")
+            .with_limit(limit.unwrap_or(10))
     }
 
     /// 我的帖子(创建/回复)分页迭代器
@@ -204,7 +198,13 @@ impl ForumDataFetcher {
         let endpoint = format!("/web/forums/posts/mine/{}", post_type.as_str());
         debug!("获取我的帖子迭代器: type={:?}", post_type);
 
-        self.build_paginated(&endpoint, 10, limit.unwrap_or(10))
+        self.client
+            .build_paginated(&endpoint)
+            .with_page_size(10)
+            .with_pagination_method(PaginationMethod::Page)
+            .with_amount_key("limit")
+            .with_offset_key("page")
+            .with_limit(limit.unwrap_or(10))
     }
 
     /// 获取我的帖子/回复数量
@@ -294,7 +294,13 @@ impl ForumDataFetcher {
     pub fn search_posts_gen(&self, title: &str, limit: Option<usize>) -> PaginatedIter {
         debug!("搜索帖子: title={}", title);
 
-        self.build_paginated("/web/forums/posts/search", 20, limit.unwrap_or(20))
+        self.client
+            .build_paginated("/web/forums/posts/search")
+            .with_page_size(20)
+            .with_pagination_method(PaginationMethod::Page)
+            .with_amount_key("limit")
+            .with_offset_key("page")
+            .with_limit(limit.unwrap_or(20))
             .with_iter_param("title", title)
     }
 
@@ -310,7 +316,13 @@ impl ForumDataFetcher {
         };
         debug!("获取7天热门: board_id={:?}", board_id);
 
-        self.build_paginated(&endpoint, 10, limit.unwrap_or(15))
+        self.client
+            .build_paginated(&endpoint)
+            .with_page_size(10)
+            .with_pagination_method(PaginationMethod::Page)
+            .with_amount_key("limit")
+            .with_offset_key("page")
+            .with_limit(limit.unwrap_or(15))
             .with_total_key("total")
     }
 
@@ -318,7 +330,13 @@ impl ForumDataFetcher {
     pub fn fetch_ask_help_posts_gen(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取求助帖子迭代器");
 
-        self.build_paginated("/web/forums/boards/posts/ask-help", 10, limit.unwrap_or(10))
+        self.client
+            .build_paginated("/web/forums/boards/posts/ask-help")
+            .with_page_size(10)
+            .with_pagination_method(PaginationMethod::Page)
+            .with_amount_key("limit")
+            .with_offset_key("page")
+            .with_limit(limit.unwrap_or(10))
     }
 }
 
@@ -389,12 +407,7 @@ impl ForumActionHandler {
     }
 
     /// 点赞或取消点赞,`action` 为 "like" 或 "unlike"
-    pub fn execute_toggle_like(
-        &self,
-        action: &str,
-        item_id: i32,
-        item_type: ItemType,
-    ) -> MewResult<bool> {
+    pub fn toggle_like(&self, action: &str, item_id: i32, item_type: ItemType) -> MewResult<bool> {
         let method = match action {
             "like" => HttpMethod::Put,
             "unlike" => HttpMethod::Delete,
@@ -475,11 +488,7 @@ impl ForumActionHandler {
     }
 
     /// 置顶 / 取消置顶回帖
-    pub fn execute_toggle_comment_top_status(
-        &self,
-        comment_id: i32,
-        should_top: bool,
-    ) -> MewResult<bool> {
+    pub fn toggle_comment_top_status(&self, comment_id: i32, should_top: bool) -> MewResult<bool> {
         let method = if should_top {
             HttpMethod::Put
         } else {
@@ -506,22 +515,18 @@ impl ForumActionHandler {
     ) -> MewResult<Value> {
         debug!("发布帖子: target={:?}, title={}", target_type, title);
         let endpoint = match target_type {
-            TargetType::Board => match board_id {
-                Some(id) => format!("/web/forums/boards/{}/posts", id as i32),
-                None => {
-                    return Err(MewError::Other(
-                        "board_id is required when target_type is 'board'".into(),
-                    ));
-                }
-            },
-            TargetType::Workshop => match workshop_id {
-                Some(id) => format!("/web/works/subjects/{}/post", id),
-                None => {
-                    return Err(MewError::Other(
-                        "workshop_id is required when target_type is 'workshop'".into(),
-                    ));
-                }
-            },
+            TargetType::Board => {
+                let id = board_id.ok_or_else(|| {
+                    MewError::Other("当 target_type 为 'board' 时,必须提供 board_id".into())
+                })?;
+                format!("/web/forums/boards/{}/posts", id as i32)
+            }
+            TargetType::Workshop => {
+                let id = workshop_id.ok_or_else(|| {
+                    MewError::Other("当 target_type 为 'workshop' 时,必须提供 workshop_id".into())
+                })?;
+                format!("/web/works/subjects/{}/post", id)
+            }
         };
 
         let payload = json!({

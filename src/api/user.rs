@@ -129,17 +129,7 @@ impl UserDataFetcher {
     // 私有辅助
 
     /// 构建基础分页迭代器,设置页大小和默认限制
-    fn build_paginated(
-        &self,
-        endpoint: &str,
-        page_size: usize,
-        default_limit: usize,
-    ) -> PaginatedIter {
-        self.client
-            .build_paginated(endpoint)
-            .with_page_size(page_size)
-            .with_limit(default_limit)
-    }
+    // 公共方法
 
     // 公共方法
 
@@ -435,11 +425,10 @@ impl UserDataFetcher {
     /// 用户已发布 Nemo 作品分页迭代器
     pub fn fetch_published_nemo_works_gen(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取已发布Nemo作品迭代器");
-        self.build_paginated(
-            "/nemo/v2/works/list/user/published",
-            15,
-            limit.unwrap_or(15),
-        )
+        self.client
+            .build_paginated("/nemo/v2/works/list/user/published")
+            .with_page_size(15)
+            .with_limit(limit.unwrap_or(15))
     }
 
     /// 用户 KN 作品分页迭代器
@@ -455,7 +444,10 @@ impl UserDataFetcher {
         };
         debug!("获取KN作品迭代器: method={:?}", method);
         let mut paginated = self
-            .build_paginated(url, 15, limit.unwrap_or(15))
+            .client
+            .build_paginated(url)
+            .with_page_size(15)
+            .with_limit(limit.unwrap_or(15))
             .with_base_key(BaseKey::Creation);
         if let Some(extra) = extra_params {
             for (key, value) in extra {
@@ -774,7 +766,7 @@ impl UserManager {
     }
 
     /// 应用头像框
-    pub fn execute_apply_avatar_frame(&self, frame_id: AvatarFrameId) -> MewResult<bool> {
+    pub fn apply_avatar_frame(&self, frame_id: AvatarFrameId) -> MewResult<bool> {
         debug!("应用头像框: frame_id={:?}", frame_id);
         let endpoint = format!("/creation-tools/v1/user/avatar-frame/{}", frame_id as i32);
         let builder = self.client.build_request(HttpMethod::Put, &endpoint, None);
