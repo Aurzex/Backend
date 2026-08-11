@@ -297,7 +297,7 @@ impl ReportConsole {
         let mut stats = RunStats::default();
         let outcome = (|| -> Result<(), ProcessorError> {
             let mut session = processor.pending_session();
-            while let Some((groups, non_group)) = session.next_chunk() {
+            for (groups, non_group) in session.by_ref() {
                 for group in groups {
                     stats += Self::process_group(ui, processor, admin_id, &group)?;
                 }

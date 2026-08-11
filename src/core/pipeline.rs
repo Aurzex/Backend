@@ -961,11 +961,12 @@ impl ViolationChecker {
     }
 
     fn login_student(username: &str, password: &str) -> Result<(), ProcessorError> {
-        crate::api::auth::LoginBuilder::new()
+        let mut session = crate::api::auth::LoginBuilder::new()
             .identity(username)
             .password(password)
             .status(crate::api::auth::AccountStatus::Edu)
-            .execute()?;
+            .build();
+        session.execute()?;
         Ok(())
     }
 

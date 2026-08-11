@@ -160,7 +160,7 @@ pub struct PendingSession<'a> {
 
 impl PendingSession<'_> {
     /// 拉取下一块,返回(已达标批量组, 非组内项);流结束时返回 None
-    pub fn next_chunk(&mut self) -> Option<(Vec<BatchGroup>, Vec<Value>)> {
+    fn next_chunk(&mut self) -> Option<(Vec<BatchGroup>, Vec<Value>)> {
         let chunk = self.rx.recv().ok()?;
         Some(self.processor.split_chunk(chunk, &mut self.pending_groups))
     }
@@ -171,6 +171,14 @@ impl PendingSession<'_> {
             .drain()
             .map(|((group_type, group_key), items)| BatchGroup::new(&group_type, &group_key, items))
             .collect()
+    }
+}
+
+impl Iterator for PendingSession<'_> {
+    type Item = (Vec<BatchGroup>, Vec<Value>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next_chunk()
     }
 }
 

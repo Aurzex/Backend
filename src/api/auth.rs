@@ -1285,7 +1285,8 @@ impl LoginBuilder {
         self
     }
 
-    pub fn execute(mut self) -> MewResult<LoginResult> {
+    /// 构建登录会话(不含网络请求,构造阶段无副作用)
+    pub fn build(self) -> LoginSession {
         let credentials = LoginCredentials {
             identity: self.identity.unwrap_or_default(),
             password: self.password.unwrap_or_default(),
@@ -1296,13 +1297,33 @@ impl LoginBuilder {
             timestamp: self.timestamp,
             captcha: self.captcha,
         };
-        self.auth_manager.login(&credentials, self.prefer_method)
+        LoginSession {
+            auth_manager: self.auth_manager,
+            credentials,
+            prefer_method: self.prefer_method,
+        }
     }
 }
 
 impl Default for LoginBuilder {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// 登录会话:由 [`LoginBuilder::build`] 构造,执行网络登录
+#[derive(Debug)]
+pub struct LoginSession {
+    auth_manager: AuthManager,
+    credentials: LoginCredentials,
+    prefer_method: Option<LoginMethod>,
+}
+
+impl LoginSession {
+    /// 执行登录(网络请求),返回登录结果
+    pub fn execute(&mut self) -> MewResult<LoginResult> {
+        self.auth_manager
+            .login(&self.credentials, self.prefer_method)
     }
 }
 

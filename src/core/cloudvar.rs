@@ -37,6 +37,10 @@ const PONG_MESSAGE: &str = "3";
 const DEFAULT_FLUSH_INTERVAL: Duration = Duration::from_millis(100);
 /// 默认重连间隔与最大次数
 const DEFAULT_RECONNECT_INTERVAL: Duration = Duration::from_secs(8);
+/// 连接建立等待超时(默认 10s)
+const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// 数据就绪等待超时(默认 10s)
+const DEFAULT_DATA_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_MAX_RECONNECT_ATTEMPTS: usize = 5;
 /// 排行榜限制范围
 pub(crate) const MIN_RANKING_LIMIT: i64 = 1;
@@ -630,6 +634,8 @@ struct CloudInner {
     max_reconnect_attempts: usize,
     reconnect_interval: Duration,
     flush_interval: Duration,
+    connect_timeout: Duration,
+    sync_timeout: Duration,
     stopping: AtomicBool,
     connected: AtomicBool,
     data_ready: AtomicBool,
@@ -693,6 +699,8 @@ pub struct CloudBuilder {
     max_reconnect_attempts: usize,
     reconnect_interval: Duration,
     flush_interval: Duration,
+    connect_timeout: Duration,
+    sync_timeout: Duration,
 }
 
 impl CloudBuilder {
@@ -706,6 +714,8 @@ impl CloudBuilder {
             max_reconnect_attempts: DEFAULT_MAX_RECONNECT_ATTEMPTS,
             reconnect_interval: DEFAULT_RECONNECT_INTERVAL,
             flush_interval: DEFAULT_FLUSH_INTERVAL,
+            connect_timeout: DEFAULT_CONNECT_TIMEOUT,
+            sync_timeout: DEFAULT_DATA_TIMEOUT,
         }
     }
 
@@ -745,6 +755,18 @@ impl CloudBuilder {
         self
     }
 
+    /// 连接建立等待超时(默认 10s)
+    pub fn connect_timeout(mut self, timeout: Duration) -> Self {
+        self.connect_timeout = timeout;
+        self
+    }
+
+    /// 数据就绪等待超时(默认 10s,供 `connect_and_wait` 使用)
+    pub fn sync_timeout(mut self, timeout: Duration) -> Self {
+        self.sync_timeout = timeout;
+        self
+    }
+
     /// 构建云连接(尚未连接,需调用 [`CloudConnection::connect`])
     pub fn build(self) -> CloudConnection {
         let inner = CloudInner {
@@ -755,6 +777,8 @@ impl CloudBuilder {
             max_reconnect_attempts: self.max_reconnect_attempts,
             reconnect_interval: self.reconnect_interval,
             flush_interval: self.flush_interval,
+            connect_timeout: self.connect_timeout,
+            sync_timeout: self.sync_timeout,
             stopping: AtomicBool::new(true),
             connected: AtomicBool::new(false),
             data_ready: AtomicBool::new(false),
@@ -827,16 +851,14 @@ impl CloudConnection {
     }
 
     /// 连接并等待数据就绪的便捷方法
-    pub fn connect_and_wait(
-        &self,
-        connect_timeout: Duration,
-        data_timeout: Duration,
-    ) -> Result<bool> {
+    /// 连接并等待数据就绪的便捷方法
+    /// 超时由 Builder 配置(`connect_timeout`/`sync_timeout`)决定
+    pub fn connect_and_wait(&self) -> Result<bool> {
         self.connect()?;
-        if !self.wait_for_connection(connect_timeout) {
+        if !self.wait_for_connection(self.inner.connect_timeout) {
             return Ok(false);
         }
-        Ok(self.wait_for_data(data_timeout))
+        Ok(self.wait_for_data(self.inner.sync_timeout))
     }
 
     /// 关闭连接并清理资源

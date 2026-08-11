@@ -72,11 +72,12 @@ use backend::api::auth::{AccountStatus, LoginBuilder};
 use backend::api::education::EduDataFetcher;
 
 // 登录:令牌写入全局身份槽,后续所有请求自动携带
-LoginBuilder::new()
+let mut session = LoginBuilder::new()
     .identity("13800138000")
     .password("student-pass")
     .status(AccountStatus::Edu)
-    .execute()?; // -> LoginResult
+    .build(); // 构造阶段无副作用
+session.execute()?; // -> LoginResult(网络请求)
 
 // 分页拉取:惰性逐页请求,单页瞬时错误可重试
 for work in EduDataFetcher::new().fetch_all_works_gen(None) {
@@ -102,8 +103,12 @@ let rule = CaptchaManager::new().fetch_captcha_rule()?; // MewResult<Value>
 use backend::core::cloudvar::{CloudBuilder, EditorType, RankingOrder};
 use std::time::Duration;
 
-let conn = CloudBuilder::new(12345).editor(EditorType::Kitten).build();
-if !conn.connect_and_wait(Duration::from_secs(5), Duration::from_secs(10))? {
+let conn = CloudBuilder::new(12345)
+    .editor(EditorType::Kitten)
+    .connect_timeout(Duration::from_secs(5))
+    .sync_timeout(Duration::from_secs(10))
+    .build();
+if !conn.connect_and_wait()? {
     return Err("云存储连接超时".into());
 }
 
@@ -122,14 +127,16 @@ conn.get_ranking("score", 10, RankingOrder::Descending)?; // 排行榜,结果经
 use backend::core::converse::{ChatBuilder, ChatEventType, HistoryMode};
 use std::time::Duration;
 
-let chat = ChatBuilder::new("user-token").build();
+let chat = ChatBuilder::new("user-token")
+    .sync_timeout(Duration::from_secs(30))
+    .build();
 chat.connect()?;
-chat.add_stream_callback(|text, ev| match ev {
+chat.on_stream(|text, ev| match ev {
     ChatEventType::Text => print!("{text}"),
     ChatEventType::End => println!(),
     _ => {}
 });
-let reply = chat.send_and_wait("你好", HistoryMode::Exclude, Duration::from_secs(30))?;
+let reply = chat.send_and_wait("你好", HistoryMode::Exclude)?;
 ```
 
 **5. 作品反编译**(支持 Kitten2/3/4、Coco、Neko、Nemo、Wood):
@@ -188,7 +195,7 @@ while let Some((_groups, items)) = session.next_chunk() {
 库的分层与写法带来的直接收益:
 
 - **同步阻塞、零异步运行时**:无 tokio / async 依赖;WebSocket 用线程 + 通道封装成同步接口。嵌入任何项目(含非 async 环境)零成本,调用栈与错误传播都是普通 Rust 函数。
-- **全局客户端 + 身份槽**:`CodeMaoClient::global()` 单例持有 `Catsona` 身份与令牌槽。登录一次(`LoginBuilder::execute`)写入身份,之后所有请求自动携带对应身份令牌——调用方不需要手动拼 `Authorization` 头,也不需要把 token 传来传去。
+- **全局客户端 + 身份槽**:`CodeMaoClient::global()` 单例持有 `Catsona` 身份与令牌槽。登录一次(`LoginBuilder::build().execute()`)写入身份,之后所有请求自动携带对应身份令牌——调用方不需要手动拼 `Authorization` 头,也不需要把 token 传来传去。
 - **样板收敛到 `ClientAccess`**:每个业务 Manager 只需实现 `fn client()`,`send_and_parse` / `check_status` / `send_maybe_parse` 由默认实现提供,且 4xx/5xx 自动携带服务端错误体——几十个 Manager 的请求代码只剩"端点 + 参数"。
 - **分页统一为 `PaginatedIter`**:惰性初始化、翻页、总数/上限终止、页大小兜底全部内聚,调用方一个 `for` 循环即可,不关心 offset/page 计算。
 - **可替换边界**:`HttpClient` trait(compiler)、`ClientProvider`(auth)、`PathConfig::with_root`(路径)——核心逻辑不绑定具体 HTTP 实现与目录,便于测试与定制。

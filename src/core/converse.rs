@@ -241,6 +241,12 @@ struct ChatInner {
     history: Mutex<Vec<HistoryMessage>>,
     callbacks: Mutex<CallbackStore<StreamCallback>>,
     notify: Notify,
+    /// 连接建立等待超时(Builder 配置)
+    connect_timeout: Duration,
+    /// 单轮同步回复等待超时(Builder 配置)
+    sync_timeout: Duration,
+    /// 回复开始等待超时(Builder 配置)
+    start_timeout: Duration,
 }
 
 /// AI 对话客户端句柄:线程安全,可克隆共享
@@ -264,6 +270,9 @@ impl std::fmt::Debug for ChatClient {
 pub struct ChatBuilder {
     token: String,
     user_agent: String,
+    connect_timeout: Duration,
+    sync_timeout: Duration,
+    start_timeout: Duration,
 }
 
 impl ChatBuilder {
@@ -272,6 +281,9 @@ impl ChatBuilder {
         Self {
             token: token.into(),
             user_agent: DEFAULT_USER_AGENT.to_string(),
+            connect_timeout: DEFAULT_CONNECT_TIMEOUT,
+            sync_timeout: DEFAULT_RESPONSE_TIMEOUT,
+            start_timeout: DEFAULT_RESPONSE_START_TIMEOUT,
         }
     }
 
@@ -281,11 +293,32 @@ impl ChatBuilder {
         self
     }
 
+    /// 连接建立等待超时(默认 10s)
+    pub fn connect_timeout(mut self, timeout: Duration) -> Self {
+        self.connect_timeout = timeout;
+        self
+    }
+
+    /// 单轮同步回复等待超时(默认 1min,供 `send_and_wait` 使用)
+    pub fn sync_timeout(mut self, timeout: Duration) -> Self {
+        self.sync_timeout = timeout;
+        self
+    }
+
+    /// 回复开始等待超时(默认 10s)
+    pub fn start_timeout(mut self, timeout: Duration) -> Self {
+        self.start_timeout = timeout;
+        self
+    }
+
     /// 构建客户端(尚未连接,需调用 [`ChatClient::connect`])
     pub fn build(self) -> ChatClient {
         let inner = ChatInner {
             token: self.token,
             user_agent: self.user_agent,
+            connect_timeout: self.connect_timeout,
+            sync_timeout: self.sync_timeout,
+            start_timeout: self.start_timeout,
             stopping: AtomicBool::new(true),
             connected: AtomicBool::new(false),
             receiving: AtomicBool::new(false),
@@ -327,7 +360,7 @@ impl ChatClient {
         }
         self.inner.stopping.store(false, Ordering::Release);
         establish(&self.inner)?;
-        Ok(self.wait_for_connection(DEFAULT_CONNECT_TIMEOUT))
+        Ok(self.wait_for_connection(self.inner.connect_timeout))
     }
 
     /// 等待 WebSocket 层连接建立(超时返回 false)
@@ -386,17 +419,14 @@ impl ChatClient {
     }
 
     /// 发送消息并等待回复完成,返回完整回复文本
-    pub fn send_and_wait(
-        &self,
-        message: &str,
-        mode: HistoryMode,
-        response_timeout: Duration,
-    ) -> Result<String> {
+    /// 发送消息并等待回复完成,返回完整回复文本
+    /// 超时由 Builder 配置(`connect_timeout`/`sync_timeout`/`start_timeout`)决定
+    pub fn send_and_wait(&self, message: &str, mode: HistoryMode) -> Result<String> {
         self.send_message(message, mode)?;
-        if !self.wait_for_response_start(DEFAULT_RESPONSE_START_TIMEOUT) {
+        if !self.wait_for_response_start(self.inner.start_timeout) {
             return Err(ChatError::Timeout("AI 未开始回复".into()));
         }
-        if !self.wait_for_response(response_timeout) {
+        if !self.wait_for_response(self.inner.sync_timeout) {
             return Err(ChatError::Timeout("回复超时".into()));
         }
         // 回复中途断连时收尾会清空 receiving,等待谓词立即通过;
@@ -408,7 +438,7 @@ impl ChatClient {
     }
 
     /// 注册流式回复回调(内容,事件类型)
-    pub fn add_stream_callback(
+    pub fn on_stream(
         &self,
         cb: impl Fn(&str, ChatEventType) + Send + Sync + 'static,
     ) -> CallbackHandle {
