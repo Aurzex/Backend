@@ -1,6 +1,6 @@
 use crate::utils::acquire::{
     ClientAccess, CodeMaoClient, DEFAULT_LIMIT, DEFAULT_PAGE_SIZE, HTTPStatus, HttpMethod,
-    MewError, MewResult, PaginatedIter, PaginationMethod,
+    MewError, MewResult, PaginatedIter, PaginationMethod, ResponseMode, ToggleAction,
 };
 use log::debug;
 use serde_json::{Value, json};
@@ -380,7 +380,7 @@ impl ForumActionHandler {
         &self,
         post_id: i32,
         content: &str,
-        return_data: bool,
+        mode: ResponseMode,
     ) -> MewResult<Value> {
         debug!("回复帖子: post_id={}", post_id);
         let endpoint = format!("/web/forums/posts/{}/replies", post_id);
@@ -389,7 +389,7 @@ impl ForumActionHandler {
             .client
             .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(payload);
-        self.send_maybe_parse(builder, return_data, HTTPStatus::Created)
+        self.send_maybe_parse(builder, mode, HTTPStatus::Created)
     }
 
     /// 回复评论(在回帖下评论)
@@ -398,7 +398,7 @@ impl ForumActionHandler {
         reply_id: i32,
         parent_id: i32,
         content: &str,
-        return_data: bool,
+        mode: ResponseMode,
     ) -> MewResult<Value> {
         debug!("回复评论: reply_id={}, parent_id={}", reply_id, parent_id);
         let endpoint = format!("/web/forums/replies/{}/comments", reply_id);
@@ -410,22 +410,19 @@ impl ForumActionHandler {
             .client
             .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(payload);
-        self.send_maybe_parse(builder, return_data, HTTPStatus::Created)
+        self.send_maybe_parse(builder, mode, HTTPStatus::Created)
     }
 
-    /// 点赞或取消点赞,`action` 为 "like" 或 "unlike"
-    pub fn toggle_like(&self, action: &str, item_id: i32, item_type: ItemType) -> MewResult<bool> {
-        let method = match action {
-            "like" => HttpMethod::Put,
-            "unlike" => HttpMethod::Delete,
-            _ => {
-                return Err(MewError::Other(
-                    "无效的action,必须是 'like' 或 'unlike'".into(),
-                ));
-            }
-        };
+    /// 点赞或取消点赞
+    pub fn toggle_like(
+        &self,
+        action: ToggleAction,
+        item_id: i32,
+        item_type: ItemType,
+    ) -> MewResult<bool> {
+        let method = action.to_http_method(HttpMethod::Put, HttpMethod::Delete);
         debug!(
-            "点赞操作: action={}, item_id={}, type={:?}",
+            "点赞操作: action={:?}, item_id={}, type={:?}",
             action, item_id, item_type
         );
         let endpoint = format!("/web/forums/comments/{}/liked", item_id);
@@ -443,7 +440,7 @@ impl ForumActionHandler {
         reason_id: ForumReportReasonId,
         description: &str,
         item_type: ItemType,
-        return_data: bool,
+        mode: ResponseMode,
     ) -> MewResult<Value> {
         debug!("举报内容: item_id={}, type={:?}", item_id, item_type);
         let payload = json!({
@@ -456,7 +453,7 @@ impl ForumActionHandler {
             .client
             .build_request(HttpMethod::Post, "/web/reports/posts/discussions", None)
             .with_payload(payload);
-        self.send_maybe_parse(builder, return_data, HTTPStatus::Created)
+        self.send_maybe_parse(builder, mode, HTTPStatus::Created)
     }
 
     /// 举报帖子
@@ -465,7 +462,7 @@ impl ForumActionHandler {
         post_id: i32,
         reason_id: PostReportReasonId,
         description: &str,
-        return_data: bool,
+        mode: ResponseMode,
     ) -> MewResult<Value> {
         debug!("举报帖子: post_id={}", post_id);
         let payload = json!({
@@ -477,7 +474,7 @@ impl ForumActionHandler {
             .client
             .build_request(HttpMethod::Post, "/web/reports/posts", None)
             .with_payload(payload);
-        self.send_maybe_parse(builder, return_data, HTTPStatus::Created)
+        self.send_maybe_parse(builder, mode, HTTPStatus::Created)
     }
 
     /// 删除回帖 / 评论 / 帖子
@@ -495,16 +492,13 @@ impl ForumActionHandler {
     }
 
     /// 置顶 / 取消置顶回帖
-    pub fn toggle_comment_top_status(&self, comment_id: i32, should_top: bool) -> MewResult<bool> {
-        let method = if should_top {
-            HttpMethod::Put
-        } else {
-            HttpMethod::Delete
-        };
-        debug!(
-            "置顶操作: comment_id={}, should_top={}",
-            comment_id, should_top
-        );
+    pub fn toggle_comment_top_status(
+        &self,
+        comment_id: i32,
+        action: ToggleAction,
+    ) -> MewResult<bool> {
+        let method = action.to_http_method(HttpMethod::Put, HttpMethod::Delete);
+        debug!("置顶操作: comment_id={}, action={:?}", comment_id, action);
         let endpoint = format!("/web/forums/replies/{}/top", comment_id);
         let builder = self.client.build_request(method, &endpoint, None);
         self.check_status(builder, HTTPStatus::NoContent)
@@ -518,7 +512,7 @@ impl ForumActionHandler {
         content: &str,
         board_id: Option<BoardId>,
         workshop_id: Option<i32>,
-        return_data: bool,
+        mode: ResponseMode,
     ) -> MewResult<Value> {
         debug!("发布帖子: target={:?}, title={}", target_type, title);
         let endpoint = match target_type {
@@ -545,7 +539,7 @@ impl ForumActionHandler {
             .client
             .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(payload);
-        self.send_maybe_parse(builder, return_data, HTTPStatus::Created)
+        self.send_maybe_parse(builder, mode, HTTPStatus::Created)
     }
 }
 

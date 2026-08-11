@@ -44,6 +44,22 @@ pub(crate) const MAX_RANKING_LIMIT: i64 = 31;
 pub(crate) const ASCENDING_ORDER: i64 = 1;
 pub(crate) const DESCENDING_ORDER: i64 = -1;
 
+/// 排行榜排序方向
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RankingOrder {
+    Ascending,
+    Descending,
+}
+
+impl RankingOrder {
+    pub(crate) fn as_code(self) -> i64 {
+        match self {
+            RankingOrder::Ascending => ASCENDING_ORDER,
+            RankingOrder::Descending => DESCENDING_ORDER,
+        }
+    }
+}
+
 // 错误类型
 
 /// 云存储操作错误
@@ -1031,17 +1047,13 @@ impl CloudConnection {
     }
 
     /// 获取私有变量排行榜(结果经 `on_ranking_received` 回调返回)
-    pub fn get_ranking(&self, variable_name: &str, limit: i64, order: i64) -> Result<()> {
+    pub fn get_ranking(&self, variable_name: &str, limit: i64, order: RankingOrder) -> Result<()> {
         if !(MIN_RANKING_LIMIT..=MAX_RANKING_LIMIT).contains(&limit) {
             return Err(CloudError::InvalidArgument(format!(
                 "排行榜限制数量必须在 {MIN_RANKING_LIMIT}..={MAX_RANKING_LIMIT} 之间"
             )));
         }
-        if order != ASCENDING_ORDER && order != DESCENDING_ORDER {
-            return Err(CloudError::InvalidArgument(format!(
-                "排序顺序必须是 {ASCENDING_ORDER} (正序) 或 {DESCENDING_ORDER} (逆序)"
-            )));
-        }
+        let order = order.as_code();
         let cvid = self
             .inner
             .state

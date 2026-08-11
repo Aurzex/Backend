@@ -1504,15 +1504,16 @@ impl FileUploader {
     }
 
     /// 统一上传入口
-    pub fn upload(&self, file_path: &Path, method: &str, save_path: &str) -> MewResult<String> {
-        match method {
-            "pgaot" => self.upload_pgaot(file_path, save_path),
-            "codegame" => self.upload_codegame(file_path, save_path),
-            "codemao" => self.upload_codemao(file_path, save_path),
-            _ => Err(MewError::Other(format!(
-                "Unsupported upload method: {}",
-                method
-            ))),
+    pub fn upload(
+        &self,
+        file_path: &Path,
+        channel: UploadChannel,
+        save_path: &str,
+    ) -> MewResult<String> {
+        match channel {
+            UploadChannel::Pgaot => self.upload_pgaot(file_path, save_path),
+            UploadChannel::Codegame => self.upload_codegame(file_path, save_path),
+            UploadChannel::Codemao => self.upload_codemao(file_path, save_path),
         }
     }
 
@@ -1825,6 +1826,55 @@ pub fn current_timestamp_secs() -> i64 {
 }
 
 // 共享请求辅助(trait)
+/// 发送请求后返回的数据形态
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResponseMode {
+    /// 返回响应 JSON 数据
+    Data,
+    /// 仅返回成功标志 `{ "success": bool }`
+    Status,
+}
+
+/// 开关型动作(点赞/收藏/置顶/关注等)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToggleAction {
+    On,
+    Off,
+}
+
+impl ToggleAction {
+    pub(crate) fn to_http_method(
+        self,
+        on_method: HttpMethod,
+        off_method: HttpMethod,
+    ) -> HttpMethod {
+        match self {
+            ToggleAction::On => on_method,
+            ToggleAction::Off => off_method,
+        }
+    }
+}
+
+/// 上传通道
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UploadChannel {
+    Pgaot,
+    Codegame,
+    Codemao,
+}
+
+impl UploadChannel {
+    /// 从通道字符串解析(非法值返回 None)
+    pub fn parse(s: &str) -> Option<UploadChannel> {
+        match s {
+            "pgaot" => Some(UploadChannel::Pgaot),
+            "codegame" => Some(UploadChannel::Codegame),
+            "codemao" => Some(UploadChannel::Codemao),
+            _ => None,
+        }
+    }
+}
+
 /// 各 API 管理器的共享请求辅助,消除每个 Manager 中重复的
 /// `check_status`/`send_and_parse`/`send_maybe_parse` 样板
 /// 实现方只需提供 `client()` 访问器,其余方法由默认实现提供
@@ -1857,11 +1907,11 @@ pub trait ClientAccess {
         self.client().response_to_json(response)
     }
 
-    /// 发送请求,根据 `return_data` 决定返回 JSON 数据或成功标志
+    /// 发送请求,根据 `mode` 决定返回 JSON 数据或成功标志
     fn send_maybe_parse(
         &self,
         builder: KittyRequestBuilder,
-        return_data: bool,
+        mode: ResponseMode,
         expected: HTTPStatus,
     ) -> MewResult<Value> {
         let response = builder.with_error_body().send()?;
@@ -1870,7 +1920,7 @@ pub trait ClientAccess {
             let body = response.into_body().read_to_string().unwrap_or_default();
             return Err(MewError::Other(format!("HTTP {status}: {body}")));
         }
-        if return_data {
+        if mode == ResponseMode::Data {
             self.client().response_to_json(response)
         } else {
             Ok(serde_json::json!({ "success": status == expected as u16 }))

@@ -1,6 +1,7 @@
 use crate::utils::acquire::{
     BaseKey, ClientAccess, CodeMaoClient, DEFAULT_LIMIT, HTTPStatus, HttpMethod,
-    KittyRequestBuilder, MewResult, PaginatedIter, PaginationMethod, current_timestamp_13,
+    KittyRequestBuilder, MewResult, PaginatedIter, PaginationMethod, ResponseMode,
+    current_timestamp_13,
 };
 use log::debug;
 use serde_json::{Value, json};
@@ -172,7 +173,7 @@ impl EduUserAction {
         avatar_url: &str,
         description: &str,
         name: &str,
-        return_data: bool,
+        mode: ResponseMode,
     ) -> MewResult<Value> {
         debug!("创建/更新课程包: method={:?}, name={}", method, name);
         let data = json!({
@@ -188,7 +189,7 @@ impl EduUserAction {
                     Some(BaseKey::Education),
                 )
                 .with_payload(data),
-            return_data,
+            mode,
             HTTPStatus::Ok,
         )
     }
@@ -857,8 +858,12 @@ impl EduDataFetcher {
             .client
             .build_request(method, &endpoint, Some(BaseKey::Education));
         let builder = Self::add_timestamp_to_builder(builder);
-        let return_data = method == HttpMethod::Get;
-        self.send_maybe_parse(builder, return_data, HTTPStatus::Ok)
+        let mode = if method == HttpMethod::Get {
+            ResponseMode::Data
+        } else {
+            ResponseMode::Status
+        };
+        self.send_maybe_parse(builder, mode, HTTPStatus::Ok)
     }
 
     /// 获取自定义课程包内容

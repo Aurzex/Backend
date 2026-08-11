@@ -17,11 +17,11 @@ use super::pipeline::{
     truncate_chars,
 };
 use super::registry::{
-    ProcessorError, ReportFetcher, SourceConfig, bytes_to_human, html_to_text,
+    ProcessorError, ReportAction, ReportFetcher, SourceConfig, bytes_to_human, html_to_text,
     resolution_display_name, value_to_string,
 };
 use crate::api::whale::{ReportStatus, Resolution};
-use crate::utils::acquire::{FileUploader, KittyFactory, current_timestamp_secs};
+use crate::utils::acquire::{FileUploader, KittyFactory, UploadChannel, current_timestamp_secs};
 use crate::utils::data::value_to_i64;
 
 /// 批量分组的键:(分组类型, 分组键)
@@ -51,7 +51,7 @@ impl FileProcessor {
     pub fn handle_file_upload(
         file_path: &Path,
         save_path: &str,
-        method: &str,
+        channel: UploadChannel,
         max_size_bytes: u64,
     ) -> Result<String, ProcessorError> {
         let metadata = fs::metadata(file_path)?;
@@ -74,7 +74,7 @@ impl FileProcessor {
 
         let client = KittyFactory::global_client().clone();
         let uploader = FileUploader::new(client);
-        let url = uploader.upload(file_path, method, save_path)?;
+        let url = uploader.upload(file_path, channel, save_path)?;
 
         let timestamp = current_timestamp_secs();
         let size_human = bytes_to_human(file_size);
@@ -92,14 +92,14 @@ impl FileProcessor {
     pub fn handle_directory_upload(
         dir_path: &Path,
         save_path: &str,
-        method: &str,
+        channel: UploadChannel,
         max_size_bytes: u64,
     ) -> Result<HashMap<PathBuf, String>, ProcessorError> {
         let mut results = HashMap::new();
         let mut cb = |entry: fs::DirEntry| {
             if entry.file_type().is_ok_and(|ft| ft.is_file()) {
                 let path = entry.path();
-                match Self::handle_file_upload(path.as_path(), save_path, method, max_size_bytes) {
+                match Self::handle_file_upload(path.as_path(), save_path, channel, max_size_bytes) {
                     Ok(url) => {
                         results.insert(path, url);
                     }
@@ -360,7 +360,7 @@ impl ReportProcessor {
     pub fn apply_action(
         &self,
         item: &Value,
-        action: &str,
+        action: ReportAction,
         admin_id: i32,
     ) -> Result<(), ProcessorError> {
         let Some(report_type) = Self::infer_report_type(item) else {
@@ -372,7 +372,7 @@ impl ReportProcessor {
                 report_type
             )));
         };
-        let result = self.execute_action(report_type, config, item, action, admin_id);
+        let result = self.execute_action(report_type, config, item, action.key(), admin_id);
         if result.is_ok() {
             self.invalidate_totals();
         }
@@ -513,11 +513,11 @@ impl ReportProcessor {
     }
 
     /// 保存批量组动作(同内容后续遇到时自动应用)
-    pub fn save_group_action(&self, group: &BatchGroup, action: &str) {
+    pub fn save_group_action(&self, group: &BatchGroup, action: ReportAction) {
         self.batch_manager.lock().unwrap().save_batch_action(
             &group.group_type,
             &group.group_key,
-            action,
+            action.key(),
         );
     }
 
@@ -586,7 +586,7 @@ impl ReportProcessor {
     }
 
     /// 将动作应用到批量组全部记录,返回成功数(逐条错误仅记录日志)
-    pub fn apply_group(&self, group: &BatchGroup, action: &str, admin_id: i32) -> i64 {
+    pub fn apply_group(&self, group: &BatchGroup, action: ReportAction, admin_id: i32) -> i64 {
         // 组内记录由同一分组键聚合,举报类型必然一致,配置只解析一次
         let Some(first) = group.items.first() else {
             return 0;
@@ -600,7 +600,7 @@ impl ReportProcessor {
         if !self
             .fetcher
             .registry
-            .is_action_available(report_type, action)
+            .is_action_available(report_type, action.key())
         {
             return 0;
         }
@@ -610,7 +610,7 @@ impl ReportProcessor {
             if Self::infer_report_type(item) != Some(report_type) {
                 continue; // 防御:组内类型不一致时跳过
             }
-            match self.execute_action(report_type, config, item, action, admin_id) {
+            match self.execute_action(report_type, config, item, action.key(), admin_id) {
                 Ok(()) => applied += 1,
                 Err(e) => error!(
                     "批量应用失败 (id={}): {}",

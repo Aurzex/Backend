@@ -1,5 +1,6 @@
 use crate::utils::acquire::{
-    ClientAccess, CodeMaoClient, DEFAULT_LIMIT, HTTPStatus, HttpMethod, MewResult,
+    ClientAccess, CodeMaoClient, DEFAULT_LIMIT, HTTPStatus, HttpMethod, MewResult, ResponseMode,
+    ToggleAction,
 };
 use log::debug;
 use serde_json::{Value, json};
@@ -358,13 +359,9 @@ impl NovelActionHandler {
     }
 
     /// 收藏 / 取消收藏小说
-    pub fn toggle_novel_favorite(&self, novel_id: i32, favorite: bool) -> MewResult<Value> {
-        let method = if favorite {
-            HttpMethod::Post
-        } else {
-            HttpMethod::Delete
-        };
-        debug!("收藏操作: novel_id={}, favorite={}", novel_id, favorite);
+    pub fn toggle_novel_favorite(&self, novel_id: i32, action: ToggleAction) -> MewResult<Value> {
+        let method = action.to_http_method(HttpMethod::Post, HttpMethod::Delete);
+        debug!("收藏操作: novel_id={}, action={:?}", novel_id, action);
         let endpoint = format!("/web/fanfic/collect/{}", novel_id);
         let builder = self.client.build_request(method, &endpoint, None);
         self.send_and_parse(builder)
@@ -375,7 +372,7 @@ impl NovelActionHandler {
         &self,
         content: &str,
         novel_id: i32,
-        return_data: bool,
+        mode: ResponseMode,
     ) -> MewResult<Value> {
         debug!("发表小说评论: novel_id={}", novel_id);
         let endpoint = format!("/api/fanfic/comments/{}", novel_id);
@@ -384,35 +381,31 @@ impl NovelActionHandler {
             .client
             .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(payload);
-        self.send_maybe_parse(builder, return_data, HTTPStatus::Ok)
+        self.send_maybe_parse(builder, mode, HTTPStatus::Ok)
     }
 
     /// 点赞 / 取消点赞小说评论
     pub fn toggle_comment_like(
         &self,
         comment_id: i32,
-        like: bool,
-        return_data: bool,
+        action: ToggleAction,
+        mode: ResponseMode,
     ) -> MewResult<Value> {
-        let method = if like {
-            HttpMethod::Post
-        } else {
-            HttpMethod::Delete
-        };
-        debug!("评论点赞: comment_id={}, like={}", comment_id, like);
+        let method = action.to_http_method(HttpMethod::Post, HttpMethod::Delete);
+        debug!("评论点赞: comment_id={}, action={:?}", comment_id, action);
         let endpoint = format!("/api/fanfic/comments/praise/{}", comment_id);
         let builder = self.client.build_request(method, &endpoint, None);
-        self.send_maybe_parse(builder, return_data, HTTPStatus::Ok)
+        self.send_maybe_parse(builder, mode, HTTPStatus::Ok)
     }
 
     /// 删除小说评论
-    pub fn delete_novel_comment(&self, comment_id: i32, return_data: bool) -> MewResult<Value> {
+    pub fn delete_novel_comment(&self, comment_id: i32, mode: ResponseMode) -> MewResult<Value> {
         debug!("删除评论: comment_id={}", comment_id);
         let endpoint = format!("/api/fanfic/comments/{}", comment_id);
         let builder = self
             .client
             .build_request(HttpMethod::Delete, &endpoint, None);
-        self.send_maybe_parse(builder, return_data, HTTPStatus::Ok)
+        self.send_maybe_parse(builder, mode, HTTPStatus::Ok)
     }
 
     /// 更新章节内容
@@ -508,7 +501,7 @@ impl NovelActionHandler {
         introduction: &str,
         category_id: i32,
         status: i32,
-        return_data: bool,
+        mode: ResponseMode,
     ) -> MewResult<Value> {
         debug!("更新小说: novel_id={}, title={}", novel_id, title);
         let endpoint = format!("/web/fanfic/{}", novel_id);
@@ -522,7 +515,7 @@ impl NovelActionHandler {
             .client
             .build_request(HttpMethod::Put, &endpoint, None)
             .with_payload(payload);
-        self.send_maybe_parse(builder, return_data, HTTPStatus::Ok)
+        self.send_maybe_parse(builder, mode, HTTPStatus::Ok)
     }
 
     /// 创建新小说
@@ -533,7 +526,7 @@ impl NovelActionHandler {
         draft: &str,
         cover_pic: &str,
         words_num: i32,
-        return_data: bool,
+        mode: ResponseMode,
     ) -> MewResult<Value> {
         debug!("创建小说: title={}", title);
         let payload = json!({
@@ -547,7 +540,7 @@ impl NovelActionHandler {
             .client
             .build_request(HttpMethod::Post, "/web/fanfic", None)
             .with_payload(payload);
-        self.send_maybe_parse(builder, return_data, HTTPStatus::Ok)
+        self.send_maybe_parse(builder, mode, HTTPStatus::Ok)
     }
 
     /// 删除小说
@@ -664,19 +657,15 @@ impl BookActionHandler {
     pub fn toggle_book_like(
         &self,
         book_id: i32,
-        like: bool,
-        return_data: bool,
+        action: ToggleAction,
+        mode: ResponseMode,
     ) -> MewResult<Value> {
-        let method = if like {
-            HttpMethod::Post
-        } else {
-            HttpMethod::Delete
-        };
-        debug!("图鉴点赞: book_id={}, like={}", book_id, like);
+        let method = action.to_http_method(HttpMethod::Post, HttpMethod::Delete);
+        debug!("图鉴点赞: book_id={}, action={:?}", book_id, action);
         let endpoint = format!("/api/sprite/praise/{}", book_id);
         self.send_maybe_parse(
             self.client.build_request(method, &endpoint, None),
-            return_data,
+            mode,
             HTTPStatus::Ok,
         )
     }

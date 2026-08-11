@@ -16,7 +16,7 @@ use crate::api::shop::{ReportCommentArgs, WorkShopReportReasonId, WorkshopAction
 use crate::api::whale::{ReportHandler, Resolution};
 use crate::api::work::{BaseWorkOperations, CommentOperations};
 use crate::core::retrieve::{CommentSource, DataQuery, JsonObject};
-use crate::utils::acquire::{Catsona, KittyFactory};
+use crate::utils::acquire::{Catsona, KittyFactory, ResponseMode};
 use crate::utils::data::PathConfig;
 
 // 配置结构体(依赖注入)
@@ -1008,7 +1008,7 @@ impl ViolationChecker {
                         content_id,
                         PostReportReasonId::Reason7,
                         reason_content,
-                        false,
+                        ResponseMode::Status,
                     )
                     .map_err(ProcessorError::from)?;
             }
@@ -1043,7 +1043,7 @@ impl ViolationChecker {
                                 ForumReportReasonId::Reason7,
                                 "",
                                 item_type,
-                                false,
+                                ResponseMode::Status,
                             )
                             .map_err(ProcessorError::from)?;
                     }

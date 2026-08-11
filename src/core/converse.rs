@@ -94,6 +94,15 @@ pub enum ChatEventType {
     Error,
 }
 
+/// 发送消息时是否携带历史记录
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HistoryMode {
+    /// 携带历史消息
+    Include,
+    /// 仅发送当前消息
+    Exclude,
+}
+
 /// 对话消息角色
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -329,7 +338,7 @@ impl ChatClient {
     }
 
     /// 发送聊天消息(用户消息自动进入历史记录)
-    pub fn send_message(&self, message: &str, include_history: bool) -> Result<()> {
+    pub fn send_message(&self, message: &str, mode: HistoryMode) -> Result<()> {
         if !self.inner.connected.load(Ordering::Acquire) {
             return Err(ChatError::NotConnected);
         }
@@ -341,7 +350,7 @@ impl ChatClient {
         let frame = {
             let mut history = self.inner.history.lock().unwrap();
             history.push(HistoryMessage::user(message));
-            let messages: &[HistoryMessage] = if include_history && history.len() > 1 {
+            let messages: &[HistoryMessage] = if mode == HistoryMode::Include && history.len() > 1 {
                 &history
             } else {
                 std::slice::from_ref(history.last().unwrap())
@@ -380,10 +389,10 @@ impl ChatClient {
     pub fn send_and_wait(
         &self,
         message: &str,
-        include_history: bool,
+        mode: HistoryMode,
         response_timeout: Duration,
     ) -> Result<String> {
-        self.send_message(message, include_history)?;
+        self.send_message(message, mode)?;
         if !self.wait_for_response_start(DEFAULT_RESPONSE_START_TIMEOUT) {
             return Err(ChatError::Timeout("AI 未开始回复".into()));
         }

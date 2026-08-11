@@ -1,6 +1,6 @@
 use crate::utils::acquire::{
     BaseKey, ClientAccess, CodeMaoClient, DEFAULT_LIMIT, DEFAULT_PAGE_SIZE, HTTPStatus, HttpMethod,
-    MewResult, PaginatedIter, PaginationMethod, current_timestamp_13,
+    MewResult, PaginatedIter, PaginationMethod, ResponseMode, ToggleAction, current_timestamp_13,
 };
 
 /// 萌新盒子套餐列表接口的单页上限
@@ -11,22 +11,6 @@ use serde_json::{Value, json};
 // 工具函数
 
 // 作品相关枚举
-
-/// HTTP 方法选择(POST / DELETE)
-#[derive(Debug, Clone, Copy)]
-pub enum SelectMethod {
-    Post,
-    Delete,
-}
-
-impl SelectMethod {
-    fn to_http_method(self) -> HttpMethod {
-        match self {
-            SelectMethod::Post => HttpMethod::Post,
-            SelectMethod::Delete => HttpMethod::Delete,
-        }
-    }
-}
 
 /// 作品类型
 #[derive(Debug, Clone, Copy)]
@@ -135,34 +119,46 @@ impl BaseWorkOperations {
     }
 
     /// 关注或取消关注用户
-    pub fn toggle_follow(&self, user_id: i32, method: SelectMethod) -> MewResult<bool> {
-        debug!("切换关注状态: user_id={}, method={:?}", user_id, method);
+    pub fn toggle_follow(&self, user_id: i32, action: ToggleAction) -> MewResult<bool> {
+        debug!("切换关注状态: user_id={}, action={:?}", user_id, action);
         let endpoint = format!("/nemo/v2/user/{}/follow", user_id);
         let builder = self
             .client
-            .build_request(method.to_http_method(), &endpoint, None)
+            .build_request(
+                action.to_http_method(HttpMethod::Post, HttpMethod::Delete),
+                &endpoint,
+                None,
+            )
             .with_payload(json!({}));
         self.check_status(builder, HTTPStatus::NoContent)
     }
 
     /// 收藏或取消收藏作品
-    pub fn toggle_collection(&self, work_id: i32, method: SelectMethod) -> MewResult<bool> {
-        debug!("切换收藏状态: work_id={}, method={:?}", work_id, method);
+    pub fn toggle_collection(&self, work_id: i32, action: ToggleAction) -> MewResult<bool> {
+        debug!("切换收藏状态: work_id={}, action={:?}", work_id, action);
         let endpoint = format!("/nemo/v2/works/{}/collection", work_id);
         let builder = self
             .client
-            .build_request(method.to_http_method(), &endpoint, None)
+            .build_request(
+                action.to_http_method(HttpMethod::Post, HttpMethod::Delete),
+                &endpoint,
+                None,
+            )
             .with_payload(json!({}));
         self.check_status(builder, HTTPStatus::Ok)
     }
 
     /// 点赞或取消点赞作品
-    pub fn toggle_like(&self, work_id: i32, method: SelectMethod) -> MewResult<bool> {
-        debug!("切换点赞状态: work_id={}, method={:?}", work_id, method);
+    pub fn toggle_like(&self, work_id: i32, action: ToggleAction) -> MewResult<bool> {
+        debug!("切换点赞状态: work_id={}, action={:?}", work_id, action);
         let endpoint = format!("/nemo/v2/works/{}/like", work_id);
         let builder = self
             .client
-            .build_request(method.to_http_method(), &endpoint, None)
+            .build_request(
+                action.to_http_method(HttpMethod::Post, HttpMethod::Delete),
+                &endpoint,
+                None,
+            )
             .with_payload(json!({}));
         self.check_status(builder, HTTPStatus::Ok)
     }
@@ -254,7 +250,7 @@ impl CommentOperations {
         work_id: i32,
         comment: &str,
         emoji: Option<&str>,
-        return_data: bool,
+        mode: ResponseMode,
     ) -> MewResult<Value> {
         debug!("添加作品评论: work_id={}", work_id);
         let endpoint = format!("/creation-tools/v1/works/{}/comment", work_id);
@@ -266,7 +262,7 @@ impl CommentOperations {
             .client
             .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(payload);
-        self.send_maybe_parse(builder, return_data, HTTPStatus::Created)
+        self.send_maybe_parse(builder, mode, HTTPStatus::Created)
     }
 
     /// 回复作品评论
@@ -276,7 +272,7 @@ impl CommentOperations {
         work_id: i32,
         comment_id: i32,
         parent_id: Option<i32>,
-        return_data: bool,
+        mode: ResponseMode,
     ) -> MewResult<Value> {
         debug!(
             "回复评论: work_id={}, comment_id={}, parent_id={:?}",
@@ -294,7 +290,7 @@ impl CommentOperations {
             .client
             .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(data);
-        self.send_maybe_parse(builder, return_data, HTTPStatus::Created)
+        self.send_maybe_parse(builder, mode, HTTPStatus::Created)
     }
 
     /// 删除作品评论
@@ -313,13 +309,13 @@ impl CommentOperations {
     /// 置顶或取消置顶评论
     pub fn toggle_comment_pin(
         &self,
-        method: HttpMethod,
+        action: ToggleAction,
         work_id: i32,
         comment_id: i32,
     ) -> MewResult<bool> {
         debug!(
-            "切换评论置顶: method={:?}, work_id={}, comment_id={}",
-            method, work_id, comment_id
+            "切换评论置顶: action={:?}, work_id={}, comment_id={}",
+            action, work_id, comment_id
         );
         let endpoint = format!(
             "/creation-tools/v1/works/{}/comment/{}/top",
@@ -327,7 +323,11 @@ impl CommentOperations {
         );
         let builder = self
             .client
-            .build_request(method, &endpoint, None)
+            .build_request(
+                action.to_http_method(HttpMethod::Put, HttpMethod::Delete),
+                &endpoint,
+                None,
+            )
             .with_payload(json!({}));
         self.check_status(builder, HTTPStatus::NoContent)
     }
@@ -337,11 +337,11 @@ impl CommentOperations {
         &self,
         work_id: i32,
         comment_id: i32,
-        method: SelectMethod,
+        action: ToggleAction,
     ) -> MewResult<bool> {
         debug!(
-            "切换评论点赞: work_id={}, comment_id={}, method={:?}",
-            work_id, comment_id, method
+            "切换评论点赞: work_id={}, comment_id={}, action={:?}",
+            work_id, comment_id, action
         );
         let endpoint = format!(
             "/creation-tools/v1/works/{}/comment/{}/liked",
@@ -349,7 +349,11 @@ impl CommentOperations {
         );
         let builder = self
             .client
-            .build_request(method.to_http_method(), &endpoint, None)
+            .build_request(
+                action.to_http_method(HttpMethod::Post, HttpMethod::Delete),
+                &endpoint,
+                None,
+            )
             .with_payload(json!({}));
         self.check_status(builder, HTTPStatus::Created)
     }

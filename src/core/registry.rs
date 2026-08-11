@@ -81,6 +81,45 @@ pub(crate) struct ActionConfig {
     pub(crate) enabled: bool,
 }
 
+/// 举报处理动作(动作键语义与 `action_name` 一致)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReportAction {
+    Delete,         // "D"
+    Mute7d,         // "S"
+    Mute3m,         // "T"
+    Unpublish,      // "U"
+    Pass,           // "P"
+    CheckViolation, // "F"
+    Skip,           // "J"
+}
+
+impl ReportAction {
+    pub(crate) fn key(self) -> &'static str {
+        match self {
+            ReportAction::Delete => "D",
+            ReportAction::Mute7d => "S",
+            ReportAction::Mute3m => "T",
+            ReportAction::Unpublish => "U",
+            ReportAction::Pass => "P",
+            ReportAction::CheckViolation => "F",
+            ReportAction::Skip => "J",
+        }
+    }
+
+    pub fn from_key(s: &str) -> Option<ReportAction> {
+        match s {
+            "D" => Some(ReportAction::Delete),
+            "S" => Some(ReportAction::Mute7d),
+            "T" => Some(ReportAction::Mute3m),
+            "U" => Some(ReportAction::Unpublish),
+            "P" => Some(ReportAction::Pass),
+            "F" => Some(ReportAction::CheckViolation),
+            "J" => Some(ReportAction::Skip),
+            _ => None,
+        }
+    }
+}
+
 /// 动作键对应的中文名称
 pub(crate) fn action_name(key: &str) -> &'static str {
     match key {

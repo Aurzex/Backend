@@ -33,6 +33,22 @@ impl ReplyTypes {
     }
 }
 
+/// Nemo 消息类型(喜欢 / 评论)
+#[derive(Debug, Clone, Copy)]
+pub enum NemoMessageType {
+    Like,
+    Comment,
+}
+
+impl NemoMessageType {
+    fn as_url_code(self) -> &'static str {
+        match self {
+            NemoMessageType::Like => "1",
+            NemoMessageType::Comment => "3",
+        }
+    }
+}
+
 /// 消息平台(Web / Nemo)
 #[derive(Debug, Clone, Copy)]
 pub enum MessageMethod {
@@ -235,10 +251,9 @@ impl CommunityDataFetcher {
     }
 
     /// 获取 Nemo 消息(喜欢或评论)
-    pub fn fetch_nemo_messages(&self, types: &str) -> MewResult<Value> {
-        let extra_url = if types == "like" { "1" } else { "3" };
-        let endpoint = format!("/nemo/v2/user/message/{}", extra_url);
-        debug!("获取Nemo消息: type={}, endpoint={}", types, endpoint);
+    pub fn fetch_nemo_messages(&self, message_type: NemoMessageType) -> MewResult<Value> {
+        let endpoint = format!("/nemo/v2/user/message/{}", message_type.as_url_code());
+        debug!("获取Nemo消息: type={:?}", message_type);
         self.send_and_parse(self.client.build_request(HttpMethod::Get, &endpoint, None))
     }
 

@@ -4086,6 +4086,7 @@ impl CodemaoDecompiler {
 }
 
 /// 便捷反编译函数:使用全局单例门面(复用 HTTP 客户端),功能与之前一致
+/// `output_dir` 传 `None` 表示不落盘,仅返回 JSON 字符串
 pub fn decompile_work(work_id: i64, output_dir: Option<&Path>) -> Result<String> {
     CodemaoDecompiler::global().decompile(work_id, output_dir)
 }

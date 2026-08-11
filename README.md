@@ -79,9 +79,12 @@ LoginBuilder::new()
     .execute()?; // -> LoginResult
 
 // 分页拉取:惰性逐页请求,单页瞬时错误可重试
-for work in EduDataFetcher::new().fetch_all_works_gen(Some(50)) {
+for work in EduDataFetcher::new().fetch_all_works_gen(None) {
     let work = work?; // MewResult<Value>
-    println!("{}", work["name"]);
+    println!(
+        "{}",
+        work.get("name").and_then(serde_json::Value::as_str).unwrap_or("")
+    );
 }
 ```
 
@@ -96,7 +99,7 @@ let rule = CaptchaManager::new().fetch_captcha_rule()?; // MewResult<Value>
 **3. 云变量 WebSocket**(回调订阅 + 同步等待):
 
 ```rust
-use backend::core::cloudvar::{CloudBuilder, EditorType};
+use backend::core::cloudvar::{CloudBuilder, EditorType, RankingOrder};
 use std::time::Duration;
 
 let conn = CloudBuilder::new(12345).editor(EditorType::Kitten).build();
@@ -110,13 +113,13 @@ if let Some(var) = conn.get_private_variable("score") {
 }
 
 conn.list_push("history", "level-3")?;   // 列表操作经批量队列合并上传
-conn.get_ranking("score", 10, 0)?;       // 排行榜,结果经 on_ranking 回调返回
+conn.get_ranking("score", 10, RankingOrder::Descending)?; // 排行榜,结果经 on_ranking 回调返回
 ```
 
 **4. AI 对话**(流式回调 + 同步等待完整回复):
 
 ```rust
-use backend::core::converse::{ChatBuilder, ChatEventType};
+use backend::core::converse::{ChatBuilder, ChatEventType, HistoryMode};
 use std::time::Duration;
 
 let chat = ChatBuilder::new("user-token").build();
@@ -126,7 +129,7 @@ chat.add_stream_callback(|text, ev| match ev {
     ChatEventType::End => println!(),
     _ => {}
 });
-let reply = chat.send_and_wait("你好", true, Duration::from_secs(30))?;
+let reply = chat.send_and_wait("你好", HistoryMode::Exclude, Duration::from_secs(30))?;
 ```
 
 **5. 作品反编译**(支持 Kitten2/3/4、Coco、Neko、Nemo、Wood):
@@ -134,7 +137,7 @@ let reply = chat.send_and_wait("你好", true, Duration::from_secs(30))?;
 ```rust
 use backend::core::compiler::{DecompileOptions, decompile_work, decompile_works};
 
-let json = decompile_work(123456, None)?; // -> String(JSON)
+let json = decompile_work(123456, None)?; // None = 不写文件,仅返回 JSON 字符串
 
 let results = decompile_works(
     &[111, 222],
@@ -145,6 +148,7 @@ let results = decompile_works(
 **6. 举报处理引擎**(分块拉取 + 逐条决策):
 
 ```rust
+use backend::core::registry::ReportAction;
 use backend::core::services::ReportProcessor;
 
 let processor = ReportProcessor::new();
@@ -153,7 +157,7 @@ while let Some((_groups, items)) = session.next_chunk() {
     for item in items {
         if let Some(view) = processor.item_view(&item) {
             for line in &view.details { println!("{line}"); }
-            processor.apply_action(&item, "P", admin_id)?; // 通过
+            processor.apply_action(&item, ReportAction::Pass, admin_id)?; // 通过
         }
     }
 }

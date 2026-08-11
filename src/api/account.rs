@@ -1,5 +1,5 @@
 use crate::utils::acquire::{
-    ClientAccess, CodeMaoClient, DEFAULT_PID, HTTPStatus, HttpMethod, MewResult,
+    ClientAccess, CodeMaoClient, DEFAULT_PID, HTTPStatus, HttpMethod, MewResult, ResponseMode,
 };
 use log::debug;
 use serde_json::{Value, json};
@@ -819,14 +819,14 @@ impl AccountManager {
     // ---- 注销 ----
 
     /// 注销用户
-    pub fn delete_user(&self, reason: &str, return_data: bool) -> MewResult<Value> {
+    pub fn delete_user(&self, reason: &str, mode: ResponseMode) -> MewResult<Value> {
         debug!("注销用户: reason={}", reason);
         let payload = json!({ "closeReason": reason });
         let builder = self
             .client
             .build_request(HttpMethod::Post, "/tiger/v3/web/accounts/close", None)
             .with_payload(payload);
-        self.send_maybe_parse(builder, return_data, HTTPStatus::Ok)
+        self.send_maybe_parse(builder, mode, HTTPStatus::Ok)
     }
 }
 

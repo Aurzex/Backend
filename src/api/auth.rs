@@ -1043,9 +1043,16 @@ impl AuthManager {
     }
 
     /// v1/v2 登出,`method` 为 "web" 或 "mobile"
-    pub fn logout_v12(&self, method: &str) -> MewResult<bool> {
+    pub fn logout_v12(&self, method: LogoutMethod) -> MewResult<bool> {
+        let segment = match method {
+            LogoutMethod::Web => "web",
+            LogoutMethod::Mobile => "mobile",
+            LogoutMethod::V0 | LogoutMethod::Admin => {
+                return Err(MewError::Auth("v0/Admin 登出走专用路径".into()));
+            }
+        };
         let client = self.client();
-        let endpoint = format!("/tiger/v3/{}/accounts/logout", method);
+        let endpoint = format!("/tiger/v3/{}/accounts/logout", segment);
         let response = client
             .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(json!({}))
@@ -1082,8 +1089,8 @@ impl AuthManager {
     pub fn logout_with(&self, method: LogoutMethod) -> MewResult<bool> {
         let ok = match method {
             LogoutMethod::V0 => self.logout_v0()?,
-            LogoutMethod::Web => self.logout_v12("web")?,
-            LogoutMethod::Mobile => self.logout_v12("mobile")?,
+            LogoutMethod::Web => self.logout_v12(LogoutMethod::Web)?,
+            LogoutMethod::Mobile => self.logout_v12(LogoutMethod::Mobile)?,
             LogoutMethod::Admin => self.admin_logout()?,
         };
         if ok {

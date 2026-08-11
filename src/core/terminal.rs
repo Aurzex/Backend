@@ -114,9 +114,10 @@ use std::collections::HashMap;
 use std::ops::AddAssign;
 
 use crate::core::pipeline::BatchGroup;
-use crate::core::registry::{ProcessorError, action_name, resolution_display_name};
+use crate::core::registry::{ProcessorError, ReportAction, action_name, resolution_display_name};
 use crate::core::retrieve::DataQuery;
 use crate::core::services::{ReportItemView, ReportProcessor};
+use log::warn;
 
 /// 单次处理运行的统计(动作分布);跳过也算一次决策
 #[derive(Default, Clone, Copy)]
@@ -375,9 +376,13 @@ impl ReportConsole {
 
         if let Some(saved) = processor.group_saved_action(group) {
             ui.info(&format!("应用保存的批量动作: {}", action_name(&saved)));
-            let n = processor.apply_group(group, &saved, admin_id);
+            let Some(action) = ReportAction::from_key(&saved) else {
+                warn!("保存的批量动作键未知: {}", saved);
+                return Ok(RunStats::default());
+            };
+            let n = processor.apply_group(group, action, admin_id);
             let mut st = RunStats::default();
-            st.record(&saved, n);
+            st.record(action.key(), n);
             return Ok(st);
         }
 
@@ -392,10 +397,10 @@ impl ReportConsole {
                 "官方内容, 批量自动通过 (举报ID: {})",
                 view.record_id
             ));
-            processor.save_group_action(group, "P");
-            let n = processor.apply_group(group, "P", admin_id);
+            processor.save_group_action(group, ReportAction::Pass);
+            let n = processor.apply_group(group, ReportAction::Pass, admin_id);
             let mut st = RunStats::default();
-            st.record("P", n);
+            st.record(ReportAction::Pass.key(), n);
             return Ok(st);
         }
 
@@ -408,15 +413,19 @@ impl ReportConsole {
         }
         match Self::ask_action(ui, processor, first, &view) {
             ActionChoice::Apply(key) => {
-                processor.save_group_action(group, &key);
+                let Some(action) = ReportAction::from_key(&key) else {
+                    warn!("未知批量动作键: {}", key);
+                    return Ok(RunStats::default());
+                };
+                processor.save_group_action(group, action);
                 ui.info(&format!(
                     "批量组动作: {}, 应用到 {} 条记录",
-                    action_name(&key),
+                    action_name(action.key()),
                     group.items.len()
                 ));
-                let n = processor.apply_group(group, &key, admin_id);
+                let n = processor.apply_group(group, action, admin_id);
                 let mut st = RunStats::default();
-                st.record(&key, n);
+                st.record(action.key(), n);
                 Ok(st)
             }
             ActionChoice::Skip => {
@@ -449,7 +458,7 @@ impl ReportConsole {
     ) -> Result<RunStats, ProcessorError> {
         // 官方内容直接自动通过:用预计算的标记,不构建详情
         if ctx.official[idx] {
-            processor.apply_action(item, "P", admin_id)?;
+            processor.apply_action(item, ReportAction::Pass, admin_id)?;
             let (type_name, record_id) = processor.item_brief(item).unwrap_or_default();
             ui.info(&format!(
                 "--- [{}/{}] {} (举报ID: {}) --- 官方内容,自动通过",
@@ -482,11 +491,15 @@ impl ReportConsole {
         }
         match Self::ask_action(ui, processor, item, &view) {
             ActionChoice::Apply(key) => {
-                match processor.apply_action(item, &key, admin_id) {
+                let Some(action) = ReportAction::from_key(&key) else {
+                    warn!("未知动作键: {}", key);
+                    return Ok(RunStats::default());
+                };
+                match processor.apply_action(item, action, admin_id) {
                     Ok(()) => {
-                        ui.info(&format!("  => 已处理: {}", action_name(&key)));
+                        ui.info(&format!("  => 已处理: {}", action_name(action.key())));
                         let mut st = RunStats::default();
-                        st.record(&key, 1);
+                        st.record(action.key(), 1);
                         // 同类型批量应用(本 chunk 内未决策项;官方内容走自动通过,不纳入批量)
                         let rest: Vec<usize> = (idx + 1..chunk.len())
                             .filter(|&j| !decided.contains(&j))
@@ -504,7 +517,7 @@ impl ReportConsole {
                         {
                             let mut ok = 0i64;
                             for &j in &rest {
-                                match processor.apply_action(&chunk[j], &key, admin_id) {
+                                match processor.apply_action(&chunk[j], action, admin_id) {
                                     Ok(()) => {
                                         ok += 1;
                                         decided.insert(j);

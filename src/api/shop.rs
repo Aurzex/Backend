@@ -1,6 +1,6 @@
 use crate::utils::acquire::{
     ClientAccess, CodeMaoClient, DEFAULT_LIMIT, DEFAULT_PAGE_SIZE, HTTPStatus, HttpMethod,
-    MewResult, PaginatedIter,
+    MewResult, PaginatedIter, ResponseMode,
 };
 use log::debug;
 use serde_json::{Value, json};
@@ -450,7 +450,7 @@ impl WorkshopActionHandler {
         content: &str,
         source: Option<Source>,
         parent_id: Option<i32>,
-        return_data: bool,
+        mode: ResponseMode,
     ) -> MewResult<Value> {
         debug!(
             "回复评论: workshop_id={}, comment_id={}",
@@ -469,7 +469,7 @@ impl WorkshopActionHandler {
             .client
             .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(payload);
-        self.send_maybe_parse(builder, return_data, HTTPStatus::Created)
+        self.send_maybe_parse(builder, mode, HTTPStatus::Created)
     }
 
     /// 删除回复
@@ -490,7 +490,7 @@ impl WorkshopActionHandler {
         content: &str,
         rich_content: &str,
         source: Option<Source>,
-        return_data: bool,
+        mode: ResponseMode,
     ) -> MewResult<Value> {
         debug!("发表评论: workshop_id={}", workshop_id);
         let endpoint = format!("/web/discussions/{}/comment", workshop_id);
@@ -503,7 +503,7 @@ impl WorkshopActionHandler {
             .client
             .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(payload);
-        self.send_maybe_parse(builder, return_data, HTTPStatus::Created)
+        self.send_maybe_parse(builder, mode, HTTPStatus::Created)
     }
 
     /// 删除评论
