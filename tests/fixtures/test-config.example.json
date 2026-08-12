@@ -1,0 +1,11 @@
+{
+  "//说明": "复制本文件到 data/test-config.json 并修改后生效(data/ 已被 gitignore,不会入库)。反编译走公开接口,默认无需账号;仅当部分私有作品需要鉴权时填写 account/password。",
+  "works": [
+    { "id": 195038626, "kind": "KITTEN4" },
+    { "id": 140290349, "kind": "KITTEN4" },
+    { "id": 325806995, "kind": "NEKO" }
+  ],
+  "nemo_work": { "id": 194684070, "kind": "NEMO" },
+  "account": "",
+  "password": ""
+}
