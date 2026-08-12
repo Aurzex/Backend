@@ -150,6 +150,9 @@ pub const DEFAULT_LIMIT: usize = 20;
 pub const DEFAULT_OFFSET: usize = 0;
 /// 默认项目 ID(未指定时使用)
 pub const DEFAULT_PID: &str = "65edCTyg";
+/// 全量拉取上限标记:传给 `with_limit` 表示不设上限,
+/// 迭代直到服务端返回空页或 total 字段耗尽(依赖服务端契约,否则可能无限翻页)
+pub const FETCH_ALL: usize = usize::MAX;
 
 /// 默认请求头静态切片(萌化命名)
 const KITTY_HEADERS: &[(&str, &str)] = &[
@@ -1151,16 +1154,6 @@ impl PaginatedIter {
     /// 设置最多获取的元素数量
     pub fn with_limit(mut self, limit: usize) -> Self {
         self.limit = Some(limit);
-        self
-    }
-
-    /// 显式设置全量拉取(不设上限)
-    ///
-    /// 等价于不调用 [`with_limit`](Self::with_limit),但语义自明:
-    /// 迭代将一直翻页直到服务端返回空页或总数(total 字段)耗尽。
-    /// 依赖服务端提供 total 字段或空页终止,否则可能无限翻页。
-    pub fn with_all(mut self) -> Self {
-        self.limit = None;
         self
     }
 
