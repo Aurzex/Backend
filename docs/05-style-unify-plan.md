@@ -6,7 +6,7 @@
 
 请求:审阅全仓 Rust 代码(同步命令行/控制台后端),找出**同一语义、多种写法**的调用风格不一致,给出统一修改方案并执行。三轮执行:① 用户指定执行 P2 的 build_paginated/随机 ID/ChangeSource 三项 + WorkType 收敛;② 用户追加执行 P0/P1 全部项;③ 用户要求 WorkType/KittenVersion 回退到原文件(接受重复),不追求 api 层共享枚举。
 
-前两轮评审(`docs/review-round1.md` → `docs/fix-plan-v2.md` → `docs/review-round2.md`,原 `temp/REVIEW.md`/`FIX_PLAN.md`/`backend-review-plan.md`)已整改严重缺陷与样板冗余。
+前两轮评审(`docs/02-review-round1.md` → `docs/03-fix-plan-v2.md` → `docs/04-review-round2.md`,原 `temp/REVIEW.md`/`FIX_PLAN.md`/`backend-review-plan.md`)已整改严重缺陷与样板冗余。
 
 ## 统一规则(目标风格,全仓唯一写法)
 
@@ -125,10 +125,10 @@
 | get_user_login_method / get_admin_login_method 同构(auth.rs)                  | auth.rs      | 语义分角色,抽参需 fn 指针,过度抽象          |
 | `with_page(Option<i32>)` vs `with_limit(usize)`(acquire.rs)                   | acquire.rs   | 已桥接,改 usize 牵连 30+ 调用点             |
 | core → api 依赖倒置(pipeline/registry/services/retrieve use api::whale 等)    | core 四文件  | 架构级重构,超调用风格范围                   |
-| registry.rs 错位工具函数                                                      | registry.rs  | 模块组织问题(见 review-round2.md)           |
+| registry.rs 错位工具函数                                                      | registry.rs  | 模块组织问题(见 04-review-round2.md)        |
 | retrieve.rs for+push vs iterator 链                                           | retrieve.rs  | 行为等价、改动低价值                        |
 | UFCS 混用(pipeline/converse/retrieve)                                         | 三文件       | 三种写法均常见,统一属审美                   |
-| compiler.rs ValueExt 报错版 5 方法零调用                                      | compiler.rs  | 死代码(见 review-round1.md)                 |
+| compiler.rs ValueExt 报错版 5 方法零调用                                      | compiler.rs  | 死代码(见 02-review-round1.md)              |
 | WorkType/KittenVersion 去重                                                   | user/work.rs | 用户明确接受重复,回退原文件                 |
 
 ## Assumptions
