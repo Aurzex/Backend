@@ -204,7 +204,7 @@ for group in session.leftover_groups() {
 - **同步阻塞、零异步运行时**:无 tokio / async 依赖;WebSocket 用线程 + 通道封装成同步接口。嵌入任何项目(含非 async 环境)零成本,调用栈与错误传播都是普通 Rust 函数。
 - **全局客户端 + 身份槽**:`CodeMaoClient::global()` 单例持有 `Catsona` 身份与令牌槽。登录一次(`LoginBuilder::build().execute()`)写入身份,之后所有请求自动携带对应身份令牌——调用方不需要手动拼 `Authorization` 头,也不需要把 token 传来传去。
 - **样板收敛到 `ClientAccess`**:每个业务 Manager 只需实现 `fn client()`,`send_and_parse` / `check_status` / `send_maybe_parse` 由默认实现提供,且 4xx/5xx 自动携带服务端错误体——几十个 Manager 的请求代码只剩"端点 + 参数"。
-- **分页统一为 `PaginatedIter`**:惰性初始化、翻页、总数/上限终止、页大小兜底全部内聚,调用方一个 `for` 循环即可,不关心 offset/page 计算。
+- **分页统一为 `PaginatedIter`**:惰性初始化、翻页、总数/上限终止、页大小兜底全部内聚,调用方一个 `for` 循环即可,不关心 offset/page 计算。`.with_limit(n)` 设上限,`.with_all()` 显式全量拉取(直到服务端空页或总数耗尽)。
 - **可替换边界**:`ClientProvider`(auth,可注入自定义客户端)、`PathConfig::with_root`(路径)——核心逻辑不绑定具体 HTTP 实现与目录,便于测试与定制。
 - **WS 状态机封装成回调 + 等待原语**:cloudvar / converse 把帧解析、握手、重连、批量合并全部收进库内,外部通过 `on_change` / `on_connection` 回调与 `connect_and_wait` / `send_and_wait` 同步原语交互。
 - **分层单向依赖**:`api → utils`,`core → api / utils`,上层不反向依赖;业务域模块之间互不引用,可按需单独使用。

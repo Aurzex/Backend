@@ -1154,6 +1154,16 @@ impl PaginatedIter {
         self
     }
 
+    /// 显式设置全量拉取(不设上限)
+    ///
+    /// 等价于不调用 [`with_limit`](Self::with_limit),但语义自明:
+    /// 迭代将一直翻页直到服务端返回空页或总数(total 字段)耗尽。
+    /// 依赖服务端提供 total 字段或空页终止,否则可能无限翻页。
+    pub fn with_all(mut self) -> Self {
+        self.limit = None;
+        self
+    }
+
     /// 设置响应中总数的 JSON 键路径(点分隔,如 "data.total")
     pub fn with_total_key(mut self, key: impl Into<String>) -> Self {
         self.total_pointer = Self::key_to_pointer(&key.into());
