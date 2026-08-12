@@ -628,7 +628,8 @@ impl Notify {
 /// 云连接共享内部状态
 struct CloudInner {
     work_id: i64,
-    editor: EditorType,
+    /// 显式指定的编辑器类型;None 表示连接时按作品详情自动识别
+    editor: Mutex<Option<EditorType>>,
     token: Option<String>,
     auto_reconnect: AtomicBool,
     max_reconnect_attempts: usize,
@@ -662,7 +663,7 @@ impl std::fmt::Debug for CloudInner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CloudInner")
             .field("work_id", &self.work_id)
-            .field("editor", &self.editor)
+            .field("editor", &self.editor.lock().unwrap())
             .field("connected", &self.connected.load(Ordering::Acquire))
             .field("data_ready", &self.data_ready.load(Ordering::Acquire))
             .field("online_users", &self.online_users.load(Ordering::Acquire))
@@ -681,7 +682,7 @@ impl std::fmt::Debug for CloudConnection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CloudConnection")
             .field("work_id", &self.inner.work_id)
-            .field("editor", &self.inner.editor)
+            .field("editor", &self.inner.editor.lock().unwrap())
             .field("connected", &self.is_connected())
             .field("data_ready", &self.is_data_ready())
             .field("online_users", &self.online_users())
@@ -719,7 +720,8 @@ impl CloudBuilder {
         }
     }
 
-    /// 显式指定编辑器类型(缺省按作品推断为 Kitten)
+    /// 显式指定编辑器类型;缺省时连接阶段按作品详情自动识别
+    /// (KITTEN2/3/4→Kitten,NEMO→Nemo,NEKO→KittenN,COCO→Coco)
     pub fn editor(mut self, editor: EditorType) -> Self {
         self.editor = Some(editor);
         self
@@ -771,7 +773,7 @@ impl CloudBuilder {
     pub fn build(self) -> CloudConnection {
         let inner = CloudInner {
             work_id: self.work_id,
-            editor: self.editor.unwrap_or_default(),
+            editor: Mutex::new(self.editor),
             token: self.authorization_token,
             auto_reconnect: AtomicBool::new(self.auto_reconnect),
             max_reconnect_attempts: self.max_reconnect_attempts,
@@ -831,7 +833,8 @@ impl CloudConnection {
         }
         info!(
             "云存储连接已发起: work_id={}, editor={:?}",
-            self.inner.work_id, self.inner.editor
+            self.inner.work_id,
+            self.inner.editor.lock().unwrap()
         );
         Ok(())
     }
@@ -2362,6 +2365,25 @@ fn truncate(text: &str, max: usize) -> String {
 
 // 连接建立与读循环
 
+/// 按作品详情自动识别编辑器类型(查询 `/creation-tools/v1/works/{id}` 的 `type` 字段)
+/// 映射:KITTEN2/3/4/KITTEN→Kitten,NEMO→Nemo,NEKO→KittenN,COCO→Coco
+/// 查询失败或类型未知时回退 Kitten(与历史默认一致)
+fn detect_editor(work_id: i64) -> EditorType {
+    use crate::api::work::WorkDataFetcher;
+    match WorkDataFetcher::new().fetch_work_details(work_id as i32) {
+        Ok(v) => match v.get("type").and_then(Value::as_str) {
+            Some("NEMO") => EditorType::Nemo,
+            Some("NEKO") => EditorType::KittenN,
+            Some("COCO") => EditorType::Coco,
+            _ => EditorType::Kitten,
+        },
+        Err(e) => {
+            warn!("自动识别作品 {work_id} 编辑器类型失败: {e},回退 Kitten");
+            EditorType::Kitten
+        }
+    }
+}
+
 /// 建立 WebSocket 连接并启动读线程
 fn establish(inner: &Arc<CloudInner>) -> Result<()> {
     // 串行化建立过程,避免 connect() 与自动重连竞态产生双读线程
@@ -2375,7 +2397,17 @@ fn establish_locked(inner: &Arc<CloudInner>) -> Result<()> {
     if inner.connected.load(Ordering::Acquire) {
         return Ok(());
     }
-    let (auth_type, stag) = inner.editor.query_params();
+    // 未显式指定编辑器类型时,按作品详情自动识别(仅首次,结果缓存避免重连重复请求)
+    {
+        let mut editor = inner.editor.lock().unwrap();
+        if editor.is_none() {
+            let detected = detect_editor(inner.work_id);
+            info!("自动识别作品 {} 编辑器类型: {:?}", inner.work_id, detected);
+            *editor = Some(detected);
+        }
+    }
+    let editor = inner.editor.lock().unwrap().unwrap_or_default();
+    let (auth_type, stag) = editor.query_params();
     let url = format!(
         "{CLOUD_WS_BASE_URL}?session_id={}&authorization_type={auth_type}&stag={stag}&EIO=3&transport=websocket",
         inner.work_id

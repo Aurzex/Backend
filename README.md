@@ -103,6 +103,8 @@ let rule = CaptchaManager::new().fetch_captcha_rule()?; // MewResult<Value>
 use backend::core::cloudvar::{CloudBuilder, EditorType, RankingOrder};
 use std::time::Duration;
 
+// 不传 .editor() 时,连接阶段按作品详情自动识别编辑器类型
+// (KITTEN2/3/4→Kitten,NEMO→Nemo,NEKO→KittenN,COCO→Coco);也可显式指定
 let conn = CloudBuilder::new(12345)
     .editor(EditorType::Kitten)
     .connect_timeout(Duration::from_secs(5))

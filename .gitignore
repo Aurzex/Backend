@@ -5,6 +5,7 @@
 /cache
 /temp
 /.reasonix
+/examples
 reasonix.toml
 
 # Byte-compiled / optimized / DLL files

@@ -219,6 +219,10 @@ struct ChatInner {
     user_agent: String,
     stopping: AtomicBool,
     connected: AtomicBool,
+    /// Socket.IO 握手已完成(收到 40),业务消息可安全发送
+    io_ready: AtomicBool,
+    /// JOIN 已完成(收到 join_ack),可发送 chat 消息
+    joined: AtomicBool,
     /// 是否正在接收流式回复
     receiving: AtomicBool,
     /// JOIN 消息已发送标记(防止重复 join 被服务器拒绝)
@@ -321,6 +325,8 @@ impl ChatBuilder {
             start_timeout: self.start_timeout,
             stopping: AtomicBool::new(true),
             connected: AtomicBool::new(false),
+            io_ready: AtomicBool::new(false),
+            joined: AtomicBool::new(false),
             receiving: AtomicBool::new(false),
             join_sent: AtomicBool::new(false),
             pending_round: AtomicU64::new(0),
@@ -360,7 +366,14 @@ impl ChatClient {
         }
         self.inner.stopping.store(false, Ordering::Release);
         establish(&self.inner)?;
-        Ok(self.wait_for_connection(self.inner.connect_timeout))
+        // 等待 WebSocket 连接 + Socket.IO 握手 + JOIN 完成,
+        // 确保 send_message 不在握手/JOIN 完成前发出业务帧被服务器丢弃
+        // (与 Python 端 connect() 后 sleep(2) 的目的相同,以 join_ack 为准更可靠)
+        Ok(wait_flag(
+            &self.inner.notify,
+            self.inner.connect_timeout,
+            || self.inner.joined.load(Ordering::Acquire),
+        ))
     }
 
     /// 等待 WebSocket 层连接建立(超时返回 false)
@@ -373,6 +386,9 @@ impl ChatClient {
     /// 发送聊天消息(用户消息自动进入历史记录)
     pub fn send_message(&self, message: &str, mode: HistoryMode) -> Result<()> {
         if !self.inner.connected.load(Ordering::Acquire) {
+            return Err(ChatError::NotConnected);
+        }
+        if !self.inner.joined.load(Ordering::Acquire) {
             return Err(ChatError::NotConnected);
         }
         if self.inner.receiving.load(Ordering::Acquire) {
@@ -515,6 +531,8 @@ impl ChatClient {
         }
         inner.notify.notify_with(|| {
             inner.connected.store(false, Ordering::Release);
+            inner.io_ready.store(false, Ordering::Release);
+            inner.joined.store(false, Ordering::Release);
             inner.receiving.store(false, Ordering::Release);
         });
         info!("AI 对话连接已关闭");
@@ -685,6 +703,9 @@ impl ChatEventHandler for JoinAckHandler {
                 *inner.search_session.lock().unwrap() = Some(session.to_string());
             }
         }
+        inner.notify.notify_with(|| {
+            inner.joined.store(true, Ordering::Release);
+        });
         info!(
             "加入成功 - 用户 ID: {:?}, 会话: {:?}",
             *inner.user_id.lock().unwrap(),
@@ -844,6 +865,9 @@ fn handle_frame(inner: &Arc<ChatInner>, text: &str) -> Result<()> {
         }
         Frame::Connected => {
             info!("Socket.IO 连接成功");
+            inner.notify.notify_with(|| {
+                inner.io_ready.store(true, Ordering::Release);
+            });
             Ok(())
         }
         Frame::Event(name, payload) => {
@@ -910,6 +934,8 @@ fn establish(inner: &Arc<ChatInner>) -> Result<()> {
     let (tx, rx) = mpsc::channel::<Message>();
     *inner.tx.lock().unwrap() = Some(tx);
     inner.join_sent.store(false, Ordering::Release);
+    inner.io_ready.store(false, Ordering::Release);
+    inner.joined.store(false, Ordering::Release);
     inner.notify.notify_with(|| {
         inner.connected.store(true, Ordering::Release);
     });
@@ -976,6 +1002,8 @@ fn read_loop(inner: Arc<ChatInner>, mut ws: Ws, rx: mpsc::Receiver<Message>) {
     let was_connected = inner.connected.load(Ordering::Acquire);
     inner.notify.notify_with(|| {
         inner.connected.store(false, Ordering::Release);
+        inner.io_ready.store(false, Ordering::Release);
+        inner.joined.store(false, Ordering::Release);
         inner.receiving.store(false, Ordering::Release);
     });
     *inner.tx.lock().unwrap() = None;
