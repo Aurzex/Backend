@@ -150,6 +150,9 @@ let results = decompile_works(
     &[111, 222],
     DecompileOptions::new().output_dir("/tmp/works").batch_concurrency(4),
 );
+for result in results {
+    println!("{}", result?); // 与输入顺序一致,单个失败不中断其余
+}
 ```
 
 **6. 举报处理引擎**(分块拉取 + 逐条决策):
@@ -160,13 +163,17 @@ use backend::core::services::ReportProcessor;
 
 let processor = ReportProcessor::new();
 let mut session = processor.pending_session(); // 后台 worker 预取分块
-while let Some((_groups, items)) = session.next_chunk() {
+for (_groups, items) in session.by_ref() {
     for item in items {
         if let Some(view) = processor.item_view(&item) {
             for line in &view.details { println!("{line}"); }
             processor.apply_action(&item, ReportAction::Pass, admin_id)?; // 通过
         }
     }
+}
+// 未达批量阈值的遗留组(可选处理)
+for group in session.leftover_groups() {
+    processor.apply_group(&group, ReportAction::Pass, admin_id);
 }
 ```
 
@@ -198,7 +205,7 @@ while let Some((_groups, items)) = session.next_chunk() {
 - **全局客户端 + 身份槽**:`CodeMaoClient::global()` 单例持有 `Catsona` 身份与令牌槽。登录一次(`LoginBuilder::build().execute()`)写入身份,之后所有请求自动携带对应身份令牌——调用方不需要手动拼 `Authorization` 头,也不需要把 token 传来传去。
 - **样板收敛到 `ClientAccess`**:每个业务 Manager 只需实现 `fn client()`,`send_and_parse` / `check_status` / `send_maybe_parse` 由默认实现提供,且 4xx/5xx 自动携带服务端错误体——几十个 Manager 的请求代码只剩"端点 + 参数"。
 - **分页统一为 `PaginatedIter`**:惰性初始化、翻页、总数/上限终止、页大小兜底全部内聚,调用方一个 `for` 循环即可,不关心 offset/page 计算。
-- **可替换边界**:`HttpClient` trait(compiler)、`ClientProvider`(auth)、`PathConfig::with_root`(路径)——核心逻辑不绑定具体 HTTP 实现与目录,便于测试与定制。
+- **可替换边界**:`ClientProvider`(auth,可注入自定义客户端)、`PathConfig::with_root`(路径)——核心逻辑不绑定具体 HTTP 实现与目录,便于测试与定制。
 - **WS 状态机封装成回调 + 等待原语**:cloudvar / converse 把帧解析、握手、重连、批量合并全部收进库内,外部通过 `on_change` / `on_connection` 回调与 `connect_and_wait` / `send_and_wait` 同步原语交互。
 - **分层单向依赖**:`api → utils`,`core → api / utils`,上层不反向依赖;业务域模块之间互不引用,可按需单独使用。
 
