@@ -1311,7 +1311,7 @@ impl PaginatedIter {
     // 迭代器核心:next_item
 
     /// 获取下一个元素,内部惰性初始化并自动翻页
-    pub fn next_item(&mut self) -> Option<MewResult<Value>> {
+    fn next_item(&mut self) -> Option<MewResult<Value>> {
         // 首次调用时自动初始化
         if matches!(self.state, IterState::Uninit)
             && let Err(e) = self.initialize()
