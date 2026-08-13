@@ -805,7 +805,7 @@ impl UserAction {
     ) -> PaginatedIter {
         self.client
             .build_paginated("/web/message-record/broadcast")
-            .with_page_size(1)
+            .with_page_size(MESSAGE_PAGE_SIZE)
             .with_iter_param("read_status", read_status.as_str())
             .with_iter_param("sort", "-created_at")
             .with_limit(limit.unwrap_or(COURSE_LIST_PAGE_SIZE))

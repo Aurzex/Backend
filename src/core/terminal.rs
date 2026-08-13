@@ -458,16 +458,23 @@ impl ReportConsole {
     ) -> Result<RunStats, ProcessorError> {
         // 官方内容直接自动通过:用预计算的标记,不构建详情
         if ctx.official[idx] {
-            processor.apply_action(item, ReportAction::Pass, admin_id)?;
-            let (type_name, record_id) = processor.item_brief(item).unwrap_or_default();
-            ui.info(&format!(
-                "--- [{}/{}] {} (举报ID: {}) --- 官方内容,自动通过",
-                index, total, type_name, record_id
-            ));
-            return Ok(RunStats {
-                passed: 1,
-                ..RunStats::default()
-            });
+            match processor.apply_action(item, ReportAction::Pass, admin_id) {
+                Ok(()) => {
+                    let (type_name, record_id) = processor.item_brief(item).unwrap_or_default();
+                    ui.info(&format!(
+                        "--- [{}/{}] {} (举报ID: {}) --- 官方内容,自动通过",
+                        index, total, type_name, record_id
+                    ));
+                    return Ok(RunStats {
+                        passed: 1,
+                        ..RunStats::default()
+                    });
+                }
+                Err(e) => {
+                    ui.error(&format!("官方内容自动通过失败: {}", e));
+                    return Ok(RunStats::default());
+                }
+            }
         }
 
         let Some(view) = processor.item_view(item) else {

@@ -840,7 +840,7 @@ impl WoodWorkManager {
             work_id, file_name
         );
         // 先获取现有项目
-        let project = self.fetch_wood_project(work_id)?;
+        let mut project = self.fetch_wood_project(work_id)?;
         let mut files = project
             .get("files")
             .and_then(Value::as_array)
@@ -858,33 +858,14 @@ impl WoodWorkManager {
         });
         files.push(file_data);
 
-        // 更新项目
-        self.create_wood_project(CreateWoodProjectArgs {
-            work_name: project.get("work_name").and_then(Value::as_str),
-            language_type: project
-                .get("language_type")
-                .and_then(Value::as_i64)
-                .map(|v| i32::try_from(v).unwrap_or(0)),
-            run_mode: project
-                .get("run_mode")
-                .and_then(Value::as_i64)
-                .map(|v| i32::try_from(v).unwrap_or(0)),
-            files: Some(files),
-            preview_code: project.get("preview_code").and_then(Value::as_str),
-            preview_url: project.get("preview_url").and_then(Value::as_str),
-            is_turn_on_debug: project
-                .get("addition")
-                .and_then(|v| v.get("isTurnOnDebug"))
-                .and_then(Value::as_bool),
-            editor_mode: project
-                .get("addition")
-                .and_then(|v| v.get("editorMode"))
-                .and_then(Value::as_str),
-            update_time: project
-                .get("update_time")
-                .and_then(Value::as_i64)
-                .map(|v| i32::try_from(v).unwrap_or(0)),
-        })
+        // 更新项目:保留抓取到的全部字段(尤其 addition.readonly_paths / locking_file_lines),
+        // 只替换 files;不再经 create_wood_project 重建(那会把二者置空)
+        project["files"] = Value::Array(files);
+        let builder = self
+            .client
+            .build_request(HttpMethod::Post, "/wood/project", Some(BaseKey::Creation))
+            .with_payload(project);
+        self.send_and_parse(builder)
     }
 }
 

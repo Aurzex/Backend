@@ -361,8 +361,8 @@ fn total_from(mut paginated: requests::PaginatedIter) -> Result<Value, Processor
     let total = paginated
         .total_items()
         .ok_or_else(|| ProcessorError::Processing("分页元数据缺少总数".into()))?;
-    let total = i32::try_from(total)
-        .map_err(|_| ProcessorError::Processing(format!("总数超出 i32 范围: {}", total)))?;
+    let total = i64::try_from(total)
+        .map_err(|_| ProcessorError::Processing(format!("总数超出 i64 范围: {}", total)))?;
     Ok(json!(total))
 }
 

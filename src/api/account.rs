@@ -343,21 +343,16 @@ impl AccountManager {
         agreement_ids: Option<Vec<i32>>,
     ) -> MewResult<Value> {
         debug!("注册账号: identity={}", identity);
-        let mut data = serde_json::Map::new();
-        data.insert("identity".to_string(), Value::String(identity.to_string()));
-        data.insert("password".to_string(), Value::String(password.to_string()));
-        data.insert("captcha".to_string(), Value::String(captcha.to_string()));
-
-        let pid_value = pid.unwrap_or(DEFAULT_PID);
-        data.insert("pid".to_string(), Value::String(pid_value.to_string()));
-
-        let agreement_values = match agreement_ids {
-            Some(ids) => ids.into_iter().map(|id| Value::Number(id.into())).collect(),
-            None => vec![Value::Number(186.into()), Value::Number(13.into())],
-        };
-        data.insert("agreement_ids".to_string(), Value::Array(agreement_values));
-
-        let payload = Value::Object(data);
+        let payload = json!({
+            "identity": identity,
+            "password": password,
+            "captcha": captcha,
+            "pid": pid.unwrap_or(DEFAULT_PID),
+            "agreement_ids": match agreement_ids {
+                Some(ids) => ids.into_iter().map(Value::from).collect::<Vec<_>>(),
+                None => vec![Value::from(186), Value::from(13)],
+            },
+        });
 
         let builder = self
             .client

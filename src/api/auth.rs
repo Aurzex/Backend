@@ -1132,7 +1132,7 @@ pub struct CloudAuthenticator {
     client_provider: Box<dyn ClientProvider>,
     authorization_token: Option<String>,
     client_id: String,
-    time_difference: i64,
+    time_difference: Option<i64>,
 }
 
 impl CloudAuthenticator {
@@ -1147,7 +1147,7 @@ impl CloudAuthenticator {
             client_provider: provider,
             authorization_token,
             client_id,
-            time_difference: 0,
+            time_difference: None,
         }
     }
 
@@ -1161,13 +1161,13 @@ impl CloudAuthenticator {
 
     /// 获取校准后的时间戳(秒),首次调用会计算时差
     pub fn get_calibrated_timestamp(&mut self) -> MewResult<i64> {
-        if self.time_difference == 0 {
+        if self.time_difference.is_none() {
             let server_time = fetch_current_timestamp_with_provider(&*self.client_provider)?;
             let local_time = current_timestamp_secs();
-            self.time_difference = local_time - server_time;
+            self.time_difference = Some(local_time - server_time);
         }
         let now = current_timestamp_secs();
-        Ok(now - self.time_difference)
+        Ok(now - self.time_difference.unwrap())
     }
 
     /// 生成 `x-device-auth` 头所需的 JSON 字符串

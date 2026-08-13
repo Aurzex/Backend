@@ -317,20 +317,21 @@ impl ForumDataFetcher {
         board_id: Option<i32>,
         limit: Option<usize>,
     ) -> PaginatedIter {
-        let endpoint = match board_id {
-            Some(id) => format!("/web/forums/boards/posts/7dayHot?board_id={}", id),
-            None => "/web/forums/boards/posts/7dayHot".to_string(),
-        };
         debug!("获取7天热门: board_id={:?}", board_id);
 
-        self.client
-            .build_paginated(&endpoint)
+        let mut paginated = self
+            .client
+            .build_paginated("/web/forums/boards/posts/7dayHot")
             .with_page_size(10)
             .with_pagination_method(PaginationMethod::Page)
             .with_amount_key("limit")
             .with_offset_key("page")
             .with_limit(limit.unwrap_or(DEFAULT_PAGE_SIZE))
-            .with_total_key("total")
+            .with_total_key("total");
+        if let Some(id) = board_id {
+            paginated = paginated.with_iter_param("board_id", id.to_string());
+        }
+        paginated
     }
 
     /// 求助帖子分页迭代器

@@ -63,10 +63,12 @@ pub(crate) fn parse_frame(text: &str) -> Frame {
     }
     if let Some(rest) = text.strip_prefix(EVENT_MESSAGE_PREFIX)
         && let Ok(Value::Array(items)) = serde_json::from_str::<Value>(rest)
-        && let Some(Value::String(name)) = items.first()
     {
-        let payload = items.get(1).cloned().unwrap_or(Value::Null);
-        return Frame::Event(name.clone(), payload);
+        let mut items = items.into_iter();
+        if let Some(Value::String(name)) = items.next() {
+            let payload = items.next().unwrap_or(Value::Null);
+            return Frame::Event(name, payload);
+        }
     }
     Frame::Unknown(text.to_string())
 }

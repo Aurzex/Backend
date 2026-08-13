@@ -918,7 +918,7 @@ impl EduDataFetcher {
                 .build_request(
                     HttpMethod::Get,
                     "https://static.codemao.cn/teacher-edu/organization_ids.json",
-                    Some(BaseKey::Education),
+                    None,
                 )
                 .with_param("CMTIME", timestamp.to_string()),
         )
