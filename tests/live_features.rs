@@ -124,10 +124,11 @@ fn login_and_ai_chat() {
         chat.connect().expect("AI 连接失败");
         assert!(chat.is_connected(), "账号 {} AI 连接未建立", entry.account);
 
-        let mut chunks = String::new();
+        let chunks = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let chunks_capture = std::sync::Arc::clone(&chunks);
         chat.on_stream(move |text, ev| {
             if ev == ChatEventType::Text {
-                chunks.push_str(text);
+                chunks_capture.lock().unwrap().push_str(text);
             }
         });
         let reply = chat
@@ -144,7 +145,7 @@ fn login_and_ai_chat() {
             "[live_features] 账号 {} AI 回复 {} 字(流式 {} 字): {}",
             entry.account,
             reply.chars().count(),
-            chunks.chars().count(),
+            chunks.lock().unwrap().chars().count(),
             truncate(&reply, 60)
         );
     }
