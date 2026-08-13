@@ -8,7 +8,7 @@ use serde_json::Value;
 use crate::api::auth::{AdminInfo, AuthProcessor, LoginHandler, LoginResult};
 use crate::core::services::ReportProcessor;
 use crate::core::terminal::{ConsoleUi, ProcessorUi, ReportConsole};
-use crate::utils::data::PathConfig;
+use crate::utils::filedata::PathConfig;
 
 struct ConsoleLogger;
 

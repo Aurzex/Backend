@@ -1,4 +1,4 @@
-use crate::utils::acquire::{
+use crate::utils::requests::{
     ClientAccess, CodeMaoClient, DEFAULT_PID, HTTPStatus, HttpMethod, MewResult, ResponseMode,
 };
 use log::debug;

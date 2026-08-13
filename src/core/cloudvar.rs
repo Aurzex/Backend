@@ -1,8 +1,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::net::TcpStream;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex, mpsc};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -13,26 +12,20 @@ use thiserror::Error;
 use tungstenite::Message;
 use tungstenite::client::IntoClientRequest;
 use tungstenite::http::HeaderValue;
-use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{WebSocket, connect};
 
 use crate::api::auth::CloudAuthenticator;
+use crate::utils::socketio::{
+    self, CONNECTED_MESSAGE, CallbackStore, EVENT_MESSAGE_PREFIX, Frame, Notify, PONG_MESSAGE, Ws,
+    set_stream_read_timeout, truncate, wait_flag,
+};
 
-/// WebSocket 流类型别名(tungstenite + rustls)
-type WsStream = MaybeTlsStream<TcpStream>;
-type Ws = WebSocket<WsStream>;
+pub use crate::utils::socketio::CallbackHandle;
 
 // 常量配置
 
 /// 云存储 WebSocket 服务器地址
 pub(crate) const CLOUD_WS_BASE_URL: &str = "wss://socketcv.codemao.cn:9096/cloudstorage/";
-/// Socket.IO 帧前缀
-const HANDSHAKE_PREFIX: &str = "0";
-const CONNECTED_MESSAGE: &str = "40";
-const SERVER_CLOSE_PREFIX: &str = "41";
-const EVENT_MESSAGE_PREFIX: &str = "42";
-const PING_MESSAGE: &str = "2";
-const PONG_MESSAGE: &str = "3";
 /// 批量上传合并间隔
 const DEFAULT_FLUSH_INTERVAL: Duration = Duration::from_millis(100);
 /// 默认重连间隔与最大次数
@@ -180,10 +173,6 @@ impl From<&str> for CloudValue {
     }
 }
 
-/// 回调句柄,用于取消注册回调
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CallbackHandle(pub(crate) usize);
-
 /// 变量/列表变更来源
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChangeSource {
@@ -246,7 +235,7 @@ type ConnectionCallback = Box<dyn Fn(ConnectionEvent) + Send + Sync>;
 // 命令模式 + 工厂
 
 /// 云数据更新命令(命令模式:请求对象化,可排队,批量执行)
-/// 由 [`CommandFactory`] 创建
+/// 由命令构造函数创建
 #[derive(Debug, Clone)]
 pub(crate) enum CloudCommand {
     /// 变量更新:私有/公有
@@ -255,41 +244,36 @@ pub(crate) enum CloudCommand {
     List { cvid: String, ops: Vec<Value> },
 }
 
-/// 命令工厂:集中创建云数据更新命令
-pub(crate) struct CommandFactory;
-
-impl CommandFactory {
-    /// 创建私有变量更新命令
-    pub(crate) fn update_private_variable(cvid: &str, value: &CloudValue) -> CloudCommand {
-        CloudCommand::Variable {
-            private: true,
-            data: json!({
-                "cvid": cvid,
-                "value": value,
-                "param_type": value.param_type(),
-            }),
-        }
+/// 创建私有变量更新命令
+pub(crate) fn private_update_command(cvid: &str, value: &CloudValue) -> CloudCommand {
+    CloudCommand::Variable {
+        private: true,
+        data: json!({
+            "cvid": cvid,
+            "value": value,
+            "param_type": value.param_type(),
+        }),
     }
+}
 
-    /// 创建公有变量更新命令
-    pub(crate) fn update_public_variable(cvid: &str, value: &CloudValue) -> CloudCommand {
-        CloudCommand::Variable {
-            private: false,
-            data: json!({
-                "action": "set",
-                "cvid": cvid,
-                "value": value,
-                "param_type": value.param_type(),
-            }),
-        }
+/// 创建公有变量更新命令
+pub(crate) fn public_update_command(cvid: &str, value: &CloudValue) -> CloudCommand {
+    CloudCommand::Variable {
+        private: false,
+        data: json!({
+            "action": "set",
+            "cvid": cvid,
+            "value": value,
+            "param_type": value.param_type(),
+        }),
     }
+}
 
-    /// 创建列表更新命令
-    pub(crate) fn update_list(cvid: &str, ops: Vec<Value>) -> CloudCommand {
-        CloudCommand::List {
-            cvid: cvid.to_string(),
-            ops,
-        }
+/// 创建列表更新命令
+pub(crate) fn list_update_command(cvid: &str, ops: Vec<Value>) -> CloudCommand {
+    CloudCommand::List {
+        cvid: cvid.to_string(),
+        ops,
     }
 }
 
@@ -449,8 +433,9 @@ impl DataStore {
         cvid: &HashMap<String, String>,
         key: &str,
     ) -> Option<&'a mut VariableData> {
-        // 注:返回 'a 借用,先 contains_key 再 get_mut 是安全 Rust 下唯一
-        // 不引入闭包借用冲突的写法;单次哈希会因借用覆盖整个函数体而无法编译
+        // 返回 'a 借用下,先 contains_key(不可变借)再 get_mut 是唯一可编译写法:
+        // 若直接 get_mut 作条件,其可变借会被 Some 分支的返回拉长为 'a,
+        // 与后续 cvid 回退路径上的第二次 get_mut 冲突(E0499/E0500)
         if vars.contains_key(key) {
             return vars.get_mut(key);
         }
@@ -469,7 +454,7 @@ impl DataStore {
     }
 
     fn list_mut(&mut self, key: &str) -> Option<&mut ListData> {
-        // 注:同 variable_in,返回 'a 借用下无法安全单次哈希
+        // 同 variable_in:返回借用下无法安全单次哈希
         if self.lists.contains_key(key) {
             return self.lists.get_mut(key);
         }
@@ -543,48 +528,6 @@ impl std::fmt::Debug for DataStore {
 
 // 事件存储
 
-/// 泛型回调存储:支持按句柄增删,触发时整体取出
-struct CallbackStore<T> {
-    next_id: usize,
-    items: Vec<(usize, T)>,
-}
-
-impl<T> std::fmt::Debug for CallbackStore<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CallbackStore")
-            .field("next_id", &self.next_id)
-            .field("count", &self.items.len())
-            .finish()
-    }
-}
-
-impl<T> Default for CallbackStore<T> {
-    fn default() -> Self {
-        Self {
-            next_id: 0,
-            items: Vec::new(),
-        }
-    }
-}
-
-impl<T> CallbackStore<T> {
-    fn add(&mut self, cb: T) -> CallbackHandle {
-        let id = self.next_id;
-        self.next_id += 1;
-        self.items.push((id, cb));
-        CallbackHandle(id)
-    }
-
-    fn remove(&mut self, handle: CallbackHandle) {
-        self.items.retain(|(id, _)| *id != handle.0);
-    }
-
-    /// 取出全部回调(锁外执行后由调用方放回)
-    fn take_all(&mut self) -> Vec<(usize, T)> {
-        std::mem::take(&mut self.items)
-    }
-}
-
 /// 连接级事件回调集合
 #[derive(Default)]
 struct Events {
@@ -602,24 +545,6 @@ impl std::fmt::Debug for Events {
             .field("ranking", &self.ranking)
             .field("connection", &self.connection)
             .finish()
-    }
-}
-
-/// 条件变量通知器,供 `wait_for_*` 使用
-#[derive(Default)]
-struct Notify {
-    lock: Mutex<()>,
-    cond: Condvar,
-}
-
-impl Notify {
-    /// 持锁设置状态并通知等待者,避免 Condvar 丢失唤醒(与 [`wait_flag`] 的
-    /// 检查-等待原子性配合,消除状态型等待的竞态窗口)
-    fn notify_with<R>(&self, f: impl FnOnce() -> R) -> R {
-        let _guard = self.lock.lock().unwrap();
-        let result = f();
-        self.cond.notify_all();
-        result
     }
 }
 
@@ -1113,6 +1038,9 @@ impl CloudConnection {
             .unwrap()
             .list(name)
             .and_then(|l| l.items.last().cloned());
+        if popped.is_none() {
+            return Ok(None);
+        }
         self.inner.list_apply_local(name, ListAction::DeleteLast)?;
         Ok(popped)
     }
@@ -1130,6 +1058,9 @@ impl CloudConnection {
             .unwrap()
             .list(name)
             .and_then(|l| l.items.first().cloned());
+        if popped.is_none() {
+            return Ok(None);
+        }
         self.inner.list_apply_local(name, ListAction::DeleteAt(0))?;
         Ok(popped)
     }
@@ -1235,13 +1166,13 @@ impl CloudVariable {
     pub fn on_change(
         &self,
         cb: impl Fn(&CloudValue, &CloudValue, &str) + Send + Sync + 'static,
-    ) -> CallbackHandle {
+    ) -> Option<CallbackHandle> {
         self.inner
             .state
             .lock()
             .unwrap()
             .variable_mut(self.kind, &self.name)
-            .map_or(CallbackHandle(usize::MAX), |v| {
+            .map(|v| {
                 let id = v.next_cb_id;
                 v.next_cb_id += 1;
                 v.callbacks.push((id, Box::new(cb)));
@@ -1263,13 +1194,16 @@ impl CloudVariable {
     }
 
     /// 注册排行榜数据回调(仅私有变量有效)
-    pub fn on_ranking(&self, cb: impl Fn(RankingData) + Send + Sync + 'static) -> CallbackHandle {
+    pub fn on_ranking(
+        &self,
+        cb: impl Fn(RankingData) + Send + Sync + 'static,
+    ) -> Option<CallbackHandle> {
         self.inner
             .state
             .lock()
             .unwrap()
             .variable_mut(self.kind, &self.name)
-            .map_or(CallbackHandle(usize::MAX), |v| {
+            .map(|v| {
                 let id = v.next_cb_id;
                 v.next_cb_id += 1;
                 v.ranking_callbacks.push((id, Box::new(cb)));
@@ -1337,6 +1271,9 @@ impl CloudList {
             .unwrap()
             .list(&self.name)
             .and_then(|l| l.items.last().cloned());
+        if popped.is_none() {
+            return Ok(None);
+        }
         self.inner
             .list_apply_local(&self.name, ListAction::DeleteLast)?;
         Ok(popped)
@@ -1355,6 +1292,9 @@ impl CloudList {
             .unwrap()
             .list(&self.name)
             .and_then(|l| l.items.first().cloned());
+        if popped.is_none() {
+            return Ok(None);
+        }
         self.inner
             .list_apply_local(&self.name, ListAction::DeleteAt(0))?;
         Ok(popped)
@@ -1373,6 +1313,9 @@ impl CloudList {
             .unwrap()
             .list(&self.name)
             .and_then(|l| l.items.get(index).cloned());
+        if removed.is_none() {
+            return Ok(None);
+        }
         self.inner
             .list_apply_local(&self.name, ListAction::DeleteAt(index))?;
         Ok(removed)
@@ -1408,32 +1351,32 @@ impl CloudList {
 
     /// 将列表元素连接为字符串
     pub fn join(&self, separator: &str) -> String {
-        self.inner
-            .state
-            .lock()
-            .unwrap()
-            .list(&self.name)
-            .map(|l| {
-                l.items
-                    .iter()
-                    .map(|v| v.to_string())
-                    .collect::<Vec<_>>()
-                    .join(separator)
-            })
-            .unwrap_or_default()
+        use std::fmt::Write as _;
+        let store = self.inner.state.lock().unwrap();
+        let Some(l) = store.list(&self.name) else {
+            return String::new();
+        };
+        let mut out = String::new();
+        for (i, v) in l.items.iter().enumerate() {
+            if i > 0 {
+                out.push_str(separator);
+            }
+            let _ = write!(out, "{v}");
+        }
+        out
     }
 
     /// 注册整表变更回调(旧列表,新列表,来源)
     pub fn on_change(
         &self,
         cb: impl Fn(&[CloudValue], &[CloudValue], &str) + Send + Sync + 'static,
-    ) -> CallbackHandle {
+    ) -> Option<CallbackHandle> {
         self.inner
             .state
             .lock()
             .unwrap()
             .list_mut(&self.name)
-            .map_or(CallbackHandle(usize::MAX), |l| {
+            .map(|l| {
                 let id = l.next_cb_id;
                 l.next_cb_id += 1;
                 l.change_callbacks.push((id, Box::new(cb)));
@@ -1446,13 +1389,13 @@ impl CloudList {
         &self,
         operation: &str,
         cb: impl Fn(&str, &[CloudValue]) + Send + Sync + 'static,
-    ) -> CallbackHandle {
+    ) -> Option<CallbackHandle> {
         self.inner
             .state
             .lock()
             .unwrap()
             .list_mut(&self.name)
-            .map_or(CallbackHandle(usize::MAX), |l| {
+            .map(|l| {
                 let id = l.next_cb_id;
                 l.next_cb_id += 1;
                 l.operation_callbacks
@@ -1654,7 +1597,7 @@ impl CloudInner {
             (cvid, old_items, outcome)
         };
         self.fire_list_outcome(&cvid, &outcome, old_items.as_deref(), ChangeSource::Local);
-        self.queue(CommandFactory::update_list(&cvid, vec![outcome.wire]));
+        self.queue(list_update_command(&cvid, vec![outcome.wire]));
         Ok(())
     }
 
@@ -1765,8 +1708,8 @@ impl CloudInner {
             ChangeSource::Local,
         );
         let command = match kind {
-            VarKind::Private => CommandFactory::update_private_variable(&cvid, &new_value),
-            VarKind::Public => CommandFactory::update_public_variable(&cvid, &new_value),
+            VarKind::Private => private_update_command(&cvid, &new_value),
+            VarKind::Public => public_update_command(&cvid, &new_value),
         };
         self.queue(command);
         Ok(())
@@ -1778,6 +1721,7 @@ impl CloudInner {
 }
 
 /// 触发变量变更回调(取走 → 锁外执行 → 放回)
+/// `key` 可为变量名或 cvid,`variable_mut` 双路径解析
 fn emit_variable_change(
     inner: &CloudInner,
     kind: VarKind,
@@ -1804,66 +1748,19 @@ fn emit_variable_change(
     }
 }
 
-/// 设置 WebSocket 底层流的读取超时(Plain 或 rustls 两种形态)
-fn set_stream_read_timeout(stream: &mut WsStream, timeout: Duration) -> std::io::Result<()> {
-    match stream {
-        MaybeTlsStream::Plain(s) => s.set_read_timeout(Some(timeout)),
-        MaybeTlsStream::Rustls(owned) => owned.sock.set_read_timeout(Some(timeout)),
-        _ => Ok(()),
-    }
-}
-
 // 消息帧解析
 
-/// 解析后的 Socket.IO 帧
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum Frame {
-    Handshake(Value),
-    Connected,
-    Ping,
-    Pong,
-    ServerClose,
-    /// 事件帧:事件名 + 载荷
-    Event(String, Value),
-    /// 未知/无法解析的文本
-    Unknown(String),
-}
-
-/// 纯函数:解析 Socket.IO 文本帧(可测)
-pub(crate) fn parse_frame(text: &str) -> Frame {
-    if text == PING_MESSAGE {
-        return Frame::Ping;
+/// 解析 Socket.IO 文本帧并做云存储特有的二次解析:
+/// 部分事件(如 list_variables_done)载荷是 JSON 字符串,需二次解析
+/// (与 Python _handle_event_message 行为一致;解析失败则保持原字符串)
+fn parse_frame(text: &str) -> Frame {
+    match socketio::parse_frame(text) {
+        Frame::Event(name, Value::String(s)) => match serde_json::from_str::<Value>(&s) {
+            Ok(parsed) => Frame::Event(name, parsed),
+            Err(_) => Frame::Event(name, Value::String(s)),
+        },
+        other => other,
     }
-    if text == PONG_MESSAGE {
-        return Frame::Pong;
-    }
-    if let Some(rest) = text.strip_prefix(HANDSHAKE_PREFIX) {
-        return match serde_json::from_str(rest) {
-            Ok(v) => Frame::Handshake(v),
-            Err(_) => Frame::Unknown(text.to_string()),
-        };
-    }
-    if text == CONNECTED_MESSAGE {
-        return Frame::Connected;
-    }
-    if text.starts_with(SERVER_CLOSE_PREFIX) {
-        return Frame::ServerClose;
-    }
-    if let Some(rest) = text.strip_prefix(EVENT_MESSAGE_PREFIX)
-        && let Ok(Value::Array(items)) = serde_json::from_str::<Value>(rest)
-        && let Some(Value::String(name)) = items.first()
-    {
-        let mut payload = items.get(1).cloned().unwrap_or(Value::Null);
-        // 部分事件(如 list_variables_done)载荷是 JSON 字符串,需二次解析
-        // (与 Python _handle_event_message 行为一致;解析失败则保持原字符串)
-        if let Value::String(s) = &payload
-            && let Ok(parsed) = serde_json::from_str::<Value>(s)
-        {
-            payload = parsed;
-        }
-        return Frame::Event(name.clone(), payload);
-    }
-    Frame::Unknown(text.to_string())
 }
 
 /// 处理单帧(错误仅记录日志,不中断连接)
@@ -2332,35 +2229,6 @@ fn emit_connection_event(inner: &Arc<CloudInner>, event: ConnectionEvent) {
         .connection
         .items
         .extend(callbacks);
-}
-
-/// 基于条件变量的超时等待
-fn wait_flag(notify: &Notify, timeout: Duration, flag: impl Fn() -> bool) -> bool {
-    let deadline = Instant::now() + timeout;
-    let guard = notify.lock.lock().unwrap();
-    let mut guard = guard;
-    while !flag() {
-        let now = Instant::now();
-        if now >= deadline {
-            return false;
-        }
-        let (g, _) = notify.cond.wait_timeout(guard, deadline - now).unwrap();
-        guard = g;
-    }
-    true
-}
-
-/// 日志截断
-fn truncate(text: &str, max: usize) -> String {
-    if text.chars().count() <= max {
-        text.to_string()
-    } else {
-        const SUFFIX: &str = "...";
-        let half = (max.saturating_sub(SUFFIX.len())) / 2;
-        let head: String = text.chars().take(half).collect();
-        let tail: String = text.chars().skip(text.chars().count() - half).collect();
-        format!("{head}{SUFFIX}{tail}")
-    }
 }
 
 // 连接建立与读循环

@@ -21,8 +21,8 @@ use super::registry::{
     resolution_display_name, value_to_string,
 };
 use crate::api::whale::{ReportStatus, Resolution};
-use crate::utils::acquire::{FileUploader, KittyFactory, UploadChannel, current_timestamp_secs};
-use crate::utils::data::value_to_i64;
+use crate::utils::filedata::value_to_i64;
+use crate::utils::requests::{FileUploader, KittyFactory, UploadChannel, current_timestamp_secs};
 
 /// 批量分组的键:(分组类型, 分组键)
 type GroupKey = (String, String);

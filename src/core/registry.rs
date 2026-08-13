@@ -9,7 +9,7 @@ use std::time::Duration;
 use crate::api::whale::{
     CommentSourceType, ReportStatus, Resolution, WhaleReportFetcher, WorkSourceType,
 };
-use crate::utils::acquire;
+use crate::utils::requests;
 use log::error;
 
 use serde_json::{Value, json};
@@ -24,7 +24,7 @@ pub enum ProcessorError {
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
     #[error("External error: {0}")]
-    Mew(#[from] acquire::MewError),
+    Mew(#[from] requests::MewError),
     /// 用户在交互中主动中止(如按 Q 退出处理会话)
     #[error("Aborted by user")]
     Aborted,
@@ -356,7 +356,7 @@ impl ReportTypeRegistry {
 // 举报获取器
 
 /// 注册辅助:包装分页迭代器为"总数"闭包
-fn total_from(mut paginated: acquire::PaginatedIter) -> Result<Value, ProcessorError> {
+fn total_from(mut paginated: requests::PaginatedIter) -> Result<Value, ProcessorError> {
     paginated.fetch_metadata()?;
     let total = paginated
         .total_items()
@@ -368,7 +368,7 @@ fn total_from(mut paginated: acquire::PaginatedIter) -> Result<Value, ProcessorE
 
 /// 注册辅助:包装分页迭代器为"生成器"闭包
 fn gen_from(
-    paginated: acquire::PaginatedIter,
+    paginated: requests::PaginatedIter,
 ) -> Box<dyn Iterator<Item = Result<Value, ProcessorError>> + Send> {
     Box::new(paginated.map(|r| r.map_err(ProcessorError::from)))
 }

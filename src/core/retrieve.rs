@@ -15,7 +15,7 @@ use crate::api::whale::{
     WorkReportFilterType, WorkSourceType,
 };
 use crate::api::work::{NemoWorkType, WorkDataFetcher};
-use crate::utils::acquire::{
+use crate::utils::requests::{
     BaseKey, Catsona, CodeMaoClient, DEFAULT_PAGE_SIZE, MewError, PaginatedIter, PaginationMethod,
 };
 

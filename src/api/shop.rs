@@ -1,4 +1,4 @@
-use crate::utils::acquire::{
+use crate::utils::requests::{
     ClientAccess, CodeMaoClient, DEFAULT_LIMIT, DEFAULT_PAGE_SIZE, HTTPStatus, HttpMethod,
     MewResult, PaginatedIter, ResponseMode,
 };

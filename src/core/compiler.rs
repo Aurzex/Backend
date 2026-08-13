@@ -1,6 +1,6 @@
 use crate::api::auth::CloudAuthenticator;
-use crate::utils::acquire::{CodeMaoClient, HttpMethod, KittyFactory};
-use crate::utils::data::PathConfig;
+use crate::utils::filedata::PathConfig;
+use crate::utils::requests::{CodeMaoClient, HttpMethod, KittyFactory};
 use aes_gcm::aead::array::Array;
 use aes_gcm::aead::array::typenum::{U12, U32};
 use aes_gcm::{

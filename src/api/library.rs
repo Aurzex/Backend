@@ -1,4 +1,4 @@
-use crate::utils::acquire::{
+use crate::utils::requests::{
     ClientAccess, CodeMaoClient, DEFAULT_LIMIT, HTTPStatus, HttpMethod, MewResult, ResponseMode,
     ToggleAction,
 };

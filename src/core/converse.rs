@@ -1,10 +1,9 @@
 use std::collections::HashMap;
-use std::net::TcpStream;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex, mpsc};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
@@ -13,14 +12,15 @@ use thiserror::Error;
 use tungstenite::Message;
 use tungstenite::client::IntoClientRequest;
 use tungstenite::http::HeaderValue;
-use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{WebSocket, connect};
 
-use crate::utils::acquire::generate_random_id;
+use crate::utils::requests::generate_random_id;
+use crate::utils::socketio::{
+    CONNECTED_MESSAGE, CallbackStore, EVENT_MESSAGE_PREFIX, Frame, Notify, PONG_MESSAGE, Ws,
+    parse_frame, set_stream_read_timeout, truncate, wait_flag,
+};
 
-/// WebSocket 流类型别名(tungstenite + rustls)
-type WsStream = MaybeTlsStream<TcpStream>;
-type Ws = WebSocket<WsStream>;
+pub use crate::utils::socketio::CallbackHandle;
 
 // 常量配置
 
@@ -28,13 +28,6 @@ type Ws = WebSocket<WsStream>;
 pub(crate) const CHAT_WS_BASE_URL: &str = "wss://cr-aichat.codemao.cn/aichat/";
 /// 默认请求头(与 Python `CodeMaoConfig.HEADERS` 一致)
 pub(crate) const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 Edg/140.0.0.0";
-
-/// Socket.IO 帧前缀
-const HANDSHAKE_PREFIX: &str = "0";
-const CONNECTED_MESSAGE: &str = "40";
-const EVENT_MESSAGE_PREFIX: &str = "42";
-const PING_MESSAGE: &str = "2";
-const PONG_MESSAGE: &str = "3";
 
 /// 等待 AI 开始回复的默认超时
 pub(crate) const DEFAULT_RESPONSE_START_TIMEOUT: Duration = Duration::from_secs(10);
@@ -144,72 +137,8 @@ pub struct UserInfo {
     pub(crate) remaining_image_times: Option<i64>,
 }
 
-/// 回调句柄,用于取消注册回调
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CallbackHandle(pub(crate) usize);
-
 // 回调类型别名
 type StreamCallback = Box<dyn Fn(&str, ChatEventType) + Send + Sync>;
-
-// 事件存储
-
-/// 泛型回调存储
-struct CallbackStore<T> {
-    next_id: usize,
-    items: Vec<(usize, T)>,
-}
-
-impl<T> std::fmt::Debug for CallbackStore<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CallbackStore")
-            .field("next_id", &self.next_id)
-            .field("count", &self.items.len())
-            .finish()
-    }
-}
-
-impl<T> Default for CallbackStore<T> {
-    fn default() -> Self {
-        Self {
-            next_id: 0,
-            items: Vec::new(),
-        }
-    }
-}
-
-impl<T> CallbackStore<T> {
-    fn add(&mut self, cb: T) -> CallbackHandle {
-        let id = self.next_id;
-        self.next_id += 1;
-        self.items.push((id, cb));
-        CallbackHandle(id)
-    }
-
-    fn remove(&mut self, handle: CallbackHandle) {
-        self.items.retain(|(id, _)| *id != handle.0);
-    }
-
-    fn take_all(&mut self) -> Vec<(usize, T)> {
-        std::mem::take(&mut self.items)
-    }
-}
-
-/// 条件变量通知器
-#[derive(Default)]
-struct Notify {
-    lock: Mutex<()>,
-    cond: Condvar,
-}
-
-impl Notify {
-    /// 持锁设置状态并通知等待者,避免 Condvar 丢失唤醒
-    fn notify_with<R>(&self, f: impl FnOnce() -> R) -> R {
-        let _guard = self.lock.lock().unwrap();
-        let result = f();
-        self.cond.notify_all();
-        result
-    }
-}
 
 // 连接核心
 
@@ -577,45 +506,6 @@ pub(crate) fn build_chat_frame(session_id: &str, messages: &[HistoryMessage]) ->
     Ok(frame)
 }
 
-/// 解析后的 Socket.IO 帧
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum Frame {
-    Handshake(Value),
-    Connected,
-    Ping,
-    Pong,
-    /// 事件帧:事件名 + 载荷
-    Event(String, Value),
-    Unknown(String),
-}
-
-/// 纯函数:解析 Socket.IO 文本帧(可测)
-pub(crate) fn parse_frame(text: &str) -> Frame {
-    if text == PING_MESSAGE {
-        return Frame::Ping;
-    }
-    if text == PONG_MESSAGE {
-        return Frame::Pong;
-    }
-    if let Some(rest) = text.strip_prefix(HANDSHAKE_PREFIX) {
-        return match serde_json::from_str(rest) {
-            Ok(v) => Frame::Handshake(v),
-            Err(_) => Frame::Unknown(text.to_string()),
-        };
-    }
-    if text == CONNECTED_MESSAGE {
-        return Frame::Connected;
-    }
-    if let Some(rest) = text.strip_prefix(EVENT_MESSAGE_PREFIX)
-        && let Ok(Value::Array(items)) = serde_json::from_str::<Value>(rest)
-        && let Some(Value::String(name)) = items.first()
-    {
-        let payload = items.get(1).cloned().unwrap_or(Value::Null);
-        return Frame::Event(name.clone(), payload);
-    }
-    Frame::Unknown(text.to_string())
-}
-
 /// 流式回复事件(由 `chat_ack` 载荷解析)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StreamEvent {
@@ -870,6 +760,11 @@ fn handle_frame(inner: &Arc<ChatInner>, text: &str) -> Result<()> {
             });
             Ok(())
         }
+        Frame::ServerClose => {
+            // AI 服务发 41 表示请求断开但 WebSocket 层保持,服务器会重建会话;直接忽略
+            info!("收到服务器断开请求 (41),忽略");
+            Ok(())
+        }
         Frame::Event(name, payload) => {
             dispatch_event(inner, &name, &payload);
             Ok(())
@@ -1011,45 +906,5 @@ fn read_loop(inner: Arc<ChatInner>, mut ws: Ws, rx: mpsc::Receiver<Message>) {
     if was_connected && !inner.stopping.load(Ordering::Acquire) {
         info!("AI 对话连接已断开");
         emit_stream(&inner, "连接已断开", ChatEventType::Error);
-    }
-}
-
-/// 设置 WebSocket 底层流的读取超时(Plain 或 rustls 两种形态)
-fn set_stream_read_timeout(stream: &mut WsStream, timeout: Duration) -> std::io::Result<()> {
-    match stream {
-        MaybeTlsStream::Plain(s) => s.set_read_timeout(Some(timeout)),
-        MaybeTlsStream::Rustls(owned) => owned.sock.set_read_timeout(Some(timeout)),
-        _ => Ok(()),
-    }
-}
-
-// 工具
-
-/// 基于条件变量的超时等待
-fn wait_flag(notify: &Notify, timeout: Duration, flag: impl Fn() -> bool) -> bool {
-    let deadline = Instant::now() + timeout;
-    let guard = notify.lock.lock().unwrap();
-    let mut guard = guard;
-    while !flag() {
-        let now = Instant::now();
-        if now >= deadline {
-            return false;
-        }
-        let (g, _) = notify.cond.wait_timeout(guard, deadline - now).unwrap();
-        guard = g;
-    }
-    true
-}
-
-/// 日志截断
-fn truncate(text: &str, max: usize) -> String {
-    if text.chars().count() <= max {
-        text.to_string()
-    } else {
-        const SUFFIX: &str = "...";
-        let half = (max.saturating_sub(SUFFIX.len())) / 2;
-        let head: String = text.chars().take(half).collect();
-        let tail: String = text.chars().skip(text.chars().count() - half).collect();
-        format!("{head}{SUFFIX}{tail}")
     }
 }

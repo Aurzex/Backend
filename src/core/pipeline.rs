@@ -16,8 +16,8 @@ use crate::api::shop::{ReportCommentArgs, WorkShopReportReasonId, WorkshopAction
 use crate::api::whale::{ReportHandler, Resolution};
 use crate::api::work::{BaseWorkOperations, CommentOperations};
 use crate::core::retrieve::{CommentSource, DataQuery, JsonObject};
-use crate::utils::acquire::{Catsona, KittyFactory, ResponseMode};
-use crate::utils::data::PathConfig;
+use crate::utils::filedata::PathConfig;
+use crate::utils::requests::{Catsona, KittyFactory, ResponseMode};
 
 // 配置结构体(依赖注入)
 #[derive(Clone)]
