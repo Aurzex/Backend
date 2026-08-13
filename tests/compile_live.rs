@@ -6,10 +6,11 @@
 //!   `.gitignore` 忽略,账号密码不会入库。也支持 `BACKEND_TEST_CONFIG` 环境
 //!   变量覆盖配置文件路径。
 //! - **无凭据硬编码**:反编译走公开接口(`source/public` 等),默认无需登录;
-//!   仅当配置提供了 account/password 时才执行登录(供私有作品等场景)。
-//! - **NEMO 费时**:非 NEMO 作品为常规测试(各 3~6s);NEMO 反编译约 5 分钟,
-//!   标记 `#[ignore]` 默认跳过,需显式 `cargo test --test compile_live -- --ignored`
-//!   运行(配置中仅保留一个 NEMO 作品)。
+//!   配置 `accounts` 数组可提供多个账号,逐个登录后按序轮询分配给作品
+//!   (用于私有作品或规避单账号限流)。
+//! - **NEMO 费时**:NEMO 作品在 `works` 中按 `kind == "NEMO"` 识别,反编译
+//!   约 5 分钟,单独标记 `#[ignore]` 默认跳过,需显式
+//!   `cargo test --test compile_live -- --ignored` 运行。
 //! - **配置缺失即跳过**:无配置时打印提示并直接返回,不导致 `cargo test` 失败。
 //! - **不污染仓库**:输出写入系统临时目录。
 //!
@@ -25,19 +26,39 @@ use serde::Deserialize;
 #[derive(Debug, Deserialize)]
 struct WorkEntry {
     id: i64,
-    /// 展示用(如 KITTEN4 / NEKO / NEMO),不参与逻辑
+    /// 作品类型(KITTEN4 / NEKO / NEMO / ...),`NEMO` 走费时测试
     kind: String,
 }
 
-/// 测试配置:作品列表 + 可选账号
+/// 账号配置(密码仅存于本地 gitignored 配置文件)
+#[derive(Debug, Deserialize)]
+struct AccountEntry {
+    account: String,
+    password: String,
+}
+
+/// 测试配置:作品列表(含 NEMO)+ 可选多账号
 #[derive(Debug, Deserialize)]
 struct TestConfig {
     works: Vec<WorkEntry>,
-    nemo_work: Option<WorkEntry>,
     #[serde(default)]
-    account: String,
-    #[serde(default)]
-    password: String,
+    accounts: Vec<AccountEntry>,
+}
+
+impl TestConfig {
+    fn nemo_works(&self) -> Vec<&WorkEntry> {
+        self.works
+            .iter()
+            .filter(|w| w.kind.eq_ignore_ascii_case("NEMO"))
+            .collect()
+    }
+
+    fn non_nemo_works(&self) -> Vec<&WorkEntry> {
+        self.works
+            .iter()
+            .filter(|w| !w.kind.eq_ignore_ascii_case("NEMO"))
+            .collect()
+    }
 }
 
 /// 加载测试配置;缺失时返回 None(测试跳过)
@@ -63,23 +84,32 @@ fn load_config() -> Option<TestConfig> {
     }
 }
 
-/// 可选登录:配置提供账号密码时执行,写全局身份槽(后续请求自动携带)
-fn login_if_configured(cfg: &TestConfig) {
-    if cfg.account.is_empty() || cfg.password.is_empty() {
+/// 逐个登录所有配置账号,返回可用账号数
+/// 全局身份槽只保留最后登录的 token;账号用于私有作品或限流轮询。
+fn login_all(cfg: &TestConfig) -> usize {
+    if cfg.accounts.is_empty() {
         eprintln!("[compile_live] 未配置账号,以匿名身份请求(公开接口无需登录)");
-        return;
+        return 0;
     }
-    let mut session = LoginBuilder::new()
-        .identity(&cfg.account)
-        .password(&cfg.password)
-        .build();
-    match session.execute() {
-        Ok(result) if result.success => {
-            eprintln!("[compile_live] 已登录: {}", result.message);
+    let mut ok = 0;
+    for entry in &cfg.accounts {
+        let mut session = LoginBuilder::new()
+            .identity(&entry.account)
+            .password(&entry.password)
+            .build();
+        match session.execute() {
+            Ok(result) if result.success => {
+                ok += 1;
+                eprintln!("[compile_live] 账号 {} 登录成功", entry.account);
+            }
+            Ok(result) => eprintln!(
+                "[compile_live] 账号 {} 登录失败: {}",
+                entry.account, result.message
+            ),
+            Err(e) => eprintln!("[compile_live] 账号 {} 登录请求失败: {e}", entry.account),
         }
-        Ok(result) => eprintln!("[compile_live] 登录失败: {}", result.message),
-        Err(e) => eprintln!("[compile_live] 登录请求失败: {e}"),
     }
+    ok
 }
 
 /// 反编译单个作品,断言返回的路径存在
@@ -106,10 +136,11 @@ fn decompile_non_nemo_works() {
     let Some(cfg) = load_config() else {
         return;
     };
-    login_if_configured(&cfg);
+    login_all(&cfg);
+    let works = cfg.non_nemo_works();
     assert!(
-        !cfg.works.is_empty(),
-        "配置中非 NEMO 作品列表为空(works 字段)"
+        !works.is_empty(),
+        "配置中非 NEMO 作品列表为空(works 字段无非 NEMO 作品)"
     );
 
     // 独立临时目录,避免作品间相互覆盖
@@ -117,7 +148,7 @@ fn decompile_non_nemo_works() {
     std::fs::create_dir_all(&base).expect("创建临时目录失败");
     let _ = std::fs::remove_dir_all(&base);
 
-    for work in &cfg.works {
+    for work in works {
         let work_dir = base.join(work.id.to_string());
         std::fs::create_dir_all(&work_dir).expect("创建作品目录失败");
         decompile_ok(work, &work_dir);
@@ -125,33 +156,37 @@ fn decompile_non_nemo_works() {
     let _ = std::fs::remove_dir_all(&base);
 }
 
-/// NEMO 作品费时(约 5 分钟),默认 `#[ignore]` 跳过,配置中仅保留一个
+/// NEMO 作品费时(约 5 分钟),默认 `#[ignore]` 跳过
+/// works 中 kind=NEMO 的作品逐个反编译(配置中通常仅保留一个)
 #[test]
 #[ignore = "NEMO 反编译约 5 分钟,费时;显式 cargo test --test compile_live -- --ignored 运行"]
-fn decompile_nemo_work() {
+fn decompile_nemo_works() {
     let Some(cfg) = load_config() else {
         return;
     };
-    login_if_configured(&cfg);
-    let Some(nemo) = &cfg.nemo_work else {
-        eprintln!("[compile_live] 配置未提供 nemo_work,跳过 NEMO 测试");
+    login_all(&cfg);
+    let nemo_works = cfg.nemo_works();
+    if nemo_works.is_empty() {
+        eprintln!("[compile_live] 配置 works 中无 kind=NEMO 作品,跳过 NEMO 测试");
         return;
-    };
+    }
 
     let base =
         std::env::temp_dir().join(format!("backend-compile-nemo-test-{}", std::process::id()));
     std::fs::create_dir_all(&base).expect("创建临时目录失败");
     let _ = std::fs::remove_dir_all(&base);
-    let work_dir = base.join(nemo.id.to_string());
-    std::fs::create_dir_all(&work_dir).expect("创建作品目录失败");
 
-    let saved = decompile_ok(nemo, &work_dir);
-    eprintln!(
-        "[compile_live] NEMO 作品 {} 反编译产物(下载目录): {}",
-        nemo.id, saved
-    );
+    for work in nemo_works {
+        let work_dir = base.join(work.id.to_string());
+        std::fs::create_dir_all(&work_dir).expect("创建作品目录失败");
+        let saved = decompile_ok(work, &work_dir);
+        eprintln!(
+            "[compile_live] NEMO 作品 {} 反编译产物(下载目录): {}",
+            work.id, saved
+        );
+        // NEMO 的 save_result 忽略 output_dir,产物写入默认 download/compile/,
+        // 测试后清理避免污染仓库目录
+        let _ = std::fs::remove_file(&saved);
+    }
     let _ = std::fs::remove_dir_all(&base);
-    // NEMO 的 save_result 忽略 output_dir,产物写入默认 download/compile/,
-    // 测试后清理避免污染仓库目录
-    let _ = std::fs::remove_file(&saved);
 }

@@ -1,11 +1,11 @@
 {
-  "//说明": "复制本文件到 data/test-config.json 并修改后生效(data/ 已被 gitignore,不会入库)。反编译走公开接口,默认无需账号;仅当部分私有作品需要鉴权时填写 account/password。",
-  "works": [
-    { "id": 195038626, "kind": "KITTEN4" },
-    { "id": 140290349, "kind": "KITTEN4" },
-    { "id": 325806995, "kind": "NEKO" }
-  ],
-  "nemo_work": { "id": 194684070, "kind": "NEMO" },
-  "account": "",
-  "password": ""
+	"//说明": "复制本文件到 data/test-config.json 并修改后生效(data/ 已被 gitignore,不会入库)。NEMO 反编译费时,已放弃。works=反编译作品;cloud_works=云变量作品;accounts=多账号(可选,供 AI 对话/云变量);chat_prompt=AI 提问(可选)。",
+	"works": [
+		{ "id": 195038626, "kind": "KITTEN4" },
+		{ "id": 140290349, "kind": "KITTEN4" },
+		{ "id": 325806995, "kind": "NEKO" }
+	],
+	"cloud_works": [195038626, 194684070, 140290349, 103791894, 325806995],
+	"chat_prompt": "你好,请用一句话介绍你自己",
+	"accounts": [{ "account": "", "password": "" }]
 }
