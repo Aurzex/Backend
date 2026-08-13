@@ -760,19 +760,24 @@ impl CryptoService {
     }
 
     pub(crate) fn sha256(data: &str) -> String {
+        use std::fmt::Write as _;
         let mut hasher = Sha256::new();
         hasher.update(data.as_bytes());
         let result = hasher.finalize();
-        result.iter().map(|b| format!("{:02x}", b)).collect()
+        let mut out = String::with_capacity(result.len() * 2);
+        for b in result {
+            let _ = write!(out, "{b:02x}");
+        }
+        out
     }
 
-    pub(crate) fn base64_to_bytes(&self, data: &str) -> Result<Vec<u8>> {
+    pub(crate) fn base64_to_bytes(data: &str) -> Result<Vec<u8>> {
         general_purpose::STANDARD
             .decode(data)
             .map_err(|e| DecompilerError::Crypto(format!("Base64解码失败: {}", e)))
     }
 
-    pub(crate) fn reverse_string(&self, data: &str) -> String {
+    pub(crate) fn reverse_string(data: &str) -> String {
         data.chars().rev().collect()
     }
 
@@ -802,8 +807,8 @@ impl CryptoService {
     }
 
     pub(crate) fn decrypt_bcmkn(&self, encrypted_content: &str) -> Result<Vec<u8>> {
-        let reversed = self.reverse_string(encrypted_content);
-        let decoded = self.base64_to_bytes(&reversed)?;
+        let reversed = Self::reverse_string(encrypted_content);
+        let decoded = Self::base64_to_bytes(&reversed)?;
         if decoded.len() <= NONCE_SIZE {
             return Err(DecompilerError::Crypto(format!(
                 "数据长度 {} 不足,至少需要 {} 字节",

@@ -892,10 +892,13 @@ impl ViolationChecker {
                 *last_login = None;
                 accounts.remove(idx);
                 account_usage.remove(&user);
-                if idx < *current_idx && *current_idx > 0 {
-                    *current_idx -= 1;
+                // remove 后原 idx+1 的账号补位到 idx,current_idx 不动即"前进到下一个账号";
+                // 仅当账号清空时归零,避免对空 Vec 取模
+                if accounts.is_empty() {
+                    *current_idx = 0;
+                } else {
+                    *current_idx %= accounts.len();
                 }
-                *current_idx %= accounts.len().max(1);
                 false
             }
         }

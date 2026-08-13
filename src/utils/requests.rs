@@ -639,7 +639,7 @@ impl KittyCore {
     }
 
     fn build_url(&self, endpoint: &str, base_key: Option<BaseKey>) -> String {
-        if endpoint.starts_with("http") {
+        if endpoint.starts_with("http://") || endpoint.starts_with("https://") {
             endpoint.to_string()
         } else {
             let base = self.config.get_base_url(base_key);
@@ -1682,7 +1682,7 @@ struct UploadTokenInfo {
 // 辅助函数
 
 /// 生成指定长度、指定字符集的随机 ID
-/// 字符集由调用方给定(如上传文件名用全字符集,客户端/会话 ID 用小写字母+数字)
+/// 字符集由调用方给定(如上传文件名用全字符集,客户端/会话 ID 用小写字母+数字);仅支持单字节 ASCII 字符集
 pub fn generate_random_id(length: usize, charset: &[u8]) -> String {
     (0..length)
         .map(|_| charset[fastrand::usize(0..charset.len())] as char)
@@ -1887,26 +1887,13 @@ pub trait ClientAccess {
 
     /// 发送请求并检查响应状态码是否为预期值
     fn check_status(&self, builder: KittyRequestBuilder, expected: HTTPStatus) -> MewResult<bool> {
-        let response = builder.with_error_body().send()?;
-        let status = response.status();
-        if status == expected as u16 {
-            return Ok(true);
-        }
-        if status.is_client_error() || status.is_server_error() {
-            let body = response.into_body().read_to_string().unwrap_or_default();
-            return Err(MewError::Other(format!("HTTP {status}: {body}")));
-        }
-        Ok(false)
+        let response = send_checked(builder)?;
+        Ok(response.status() == expected as u16)
     }
 
     /// 发送请求并将响应解析为 JSON
     fn send_and_parse(&self, builder: KittyRequestBuilder) -> MewResult<Value> {
-        let response = builder.with_error_body().send()?;
-        let status = response.status();
-        if status.is_client_error() || status.is_server_error() {
-            let body = response.into_body().read_to_string().unwrap_or_default();
-            return Err(MewError::Other(format!("HTTP {status}: {body}")));
-        }
+        let response = send_checked(builder)?;
         self.client().response_to_json(response)
     }
 
@@ -1917,16 +1904,23 @@ pub trait ClientAccess {
         mode: ResponseMode,
         expected: HTTPStatus,
     ) -> MewResult<Value> {
-        let response = builder.with_error_body().send()?;
-        let status = response.status();
-        if status.is_client_error() || status.is_server_error() {
-            let body = response.into_body().read_to_string().unwrap_or_default();
-            return Err(MewError::Other(format!("HTTP {status}: {body}")));
-        }
+        let response = send_checked(builder)?;
         if mode == ResponseMode::Data {
             self.client().response_to_json(response)
         } else {
-            Ok(serde_json::json!({ "success": status == expected as u16 }))
+            Ok(serde_json::json!({ "success": response.status() == expected as u16 }))
         }
     }
+}
+
+/// 发送请求并统一处理 4xx/5xx:错误时读取服务端错误体并包装为 `MewError`。
+/// builder 已持有客户端,无需额外 client 参数;供 `ClientAccess` 默认方法复用。
+fn send_checked(builder: KittyRequestBuilder) -> MewResult<Response<Body>> {
+    let response = builder.with_error_body().send()?;
+    let status = response.status();
+    if status.is_client_error() || status.is_server_error() {
+        let body = response.into_body().read_to_string().unwrap_or_default();
+        return Err(MewError::Other(format!("HTTP {status}: {body}")));
+    }
+    Ok(response)
 }

@@ -675,8 +675,9 @@ impl DataQuery {
         if limit <= 0 {
             return Box::new(std::iter::empty());
         }
-        // 奇数 limit 时两源各取 (limit+1)/2,合并处再截断,保证恰好 limit 条
-        let per_source_limit = Some((limit + 1) / 2);
+        // 奇数 limit 时两源各取 ceil(limit/2),合并处再截断,保证恰好 limit 条
+        // 用 limit/2 + limit%2 向上取整,避免 (limit+1) 在 i32::MAX 时溢出
+        let per_source_limit = Some(limit / 2 + limit % 2);
 
         let nemo_field_mapping: HashMap<&str, &str> = [
             ("work_id", "work_id"),

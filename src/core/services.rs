@@ -225,18 +225,20 @@ impl ReportProcessor {
 
     /// 未处理与已处理总数(短时缓存;任何处理动作后自动失效,保证下次展示即时刷新)
     pub fn totals(&self) -> (i64, i64) {
-        let mut cache = self.totals_cache.lock().unwrap();
-
-        if let Some(c) = cache.as_ref()
-            && c.fresh()
+        // 先短锁查缓存;未命中则锁外取数,避免网络 I/O 期间阻塞 invalidate_totals
         {
-            return (c.pending, c.done);
+            let cache = self.totals_cache.lock().unwrap();
+            if let Some(c) = cache.as_ref()
+                && c.fresh()
+            {
+                return (c.pending, c.done);
+            }
         }
         // 两个状态在一次并行批次内取回,只需 1 个 RTT
         let (pending, done) = self
             .fetcher
             .get_totals_pair(ReportStatus::ToBeDone, ReportStatus::Done);
-        *cache = Some(TotalsCache {
+        *self.totals_cache.lock().unwrap() = Some(TotalsCache {
             pending,
             done,
             fetched_at: Instant::now(),
