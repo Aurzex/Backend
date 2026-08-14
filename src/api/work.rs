@@ -1578,6 +1578,29 @@ impl Default for SampleManager {
     }
 }
 
+// 喵口令(分享口令)
+
+/// 喵口令请求载荷(经 serde 序列化为请求体;全部字段由调用方提供,不内置默认值)。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct MiaoCodePayload<'a> {
+    /// 客户端版本
+    pub app_version: &'a str,
+    /// BCM 版本
+    pub bcm_version: &'a str,
+    /// 设备型号
+    pub equipment: &'a str,
+    /// 作品名称
+    pub name: &'a str,
+    /// 操作系统
+    pub os: &'a str,
+    /// 作品封面
+    pub preview: &'a str,
+    /// 作品 ID
+    pub work_id: &'a str,
+    /// 作品源地址
+    pub work_url: &'a str,
+}
+
 // 作品数据获取类
 
 /// 作品数据查询接口(详情,评论,源代码,推荐,搜索等)
@@ -2297,6 +2320,19 @@ impl WorkDataFetcher {
             .build_request(HttpMethod::Get, "/tiger/nemo/miao-codes", None)
             .with_param("TIME", timestamp.to_string())
             .with_param("token", token);
+        self.send_and_parse(builder)
+    }
+
+    /// 生成作品喵口令(分享口令):携带完整载荷请求口令,返回服务端解析后的 JSON。
+    /// 请求头 `User-Agent` 固定为 `okhttp/4.2.2`;`Authorization` 自动携带全局身份令牌
+    /// (调用前需先登录写入身份槽,与库内其余请求一致)。
+    pub fn generate_miao_code(&self, payload: MiaoCodePayload<'_>) -> MewResult<Value> {
+        debug!("生成喵口令: work_id={}", payload.work_id);
+        let builder = self
+            .client
+            .build_request(HttpMethod::Post, "/nemo/v2/miao-codes/bcm", None)
+            .with_payload(serde_json::to_value(payload)?)
+            .with_header("User-Agent", "okhttp/4.2.2");
         self.send_and_parse(builder)
     }
 

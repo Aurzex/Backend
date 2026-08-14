@@ -722,11 +722,18 @@ impl KittyCore {
         params: &[(String, String)],
         extra_headers: &[(String, String)],
     ) -> RequestBuilder<B> {
+        // 额外头按名覆盖默认头与认证头:ureq 的 header() 是追加语义,
+        // 同名单例头(如 User-Agent / Authorization)若重复发送会被服务端 400 拒绝
+        let overridden = |name: &str| extra_headers.iter().any(|(k, _)| k == name);
         for (k, v) in KITTY_HEADERS {
-            builder = builder.header(*k, *v);
+            if !overridden(k) {
+                builder = builder.header(*k, *v);
+            }
         }
         // 添加 Authorization 头
-        if let Some((k, v)) = auth.auth_header() {
+        if let Some((k, v)) = auth.auth_header()
+            && !overridden(k)
+        {
             builder = builder.header(k, &v);
         }
         for (k, v) in extra_headers {
