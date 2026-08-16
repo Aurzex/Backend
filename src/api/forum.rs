@@ -144,7 +144,7 @@ impl ForumDataFetcher {
             return Err(MewError::Other("数据长度需小于 20".into()));
         }
         debug!("批量获取帖子详情: count={}", post_ids.len());
-        let ids_str: Vec<String> = post_ids.iter().map(|v| v.to_string()).collect();
+        let ids_str: Vec<String> = post_ids.iter().map(ToString::to_string).collect();
         self.send_and_parse(
             self.client
                 .build_request(HttpMethod::Get, "/web/forums/posts/all", None)

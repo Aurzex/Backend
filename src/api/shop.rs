@@ -153,7 +153,7 @@ impl WorkshopDataFetcher {
             || "1,2,3,4".to_string(),
             |v| {
                 v.iter()
-                    .map(|v| v.to_string())
+                    .map(ToString::to_string)
                     .collect::<Vec<_>>()
                     .join(",")
             },

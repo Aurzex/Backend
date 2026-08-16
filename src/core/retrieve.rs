@@ -777,17 +777,17 @@ impl DataQuery {
                                         if v.is_number() {
                                             Some(v.to_string())
                                         } else {
-                                            v.as_str().map(|v| v.to_string())
+                                            v.as_str().map(ToString::to_string)
                                         }
                                     });
                                     let content = comment
                                         .get("content")
                                         .and_then(|c| c.as_str())
-                                        .map(|v| v.to_string());
+                                        .map(ToString::to_string);
                                     let nickname = comment
                                         .get("nickname")
                                         .and_then(|n| n.as_str())
-                                        .map(|v| v.to_string());
+                                        .map(ToString::to_string);
 
                                     if let (Some(uid), Some(cont), Some(nick)) =
                                         (user_id, content, nickname)

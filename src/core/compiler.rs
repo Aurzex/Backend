@@ -14,6 +14,7 @@ use sha2::{Digest, Sha256};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use thiserror::Error;
@@ -981,7 +982,7 @@ impl ShadowBuilder {
             shadow_type, block_id, tmpl.visible, tmpl.editable
         );
         for (name, value) in fields {
-            xml.push_str(&format!(r#"<field name="{}">{}</field>"#, name, value));
+            write!(xml, r#"<field name="{}">{}</field>"#, name, value).unwrap();
         }
         xml.push_str("</shadow>");
         xml
@@ -2151,17 +2152,15 @@ impl<'a> XmlBlockWriter<'a> {
         if let Some(params) = compiled.get_object_opt("params") {
             for (k, v) in params {
                 if !v.is_object() && !v.is_array() {
-                    field_xml.push_str(&format!(
-                        r#"<field name="{}">{}</field>"#,
-                        k,
-                        Self::escape_text(&Self::value_to_text(v))
-                    ));
+                    write!(field_xml, r#"<field name="{}">"#, k).unwrap();
+                    Self::push_value_text_escaped(&mut field_xml, v);
+                    field_xml.push_str("</field>");
                 }
             }
             // value 插槽:params 对象
             for (k, v) in params {
                 if v.is_object() {
-                    value_xml.push_str(&format!(r#"<value name="{}">"#, k));
+                    write!(value_xml, r#"<value name="{}">"#, k).unwrap();
                     value_xml.push_str(&self.value_xml(v));
                     value_xml.push_str("</value>");
                 }
@@ -2178,7 +2177,7 @@ impl<'a> XmlBlockWriter<'a> {
         if let Some(conditions) = conditions {
             for (i, c) in conditions.iter().enumerate() {
                 if c.is_object() {
-                    s.push_str(&format!(r#"<value name="IF{}">"#, i));
+                    write!(s, r#"<value name="IF{}">"#, i).unwrap();
                     s.push_str(&self.value_xml(c));
                     s.push_str("</value>");
                 }
@@ -2202,7 +2201,7 @@ impl<'a> XmlBlockWriter<'a> {
                     "procedures_2_defnoreturn" => "STACK".to_string(),
                     _ => "DO".to_string(),
                 };
-                s.push_str(&format!(r#"<statement name="{}">"#, name));
+                write!(s, r#"<statement name="{}">"#, name).unwrap();
                 s.push_str(&self.block_xml(c, false, 0.0));
                 s.push_str("</statement>");
             }
@@ -2230,11 +2229,9 @@ impl<'a> XmlBlockWriter<'a> {
             if let Some(params) = v.get_object_opt("params") {
                 for (k, fv) in params {
                     if !fv.is_object() && !fv.is_array() {
-                        s.push_str(&format!(
-                            r#"<field name="{}">{}</field>"#,
-                            k,
-                            Self::escape_text(&Self::value_to_text(fv))
-                        ));
+                        write!(s, r#"<field name="{}">"#, k).unwrap();
+                        Self::push_value_text_escaped(&mut s, fv);
+                        s.push_str("</field>");
                     }
                 }
             }
@@ -2246,11 +2243,12 @@ impl<'a> XmlBlockWriter<'a> {
     }
 
     /// XML 转义:单遍扫描,避免链式 replace 每次全量分配
-    fn escape_text(s: &str) -> String {
+    /// XML 转义后写入 `out`,避免为字符串字段构造中间 `String`。
+    fn push_escaped(out: &mut String, s: &str) {
         if !s.contains(['&', '<', '>', '"', '\'']) {
-            return s.to_owned();
+            out.push_str(s);
+            return;
         }
-        let mut out = String::with_capacity(s.len());
         for c in s.chars() {
             match c {
                 '&' => out.push_str("&amp;"),
@@ -2261,15 +2259,18 @@ impl<'a> XmlBlockWriter<'a> {
                 _ => out.push(c),
             }
         }
-        out
     }
 
-    fn value_to_text(v: &Value) -> String {
+    /// 将 `Value` 按文本形式转义后写入 `out`;字符串直接借用,数字临时转字符串。
+    fn push_value_text_escaped(out: &mut String, v: &Value) {
         match v {
-            Value::String(s) => s.clone(),
-            Value::Number(n) => n.to_string(),
-            Value::Bool(b) => b.to_string(),
-            _ => String::new(),
+            Value::String(s) => Self::push_escaped(out, s),
+            Value::Number(n) => {
+                let text = n.to_string();
+                Self::push_escaped(out, &text);
+            }
+            Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+            _ => {}
         }
     }
 }
@@ -3442,7 +3443,7 @@ impl<'a> BlockDecompiler<'a> for FunctionDefDecompiler<'a> {
         for (i, (param_name, _)) in params.iter().enumerate() {
             // 编辑版插槽名为 PARAMS0/PARAMS1/...(无空格)
             let input_name = format!("PARAMS{}", i);
-            mutation_args.push_str(&format!(r#"<arg name="{}"></arg>"#, input_name));
+            write!(mutation_args, r#"<arg name="{}"></arg>"#, input_name).unwrap();
 
             // 生成稳定的参数块(编辑版 is_shadow=false,可编辑)
             let param_block_id = context.shadow_builder.id_generator.generate(20);
@@ -3540,14 +3541,16 @@ impl<'a> BlockDecompiler<'a> for FunctionCallDecompiler<'a> {
         block.insert("disabled".to_string(), Value::Bool(disabled));
 
         let mut mutation = String::from(r#"<mutation xmlns="http://www.w3.org/1999/xhtml""#);
-        mutation.push_str(&format!(r#" name="{}""#, procedure_name));
-        mutation.push_str(&format!(r#" def_id="{}""#, def_id));
+        write!(mutation, r#" name="{}""#, procedure_name).unwrap();
+        write!(mutation, r#" def_id="{}""#, def_id).unwrap();
         mutation.push('>');
         for (param_name, _) in &params {
-            mutation.push_str(&format!(
+            write!(
+                mutation,
                 r#"<procedures_2_parameter_shadow name="{}" value="0"></procedures_2_parameter_shadow>"#,
                 param_name
-            ));
+            )
+            .unwrap();
         }
         mutation.push_str("</mutation>");
         block.insert("mutation".to_string(), Value::String(mutation));

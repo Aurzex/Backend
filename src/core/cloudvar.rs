@@ -2023,7 +2023,7 @@ impl MessageHandler for RankingHandler {
         {
             let store = inner.state.lock().unwrap();
             if let Some(v) = store.variable(VarKind::Private, &cvid) {
-                ranking.name = v.name.clone();
+                ranking.name.clone_from(&v.name);
             }
         }
         if let Some(items) = payload.get("items").and_then(Value::as_array) {

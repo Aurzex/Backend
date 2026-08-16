@@ -168,6 +168,13 @@ const KITTY_HEADERS: &[(&str, &str)] = &[
     ),
 ];
 
+/// 判断额外请求头是否已覆盖指定默认头/认证头(HTTP 头名称大小写不敏感)。
+fn is_header_overridden(name: &str, extra_headers: &[(String, String)]) -> bool {
+    extra_headers
+        .iter()
+        .any(|(k, _)| k.eq_ignore_ascii_case(name))
+}
+
 // 身份枚举(萌化:Catsona)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Catsona {
@@ -656,6 +663,7 @@ impl KittyCore {
         method: HttpMethod,
         url: &str,
         params: &[(String, String)],
+        extra_headers: &[(String, String)],
         payload: Option<&Value>,
     ) {
         if !self.config.log_requests || !log::log_enabled!(log::Level::Debug) {
@@ -667,11 +675,24 @@ impl KittyCore {
 
         debug!("请求头:");
         for (k, v) in KITTY_HEADERS {
-            debug!("  {}: {}", k, v);
+            if !is_header_overridden(k, extra_headers) {
+                debug!("  {}: {}", k, v);
+            }
         }
 
-        if self.auth.auth_header().is_some() {
-            debug!("  Authorization: Bearer [已隐藏]");
+        if let Some((k, _)) = self.auth.auth_header()
+            && !is_header_overridden(k, extra_headers)
+        {
+            debug!("  {}: {}", k, "[已隐藏]");
+        }
+
+        for (k, v) in extra_headers {
+            let value = if k.eq_ignore_ascii_case("authorization") {
+                "[已隐藏]"
+            } else {
+                v.as_str()
+            };
+            debug!("  {}: {}", k, value);
         }
 
         if !params.is_empty() {
@@ -723,16 +744,16 @@ impl KittyCore {
         extra_headers: &[(String, String)],
     ) -> RequestBuilder<B> {
         // 额外头按名覆盖默认头与认证头:ureq 的 header() 是追加语义,
-        // 同名单例头(如 User-Agent / Authorization)若重复发送会被服务端 400 拒绝
-        let overridden = |name: &str| extra_headers.iter().any(|(k, _)| k == name);
+        // 同名单例头(如 User-Agent / Authorization)若重复发送会被服务端 400 拒绝。
+        // 比较时不区分大小写(HTTP 头名称大小写不敏感,避免 "user-agent" 无法覆盖 "User-Agent")。
         for (k, v) in KITTY_HEADERS {
-            if !overridden(k) {
+            if !is_header_overridden(k, extra_headers) {
                 builder = builder.header(*k, *v);
             }
         }
         // 添加 Authorization 头
         if let Some((k, v)) = auth.auth_header()
-            && !overridden(k)
+            && !is_header_overridden(k, extra_headers)
         {
             builder = builder.header(k, &v);
         }
@@ -776,7 +797,7 @@ impl KittyCore {
             RequestBody::Json(v) => Some(*v),
             _ => None,
         };
-        self.log_request(spec.method, &url, spec.params, payload);
+        self.log_request(spec.method, &url, spec.params, spec.extra_headers, payload);
 
         let response = match spec.method {
             // 无请求体方法: 直接发送
@@ -1225,15 +1246,16 @@ impl PaginatedIter {
     /// 构造指定页的请求参数:基础参数 + 分页参数
     /// 过滤与分页键同名的基础参数,避免重复键(服务端对重复键的取值框架相关)
     fn build_params(&self, page: usize) -> Vec<(String, String)> {
-        let mut params: Vec<(String, String)> = self
-            .base_params
-            .iter()
-            .filter(|(k, _)| {
-                Some(k.as_str()) != self.config.amount_key.as_deref()
-                    && Some(k.as_str()) != self.config.offset_key.as_deref()
-            })
-            .cloned()
-            .collect();
+        let mut params = Vec::with_capacity(self.base_params.len() + 2);
+        params.extend(
+            self.base_params
+                .iter()
+                .filter(|(k, _)| {
+                    Some(k.as_str()) != self.config.amount_key.as_deref()
+                        && Some(k.as_str()) != self.config.offset_key.as_deref()
+                })
+                .cloned(),
+        );
         if let Some(key) = &self.config.amount_key {
             params.push((key.clone(), self.config.page_size.to_string()));
         }
@@ -1930,4 +1952,18 @@ fn send_checked(builder: KittyRequestBuilder) -> MewResult<Response<Body>> {
         return Err(MewError::Other(format!("HTTP {status}: {body}")));
     }
     Ok(response)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn header_override_is_case_insensitive() {
+        let extra_headers = vec![("user-agent".to_string(), "okhttp/4.2.2".to_string())];
+
+        assert!(is_header_overridden("User-Agent", &extra_headers));
+        assert!(is_header_overridden("USER-AGENT", &extra_headers));
+        assert!(!is_header_overridden("Accept", &extra_headers));
+    }
 }

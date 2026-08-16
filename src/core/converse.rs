@@ -559,7 +559,7 @@ impl ChatEventHandler for ConnectAckHandler {
             inner.user_info.lock().unwrap().extend(data.clone());
             let chat_count = data
                 .get("chat_count")
-                .map_or_else(|| "未知".into(), |v| v.to_string());
+                .map_or_else(|| "未知".into(), ToString::to_string);
             info!("连接确认 - 剩余对话次数: {chat_count}");
         }
         // 服务器可能重复确认,只发送一次 JOIN(帧格式与 Python 的 `42 ["join"]` 一致)
