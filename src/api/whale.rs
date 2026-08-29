@@ -145,14 +145,16 @@ impl Resolution {
 
 /// 管理员举报数据查询接口
 pub struct WhaleReportFetcher {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl WhaleReportFetcher {
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     // 私有辅助
@@ -294,14 +296,16 @@ impl Default for WhaleReportFetcher {
 
 /// 举报处理接口(处理作品,评论,帖子,讨论区举报)
 pub struct ReportHandler {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl ReportHandler {
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     // 私有辅助
@@ -400,12 +404,12 @@ impl Default for ReportHandler {
 
 impl ClientAccess for WhaleReportFetcher {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }
 
 impl ClientAccess for ReportHandler {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }

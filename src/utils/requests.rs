@@ -256,8 +256,6 @@ pub struct KittyConfig {
     default_base_key: BaseKey,
     timeout: Duration,
     log_requests: bool,
-    /// 是否使用全局身份管理器
-    use_global_auth: bool,
 }
 
 impl Default for KittyConfig {
@@ -266,7 +264,6 @@ impl Default for KittyConfig {
             default_base_key: BaseKey::Default,
             timeout: Duration::from_secs(30),
             log_requests: true,
-            use_global_auth: true,
         }
     }
 }
@@ -293,12 +290,6 @@ impl KittyConfig {
 
     pub fn with_log_requests(mut self, log: bool) -> Self {
         self.log_requests = log;
-        self
-    }
-
-    /// 设置为独立身份模式(不使用全局身份管理器)
-    pub fn with_independent_auth(mut self) -> Self {
-        self.use_global_auth = false;
         self
     }
 }
@@ -950,15 +941,6 @@ impl CodeMaoClient {
     pub fn new_with_auth(config: KittyConfig, auth: Arc<dyn KittyAuth>) -> Self {
         Self {
             inner: Arc::new(KittyCore::new(config, auth)),
-        }
-    }
-
-    /// 创建新实例(向后兼容,根据配置决定使用全局或独立身份管理器)
-    pub fn new(config: KittyConfig) -> Self {
-        if config.use_global_auth {
-            Self::new_with_global_auth(config)
-        } else {
-            Self::new_independent(config)
         }
     }
 

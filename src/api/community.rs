@@ -168,14 +168,16 @@ impl ReadStatus {
 
 /// 社区相关数据与配置获取
 pub struct CommunityDataFetcher {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl CommunityDataFetcher {
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     // 辅助方法
@@ -765,14 +767,16 @@ impl Default for CommunityDataFetcher {
 
 /// 用户相关操作(协议签署,消息管理等)
 pub struct UserAction {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl UserAction {
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     /// 签订 Nemo 友好协议
@@ -820,12 +824,12 @@ impl Default for UserAction {
 
 impl ClientAccess for CommunityDataFetcher {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }
 
 impl ClientAccess for UserAction {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }

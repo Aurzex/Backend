@@ -6,14 +6,16 @@ use serde_json::{Value, json};
 
 /// 排行榜管理器,封装全量更新,增删查等操作
 pub struct Ranking {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl Ranking {
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     /// 更新排行榜(全量更新)
@@ -120,14 +122,16 @@ impl Default for Ranking {
 
 /// 云数据操作器(普通用户权限),用于操作云字典和云数据表
 pub struct CoconutCloud {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl CoconutCloud {
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     /// 设置云字典键值
@@ -336,14 +340,16 @@ pub enum CloudDatabaseType {
 
 /// 云数据库管理员操作器,用于查询,迁移等管理功能
 pub struct CoconutCloudAdmin {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl CoconutCloudAdmin {
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     /// 获取用户云数据库列表
@@ -457,18 +463,18 @@ impl Default for CoconutCloudAdmin {
 
 impl ClientAccess for Ranking {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }
 
 impl ClientAccess for CoconutCloud {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }
 
 impl ClientAccess for CoconutCloudAdmin {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }

@@ -45,14 +45,16 @@ pub struct UpdateProfileDetailsArgs<'a> {
 /// 账号管理接口(验证码、注册、资料、OAuth、手机号、密码、令牌等)
 /// 对应 OpenAPI 中「用户 - 认证」分组下的 `/tiger/v3/web/accounts/*` 端点
 pub struct AccountManager {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl AccountManager {
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     // ---- 验证码发送与校验 ----
@@ -833,6 +835,22 @@ impl Default for AccountManager {
 
 impl ClientAccess for AccountManager {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AccountManager;
+    use crate::utils::requests::{Catsona, ClientAccess, CodeMaoClient, KittyConfig};
+
+    #[test]
+    fn manager_new_with_client_uses_injected_client() {
+        let a = CodeMaoClient::new_independent(KittyConfig::default());
+        let b = CodeMaoClient::new_independent(KittyConfig::default());
+        let m = AccountManager::new_with_client(a.clone());
+        a.set_token(Catsona::Fluffy, "tok-a").unwrap();
+        assert_eq!(m.client().current_token().as_deref(), Some("tok-a"));
+        assert_eq!(b.current_token(), None); // b 独立,不受影响
     }
 }

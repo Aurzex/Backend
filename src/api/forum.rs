@@ -126,14 +126,16 @@ pub enum BoardId {
 
 /// 论坛数据查询接口
 pub struct ForumDataFetcher {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl ForumDataFetcher {
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     // 公共方法
@@ -356,7 +358,7 @@ impl Default for ForumDataFetcher {
 
 impl ClientAccess for ForumDataFetcher {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }
 
@@ -364,14 +366,16 @@ impl ClientAccess for ForumDataFetcher {
 
 /// 论坛操作接口(发帖,回复,点赞,举报等)
 pub struct ForumActionHandler {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl ForumActionHandler {
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     // 公共方法
@@ -552,6 +556,6 @@ impl Default for ForumActionHandler {
 
 impl ClientAccess for ForumActionHandler {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }

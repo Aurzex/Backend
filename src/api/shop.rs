@@ -59,14 +59,16 @@ pub enum WorkShopReportReasonId {
 
 /// 工作室相关数据查询接口
 pub struct WorkshopDataFetcher {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl WorkshopDataFetcher {
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     // 私有辅助
@@ -269,7 +271,7 @@ impl Default for WorkshopDataFetcher {
 
 impl ClientAccess for WorkshopDataFetcher {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }
 
@@ -288,14 +290,16 @@ pub struct ReportCommentArgs<'a> {
 
 /// 工作室相关操作接口(创建,投稿,评论,审核等)
 pub struct WorkshopActionHandler {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl WorkshopActionHandler {
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     // 私有辅助
@@ -526,6 +530,6 @@ impl Default for WorkshopActionHandler {
 
 impl ClientAccess for WorkshopActionHandler {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }

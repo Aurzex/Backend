@@ -8,7 +8,6 @@ use std::time::Duration;
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use thiserror::Error;
 use tungstenite::Message;
 use tungstenite::client::IntoClientRequest;
 use tungstenite::http::HeaderValue;
@@ -16,8 +15,8 @@ use tungstenite::{WebSocket, connect};
 
 use crate::utils::requests::generate_random_id;
 use crate::utils::socketio::{
-    CONNECTED_MESSAGE, CallbackStore, EVENT_MESSAGE_PREFIX, Frame, Notify, PONG_MESSAGE, Ws,
-    parse_frame, set_stream_read_timeout, truncate, wait_flag,
+    CONNECTED_MESSAGE, CallbackStore, EVENT_MESSAGE_PREFIX, Frame, Notify, PONG_MESSAGE,
+    SocketError, Ws, parse_frame, set_stream_read_timeout, truncate, wait_flag,
 };
 
 pub use crate::utils::socketio::CallbackHandle;
@@ -38,39 +37,8 @@ pub(crate) const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 // 错误类型
 
-/// AI 对话操作错误
-#[derive(Debug, Error)]
-pub enum ChatError {
-    #[error("WebSocket 错误: {0}")]
-    WebSocket(#[from] Box<tungstenite::Error>),
-    #[error("HTTP 握手失败: {0}")]
-    Handshake(String),
-    #[error("JSON 错误: {0}")]
-    Json(#[from] serde_json::Error),
-    #[error("发送失败: {0}")]
-    Send(#[from] std::sync::mpsc::SendError<tungstenite::Message>),
-    #[error("连接未就绪")]
-    NotConnected,
-    #[error("正在接收回复,请等待完成")]
-    Busy,
-    #[error("超时: {0}")]
-    Timeout(String),
-    #[error("未提供 token")]
-    MissingToken,
-    #[error("鉴权错误: {0}")]
-    Auth(String),
-    #[error("线程错误: {0}")]
-    Thread(String),
-}
-
-impl From<tungstenite::Error> for ChatError {
-    fn from(err: tungstenite::Error) -> Self {
-        ChatError::WebSocket(Box::new(err))
-    }
-}
-
 /// 本模块统一的 `Result` 别名
-pub(crate) type Result<T> = std::result::Result<T, ChatError>;
+pub(crate) type Result<T, E = SocketError> = std::result::Result<T, E>;
 
 // 基础类型
 
@@ -286,7 +254,7 @@ impl ChatClient {
     /// 建立与 AI 服务器的 WebSocket 连接,并等待 Socket.IO 层就绪
     pub fn connect(&self) -> Result<bool> {
         if self.inner.token.is_empty() {
-            return Err(ChatError::MissingToken);
+            return Err(SocketError::MissingToken);
         }
         // 检查与建立均在临界区内,避免并发 connect 双建连接
         let _connect_guard = self.inner.connect_lock.lock().unwrap();
@@ -315,13 +283,13 @@ impl ChatClient {
     /// 发送聊天消息(用户消息自动进入历史记录)
     pub fn send_message(&self, message: &str, mode: HistoryMode) -> Result<()> {
         if !self.inner.connected.load(Ordering::Acquire) {
-            return Err(ChatError::NotConnected);
+            return Err(SocketError::NotConnected);
         }
         if !self.inner.joined.load(Ordering::Acquire) {
-            return Err(ChatError::NotConnected);
+            return Err(SocketError::NotConnected);
         }
         if self.inner.receiving.load(Ordering::Acquire) {
-            return Err(ChatError::Busy);
+            return Err(SocketError::Busy);
         }
         // 先取会话 ID(释放锁)再构造帧,避免与 new_conversation 形成嵌套取锁
         let session_id = self.inner.conversation_id.lock().unwrap().clone();
@@ -369,15 +337,15 @@ impl ChatClient {
     pub fn send_and_wait(&self, message: &str, mode: HistoryMode) -> Result<String> {
         self.send_message(message, mode)?;
         if !self.wait_for_response_start(self.inner.start_timeout) {
-            return Err(ChatError::Timeout("AI 未开始回复".into()));
+            return Err(SocketError::Timeout("AI 未开始回复".into()));
         }
         if !self.wait_for_response(self.inner.sync_timeout) {
-            return Err(ChatError::Timeout("回复超时".into()));
+            return Err(SocketError::Timeout("回复超时".into()));
         }
         // 回复中途断连时收尾会清空 receiving,等待谓词立即通过;
         // 此处校验连接,避免把半截回复当作成功返回
         if !self.is_connected() {
-            return Err(ChatError::Timeout("连接已断开,回复不完整".into()));
+            return Err(SocketError::Timeout("连接已断开,回复不完整".into()));
         }
         Ok(self.current_response())
     }
@@ -484,8 +452,8 @@ impl ChatClient {
             .lock()
             .unwrap()
             .clone()
-            .ok_or_else(|| ChatError::NotConnected)?;
-        tx.send(Message::text(payload)).map_err(ChatError::from)
+            .ok_or_else(|| SocketError::NotConnected)?;
+        tx.send(Message::text(payload)).map_err(SocketError::from)
     }
 }
 
@@ -739,8 +707,8 @@ fn send_event_on(inner: &Arc<ChatInner>, name: &str, payload: &Value) -> Result<
         .lock()
         .unwrap()
         .clone()
-        .ok_or_else(|| ChatError::NotConnected)?;
-    tx.send(Message::text(frame)).map_err(ChatError::from)
+        .ok_or_else(|| SocketError::NotConnected)?;
+    tx.send(Message::text(frame)).map_err(SocketError::from)
 }
 
 // 帧处理
@@ -782,8 +750,8 @@ fn send_raw(inner: &Arc<ChatInner>, payload: &str) -> Result<()> {
         .lock()
         .unwrap()
         .clone()
-        .ok_or_else(|| ChatError::NotConnected)?;
-    tx.send(Message::text(payload)).map_err(ChatError::from)
+        .ok_or_else(|| SocketError::NotConnected)?;
+    tx.send(Message::text(payload)).map_err(SocketError::from)
 }
 
 // 连接建立与读循环
@@ -792,7 +760,7 @@ fn send_raw(inner: &Arc<ChatInner>, payload: &str) -> Result<()> {
 fn establish(inner: &Arc<ChatInner>) -> Result<()> {
     // 与 Python build_websocket_url 一致(token 经 URL 编码)
     let mut url =
-        url::Url::parse(CHAT_WS_BASE_URL).map_err(|e| ChatError::Handshake(e.to_string()))?;
+        url::Url::parse(CHAT_WS_BASE_URL).map_err(|e| SocketError::Handshake(e.to_string()))?;
     url.query_pairs_mut()
         .append_pair("stag", "6")
         .append_pair("rf", "")
@@ -805,10 +773,10 @@ fn establish(inner: &Arc<ChatInner>) -> Result<()> {
     let mut request = url
         .as_str()
         .into_client_request()
-        .map_err(|e| ChatError::Handshake(e.to_string()))?;
+        .map_err(|e| SocketError::Handshake(e.to_string()))?;
     request.headers_mut().insert(
         "User-Agent",
-        HeaderValue::from_str(&inner.user_agent).map_err(|e| ChatError::Auth(e.to_string()))?,
+        HeaderValue::from_str(&inner.user_agent).map_err(|e| SocketError::Auth(e.to_string()))?,
     );
     request
         .headers_mut()
@@ -817,7 +785,7 @@ fn establish(inner: &Arc<ChatInner>) -> Result<()> {
     let (mut ws, response) = connect(request)?;
     // WebSocket 升级成功返回 HTTP 101 Switching Protocols
     if response.status() != tungstenite::http::StatusCode::SWITCHING_PROTOCOLS {
-        return Err(ChatError::Handshake(format!(
+        return Err(SocketError::Handshake(format!(
             "HTTP 状态: {}",
             response.status()
         )));
@@ -839,7 +807,7 @@ fn establish(inner: &Arc<ChatInner>) -> Result<()> {
     let handle = thread::Builder::new()
         .name("chat-ws-read".into())
         .spawn(move || read_loop(inner_loop, ws, rx))
-        .map_err(|e| ChatError::Thread(e.to_string()))?;
+        .map_err(|e| SocketError::Thread(e.to_string()))?;
     *inner.read_join.lock().unwrap() = Some(handle);
     Ok(())
 }

@@ -1,6 +1,6 @@
 use crate::api::auth::CloudAuthenticator;
 use crate::utils::filedata::PathConfig;
-use crate::utils::requests::{CodeMaoClient, HttpMethod, KittyFactory};
+use crate::utils::requests::{CodeMaoClient, HttpMethod};
 use aes_gcm::aead::array::Array;
 use aes_gcm::aead::array::typenum::{U12, U32};
 use aes_gcm::{
@@ -3910,7 +3910,7 @@ impl Default for WorkProcessorRegistry {
 }
 
 // 主入口
-pub(crate) struct CodemaoDecompiler {
+pub struct CodemaoDecompiler {
     config: Arc<DecompilerConfig>,
     client: Arc<CodeMaoClient>,
     id_generator: IdGenerator,
@@ -3918,7 +3918,12 @@ pub(crate) struct CodemaoDecompiler {
 }
 
 impl CodemaoDecompiler {
-    pub(crate) fn new(config: Option<DecompilerConfig>, client: Arc<CodeMaoClient>) -> Self {
+    /// 使用自定义 HTTP 客户端构造反编译器(注入客户端,便于独立实例/测试)
+    pub fn new(client: CodeMaoClient) -> Self {
+        Self::new_inner(None, Arc::new(client))
+    }
+
+    fn new_inner(config: Option<DecompilerConfig>, client: Arc<CodeMaoClient>) -> Self {
         let config = Arc::new(config.unwrap_or_default());
         Self {
             config,
@@ -3930,15 +3935,15 @@ impl CodemaoDecompiler {
 
     /// 全局单例门面:复用全局 HTTP 客户端与默认注册表
     /// 多次反编译不重复创建客户端(性能优化)
-    pub(crate) fn global() -> &'static Self {
+    pub fn global() -> &'static Self {
         static GLOBAL: OnceLock<CodemaoDecompiler> = OnceLock::new();
         GLOBAL.get_or_init(|| {
-            let client = Arc::new(KittyFactory::global_client().clone());
-            Self::new(None, client)
+            let client = Arc::new(CodeMaoClient::global().clone());
+            Self::new_inner(None, client)
         })
     }
     /// 反编译单个作品(默认选项,向后兼容)
-    pub(crate) fn decompile(&self, work_id: i64, output_dir: Option<&Path>) -> Result<String> {
+    pub fn decompile(&self, work_id: i64, output_dir: Option<&Path>) -> Result<String> {
         let mut options = DecompileOptions::new();
         if let Some(dir) = output_dir {
             options = options.output_dir(dir.to_path_buf());
@@ -3947,7 +3952,7 @@ impl CodemaoDecompiler {
     }
 
     /// 使用自定义选项反编译单个作品
-    pub(crate) fn decompile_with_options(
+    pub fn decompile_with_options(
         &self,
         work_id: i64,
         options: DecompileOptions,
@@ -3956,7 +3961,7 @@ impl CodemaoDecompiler {
     }
 
     /// 批处理反编译多个作品,返回与输入顺序一致的 `Vec<Result>`
-    pub(crate) fn decompile_batch(
+    pub fn decompile_batch(
         &self,
         work_ids: &[i64],
         options: DecompileOptions,
@@ -4094,17 +4099,17 @@ impl CodemaoDecompiler {
 }
 
 /// 便捷反编译函数:使用全局单例门面(复用 HTTP 客户端),功能与之前一致
-/// `output_dir` 传 `None` 表示不落盘,仅返回 JSON 字符串
+/// `output_dir` 传 `None` 表示不落盘,仅返回 JSON 字符串;自定义客户端请用 `CodemaoDecompiler::new(client)`
 pub fn decompile_work(work_id: i64, output_dir: Option<&Path>) -> Result<String> {
     CodemaoDecompiler::global().decompile(work_id, output_dir)
 }
 
-/// 便捷反编译函数:使用自定义选项
+/// 便捷反编译函数:使用自定义选项;自定义客户端请用 `CodemaoDecompiler::new(client)`
 pub fn decompile_work_with(work_id: i64, options: DecompileOptions) -> Result<String> {
     CodemaoDecompiler::global().decompile_with_options(work_id, options)
 }
 
-/// 便捷批量反编译函数:返回与输入顺序一致的 `Vec<Result<String>>`
+/// 便捷批量反编译函数:返回与输入顺序一致的 `Vec<Result<String>>`;自定义客户端请用 `CodemaoDecompiler::new(client)`
 pub fn decompile_works(work_ids: &[i64], options: DecompileOptions) -> Vec<Result<String>> {
     CodemaoDecompiler::global().decompile_batch(work_ids, options)
 }

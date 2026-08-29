@@ -7,15 +7,17 @@ use serde_json::{Value, json};
 /// 海外平台数据访问客户端
 /// 提供获取 Tiger 账号信息和平台配置的能力
 pub struct OverseaDataClient {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl OverseaDataClient {
     /// 创建新实例,使用全局客户端
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     /// 获取 Tiger 账号信息列表
@@ -64,7 +66,7 @@ impl Language {
 /// 用户操作处理器
 /// 负责海外平台的注册与登录功能
 pub struct UserActionHandler {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl UserActionHandler {
@@ -73,9 +75,11 @@ impl UserActionHandler {
 
     /// 创建新实例,使用全局客户端
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     /// 通过邮箱注册新账号
@@ -147,12 +151,12 @@ impl Default for UserActionHandler {
 
 impl ClientAccess for OverseaDataClient {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }
 
 impl ClientAccess for UserActionHandler {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }

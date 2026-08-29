@@ -5,14 +5,16 @@ use serde_json::{Value, json};
 /// 人机验证接口(极验/阿里云/网易/腾讯/防水墙等)
 /// 对应 OpenAPI 中「人机验证」分组
 pub struct CaptchaManager {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl CaptchaManager {
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     /// 获取验证码规则
@@ -146,6 +148,6 @@ impl Default for CaptchaManager {
 
 impl ClientAccess for CaptchaManager {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }

@@ -42,14 +42,16 @@ pub struct ImproveTeacherInfoArgs<'a> {
 
 /// 教育管理相关操作(班级,学生,作业等)
 pub struct EduUserAction {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl EduUserAction {
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     // 私有辅助
@@ -348,7 +350,7 @@ impl Default for EduUserAction {
 
 impl ClientAccess for EduUserAction {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }
 
@@ -356,14 +358,16 @@ impl ClientAccess for EduUserAction {
 
 /// 教育平台数据查询接口
 pub struct EduDataFetcher {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl EduDataFetcher {
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     // 私有辅助
@@ -1067,6 +1071,6 @@ impl Default for EduDataFetcher {
 
 impl ClientAccess for EduDataFetcher {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }

@@ -8,7 +8,6 @@ use std::time::{Duration, Instant};
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use thiserror::Error;
 use tungstenite::Message;
 use tungstenite::client::IntoClientRequest;
 use tungstenite::http::HeaderValue;
@@ -16,8 +15,8 @@ use tungstenite::{WebSocket, connect};
 
 use crate::api::auth::CloudAuthenticator;
 use crate::utils::socketio::{
-    self, CONNECTED_MESSAGE, CallbackStore, EVENT_MESSAGE_PREFIX, Frame, Notify, PONG_MESSAGE, Ws,
-    set_stream_read_timeout, truncate, wait_flag,
+    self, CONNECTED_MESSAGE, CallbackStore, EVENT_MESSAGE_PREFIX, Frame, Notify, PONG_MESSAGE,
+    SocketError, Ws, set_stream_read_timeout, truncate, wait_flag,
 };
 
 pub use crate::utils::socketio::CallbackHandle;
@@ -59,39 +58,8 @@ impl RankingOrder {
 
 // 错误类型
 
-/// 云存储操作错误
-#[derive(Debug, Error)]
-pub enum CloudError {
-    #[error("WebSocket 错误: {0}")]
-    WebSocket(#[from] Box<tungstenite::Error>),
-    #[error("HTTP 握手失败: {0}")]
-    Handshake(String),
-    #[error("JSON 错误: {0}")]
-    Json(#[from] serde_json::Error),
-    #[error("发送失败: {0}")]
-    Send(#[from] std::sync::mpsc::SendError<tungstenite::Message>),
-    #[error("连接未就绪")]
-    NotConnected,
-    #[error("变量未找到: {0}")]
-    VariableNotFound(String),
-    #[error("列表未找到: {0}")]
-    ListNotFound(String),
-    #[error("无效参数: {0}")]
-    InvalidArgument(String),
-    #[error("鉴权错误: {0}")]
-    Auth(String),
-    #[error("线程错误: {0}")]
-    Thread(String),
-}
-
-impl From<tungstenite::Error> for CloudError {
-    fn from(err: tungstenite::Error) -> Self {
-        CloudError::WebSocket(Box::new(err))
-    }
-}
-
 /// 本模块统一的 `Result` 别名
-pub(crate) type Result<T> = std::result::Result<T, CloudError>;
+pub(crate) type Result<T, E = SocketError> = std::result::Result<T, E>;
 
 // 基础类型
 
@@ -753,7 +721,7 @@ impl CloudConnection {
             let handle = thread::Builder::new()
                 .name("cloud-flush".into())
                 .spawn(move || flush_loop(inner))
-                .map_err(|e| CloudError::Thread(e.to_string()))?;
+                .map_err(|e| SocketError::Thread(e.to_string()))?;
             *self.inner.flush_join.lock().unwrap() = Some(handle);
         }
         info!(
@@ -999,7 +967,7 @@ impl CloudConnection {
     /// 获取私有变量排行榜(结果经 `on_ranking_received` 回调返回)
     pub fn get_ranking(&self, variable_name: &str, limit: i64, order: RankingOrder) -> Result<()> {
         if !(MIN_RANKING_LIMIT..=MAX_RANKING_LIMIT).contains(&limit) {
-            return Err(CloudError::InvalidArgument(format!(
+            return Err(SocketError::InvalidArgument(format!(
                 "排行榜限制数量必须在 {MIN_RANKING_LIMIT}..={MAX_RANKING_LIMIT} 之间"
             )));
         }
@@ -1011,7 +979,7 @@ impl CloudConnection {
             .unwrap()
             .variable(VarKind::Private, variable_name)
             .map(|v| v.cvid.clone())
-            .ok_or_else(|| CloudError::VariableNotFound(variable_name.to_string()))?;
+            .ok_or_else(|| SocketError::VariableNotFound(variable_name.to_string()))?;
         // 先发送再入队:入队顺序与 wire 发送顺序一致,消除并发请求的响应错配主窗口
         // (协议无请求关联 ID,极端并发下仍可能错配,属协议限制)
         let mut payload = serde_json::Map::new();
@@ -1583,7 +1551,7 @@ impl CloudInner {
             let mut store = self.state.lock().unwrap();
             let list = store
                 .list_mut(name)
-                .ok_or_else(|| CloudError::ListNotFound(name.to_string()))?;
+                .ok_or_else(|| SocketError::ListNotFound(name.to_string()))?;
             // 仅在注册了整表变更回调时才克隆旧表,避免高频列表操作白拷贝整表
             let old_items = if list.change_callbacks.is_empty() {
                 None
@@ -1592,7 +1560,7 @@ impl CloudInner {
             };
             let cvid = list.cvid.clone();
             let outcome = execute_list_action(&mut list.items, &action).ok_or_else(|| {
-                CloudError::InvalidArgument(format!("列表操作越界或非法: {action:?}"))
+                SocketError::InvalidArgument(format!("列表操作越界或非法: {action:?}"))
             })?;
             (cvid, old_items, outcome)
         };
@@ -1695,7 +1663,7 @@ impl CloudInner {
             let mut store = self.state.lock().unwrap();
             let var = store
                 .variable_mut(kind, name)
-                .ok_or_else(|| CloudError::VariableNotFound(name.to_string()))?;
+                .ok_or_else(|| SocketError::VariableNotFound(name.to_string()))?;
             let old = std::mem::replace(&mut var.value, new_value.clone());
             (var.cvid.clone(), old)
         };
@@ -2129,16 +2097,16 @@ fn dispatch_message(inner: &Arc<CloudInner>, name: &str, payload: &Value) -> Res
 /// 从数据项 JSON 创建变量或列表(云端类型:0 私有变量 / 1 公有变量 / 2 列表)
 fn create_data_item(inner: &Arc<CloudInner>, item: &Value) -> Result<()> {
     let Some(cvid) = item.get("cvid").and_then(Value::as_str) else {
-        return Err(CloudError::InvalidArgument("数据项缺少 cvid".into()));
+        return Err(SocketError::InvalidArgument("数据项缺少 cvid".into()));
     };
     let Some(name) = item.get("name").and_then(Value::as_str) else {
-        return Err(CloudError::InvalidArgument("数据项缺少 name".into()));
+        return Err(SocketError::InvalidArgument("数据项缺少 name".into()));
     };
     let Some(value) = item.get("value") else {
-        return Err(CloudError::InvalidArgument("数据项缺少 value".into()));
+        return Err(SocketError::InvalidArgument("数据项缺少 value".into()));
     };
     let Some(data_type) = item.get("type").and_then(Value::as_i64) else {
-        return Err(CloudError::InvalidArgument("数据项缺少 type".into()));
+        return Err(SocketError::InvalidArgument("数据项缺少 type".into()));
     };
     let mut store = inner.state.lock().unwrap();
     match data_type {
@@ -2188,7 +2156,7 @@ fn send_inner_text(inner: &Arc<CloudInner>, payload: &str) -> Result<()> {
         .lock()
         .unwrap()
         .clone()
-        .ok_or_else(|| CloudError::NotConnected)?;
+        .ok_or_else(|| SocketError::NotConnected)?;
     tx.send(Message::text(payload))?;
     Ok(())
 }
@@ -2285,24 +2253,24 @@ fn establish_locked(inner: &Arc<CloudInner>) -> Result<()> {
     let mut auth = CloudAuthenticator::new(None);
     let device_auth = auth
         .generate_x_device_auth()
-        .map_err(|e| CloudError::Auth(e.to_string()))?;
+        .map_err(|e| SocketError::Auth(e.to_string()))?;
 
     let mut request = url
         .as_str()
         .into_client_request()
-        .map_err(|e| CloudError::Handshake(e.to_string()))?;
+        .map_err(|e| SocketError::Handshake(e.to_string()))?;
     let headers = request.headers_mut();
     headers.insert(
         "X-Creation-Tools-Device-Auth",
         HeaderValue::from_str(&device_auth)
-            .map_err(|e| CloudError::InvalidArgument(e.to_string()))?,
+            .map_err(|e| SocketError::InvalidArgument(e.to_string()))?,
     );
     if let Some(token) = &inner.token {
         let cookie = format!("Authorization={token}");
         headers.insert(
             "Cookie",
             HeaderValue::from_str(&cookie)
-                .map_err(|e| CloudError::InvalidArgument(e.to_string()))?,
+                .map_err(|e| SocketError::InvalidArgument(e.to_string()))?,
         );
     }
 
@@ -2311,7 +2279,7 @@ fn establish_locked(inner: &Arc<CloudInner>) -> Result<()> {
     })?;
     // WebSocket 升级成功返回 HTTP 101 Switching Protocols
     if response.status() != tungstenite::http::StatusCode::SWITCHING_PROTOCOLS {
-        let err = CloudError::Handshake(format!("HTTP 状态: {}", response.status()));
+        let err = SocketError::Handshake(format!("HTTP 状态: {}", response.status()));
         emit_connection_event(inner, ConnectionEvent::Error(err.to_string()));
         return Err(err);
     }
@@ -2332,7 +2300,7 @@ fn establish_locked(inner: &Arc<CloudInner>) -> Result<()> {
     let handle = thread::Builder::new()
         .name("cloud-ws-read".into())
         .spawn(move || read_loop(inner_loop, ws, rx))
-        .map_err(|e| CloudError::Thread(e.to_string()))?;
+        .map_err(|e| SocketError::Thread(e.to_string()))?;
     *inner.read_join.lock().unwrap() = Some(handle);
     Ok(())
 }

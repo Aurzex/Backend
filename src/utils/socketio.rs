@@ -173,3 +173,40 @@ pub(crate) fn truncate(text: &str, max: usize) -> String {
     let tail: String = text.chars().skip(count - half).collect();
     format!("{head}{SUFFIX}{tail}")
 }
+
+/// Socket.IO 客户端(云变量 / AI 对话)共用的错误类型
+#[derive(Debug, thiserror::Error)]
+pub enum SocketError {
+    #[error("WebSocket 错误: {0}")]
+    WebSocket(#[from] Box<tungstenite::Error>),
+    #[error("HTTP 握手失败: {0}")]
+    Handshake(String),
+    #[error("JSON 错误: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("发送失败: {0}")]
+    Send(#[from] std::sync::mpsc::SendError<tungstenite::Message>),
+    #[error("连接未就绪")]
+    NotConnected,
+    #[error("正在接收回复,请等待完成")]
+    Busy,
+    #[error("超时: {0}")]
+    Timeout(String),
+    #[error("未提供 token")]
+    MissingToken,
+    #[error("变量未找到: {0}")]
+    VariableNotFound(String),
+    #[error("列表未找到: {0}")]
+    ListNotFound(String),
+    #[error("无效参数: {0}")]
+    InvalidArgument(String),
+    #[error("鉴权错误: {0}")]
+    Auth(String),
+    #[error("线程错误: {0}")]
+    Thread(String),
+}
+
+impl From<tungstenite::Error> for SocketError {
+    fn from(err: tungstenite::Error) -> Self {
+        SocketError::WebSocket(Box::new(err))
+    }
+}

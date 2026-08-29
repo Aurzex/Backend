@@ -108,14 +108,16 @@ impl ResourcePackType {
 
 /// 基础作品操作接口(关注,收藏,点赞,再创作,分享,举报,重命名)
 pub struct BaseWorkOperations {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl BaseWorkOperations {
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     /// 关注或取消关注用户
@@ -234,14 +236,16 @@ impl Default for BaseWorkOperations {
 
 /// 作品评论操作接口
 pub struct CommentOperations {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl CommentOperations {
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     /// 添加作品评论
@@ -416,17 +420,21 @@ pub struct PublishKittenWorkArgs<'a> {
 
 /// Kitten 作品管理接口(创建,发布,删除,回收站等)
 pub struct KittenWorkManager {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
     pub operations: BaseWorkOperations,
     pub comments: CommentOperations,
 }
 
 impl KittenWorkManager {
     pub fn new() -> Self {
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
         Self {
-            client: CodeMaoClient::global(),
-            operations: BaseWorkOperations::new(),
-            comments: CommentOperations::new(),
+            client: client.clone(),
+            operations: BaseWorkOperations::new_with_client(client.clone()),
+            comments: CommentOperations::new_with_client(client),
         }
     }
 
@@ -578,17 +586,21 @@ pub struct PublishKnWorkArgs<'a> {
 
 /// KN 作品管理接口
 pub struct NekoWorkManager {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
     pub operations: BaseWorkOperations,
     pub comments: CommentOperations,
 }
 
 impl NekoWorkManager {
     pub fn new() -> Self {
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
         Self {
-            client: CodeMaoClient::global(),
-            operations: BaseWorkOperations::new(),
-            comments: CommentOperations::new(),
+            client: client.clone(),
+            operations: BaseWorkOperations::new_with_client(client.clone()),
+            comments: CommentOperations::new_with_client(client),
         }
     }
 
@@ -744,14 +756,16 @@ pub struct CreateWoodProjectArgs<'a> {
 
 /// 海龟编辑器作品管理接口
 pub struct WoodWorkManager {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl WoodWorkManager {
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     /// 获取海龟编辑器项目信息
@@ -879,14 +893,16 @@ impl Default for WoodWorkManager {
 
 /// Coco 平台管理接口
 pub struct CocoWorkManager {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl CocoWorkManager {
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     /// 获取 Coco 平台的主要课程列表
@@ -1024,14 +1040,16 @@ impl Default for CocoWorkManager {
 
 /// 作品协作功能接口
 pub struct CollaborationManager {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl CollaborationManager {
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     /// 获取或删除 Kitten 协作邀请码
@@ -1156,14 +1174,16 @@ impl Default for CollaborationManager {
 
 /// AI 绘画等服务接口
 pub struct AIServices {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl AIServices {
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     /// 获取文生图提示词
@@ -1246,14 +1266,16 @@ impl Default for AIServices {
 
 /// 教学计划管理接口
 pub struct TeachingPlanManager {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl TeachingPlanManager {
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     /// 保存团队作品(教学计划)
@@ -1383,14 +1405,16 @@ impl Default for TeachingPlanManager {
 
 /// 图像分类管理接口
 pub struct ImageClassifyManager {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl ImageClassifyManager {
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     /// 获取图像分类列表
@@ -1459,14 +1483,16 @@ impl Default for ImageClassifyManager {
 
 /// 包管理接口
 pub struct PackageManager {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl PackageManager {
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     /// 获取包列表
@@ -1545,14 +1571,16 @@ impl Default for PackageManager {
 
 /// 示例管理接口
 pub struct SampleManager {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl SampleManager {
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     /// 获取示例列表
@@ -1605,14 +1633,16 @@ pub struct MiaoCodePayload<'a> {
 
 /// 作品数据查询接口(详情,评论,源代码,推荐,搜索等)
 pub struct WorkDataFetcher {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl WorkDataFetcher {
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     /// 获取作品详细信息
@@ -2426,78 +2456,78 @@ impl Default for WorkDataFetcher {
 
 impl ClientAccess for BaseWorkOperations {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }
 
 impl ClientAccess for CommentOperations {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }
 
 impl ClientAccess for KittenWorkManager {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }
 
 impl ClientAccess for NekoWorkManager {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }
 
 impl ClientAccess for WoodWorkManager {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }
 
 impl ClientAccess for CocoWorkManager {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }
 
 impl ClientAccess for CollaborationManager {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }
 
 impl ClientAccess for AIServices {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }
 
 impl ClientAccess for TeachingPlanManager {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }
 
 impl ClientAccess for ImageClassifyManager {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }
 
 impl ClientAccess for PackageManager {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }
 
 impl ClientAccess for SampleManager {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }
 
 impl ClientAccess for WorkDataFetcher {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }

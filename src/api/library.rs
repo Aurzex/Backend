@@ -94,14 +94,16 @@ pub enum BookAttributeId {
 
 /// 漫画相关数据查询接口
 pub struct CartoonDataFetcher {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl CartoonDataFetcher {
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     /// 获取全部漫画列表
@@ -138,7 +140,7 @@ impl Default for CartoonDataFetcher {
 
 impl ClientAccess for CartoonDataFetcher {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }
 
@@ -146,14 +148,16 @@ impl ClientAccess for CartoonDataFetcher {
 
 /// 小说相关数据查询接口
 pub struct NovelDataFetcher {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl NovelDataFetcher {
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     /// 获取小说分类列表
@@ -340,7 +344,7 @@ impl Default for NovelDataFetcher {
 
 impl ClientAccess for NovelDataFetcher {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }
 
@@ -348,14 +352,16 @@ impl ClientAccess for NovelDataFetcher {
 
 /// 小说相关操作接口(收藏,评论,发布章节等)
 pub struct NovelActionHandler {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl NovelActionHandler {
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     /// 收藏 / 取消收藏小说
@@ -562,7 +568,7 @@ impl Default for NovelActionHandler {
 
 impl ClientAccess for NovelActionHandler {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }
 
@@ -570,14 +576,16 @@ impl ClientAccess for NovelActionHandler {
 
 /// 图鉴相关数据查询接口
 pub struct BookDataFetcher {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl BookDataFetcher {
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     /// 获取全部图鉴
@@ -635,7 +643,7 @@ impl Default for BookDataFetcher {
 
 impl ClientAccess for BookDataFetcher {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }
 
@@ -643,14 +651,16 @@ impl ClientAccess for BookDataFetcher {
 
 /// 图鉴相关操作接口(点赞等)
 pub struct BookActionHandler {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl BookActionHandler {
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     /// 点赞 / 取消点赞图鉴
@@ -679,6 +689,6 @@ impl Default for BookActionHandler {
 
 impl ClientAccess for BookActionHandler {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }

@@ -122,14 +122,16 @@ pub enum AvatarFrameId {
 
 /// 用户相关数据查询接口
 pub struct UserDataFetcher {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl UserDataFetcher {
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     // 私有辅助
@@ -733,7 +735,7 @@ impl Default for UserDataFetcher {
 
 impl ClientAccess for UserDataFetcher {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }
 
@@ -741,14 +743,16 @@ impl ClientAccess for UserDataFetcher {
 
 /// 用户相关操作接口(更新状态,头像框,主页封面等)
 pub struct UserManager {
-    client: &'static CodeMaoClient,
+    client: CodeMaoClient,
 }
 
 impl UserManager {
     pub fn new() -> Self {
-        Self {
-            client: CodeMaoClient::global(),
-        }
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     // 私有辅助
@@ -808,6 +812,6 @@ impl Default for UserManager {
 
 impl ClientAccess for UserManager {
     fn client(&self) -> &CodeMaoClient {
-        self.client
+        &self.client
     }
 }
