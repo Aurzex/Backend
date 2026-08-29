@@ -189,11 +189,12 @@ impl BatchActionManager {
     }
 }
 
-// 动作注册表(静态函数表)
-type ActionFn = fn(i32, i32, Resolution) -> Result<bool, ProcessorError>;
+// 动作注册表(可捕获客户端)
+type ActionFn = Box<dyn Fn(i32, i32, Resolution) -> Result<bool, ProcessorError> + Send + Sync>;
 
 pub(crate) struct ActionRegistry {
     handlers: HashMap<&'static str, ActionFn>,
+    client: CodeMaoClient,
 }
 
 impl Default for ActionRegistry {
@@ -204,20 +205,27 @@ impl Default for ActionRegistry {
 
 impl ActionRegistry {
     pub(crate) fn new() -> Self {
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub(crate) fn new_with_client(client: CodeMaoClient) -> Self {
         macro_rules! register_report_handler {
-            ($handlers:ident, $method:literal, $handler:ident) => {
+            ($handlers:ident, $method:literal, $handler:ident) => {{
+                let c = client.clone();
                 $handlers.insert(
                     $method,
-                    |report_id: i32,
-                     admin_id: i32,
-                     resolution: Resolution|
-                     -> Result<bool, ProcessorError> {
-                        ReportHandler::new()
-                            .$handler(report_id, admin_id, resolution)
-                            .map_err(ProcessorError::from)
-                    },
+                    Box::new(
+                        move |report_id: i32,
+                              admin_id: i32,
+                              resolution: Resolution|
+                              -> Result<bool, ProcessorError> {
+                            ReportHandler::new_with_client(c.clone())
+                                .$handler(report_id, admin_id, resolution)
+                                .map_err(ProcessorError::from)
+                        },
+                    ),
                 );
-            };
+            }};
         }
         let mut handlers: HashMap<&'static str, ActionFn> = HashMap::new();
         register_report_handler!(
@@ -232,7 +240,7 @@ impl ActionRegistry {
             "execute_process_discussion_report",
             process_discussion_report
         );
-        ActionRegistry { handlers }
+        ActionRegistry { handlers, client }
     }
 
     pub(crate) fn apply(
@@ -250,24 +258,21 @@ impl ActionRegistry {
     }
 }
 
-static ACTION_REGISTRY: LazyLock<ActionRegistry> = LazyLock::new(ActionRegistry::new);
-pub(crate) fn global_action_registry() -> &'static ActionRegistry {
-    &ACTION_REGISTRY
-}
-
 // 应用动作的便捷函数
 pub(crate) fn apply_action_by_method(
+    client: &CodeMaoClient,
     method: &str,
     report_id: i32,
     admin_id: i32,
     resolution: Resolution,
 ) -> Result<bool, ProcessorError> {
-    global_action_registry().apply(method, report_id, admin_id, resolution)
+    ActionRegistry::new_with_client(client.clone()).apply(method, report_id, admin_id, resolution)
 }
 
 /// 依据动作键查配置中的决议并执行处理动作;
 /// 未知键或非执行类动作(检查违规/跳过)直接报错,避免调用方误把记录静默标记为已处理
 pub(crate) fn apply_action_by_key(
+    client: &CodeMaoClient,
     config: &SourceConfig,
     report_id: i32,
     admin_id: i32,
@@ -282,7 +287,13 @@ pub(crate) fn apply_action_by_key(
         .resolution
         .ok_or_else(|| ProcessorError::Processing(format!("动作 {} 为非执行类动作", action_key)))?;
     // 服务端未确认(状态码非预期)时返回错误,避免记录被静默标记为已处理
-    if !apply_action_by_method(&config.handle_method, report_id, admin_id, resolution)? {
+    if !apply_action_by_method(
+        client,
+        &config.handle_method,
+        report_id,
+        admin_id,
+        resolution,
+    )? {
         return Err(ProcessorError::Processing(format!(
             "服务端未确认动作(状态码非预期): report_id={report_id}"
         )));
@@ -846,7 +857,7 @@ impl ViolationChecker {
         let violations: HashSet<String> = violations.iter().cloned().collect();
         let mut accounts = multi_account.accounts.clone();
         let success = self.report_violations(&mut accounts, &violations);
-        if let Err(e) = CodeMaoClient::global().switch_identity(Catsona::Judge) {
+        if let Err(e) = self.client.switch_identity(Catsona::Judge) {
             warn!("切换回管理员身份失败: {}", e);
         }
         info!("自动举报完成,成功 {}/{}", success, violations.len());
@@ -889,7 +900,7 @@ impl ViolationChecker {
         if last_login.as_deref() == Some(user.as_str()) {
             return true;
         }
-        match Self::login_student(&user, &pass) {
+        match self.login_student(&user, &pass) {
             Ok(()) => {
                 *last_login = Some(user.clone());
                 true
@@ -970,8 +981,8 @@ impl ViolationChecker {
         success
     }
 
-    fn login_student(username: &str, password: &str) -> Result<(), ProcessorError> {
-        let mut session = crate::api::auth::LoginBuilder::new()
+    fn login_student(&self, username: &str, password: &str) -> Result<(), ProcessorError> {
+        let mut session = crate::api::auth::LoginBuilder::new_with_client(self.client.clone())
             .identity(username)
             .password(password)
             .status(crate::api::auth::AccountStatus::Edu)
@@ -1014,7 +1025,7 @@ impl ViolationChecker {
                 if source != "forum" {
                     return Err(ProcessorError::Processing("不能在非论坛举报帖子".into()));
                 }
-                ForumActionHandler::new()
+                ForumActionHandler::new_with_client(self.client.clone())
                     .report_post(
                         content_id,
                         PostReportReasonId::Reason7,
@@ -1024,7 +1035,7 @@ impl ViolationChecker {
                     .map_err(ProcessorError::from)?;
             }
             "work" => {
-                BaseWorkOperations::new()
+                BaseWorkOperations::new_with_client(self.client.clone())
                     .report_work(content_id, reason_content, reason_content)
                     .map_err(ProcessorError::from)?;
             }
@@ -1038,7 +1049,7 @@ impl ViolationChecker {
                                 source_id
                             ))
                         })?;
-                        CommentOperations::new()
+                        CommentOperations::new_with_client(self.client.clone())
                             .report_comment(work_id, content_id, reason_content)
                             .map_err(ProcessorError::from)?;
                     }
@@ -1048,7 +1059,7 @@ impl ViolationChecker {
                         } else {
                             ItemType::Comment
                         };
-                        ForumActionHandler::new()
+                        ForumActionHandler::new_with_client(self.client.clone())
                             .report_item(
                                 content_id,
                                 ForumReportReasonId::Reason7,
@@ -1060,7 +1071,7 @@ impl ViolationChecker {
                     }
                     "shop" => {
                         let reporter_id = fastrand::i32(10000..=199_999_999);
-                        WorkshopActionHandler::new()
+                        WorkshopActionHandler::new_with_client(self.client.clone())
                             .report_comment(ReportCommentArgs {
                                 comment_id: content_id,
                                 reason_content,

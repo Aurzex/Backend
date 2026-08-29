@@ -13,7 +13,7 @@ use serde_json::Value;
 
 use super::pipeline::{
     BatchActionManager, BatchGroup, CheckConfig, ReportIdExt, ViolationChecker,
-    apply_action_by_key, get_display_registry, get_source_type_map, global_action_registry,
+    apply_action_by_key, apply_action_by_method, get_display_registry, get_source_type_map,
     truncate_chars,
 };
 use super::registry::{
@@ -440,7 +440,7 @@ impl ReportProcessor {
             )));
         }
         let report_id = config.get_report_id(item)?;
-        apply_action_by_key(config, report_id, admin_id, action)?;
+        apply_action_by_key(&self.client, config, report_id, admin_id, action)?;
         // 标记已决策:本次会话内不再重列(即使 API 状态尚未刷新)
         self.batch_manager
             .lock()
@@ -518,9 +518,13 @@ impl ReportProcessor {
                             continue;
                         }
                     };
-                    let registry = global_action_registry();
-                    let result =
-                        registry.apply(&cfg.handle_method, report_id, admin_id, Resolution::Pass);
+                    let result = apply_action_by_method(
+                        &self.client,
+                        &cfg.handle_method,
+                        report_id,
+                        admin_id,
+                        Resolution::Pass,
+                    );
                     match result {
                         Ok(true) => {
                             count += 1;

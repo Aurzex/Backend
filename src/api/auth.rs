@@ -271,6 +271,35 @@ impl Default for GlobalClientProvider {
     }
 }
 
+/// 持有独立 `CodeMaoClient` 的本地 provider,供登录流写入注入的客户端身份槽
+#[derive(Clone)]
+pub struct LocalClientProvider {
+    client: CodeMaoClient,
+}
+
+impl std::fmt::Debug for LocalClientProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LocalClientProvider")
+            .finish_non_exhaustive()
+    }
+}
+
+impl LocalClientProvider {
+    pub fn new(client: CodeMaoClient) -> Self {
+        Self { client }
+    }
+}
+
+impl ClientProvider for LocalClientProvider {
+    fn client(&self) -> &CodeMaoClient {
+        &self.client
+    }
+
+    fn clone_box(&self) -> Box<dyn ClientProvider> {
+        Box::new(self.clone())
+    }
+}
+
 // 全局单例
 
 static GLOBAL_AUTH_MANAGER: OnceLock<Arc<AuthManager>> = OnceLock::new();
@@ -1226,8 +1255,14 @@ pub struct LoginBuilder {
 
 impl LoginBuilder {
     pub fn new() -> Self {
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
         Self {
-            auth_manager: AuthManager::new(),
+            auth_manager: AuthManager::new_with_provider(Box::new(LocalClientProvider::new(
+                client,
+            ))),
             identity: None,
             password: None,
             token: None,
