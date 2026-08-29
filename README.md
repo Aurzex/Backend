@@ -56,7 +56,7 @@ cargo test          # 跑库单测
 - **core/** — 业务引擎:
   `cloudvar` 云变量 WS 客户端 · `compiler` 作品反编译(七种编辑器) · `converse` AI 对话 · `pipeline` / `services` / `registry` / `retrieve` 举报处理引擎 · `terminal` 交互式 UI(演示用)
 - **utils/** — 基础设施:
-  `requests` HTTP 客户端、身份管理、分页迭代器、上传、`ClientAccess` · `filedata` 路径配置、文件写入、`value_to_i64` · `socketio` Socket.IO over WebSocket 共享基础设施(cloudvar / converse 共用)
+  `requests` HTTP 客户端、身份管理、分页迭代器、上传、`ClientAccess` · `filedata` 路径配置、文件写入、`value_to_i64` · `socketio` Socket.IO over WebSocket 共享基础设施(cloudvar / converse 共用),含共享错误类型 `SocketError`
 
 ## 示例代码
 
@@ -211,6 +211,8 @@ for group in session.leftover_groups() {
 - **样板收敛到 `ClientAccess`**:每个业务 Manager 只需要实现 `fn client()`,`send_and_parse` / `check_status` / `send_maybe_parse` 由默认实现提供,4xx/5xx 还会自动带上服务端错误体——几十个 Manager 的请求代码只剩下「端点 + 参数」。
 - **分页统一为 `PaginatedIter`**:惰性初始化、翻页、总数/上限终止、页大小兜底全部内聚,调用方一个 `for` 循环就完事,不关心 offset/page 怎么算。`.with_limit(n)` 设上限,`.with_limit(FETCH_ALL)` 显式全量拉取(直到服务端空页或总数耗尽)。
 - **可替换边界**:`CodeMaoClient` 支持全局单例 / 独立实例(`new_with_global_auth` / `new_independent` / `new_with_auth`)和自定义 `KittyAuth` 认证提供者;业务 Manager、反编译器、举报引擎与登录(`LoginBuilder::new_with_client`)均提供 `new_with_client(client)`(默认 `new()` 走全局),`ClientProvider`(auth 域)与 `PathConfig::with_root`(路径)——核心逻辑不绑定具体 HTTP 实现和目录,方便测试和定制。
+
+- **错误模型分层**:传输层 / 通用错误归 `MewError`(`Http` / `Io` / `Json` / `HttpStatus` 结构化 4xx/5xx);WS 客户端共享 `SocketError`(cloudvar / converse);业务域错误(`DecompilerError` / `ProcessorError` / `DataQueryError`)包装 `MewError`,不重复传输层变体。
 - **WS 状态机封装成回调 + 等待原语**:cloudvar / converse 把帧解析、握手、重连、批量合并全部收进库内,外部通过 `on_change` / `on_connection` / `on_stream` 回调和 `connect_and_wait` / `send_and_wait` 同步原语交互;Socket.IO 帧解析与回调存储由 `utils/socketio` 统一提供。
 - **分层单向依赖**:`api → utils`,`core → api / utils`,上层不反向依赖;业务域模块之间互不引用,可以按需单独使用。
 
@@ -255,7 +257,7 @@ cargo test --test live_features   # 真机:登录 + AI 对话 + 云变量 + 反�
 cargo test --test compile_live -- --ignored   # 含 NEMO 反编译(约 5 分钟)
 ```
 
-- 库单测覆盖:管理员信息固定字段提取(`AdminInfo::from_details` 正常/缺失字段两条)、分块迭代器终止性(数据量超过 chunk 大小不重复、不丢失)。
+- 库单测覆盖:`AdminInfo::from_details` 固定字段提取(正常 / 缺失字段)、`manager_new_with_client_uses_injected_client`(客户端注入契约)、`header_override_is_case_insensitive`(请求头大小写覆盖)、分块迭代器终止性(数据量超过 chunk 大小不重复、不丢失)。
 - 集成测试配置和代码分离:把 `tests/fixtures/test-config.example.json` 复制成 `data/test-config.json` 再填好;`data/` 已被 `.gitignore` 忽略,账号密码不会入库。没配置时测试打印提示并跳过,不会导致失败;也可以用 `BACKEND_TEST_CONFIG` 环境变量覆盖配置文件路径。
 
 ## CI

@@ -29,8 +29,13 @@ cargo test --test live_features
 - **锁**:使用标准库 `std::sync::{Mutex, RwLock, Condvar}` 与 `lock().unwrap()` 风格,不引入额外锁依赖。
 - **删除代码**:不主动删除,除非已用 `lsp references`(或 `grep`)全仓确证零调用点(死代码)。`Cargo.toml` 已配置 `unused = "allow"`,死代码不阻塞编译,但应避免累积。
 - **请求样板**:优先复用 `utils/requests.rs` 的 `ClientAccess` 默认方法(`send_and_parse` / `check_status` / `send_maybe_parse`),不要手写 `send() + response_to_json`。这些方法已统一携带服务端错误响应体,错误路径可读。
+
+- **客户端注入**:业务 Manager / 反编译器 / 举报引擎 / 登录构建器等类型提供 `new()`(全局默认,委托 `new_with_client(CodeMaoClient::global().clone())`)与 `new_with_client(client: CodeMaoClient)`;不硬编码 `CodeMaoClient::global()`。例外:自动举报的多账号登录是全局身份槽特性,`login_student` 登录与身份切换保持全局。
 - **日志**:构造日志字符串(尤其 pretty-print)前先加 `log_enabled!(log::Level::Debug)` 守卫,避免 Info 级别下无谓分配。
 - **错误**:用 `thiserror` 枚举;包装错误时保留底层变体(如 `Http` / `Json` / `Io`),不要全部压成 `Auth(String)`。
+
+- **`Result` 别名**:模块内若定义 `type Result<T>` 别名,必须暴露默认错误参数——`type Result<T, E = XxxError> = std::result::Result<T, E>`——让 `?` 透传的同时保留精确错误的逃生口。
+- **错误模型分层**:传输层 / 通用错误归 `MewError`(`Http` / `Io` / `Json` / `HttpStatus`),WS 归 `SocketError`;业务域错误包装 `MewError`(如 `DecompilerError::Mew(#[from] MewError)`),不重复 Io/Json/Http 变体。
 - **注释与提交信息**:使用中文(喵语自由,但要让别的猫看懂)。
 
 ## 提交规范
