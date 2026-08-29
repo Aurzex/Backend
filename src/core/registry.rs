@@ -9,7 +9,7 @@ use std::time::Duration;
 use crate::api::whale::{
     CommentSourceType, ReportStatus, Resolution, WhaleReportFetcher, WorkSourceType,
 };
-use crate::utils::requests;
+use crate::utils::requests::{self, CodeMaoClient};
 use log::error;
 
 use serde_json::{Value, json};
@@ -174,11 +174,14 @@ fn actions(keys: &[&str]) -> Vec<ActionConfig> {
     keys.iter().map(|k| ActionConfig::simple(k)).collect()
 }
 
-pub(crate) type FetchGenerator =
-    fn(ReportStatus) -> Box<dyn Iterator<Item = Result<Value, ProcessorError>> + Send>;
-pub(crate) type FetchTotal = fn(ReportStatus) -> Result<Value, ProcessorError>;
+pub(crate) type FetchGenerator = Box<
+    dyn Fn(ReportStatus) -> Box<dyn Iterator<Item = Result<Value, ProcessorError>> + Send>
+        + Send
+        + Sync,
+>;
+pub(crate) type FetchTotal =
+    Arc<dyn Fn(ReportStatus) -> Result<Value, ProcessorError> + Send + Sync>;
 
-#[derive(Clone, Debug)]
 pub(crate) struct SourceConfig {
     pub(crate) admin_id_field: String,
     pub(crate) admin_username_field: String,
@@ -219,17 +222,19 @@ impl SourceConfig {
     /// 构造带公共默认字段名的配置;差异字段由调用方覆盖后再注册
     /// 大部分举报类型的字段名高度一致(如 `report_id_field` 均为 "id"),
     /// 通过"公共默认值 + 覆盖差异"大幅减少重复
-    fn base(
-        name: &str,
-        handle_method: &str,
-        fetch_total: FetchTotal,
-        fetch_generator: FetchGenerator,
-    ) -> Self {
+    fn base<F, G>(name: &str, handle_method: &str, fetch_total: F, fetch_generator: G) -> Self
+    where
+        F: Fn(ReportStatus) -> Result<Value, ProcessorError> + Send + Sync + 'static,
+        G: Fn(ReportStatus) -> Box<dyn Iterator<Item = Result<Value, ProcessorError>> + Send>
+            + Send
+            + Sync
+            + 'static,
+    {
         SourceConfig {
             name: name.into(),
             handle_method: handle_method.into(),
-            fetch_total,
-            fetch_generator,
+            fetch_total: Arc::new(fetch_total),
+            fetch_generator: Box::new(fetch_generator),
             admin_id_field: "admin_id".into(),
             admin_username_field: String::new(),
             available_actions: Vec::new(),
@@ -390,6 +395,7 @@ struct ActiveSource {
 }
 
 pub(crate) struct ReportFetcher {
+    client: CodeMaoClient,
     /// Arc 共享:ReportProcessor 的管道工厂与 fetcher 复用同一注册表,避免深拷贝
     pub(crate) registry: Arc<ReportTypeRegistry>,
 }
@@ -402,6 +408,10 @@ impl Default for ReportFetcher {
 
 impl ReportFetcher {
     pub(crate) fn new() -> Self {
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub(crate) fn new_with_client(client: CodeMaoClient) -> Self {
         let mut registry = ReportTypeRegistry::new();
 
         // shop_comment
@@ -409,23 +419,35 @@ impl ReportFetcher {
             let mut cfg = SourceConfig::base(
                 "工作室评论举报",
                 "execute_process_comment_report",
-                |status| {
-                    total_from(WhaleReportFetcher::new().fetch_comment_reports_gen(
-                        CommentSourceType::All,
-                        status,
-                        None,
-                        None,
-                        None,
-                    ))
+                {
+                    let c = client.clone();
+                    move |status| {
+                        total_from(
+                            WhaleReportFetcher::new_with_client(c.clone())
+                                .fetch_comment_reports_gen(
+                                    CommentSourceType::All,
+                                    status,
+                                    None,
+                                    None,
+                                    None,
+                                ),
+                        )
+                    }
                 },
-                |status| {
-                    gen_from(WhaleReportFetcher::new().fetch_comment_reports_gen(
-                        CommentSourceType::All,
-                        status,
-                        None,
-                        None,
-                        None,
-                    ))
+                {
+                    let c = client.clone();
+                    move |status| {
+                        gen_from(
+                            WhaleReportFetcher::new_with_client(c.clone())
+                                .fetch_comment_reports_gen(
+                                    CommentSourceType::All,
+                                    status,
+                                    None,
+                                    None,
+                                    None,
+                                ),
+                        )
+                    }
                 },
             );
             set_config_fields!(
@@ -459,23 +481,33 @@ impl ReportFetcher {
             let mut cfg = SourceConfig::base(
                 "作品举报",
                 "execute_process_work_report",
-                |status| {
-                    total_from(WhaleReportFetcher::new().fetch_work_reports_gen(
-                        WorkSourceType::All,
-                        status,
-                        None,
-                        None,
-                        None,
-                    ))
+                {
+                    let c = client.clone();
+                    move |status| {
+                        total_from(
+                            WhaleReportFetcher::new_with_client(c.clone()).fetch_work_reports_gen(
+                                WorkSourceType::All,
+                                status,
+                                None,
+                                None,
+                                None,
+                            ),
+                        )
+                    }
                 },
-                |status| {
-                    gen_from(WhaleReportFetcher::new().fetch_work_reports_gen(
-                        WorkSourceType::All,
-                        status,
-                        None,
-                        None,
-                        None,
-                    ))
+                {
+                    let c = client.clone();
+                    move |status| {
+                        gen_from(
+                            WhaleReportFetcher::new_with_client(c.clone()).fetch_work_reports_gen(
+                                WorkSourceType::All,
+                                status,
+                                None,
+                                None,
+                                None,
+                            ),
+                        )
+                    }
                 },
             );
             set_config_fields!(
@@ -503,17 +535,23 @@ impl ReportFetcher {
             let mut cfg = SourceConfig::base(
                 "帖子举报",
                 "execute_process_post_report",
-                |status| {
-                    total_from(
-                        WhaleReportFetcher::new()
-                            .fetch_post_reports_gen(status, None, None, None, None),
-                    )
+                {
+                    let c = client.clone();
+                    move |status| {
+                        total_from(
+                            WhaleReportFetcher::new_with_client(c.clone())
+                                .fetch_post_reports_gen(status, None, None, None, None),
+                        )
+                    }
                 },
-                |status| {
-                    gen_from(
-                        WhaleReportFetcher::new()
-                            .fetch_post_reports_gen(status, None, None, None, None),
-                    )
+                {
+                    let c = client.clone();
+                    move |status| {
+                        gen_from(
+                            WhaleReportFetcher::new_with_client(c.clone())
+                                .fetch_post_reports_gen(status, None, None, None, None),
+                        )
+                    }
                 },
             );
             set_config_fields!(
@@ -544,17 +582,23 @@ impl ReportFetcher {
             let mut cfg = SourceConfig::base(
                 "讨论举报",
                 "execute_process_discussion_report",
-                |status| {
-                    total_from(
-                        WhaleReportFetcher::new()
-                            .fetch_discussion_reports_gen(status, None, None, None, None),
-                    )
+                {
+                    let c = client.clone();
+                    move |status| {
+                        total_from(
+                            WhaleReportFetcher::new_with_client(c.clone())
+                                .fetch_discussion_reports_gen(status, None, None, None, None),
+                        )
+                    }
                 },
-                |status| {
-                    gen_from(
-                        WhaleReportFetcher::new()
-                            .fetch_discussion_reports_gen(status, None, None, None, None),
-                    )
+                {
+                    let c = client.clone();
+                    move |status| {
+                        gen_from(
+                            WhaleReportFetcher::new_with_client(c.clone())
+                                .fetch_discussion_reports_gen(status, None, None, None, None),
+                        )
+                    }
                 },
             );
             set_config_fields!(
@@ -581,6 +625,7 @@ impl ReportFetcher {
         }
 
         ReportFetcher {
+            client,
             registry: Arc::new(registry),
         }
     }
@@ -710,16 +755,17 @@ impl ReportFetcher {
                 let Some(config) = self.registry.get_config(&rtype) else {
                     continue;
                 };
-                let fetch_total = config.fetch_total; // fn 指针:Copy + Send
+                let fetch_total_a = config.fetch_total.clone();
+                let fetch_total_b = config.fetch_total.clone();
                 let rtype_a = rtype.clone();
                 let rtype_b = rtype.clone();
-                s.spawn(move || match fetch_total(a) {
+                s.spawn(move || match fetch_total_a(a) {
                     Ok(result) => {
                         ta.fetch_add(result.as_i64().unwrap_or(0), Ordering::Relaxed);
                     }
                     Err(e) => error!("获取 {} 总数失败: {}", rtype_a, e),
                 });
-                s.spawn(move || match fetch_total(b) {
+                s.spawn(move || match fetch_total_b(b) {
                     Ok(result) => {
                         tb.fetch_add(result.as_i64().unwrap_or(0), Ordering::Relaxed);
                     }
@@ -760,6 +806,7 @@ mod tests {
         registry.register("test_type", cfg);
 
         let fetcher = ReportFetcher {
+            client: CodeMaoClient::global().clone(),
             registry: Arc::new(registry),
         };
         let items: Vec<Value> = fetcher

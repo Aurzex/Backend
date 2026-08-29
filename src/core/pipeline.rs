@@ -17,7 +17,7 @@ use crate::api::whale::{ReportHandler, Resolution};
 use crate::api::work::{BaseWorkOperations, CommentOperations};
 use crate::core::retrieve::{CommentSource, DataQuery, JsonObject};
 use crate::utils::filedata::PathConfig;
-use crate::utils::requests::{Catsona, KittyFactory, ResponseMode};
+use crate::utils::requests::{Catsona, CodeMaoClient, ResponseMode};
 
 // 配置结构体(依赖注入)
 #[derive(Clone)]
@@ -543,10 +543,15 @@ pub(crate) struct ViolationChecker {
     ad_keywords_cache: Arc<HashSet<String>>,
     /// 与处理会话的预取线程共享:自动举报会切换全局身份,必须与在途请求互斥
     network_lock: Arc<Mutex<()>>,
+    client: CodeMaoClient,
 }
 
 impl ViolationChecker {
-    pub(crate) fn new(config: CheckConfig, network_lock: Arc<Mutex<()>>) -> Self {
+    pub(crate) fn new(
+        config: CheckConfig,
+        network_lock: Arc<Mutex<()>>,
+        client: CodeMaoClient,
+    ) -> Self {
         let ad_keywords_cache = Arc::new(
             config
                 .ad_keywords
@@ -558,6 +563,7 @@ impl ViolationChecker {
             config,
             ad_keywords_cache,
             network_lock,
+            client,
         }
     }
 
@@ -709,11 +715,12 @@ impl ViolationChecker {
 
     /// 流式获取详细评论,单条失败仅记录日志
     fn fetch_detailed_comments(
+        &self,
         source: CommentSource,
         source_id: i32,
         limit: usize,
     ) -> Result<Vec<JsonObject>, ProcessorError> {
-        let stream = DataQuery::new()
+        let stream = DataQuery::new_with_client(self.client.clone())
             .stream_detailed_comments(source, source_id, Some(limit))
             .map_err(|e| ProcessorError::Processing(format!("获取评论流失败: {}", e)))?;
         let mut comments = Vec::new();
@@ -751,13 +758,13 @@ impl ViolationChecker {
             ProcessorError::Processing(format!("source_id 超出 i32 范围: {}", source_id))
         })?;
 
-        let total = DataQuery::new()
+        let total = DataQuery::new_with_client(self.client.clone())
             .count_comments(comment_source, source_id32)
             .map_err(|e| ProcessorError::Processing(format!("获取评论总数失败: {}", e)))?;
         info!("该内容共有 {} 条评论", total);
 
         let detailed_comments =
-            Self::fetch_detailed_comments(comment_source, source_id32, comment_limit)?;
+            self.fetch_detailed_comments(comment_source, source_id32, comment_limit)?;
 
         let pending = self.collect_pending_violations(&detailed_comments, source_type, source_id);
         let mut violations = Self::classify_violations(pending, self.config.spam_threshold);
@@ -779,7 +786,7 @@ impl ViolationChecker {
     }
 
     fn check_spam_posts(&self, user_id: i64, title: &str) -> Vec<String> {
-        let fetcher = ForumDataFetcher::new();
+        let fetcher = ForumDataFetcher::new_with_client(self.client.clone());
         let threshold = self.config.spam_threshold;
         let mut matches = 0usize;
         let mut violations = Vec::new();
@@ -839,7 +846,7 @@ impl ViolationChecker {
         let violations: HashSet<String> = violations.iter().cloned().collect();
         let mut accounts = multi_account.accounts.clone();
         let success = self.report_violations(&mut accounts, &violations);
-        if let Err(e) = KittyFactory::global_client().switch_identity(Catsona::Judge) {
+        if let Err(e) = CodeMaoClient::global().switch_identity(Catsona::Judge) {
             warn!("切换回管理员身份失败: {}", e);
         }
         info!("自动举报完成,成功 {}/{}", success, violations.len());

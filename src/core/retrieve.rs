@@ -174,6 +174,7 @@ fn build_compact_reply(
 
 /// 评论查询构建器(纯惰性流式)
 pub struct CommentQueryBuilder {
+    client: CodeMaoClient,
     source: Option<CommentSource>,
     target_id: Option<i32>,
     limit: Option<usize>,
@@ -250,7 +251,12 @@ where
 
 impl CommentQueryBuilder {
     pub fn new() -> Self {
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
         Self {
+            client,
             source: None,
             target_id: None,
             limit: Some(500),
@@ -287,19 +293,19 @@ impl CommentQueryBuilder {
 
         match source {
             CommentSource::Work => {
-                let iter = WorkDataFetcher::new()
+                let iter = WorkDataFetcher::new_with_client(self.client.clone())
                     .fetch_work_comments_gen(target_id, Some(safe_limit))
                     .map(|item| item.map_err(DataQueryError::from));
                 Ok(Box::new(iter))
             }
             CommentSource::Forum => {
-                let iter = ForumDataFetcher::new()
+                let iter = ForumDataFetcher::new_with_client(self.client.clone())
                     .fetch_post_replies_gen(target_id, None, Some(safe_limit))
                     .map(|item| item.map_err(DataQueryError::from));
                 Ok(Box::new(iter))
             }
             CommentSource::Shop => {
-                let iter = WorkshopDataFetcher::new()
+                let iter = WorkshopDataFetcher::new_with_client(self.client.clone())
                     .fetch_workshop_discussions_gen(target_id, None, None, Some(safe_limit))
                     .map(|item| item.map_err(DataQueryError::from));
                 Ok(Box::new(iter))
@@ -310,12 +316,13 @@ impl CommentQueryBuilder {
     /// 获取某条主评论下的所有回复对象
     /// 论坛来源需额外请求回复接口;其余来源直接取内联的 `replies.items` 字段
     fn reply_items(
+        client: &CodeMaoClient,
         source: CommentSource,
         comment_id: i64,
         comment_obj: &JsonObject,
     ) -> Vec<Result<JsonObject, DataQueryError>> {
         if source == CommentSource::Forum {
-            ForumDataFetcher::new()
+            ForumDataFetcher::new_with_client(client.clone())
                 .fetch_reply_comments_gen(i32::try_from(comment_id).unwrap_or(0), None)
                 .map(|r| {
                     r.map_err(DataQueryError::from).and_then(|v| {
@@ -366,6 +373,7 @@ impl CommentQueryBuilder {
                 .and_then(serde_json::Value::as_i64)
         };
 
+        let client = self.client.clone();
         let mapped = map_comments_chunked(source, raw_stream, move |comment| {
             let mut ids: Vec<Result<String, DataQueryError>> = Vec::new();
 
@@ -386,7 +394,7 @@ impl CommentQueryBuilder {
                 .unwrap_or(0);
             // 借用而非克隆:仅读取回复无需整对象深拷贝
             if let Some(comment_obj) = comment.as_object() {
-                for reply in Self::reply_items(source, comment_id, comment_obj) {
+                for reply in Self::reply_items(&client, source, comment_id, comment_obj) {
                     match reply {
                         Ok(reply_obj) => {
                             if let Some(uid) = extract_reply_user_id(&reply_obj) {
@@ -413,6 +421,7 @@ impl CommentQueryBuilder {
             .ok_or_else(|| DataQueryError::InvalidSource("未设置来源".into()))?;
         let raw_stream = self.build_raw_stream()?;
 
+        let client = self.client.clone();
         let mapped = map_comments_chunked(source, raw_stream, move |comment| {
             let mut ids: Vec<Result<String, DataQueryError>> = Vec::new();
             if let Some(comment_obj) = comment.as_object() {
@@ -425,7 +434,7 @@ impl CommentQueryBuilder {
                     ids.push(Ok(comment_id.to_string()));
                 }
 
-                for reply in Self::reply_items(source, comment_id, comment_obj) {
+                for reply in Self::reply_items(&client, source, comment_id, comment_obj) {
                     match reply {
                         Ok(reply_obj) => {
                             if let Some(rid) =
@@ -467,6 +476,7 @@ impl CommentQueryBuilder {
                 .and_then(serde_json::Value::as_i64)
         };
 
+        let client = self.client.clone();
         let mapped = map_comments_chunked(source, raw_stream, move |comment| {
             let comment_obj = match comment.as_object() {
                 Some(obj) => obj,
@@ -478,16 +488,19 @@ impl CommentQueryBuilder {
                 .unwrap_or(0);
 
             // 收集该评论的所有回复(此处回复数量通常较少,收集为 Vec 可以接受)
-            let replies: Vec<JsonObject> = Self::reply_items(source, comment_id, comment_obj)
-                .into_iter()
-                .filter_map(|r| {
-                    if let Err(e) = &r {
-                        warn!("拉取回复失败,已跳过: {e}");
-                    }
-                    r.ok()
-                })
-                .filter_map(|reply| build_compact_reply(&reply, user_field, &extract_reply_user_id))
-                .collect();
+            let replies: Vec<JsonObject> =
+                Self::reply_items(&client, source, comment_id, comment_obj)
+                    .into_iter()
+                    .filter_map(|r| {
+                        if let Err(e) = &r {
+                            warn!("拉取回复失败,已跳过: {e}");
+                        }
+                        r.ok()
+                    })
+                    .filter_map(|reply| {
+                        build_compact_reply(&reply, user_field, &extract_reply_user_id)
+                    })
+                    .collect();
 
             let mut comment_data = JsonObject::new();
             if let Some(user) = comment_obj.get("user").and_then(|u| u.as_object()) {
@@ -534,16 +547,22 @@ impl CommentQueryBuilder {
 // 数据查询主结构体
 
 /// 数据查询与统计入口
-pub struct DataQuery;
+pub struct DataQuery {
+    client: CodeMaoClient,
+}
 
 impl DataQuery {
     pub fn new() -> Self {
-        DataQuery
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
     }
 
     /// 创建评论查询构建器
     pub fn query_comments(&self) -> CommentQueryBuilder {
-        CommentQueryBuilder::new()
+        CommentQueryBuilder::new_with_client(self.client.clone())
     }
 
     /// 惰性原始评论流
@@ -624,7 +643,7 @@ impl DataQuery {
         source: CommentSource,
         target_id: i32,
     ) -> Result<i32, DataQueryError> {
-        let client = CodeMaoClient::global();
+        let client = &self.client;
         match source {
             CommentSource::Work => Self::paginated_total(
                 client,
@@ -701,12 +720,13 @@ impl DataQuery {
         .into_iter()
         .collect();
 
-        let nemo_result = WorkDataFetcher::new().fetch_new_works_nemo(
-            NemoWorkType::Original,
+        let nemo_result = WorkDataFetcher::new_with_client(self.client.clone())
+            .fetch_new_works_nemo(NemoWorkType::Original, per_source_limit, None);
+        let web_result = WorkDataFetcher::new_with_client(self.client.clone()).fetch_new_works_web(
             per_source_limit,
             None,
+            true,
         );
-        let web_result = WorkDataFetcher::new().fetch_new_works_web(per_source_limit, None, true);
 
         let process_result = |res: Result<Value, MewError>, mapping: HashMap<&str, &str>| match res
         {
@@ -873,13 +893,15 @@ impl DataQuery {
         ];
 
         // 每个管理员的两类总数相互独立,并行请求(8 管理员 × 2 请求 → 约 1 个 RTT)
+        let client = self.client.clone();
         let results: Vec<Result<(i32, String, i32, i32), DataQueryError>> = thread::scope(|s| {
             admins
                 .iter()
                 .map(|&(admin_id, admin_name)| {
+                    let c = client.clone();
                     let handle = s.spawn(move || {
                         // 获取评论举报总数
-                        let mut comment_paginated = WhaleReportFetcher::new()
+                        let mut comment_paginated = WhaleReportFetcher::new_with_client(c.clone())
                             .fetch_comment_reports_gen(
                                 CommentSourceType::All,
                                 ReportStatus::All,
@@ -901,13 +923,14 @@ impl DataQuery {
                         })?;
 
                         // 获取作品举报总数
-                        let mut work_paginated = WhaleReportFetcher::new().fetch_work_reports_gen(
-                            WorkSourceType::All,
-                            ReportStatus::All,
-                            Some(WorkReportFilterType::Admin),
-                            Some(admin_id),
-                            None, // 不设置limit,使用默认值
-                        );
+                        let mut work_paginated = WhaleReportFetcher::new_with_client(c.clone())
+                            .fetch_work_reports_gen(
+                                WorkSourceType::All,
+                                ReportStatus::All,
+                                Some(WorkReportFilterType::Admin),
+                                Some(admin_id),
+                                None, // 不设置limit,使用默认值
+                            );
                         work_paginated
                             .fetch_metadata()
                             .map_err(DataQueryError::from)?;
@@ -976,7 +999,8 @@ impl DataQuery {
         user_id: i32,
         like_threshold: i32,
     ) -> Result<FanByLikesStatistics, DataQueryError> {
-        let fans_stream = UserDataFetcher::new().fetch_followers_gen(user_id, None);
+        let fans_stream = UserDataFetcher::new_with_client(self.client.clone())
+            .fetch_followers_gen(user_id, None);
 
         let mut total_fans = 0;
         // 第一段(串行,无 HTTP):按流序过滤出达标的粉丝,保留 (id, fan, total_likes) 三元组
@@ -999,20 +1023,24 @@ impl DataQuery {
         }
 
         // 第二段:按 chunk=16 并行查询荣誉数据(尽力而为),结果按流序写回
+        let client = self.client.clone();
         let mut results: Vec<Option<JsonObject>> = vec![None; qualified.len()];
         thread::scope(|s| {
             let mut remaining: &mut [Option<JsonObject>] = &mut results[..];
             for chunk in qualified.chunks(16) {
                 let (head, tail) = remaining.split_at_mut(chunk.len());
                 remaining = tail;
+                let c = client.clone();
                 s.spawn(move || {
                     for (i, (id, fan, total_likes)) in chunk.iter().enumerate() {
                         let mut fan_obj = JsonObject::new();
                         fan_obj.insert("user_id".into(), Value::Number((*id).into()));
                         // 荣誉数据为尽力而为:ID 超出 i32 范围或请求失败时输出 N/A
-                        let honors_data = i32::try_from(*id)
-                            .ok()
-                            .and_then(|id32| UserDataFetcher::new().fetch_user_honors(id32).ok());
+                        let honors_data = i32::try_from(*id).ok().and_then(|id32| {
+                            UserDataFetcher::new_with_client(c.clone())
+                                .fetch_user_honors(id32)
+                                .ok()
+                        });
                         if let Some(ref honors_data) = honors_data {
                             if let Some(fans_total) = honors_data.get("fans_total") {
                                 fan_obj.insert("fans_total".into(), fans_total.clone());
@@ -1068,14 +1096,15 @@ impl DataQuery {
     pub fn stream_edu_accounts_with_reset_passwords(&self, limit: Option<usize>) -> JsonPairIter {
         const MAX_EDU_STUDENTS: usize = 2000;
 
-        if let Err(e) = CodeMaoClient::global().switch_identity(Catsona::Scholar) {
+        if let Err(e) = self.client.switch_identity(Catsona::Scholar) {
             return Box::new(std::iter::once(Err(DataQueryError::from(e))));
         }
 
         let effective_limit = limit.unwrap_or(MAX_EDU_STUDENTS).min(MAX_EDU_STUDENTS);
 
         // 直接使用接口返回的迭代器,保留原始顺序
-        let stream = EduDataFetcher::new()
+        let client = self.client.clone();
+        let stream = EduDataFetcher::new_with_client(client.clone())
             .fetch_class_students_gen(1, Some(effective_limit))
             .filter_map(move |student_result| {
                 let student = match student_result {
@@ -1091,7 +1120,7 @@ impl DataQuery {
                     .and_then(|u| u.as_str())?
                     .to_string();
 
-                let password_result = EduUserAction::new()
+                let password_result = EduUserAction::new_with_client(client.clone())
                     .reset_student_password(student_id)
                     .map_err(DataQueryError::from);
 
@@ -1114,7 +1143,7 @@ impl DataQuery {
 
     /// 获取社区新回复流(惰性迭代器)
     pub fn stream_new_replies(&self, reply_type: ReplyTypes, limit: i32) -> JsonObjIter {
-        let total = match CommunityDataFetcher::new()
+        let total = match CommunityDataFetcher::new_with_client(self.client.clone())
             .fetch_message_count(MessageMethod::Web)
             .map_err(DataQueryError::from)
         {
@@ -1129,6 +1158,7 @@ impl DataQuery {
         let remaining = if limit == 0 { total } else { limit.min(total) };
 
         Box::new(CommunityReplyStream {
+            client: self.client.clone(),
             reply_type,
             remaining,
             offset: 0,
@@ -1180,6 +1210,7 @@ pub struct FanByLikesStatistics {
 
 /// 社区新回复分页流(健壮版,不再依赖总数)
 struct CommunityReplyStream {
+    client: CodeMaoClient,
     reply_type: ReplyTypes,
     remaining: i32, // 剩余待取数量(i32::MAX 表示无上限)
     offset: i32,
@@ -1198,7 +1229,11 @@ impl Iterator for CommunityReplyStream {
         }
 
         let batch_size = self.remaining.clamp(5, 200);
-        match CommunityDataFetcher::new().fetch_replies(self.reply_type, batch_size, self.offset) {
+        match CommunityDataFetcher::new_with_client(self.client.clone()).fetch_replies(
+            self.reply_type,
+            batch_size,
+            self.offset,
+        ) {
             Ok(response) => {
                 let items: Vec<JsonObject> = response
                     .get("items")

@@ -1792,36 +1792,6 @@ impl fmt::Display for HTTPStatus {
     }
 }
 
-// 简化的工厂(萌化名:KittyFactory)
-pub struct KittyFactory;
-
-impl KittyFactory {
-    /// 创建使用全局身份管理器的 HTTP 客户端
-    pub fn create_global_client(config: Option<KittyConfig>) -> CodeMaoClient {
-        CodeMaoClient::new_with_global_auth(config.unwrap_or_default())
-    }
-
-    /// 创建使用独立身份管理器的 HTTP 客户端
-    pub fn create_independent_client(config: Option<KittyConfig>) -> CodeMaoClient {
-        CodeMaoClient::new_independent(config.unwrap_or_default())
-    }
-
-    /// 创建文件上传器
-    pub fn create_file_uploader(client: CodeMaoClient) -> FileUploader {
-        FileUploader::new(client)
-    }
-
-    /// 获取全局客户端实例(使用默认配置)
-    pub fn global_client() -> &'static CodeMaoClient {
-        CodeMaoClient::global()
-    }
-
-    /// 获取全局身份管理器
-    pub fn global_identity_manager() -> &'static KittyIdentityManager {
-        get_global_identity_manager()
-    }
-}
-
 /// 获取 13 位毫秒时间戳(本地时间)
 /// 若系统时间异常(早于 Unix 纪元),则返回 0 并记录警告
 pub fn current_timestamp_13() -> u128 {

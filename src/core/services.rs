@@ -22,7 +22,7 @@ use super::registry::{
 };
 use crate::api::whale::{ReportStatus, Resolution};
 use crate::utils::filedata::value_to_i64;
-use crate::utils::requests::{FileUploader, KittyFactory, UploadChannel, current_timestamp_secs};
+use crate::utils::requests::{CodeMaoClient, FileUploader, UploadChannel, current_timestamp_secs};
 
 /// 批量分组的键:(分组类型, 分组键)
 type GroupKey = (String, String);
@@ -44,11 +44,22 @@ impl TotalsCache {
 }
 
 // 文件处理器
-pub struct FileProcessor;
+pub struct FileProcessor {
+    client: CodeMaoClient,
+}
 
 impl FileProcessor {
+    pub fn new() -> Self {
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self { client }
+    }
+
     /// 上传单个文件,返回上传后的 URL
     pub fn handle_file_upload(
+        &self,
         file_path: &Path,
         save_path: &str,
         channel: UploadChannel,
@@ -72,7 +83,7 @@ impl FileProcessor {
             )));
         }
 
-        let client = KittyFactory::global_client().clone();
+        let client = self.client.clone();
         let uploader = FileUploader::new(client);
         let url = uploader.upload(file_path, channel, save_path)?;
 
@@ -90,6 +101,7 @@ impl FileProcessor {
     }
 
     pub fn handle_directory_upload(
+        &self,
         dir_path: &Path,
         save_path: &str,
         channel: UploadChannel,
@@ -99,7 +111,7 @@ impl FileProcessor {
         let mut cb = |entry: fs::DirEntry| {
             if entry.file_type().is_ok_and(|ft| ft.is_file()) {
                 let path = entry.path();
-                match Self::handle_file_upload(path.as_path(), save_path, channel, max_size_bytes) {
+                match self.handle_file_upload(path.as_path(), save_path, channel, max_size_bytes) {
                     Ok(url) => {
                         results.insert(path, url);
                     }
@@ -112,6 +124,12 @@ impl FileProcessor {
         };
         visit_dir(dir_path, &mut cb)?;
         Ok(results)
+    }
+}
+
+impl Default for FileProcessor {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -191,6 +209,7 @@ pub struct ReportProcessor {
     totals_cache: Mutex<Option<TotalsCache>>,
     /// 串行化"身份切换(自动举报)"与"预取线程的在途请求",防止请求带错身份
     network_lock: Arc<Mutex<()>>,
+    client: CodeMaoClient,
 }
 
 impl Default for ReportProcessor {
@@ -200,17 +219,28 @@ impl Default for ReportProcessor {
 }
 
 impl ReportProcessor {
-    /// 使用默认配置构造
+    /// 使用默认配置构造(全局客户端)
     pub fn new() -> Self {
-        Self::new_with_config(CheckConfig::default())
+        Self::new_with_client(CodeMaoClient::global().clone())
     }
 
-    /// 使用自定义配置构造
+    /// 使用注入的客户端与默认配置构造
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self::new_with_config_and_client(CheckConfig::default(), client)
+    }
+
+    /// 使用自定义配置构造(全局客户端)
     pub fn new_with_config(config: CheckConfig) -> Self {
-        let fetcher = ReportFetcher::new();
+        Self::new_with_config_and_client(config, CodeMaoClient::global().clone())
+    }
+
+    /// 使用注入的客户端与自定义配置构造
+    pub fn new_with_config_and_client(config: CheckConfig, client: CodeMaoClient) -> Self {
+        let fetcher = ReportFetcher::new_with_client(client.clone());
         let batch_manager = Arc::new(Mutex::new(BatchActionManager::new()));
         let network_lock = Arc::new(Mutex::new(()));
-        let violation_checker = ViolationChecker::new(config.clone(), Arc::clone(&network_lock));
+        let violation_checker =
+            ViolationChecker::new(config.clone(), Arc::clone(&network_lock), client.clone());
         ReportProcessor {
             fetcher,
             batch_manager,
@@ -218,6 +248,7 @@ impl ReportProcessor {
             config,
             totals_cache: Mutex::new(None),
             network_lock,
+            client,
         }
     }
 
