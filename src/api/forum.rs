@@ -143,7 +143,7 @@ impl ForumDataFetcher {
     /// 批量获取帖子详情(最多 19 个)
     pub fn fetch_posts_details(&self, post_ids: Vec<i32>) -> MewResult<Value> {
         if post_ids.len() >= 20 {
-            return Err(MewError::Other("数据长度需小于 20".into()));
+            return Err(MewError::InvalidArgument("数据长度需小于 20".into()));
         }
         debug!("批量获取帖子详情: count={}", post_ids.len());
         let ids_str: Vec<String> = post_ids.iter().map(ToString::to_string).collect();
@@ -162,7 +162,7 @@ impl ForumDataFetcher {
     }
 
     /// 帖子回帖分页迭代器
-    pub fn fetch_post_replies_gen(
+    pub fn fetch_post_replies_iter(
         &self,
         post_id: i32,
         sort: Option<String>,
@@ -183,7 +183,7 @@ impl ForumDataFetcher {
     }
 
     /// 回帖评论分页迭代器
-    pub fn fetch_reply_comments_gen(&self, reply_id: i32, limit: Option<usize>) -> PaginatedIter {
+    pub fn fetch_reply_comments_iter(&self, reply_id: i32, limit: Option<usize>) -> PaginatedIter {
         let endpoint = format!("/web/forums/replies/{}/comments", reply_id);
         debug!("获取评论迭代器: reply_id={}", reply_id);
 
@@ -197,7 +197,7 @@ impl ForumDataFetcher {
     }
 
     /// 我的帖子(创建/回复)分页迭代器
-    pub fn fetch_my_posts_gen(&self, post_type: PostType, limit: Option<usize>) -> PaginatedIter {
+    pub fn fetch_my_posts_iter(&self, post_type: PostType, limit: Option<usize>) -> PaginatedIter {
         let endpoint = format!("/web/forums/posts/mine/{}", post_type.as_str());
         debug!("获取我的帖子迭代器: type={:?}", post_type);
 
@@ -300,7 +300,7 @@ impl ForumDataFetcher {
     }
 
     /// 按标题搜索帖子分页迭代器
-    pub fn search_posts_gen(&self, title: &str, limit: Option<usize>) -> PaginatedIter {
+    pub fn search_posts_iter(&self, title: &str, limit: Option<usize>) -> PaginatedIter {
         debug!("搜索帖子: title={}", title);
 
         self.client
@@ -314,7 +314,7 @@ impl ForumDataFetcher {
     }
 
     /// 7 天内热门帖子分页迭代器
-    pub fn fetch_7day_hot_posts_gen(
+    pub fn fetch_7day_hot_posts_iter(
         &self,
         board_id: Option<i32>,
         limit: Option<usize>,
@@ -337,7 +337,7 @@ impl ForumDataFetcher {
     }
 
     /// 求助帖子分页迭代器
-    pub fn fetch_ask_help_posts_gen(&self, limit: Option<usize>) -> PaginatedIter {
+    pub fn fetch_ask_help_posts_iter(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取求助帖子迭代器");
 
         self.client
@@ -523,13 +523,17 @@ impl ForumActionHandler {
         let endpoint = match target_type {
             TargetType::Board => {
                 let id = board_id.ok_or_else(|| {
-                    MewError::Other("当 target_type 为 'board' 时,必须提供 board_id".into())
+                    MewError::InvalidArgument(
+                        "当 target_type 为 'board' 时,必须提供 board_id".into(),
+                    )
                 })?;
                 format!("/web/forums/boards/{}/posts", id as i32)
             }
             TargetType::Workshop => {
                 let id = workshop_id.ok_or_else(|| {
-                    MewError::Other("当 target_type 为 'workshop' 时,必须提供 workshop_id".into())
+                    MewError::InvalidArgument(
+                        "当 target_type 为 'workshop' 时,必须提供 workshop_id".into(),
+                    )
                 })?;
                 format!("/web/works/subjects/{}/post", id)
             }

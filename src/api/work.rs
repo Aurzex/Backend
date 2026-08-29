@@ -917,7 +917,7 @@ impl CocoWorkManager {
     }
 
     /// 获取 Coco 的自定义控件列表分页迭代器
-    pub fn fetch_custom_widgets_gen(&self, limit: Option<usize>) -> PaginatedIter {
+    pub fn fetch_custom_widgets_iter(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取Coco自定义控件迭代器");
         let timestamp = current_timestamp_13();
         self.client
@@ -1090,7 +1090,7 @@ impl CollaborationManager {
     }
 
     /// 获取协作者列表分页迭代器
-    pub fn fetch_collaborators_gen(
+    pub fn fetch_collaborators_iter(
         &self,
         work_type: CollabWorkType,
         work_id: i32,
@@ -1147,7 +1147,7 @@ impl CollaborationManager {
     }
 
     /// 获取协作的 Coco 作品分页迭代器
-    pub fn fetch_collaboration_coco_works_gen(&self, limit: Option<usize>) -> PaginatedIter {
+    pub fn fetch_collaboration_coco_works_iter(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取协作Coco作品迭代器");
         let timestamp = current_timestamp_13();
         self.client
@@ -1760,7 +1760,7 @@ impl WorkDataFetcher {
     // 评论相关
 
     /// 获取作品评论分页迭代器
-    pub fn fetch_work_comments_gen(&self, work_id: i32, limit: Option<usize>) -> PaginatedIter {
+    pub fn fetch_work_comments_iter(&self, work_id: i32, limit: Option<usize>) -> PaginatedIter {
         debug!("获取作品评论迭代器: work_id={}", work_id);
         let endpoint = format!("/creation-tools/v1/works/{}/comments", work_id);
         self.client
@@ -2083,7 +2083,7 @@ impl WorkDataFetcher {
     // 回收站
 
     /// 获取 Kitten 回收站作品分页迭代器
-    pub fn fetch_kitten_trash_gen(
+    pub fn fetch_kitten_trash_iter(
         &self,
         version: KittenVersion,
         work_status: Option<&str>,
@@ -2101,7 +2101,7 @@ impl WorkDataFetcher {
     }
 
     /// 获取海龟编辑器回收站作品分页迭代器
-    pub fn fetch_wood_trash_gen(
+    pub fn fetch_wood_trash_iter(
         &self,
         language_type: Option<i32>,
         work_status: Option<&str>,
@@ -2121,7 +2121,7 @@ impl WorkDataFetcher {
     }
 
     /// 获取代码岛回收站作品分页迭代器
-    pub fn fetch_box_trash_gen(
+    pub fn fetch_box_trash_iter(
         &self,
         work_status: Option<&str>,
         limit: Option<usize>,
@@ -2137,7 +2137,7 @@ impl WorkDataFetcher {
     }
 
     /// 获取小说回收站分页迭代器
-    pub fn fetch_fiction_trash_gen(
+    pub fn fetch_fiction_trash_iter(
         &self,
         fiction_status: Option<&str>,
         limit: Option<usize>,
@@ -2152,7 +2152,7 @@ impl WorkDataFetcher {
     }
 
     /// 获取 KN 回收站作品分页迭代器
-    pub fn fetch_kn_trash_gen(
+    pub fn fetch_kn_trash_iter(
         &self,
         name: Option<&str>,
         work_business_classify: Option<i32>,
@@ -2177,7 +2177,7 @@ impl WorkDataFetcher {
     // 搜索
 
     /// 搜索 KN 作品分页迭代器
-    pub fn search_kn_works_gen(
+    pub fn search_kn_works_iter(
         &self,
         name: &str,
         status: Option<i32>,
@@ -2201,7 +2201,7 @@ impl WorkDataFetcher {
     }
 
     /// 搜索已发布 KN 作品分页迭代器
-    pub fn search_published_kn_works_gen(
+    pub fn search_published_kn_works_iter(
         &self,
         name: &str,
         work_business_classify: Option<i32>,

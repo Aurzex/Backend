@@ -421,7 +421,7 @@ impl EduDataFetcher {
     }
 
     /// 系统通知分页迭代器
-    pub fn fetch_notices_gen(&self, limit: Option<usize>) -> PaginatedIter {
+    pub fn fetch_notices_iter(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取系统通知迭代器");
         let mut paginated = self
             .client
@@ -437,7 +437,7 @@ impl EduDataFetcher {
     }
 
     /// 教师提醒消息分页迭代器
-    pub fn fetch_reminders_gen(&self, limit: Option<usize>) -> PaginatedIter {
+    pub fn fetch_reminders_iter(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取教师提醒迭代器");
         let mut paginated = self
             .client
@@ -499,7 +499,7 @@ impl EduDataFetcher {
     }
 
     /// 学生移除记录分页迭代器
-    pub fn fetch_student_removal_records_gen(&self, limit: Option<usize>) -> PaginatedIter {
+    pub fn fetch_student_removal_records_iter(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取学生移除记录迭代器");
         let mut paginated = self
             .client
@@ -515,7 +515,7 @@ impl EduDataFetcher {
     }
 
     /// 班级学生列表分页迭代器(支持无效/有效筛选)
-    pub fn fetch_class_students_gen(&self, invalid: i32, limit: Option<usize>) -> PaginatedIter {
+    pub fn fetch_class_students_iter(&self, invalid: i32, limit: Option<usize>) -> PaginatedIter {
         debug!("获取班级学生迭代器: invalid={}", invalid);
         let data = json!({ "invalid": invalid });
 
@@ -658,7 +658,7 @@ impl EduDataFetcher {
     }
 
     /// 所有作品分页迭代器
-    pub fn fetch_all_works_gen(&self, limit: Option<usize>) -> PaginatedIter {
+    pub fn fetch_all_works_iter(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取所有作品迭代器");
         let mut paginated = self
             .client
@@ -675,7 +675,7 @@ impl EduDataFetcher {
     }
 
     /// 管理作品分页迭代器
-    pub fn fetch_managed_works_gen(&self, limit: Option<usize>) -> PaginatedIter {
+    pub fn fetch_managed_works_iter(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取管理作品迭代器");
         let mut paginated = self
             .client
@@ -692,7 +692,7 @@ impl EduDataFetcher {
     }
 
     /// 个人作品分页迭代器
-    pub fn fetch_personal_works_gen(&self, limit: Option<usize>) -> PaginatedIter {
+    pub fn fetch_personal_works_iter(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取个人作品迭代器");
         let mut paginated = self
             .client
@@ -736,7 +736,7 @@ impl EduDataFetcher {
     }
 
     /// 教学记录分页迭代器
-    pub fn fetch_teaching_records_gen(&self, limit: Option<usize>) -> PaginatedIter {
+    pub fn fetch_teaching_records_iter(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取教学记录迭代器");
         let mut paginated = self
             .client
@@ -779,7 +779,7 @@ impl EduDataFetcher {
     }
 
     /// 官方课程包分页迭代器
-    pub fn fetch_official_lesson_packages_gen(&self, limit: Option<usize>) -> PaginatedIter {
+    pub fn fetch_official_lesson_packages_iter(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取官方课程包迭代器");
         let mut paginated = self
             .client
@@ -832,7 +832,7 @@ impl EduDataFetcher {
     }
 
     /// 自定义课程包分页迭代器
-    pub fn fetch_custom_lesson_packages_gen(&self, limit: Option<usize>) -> PaginatedIter {
+    pub fn fetch_custom_lesson_packages_iter(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取自定义课程包迭代器");
         let mut paginated = self
             .client

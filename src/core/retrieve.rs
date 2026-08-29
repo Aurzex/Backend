@@ -294,19 +294,19 @@ impl CommentQueryBuilder {
         match source {
             CommentSource::Work => {
                 let iter = WorkDataFetcher::new_with_client(self.client.clone())
-                    .fetch_work_comments_gen(target_id, Some(safe_limit))
+                    .fetch_work_comments_iter(target_id, Some(safe_limit))
                     .map(|item| item.map_err(DataQueryError::from));
                 Ok(Box::new(iter))
             }
             CommentSource::Forum => {
                 let iter = ForumDataFetcher::new_with_client(self.client.clone())
-                    .fetch_post_replies_gen(target_id, None, Some(safe_limit))
+                    .fetch_post_replies_iter(target_id, None, Some(safe_limit))
                     .map(|item| item.map_err(DataQueryError::from));
                 Ok(Box::new(iter))
             }
             CommentSource::Shop => {
                 let iter = WorkshopDataFetcher::new_with_client(self.client.clone())
-                    .fetch_workshop_discussions_gen(target_id, None, None, Some(safe_limit))
+                    .fetch_workshop_discussions_iter(target_id, None, None, Some(safe_limit))
                     .map(|item| item.map_err(DataQueryError::from));
                 Ok(Box::new(iter))
             }
@@ -323,7 +323,7 @@ impl CommentQueryBuilder {
     ) -> Vec<Result<JsonObject, DataQueryError>> {
         if source == CommentSource::Forum {
             ForumDataFetcher::new_with_client(client.clone())
-                .fetch_reply_comments_gen(i32::try_from(comment_id).unwrap_or(0), None)
+                .fetch_reply_comments_iter(i32::try_from(comment_id).unwrap_or(0), None)
                 .map(|r| {
                     r.map_err(DataQueryError::from).and_then(|v| {
                         v.as_object()
@@ -902,7 +902,7 @@ impl DataQuery {
                     let handle = s.spawn(move || {
                         // 获取评论举报总数
                         let mut comment_paginated = WhaleReportFetcher::new_with_client(c.clone())
-                            .fetch_comment_reports_gen(
+                            .fetch_comment_reports_iter(
                                 CommentSourceType::All,
                                 ReportStatus::All,
                                 Some(CommentReportFilterType::Admin),
@@ -924,7 +924,7 @@ impl DataQuery {
 
                         // 获取作品举报总数
                         let mut work_paginated = WhaleReportFetcher::new_with_client(c.clone())
-                            .fetch_work_reports_gen(
+                            .fetch_work_reports_iter(
                                 WorkSourceType::All,
                                 ReportStatus::All,
                                 Some(WorkReportFilterType::Admin),
@@ -1000,7 +1000,7 @@ impl DataQuery {
         like_threshold: i32,
     ) -> Result<FanByLikesStatistics, DataQueryError> {
         let fans_stream = UserDataFetcher::new_with_client(self.client.clone())
-            .fetch_followers_gen(user_id, None);
+            .fetch_followers_iter(user_id, None);
 
         let mut total_fans = 0;
         // 第一段(串行,无 HTTP):按流序过滤出达标的粉丝,保留 (id, fan, total_likes) 三元组
@@ -1105,7 +1105,7 @@ impl DataQuery {
         // 直接使用接口返回的迭代器,保留原始顺序
         let client = self.client.clone();
         let stream = EduDataFetcher::new_with_client(client.clone())
-            .fetch_class_students_gen(1, Some(effective_limit))
+            .fetch_class_students_iter(1, Some(effective_limit))
             .filter_map(move |student_result| {
                 let student = match student_result {
                     Ok(s) => s,

@@ -30,8 +30,9 @@ pub enum MewError {
     Json(#[from] serde_json::Error),
     #[error("Auth error: {0}")]
     Auth(String),
-    #[error("Other error: {0}")]
-    Other(String),
+    /// 调用方参数非法(客户端前置条件错误)
+    #[error("Invalid argument: {0}")]
+    InvalidArgument(String),
 }
 
 pub type MewResult<T> = std::result::Result<T, MewError>;
@@ -139,7 +140,10 @@ impl FromStr for BaseKey {
             "update" => Ok(BaseKey::Update),
             "kn_cdn" => Ok(BaseKey::KnCdn),
             "wechat_sbp" => Ok(BaseKey::WeChatSbp),
-            _ => Err(MewError::Other(format!("无效的基础 URL 键: {}", s))),
+            _ => Err(MewError::InvalidArgument(format!(
+                "无效的基础 URL 键: {}",
+                s
+            ))),
         }
     }
 }
@@ -226,12 +230,12 @@ impl AsRef<str> for Catsona {
     }
 }
 
-// 身份管理器(核心单例,扁平化设计)
+/// 身份管理器(核心单例,扁平化设计)
 /// 全局身份管理器,使用固定长度数组存储令牌
 /// 采用 `RwLock` + `AtomicUsize` 分离 token 存储和当前身份索引
 /// `AtomicUsize` 使用 `Release/Acquire` 排序保证身份切换后令牌可见
 #[derive(Debug)]
-pub struct KittyIdentityManager {
+pub(crate) struct KittyIdentityManager {
     token_bowl: RwLock<[Option<Arc<str>>; 4]>,
     current_cat: AtomicUsize,
 }
@@ -395,7 +399,7 @@ impl KittyAuth for KittyIdentityManager {
 
 /// 全局认证提供者
 #[derive(Debug, Clone)]
-pub struct GlobalKittyAuth;
+pub(crate) struct GlobalKittyAuth;
 
 impl Default for GlobalKittyAuth {
     fn default() -> Self {
@@ -404,7 +408,7 @@ impl Default for GlobalKittyAuth {
 }
 
 impl GlobalKittyAuth {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self
     }
 }
@@ -430,7 +434,7 @@ impl KittyAuth for GlobalKittyAuth {
 
 /// 本地认证提供者(独立实例)
 #[derive(Debug, Clone)]
-pub struct LocalKittyAuth {
+pub(crate) struct LocalKittyAuth {
     inner: Arc<KittyIdentityManager>,
 }
 
@@ -441,7 +445,7 @@ impl Default for LocalKittyAuth {
 }
 
 impl LocalKittyAuth {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             inner: Arc::new(KittyIdentityManager::new()),
         }
@@ -770,7 +774,7 @@ impl KittyCore {
             HttpMethod::Get => Ok(self.agent.get(url)),
             HttpMethod::Delete => Ok(self.agent.delete(url)),
             HttpMethod::Head => Ok(self.agent.head(url)),
-            _ => Err(MewError::Other("该 HTTP 方法不支持请求体".into())),
+            _ => Err(MewError::InvalidArgument("该 HTTP 方法不支持请求体".into())),
         }
     }
 
@@ -780,7 +784,7 @@ impl KittyCore {
             HttpMethod::Post => Ok(self.agent.post(url)),
             HttpMethod::Patch => Ok(self.agent.patch(url)),
             HttpMethod::Put => Ok(self.agent.put(url)),
-            _ => Err(MewError::Other("该 HTTP 方法需要请求体".into())),
+            _ => Err(MewError::InvalidArgument("该 HTTP 方法需要请求体".into())),
         }
     }
 
@@ -1611,12 +1615,18 @@ impl FileUploader {
         self.client.response_to_json(response)
     }
 
+    /// 服务端契约违背(上传响应缺字段):包装为 Json 解析错误,而非调用方参数错误
+    fn response_missing_field(msg: &str) -> serde_json::Error {
+        serde_json::Error::io(std::io::Error::new(std::io::ErrorKind::InvalidData, msg))
+    }
+
     /// 从响应 JSON 中取出指定键的数组, 并返回数组首元素
+    /// 缺失视为服务端契约违背(上传响应缺字段),归入 Json 解析错误
     fn first_token_entry<'a>(json: &'a Value, key: &str, error: &str) -> MewResult<&'a Value> {
         json.get(key)
             .and_then(|v| v.as_array())
             .and_then(|arr| arr.first())
-            .ok_or_else(|| MewError::Other(error.into()))
+            .ok_or_else(|| MewError::Json(Self::response_missing_field(error)))
     }
 
     /// 从响应 JSON 中提取必填字符串字段,缺失时报错而非静默返回空串
@@ -1624,7 +1634,12 @@ impl FileUploader {
         json.get(key)
             .and_then(|v| v.as_str())
             .map(str::to_string)
-            .ok_or_else(|| MewError::Other(format!("上传响应缺少必填字段: {}", key)))
+            .ok_or_else(|| {
+                MewError::Json(Self::response_missing_field(&format!(
+                    "上传响应缺少必填字段: {}",
+                    key
+                )))
+            })
     }
 
     fn get_codemao_token(&self, file_path: &str) -> MewResult<UploadTokenInfo> {

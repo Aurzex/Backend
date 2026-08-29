@@ -6,3 +6,4 @@ pub mod registry;
 pub mod retrieve;
 pub mod services;
 pub mod terminal;
+pub(crate) mod unpacker;

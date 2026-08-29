@@ -72,15 +72,15 @@ use backend::api::auth::{AccountStatus, LoginBuilder};
 use backend::api::education::EduDataFetcher;
 
 // 登录:小鱼干(令牌)写进全局身份槽,之后所有请求自动携带
-let mut session = LoginBuilder::new()
+LoginBuilder::new()
     .identity("13800138000")
     .password("student-pass")
     .status(AccountStatus::Edu)   // 教育身份,映射到 Catsona::Scholar
-    .build();                     // 构造阶段无副作用
-session.execute()?;               // -> MewResult<LoginResult>(真正的网络请求)
+    .execute()?;                  // 构造阶段无副作用,execute() 才发网络请求
+//                                  -> MewResult<LoginResult>
 
 // 分页拉取:惰性逐页请求,单页瞬时错误可以重试
-for work in EduDataFetcher::new().fetch_all_works_gen(None) {
+for work in EduDataFetcher::new().fetch_all_works_iter(None) {
     let work = work?; // MewResult<Value>
     println!(
         "{}",
@@ -212,7 +212,7 @@ for group in session.leftover_groups() {
 - **分页统一为 `PaginatedIter`**:惰性初始化、翻页、总数/上限终止、页大小兜底全部内聚,调用方一个 `for` 循环就完事,不关心 offset/page 怎么算。`.with_limit(n)` 设上限,`.with_limit(FETCH_ALL)` 显式全量拉取(直到服务端空页或总数耗尽)。
 - **可替换边界**:`CodeMaoClient` 支持全局单例 / 独立实例(`new_with_global_auth` / `new_independent` / `new_with_auth`)和自定义 `KittyAuth` 认证提供者;业务 Manager、反编译器、举报引擎与登录(`LoginBuilder::new_with_client`)均提供 `new_with_client(client)`(默认 `new()` 走全局),`ClientProvider`(auth 域)与 `PathConfig::with_root`(路径)——核心逻辑不绑定具体 HTTP 实现和目录,方便测试和定制。
 
-- **错误模型分层**:传输层 / 通用错误归 `MewError`(`Http` / `Io` / `Json` / `HttpStatus` 结构化 4xx/5xx);WS 客户端共享 `SocketError`(cloudvar / converse);业务域错误(`DecompilerError` / `ProcessorError` / `DataQueryError`)包装 `MewError`,不重复传输层变体。
+- **错误模型分层**:传输层 / 通用错误归 `MewError`(`Http` / `Io` / `Json` / `HttpStatus` 结构化 4xx/5xx,外加域类别 `Auth` 凭据错误与 `InvalidArgument` 调用方参数错误);WS 客户端共享 `SocketError`(cloudvar / converse);业务域错误(`DecompilerError` / `ProcessorError` / `DataQueryError`)包装 `MewError`,不重复传输层变体。
 - **WS 状态机封装成回调 + 等待原语**:cloudvar / converse 把帧解析、握手、重连、批量合并全部收进库内,外部通过 `on_change` / `on_connection` / `on_stream` 回调和 `connect_and_wait` / `send_and_wait` 同步原语交互;Socket.IO 帧解析与回调存储由 `utils/socketio` 统一提供。
 - **分层单向依赖**:`api → utils`,`core → api / utils`,上层不反向依赖;业务域模块之间互不引用,可以按需单独使用。
 

@@ -128,7 +128,7 @@ impl WorkshopDataFetcher {
     }
 
     /// 工作室成员列表分页迭代器
-    pub fn fetch_workshop_members_gen(
+    pub fn fetch_workshop_members_iter(
         &self,
         workshop_id: i32,
         limit: Option<usize>,
@@ -174,7 +174,7 @@ impl WorkshopDataFetcher {
     }
 
     /// 工作室讨论分页迭代器
-    pub fn fetch_workshop_discussions_gen(
+    pub fn fetch_workshop_discussions_iter(
         &self,
         shop_id: i32,
         source: Option<Source>,
@@ -192,7 +192,7 @@ impl WorkshopDataFetcher {
     }
 
     /// 工作室投稿作品分页迭代器
-    pub fn fetch_workshop_works_gen(
+    pub fn fetch_workshop_works_iter(
         &self,
         workshop_id: i32,
         user_id: i32,
@@ -224,7 +224,7 @@ impl WorkshopDataFetcher {
     }
 
     /// 工作室讨论区帖子分页迭代器
-    pub fn fetch_workshop_posts_gen(&self, label_id: i32, limit: Option<usize>) -> PaginatedIter {
+    pub fn fetch_workshop_posts_iter(&self, label_id: i32, limit: Option<usize>) -> PaginatedIter {
         let endpoint = format!("/web/works/subjects/labels/{}/posts", label_id);
         debug!("获取工作室帖子迭代器: label_id={}", label_id);
         self.client

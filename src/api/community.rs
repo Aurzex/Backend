@@ -241,7 +241,7 @@ impl CommunityDataFetcher {
     }
 
     /// 获取回复的分页迭代器
-    pub fn fetch_replies_gen(&self, types: ReplyTypes, limit: Option<usize>) -> PaginatedIter {
+    pub fn fetch_replies_iter(&self, types: ReplyTypes, limit: Option<usize>) -> PaginatedIter {
         self.client
             .build_paginated("/web/message-record")
             .with_iter_param("query_type", types.as_str())
@@ -543,7 +543,7 @@ impl CommunityDataFetcher {
     }
 
     /// KN 公开课分页迭代器
-    pub fn fetch_public_courses_gen(&self, limit: Option<usize>) -> PaginatedIter {
+    pub fn fetch_public_courses_iter(&self, limit: Option<usize>) -> PaginatedIter {
         self.client
             .build_paginated("/neko/course/publish/list")
             .with_page_size(10)
@@ -588,7 +588,7 @@ impl CommunityDataFetcher {
     }
 
     /// Nemo 端教程合集分页迭代器
-    pub fn fetch_course_packages_gen(&self, platform: i32, limit: Option<usize>) -> PaginatedIter {
+    pub fn fetch_course_packages_iter(&self, platform: i32, limit: Option<usize>) -> PaginatedIter {
         self.client
             .build_paginated("/creation-tools/v1/course/package/list")
             .with_page_size(50)
@@ -597,7 +597,7 @@ impl CommunityDataFetcher {
     }
 
     /// Nemo 教程详情分页迭代器
-    pub fn fetch_course_details_gen(
+    pub fn fetch_course_details_iter(
         &self,
         course_package_id: i32,
         limit: Option<usize>,
@@ -611,7 +611,7 @@ impl CommunityDataFetcher {
     }
 
     /// 教学计划分页迭代器
-    pub fn fetch_teaching_plans_gen(&self, limit: usize) -> PaginatedIter {
+    pub fn fetch_teaching_plans_iter(&self, limit: usize) -> PaginatedIter {
         debug!("获取教学计划迭代器, limit={}", limit);
         self.client
             .build_paginated("/neko/teaching-plan/list/team")
@@ -634,7 +634,7 @@ impl CommunityDataFetcher {
     }
 
     /// 活动帖子分页迭代器
-    pub fn fetch_studio_posts_gen(&self, studio_id: i32, limit: Option<usize>) -> PaginatedIter {
+    pub fn fetch_studio_posts_iter(&self, studio_id: i32, limit: Option<usize>) -> PaginatedIter {
         self.client
             .build_paginated("/web/forums/posts")
             .with_page_size(50)
@@ -644,7 +644,7 @@ impl CommunityDataFetcher {
     }
 
     /// 活动教程分页迭代器
-    pub fn fetch_studio_courses_gen(&self, studio_id: i32, limit: Option<usize>) -> PaginatedIter {
+    pub fn fetch_studio_courses_iter(&self, studio_id: i32, limit: Option<usize>) -> PaginatedIter {
         let endpoint = format!("/web/studios/{}/courses", studio_id);
         self.client
             .build_paginated(&endpoint)
@@ -653,7 +653,7 @@ impl CommunityDataFetcher {
     }
 
     /// 活动作品分页迭代器
-    pub fn fetch_studio_works_gen(&self, studio_id: i32, limit: Option<usize>) -> PaginatedIter {
+    pub fn fetch_studio_works_iter(&self, studio_id: i32, limit: Option<usize>) -> PaginatedIter {
         let endpoint = format!("/web/studios/{}/works", studio_id);
         self.client
             .build_paginated(&endpoint)
@@ -663,7 +663,7 @@ impl CommunityDataFetcher {
     }
 
     /// 活动参与者分页迭代器
-    pub fn fetch_studio_participators_gen(
+    pub fn fetch_studio_participators_iter(
         &self,
         studio_id: i32,
         limit: Option<usize>,
@@ -802,7 +802,7 @@ impl UserAction {
     }
 
     /// 获取广播消息分页迭代器
-    pub fn fetch_broadcast_messages_gen(
+    pub fn fetch_broadcast_messages_iter(
         &self,
         limit: Option<usize>,
         read_status: ReadStatus,

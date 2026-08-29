@@ -35,7 +35,7 @@ cargo test --test live_features
 - **错误**:用 `thiserror` 枚举;包装错误时保留底层变体(如 `Http` / `Json` / `Io`),不要全部压成 `Auth(String)`。
 
 - **`Result` 别名**:模块内若定义 `type Result<T>` 别名,必须暴露默认错误参数——`type Result<T, E = XxxError> = std::result::Result<T, E>`——让 `?` 透传的同时保留精确错误的逃生口。
-- **错误模型分层**:传输层 / 通用错误归 `MewError`(`Http` / `Io` / `Json` / `HttpStatus`),WS 归 `SocketError`;业务域错误包装 `MewError`(如 `DecompilerError::Mew(#[from] MewError)`),不重复 Io/Json/Http 变体。
+- **错误模型分层**:传输层 / 通用错误归 `MewError`(`Http` / `Io` / `Json` / `HttpStatus`),WS 归 `SocketError`;业务域错误包装 `MewError`(如 `DecompilerError::Mew(#[from] MewError)`),不重复 Io/Json/Http 变体。另两类域错误:凭据/身份错误用 `MewError::Auth`,调用方参数非法(前置条件)用 `MewError::InvalidArgument`——不要压成裸字符串或 `Other`。
 - **注释与提交信息**:使用中文(喵语自由,但要让别的猫看懂)。
 
 ## 提交规范

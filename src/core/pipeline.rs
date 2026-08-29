@@ -801,7 +801,7 @@ impl ViolationChecker {
         let threshold = self.config.spam_threshold;
         let mut matches = 0usize;
         let mut violations = Vec::new();
-        for result in fetcher.search_posts_gen(title, None) {
+        for result in fetcher.search_posts_iter(title, None) {
             match result {
                 Ok(post) => {
                     if post
@@ -982,12 +982,11 @@ impl ViolationChecker {
     }
 
     fn login_student(&self, username: &str, password: &str) -> Result<(), ProcessorError> {
-        let mut session = crate::api::auth::LoginBuilder::new_with_client(self.client.clone())
+        crate::api::auth::LoginBuilder::new_with_client(self.client.clone())
             .identity(username)
             .password(password)
             .status(crate::api::auth::AccountStatus::Edu)
-            .build();
-        session.execute()?;
+            .execute()?;
         Ok(())
     }
 

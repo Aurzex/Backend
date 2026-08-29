@@ -266,11 +266,12 @@ impl ChatClient {
         // 等待 WebSocket 连接 + Socket.IO 握手 + JOIN 完成,
         // 确保 send_message 不在握手/JOIN 完成前发出业务帧被服务器丢弃
         // (与 Python 端 connect() 后 sleep(2) 的目的相同,以 join_ack 为准更可靠)
-        Ok(wait_flag(
-            &self.inner.notify,
-            self.inner.connect_timeout,
-            || self.inner.joined.load(Ordering::Acquire),
-        ))
+        // 谓词同时监听 stopping:等待期间被 close() 时立即中止,而非挂满 connect_timeout
+        let joined = wait_flag(&self.inner.notify, self.inner.connect_timeout, || {
+            self.inner.joined.load(Ordering::Acquire) || self.inner.stopping.load(Ordering::Acquire)
+        });
+        // 等待期间被 close():按「未连接成功」返回 false
+        Ok(joined && !self.inner.stopping.load(Ordering::Acquire))
     }
 
     /// 等待 WebSocket 层连接建立(超时返回 false)

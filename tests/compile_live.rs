@@ -93,11 +93,11 @@ fn login_all(cfg: &TestConfig) -> usize {
     }
     let mut ok = 0;
     for entry in &cfg.accounts {
-        let mut session = LoginBuilder::new()
+        match LoginBuilder::new()
             .identity(&entry.account)
             .password(&entry.password)
-            .build();
-        match session.execute() {
+            .execute()
+        {
             Ok(result) if result.success => {
                 ok += 1;
                 eprintln!("[compile_live] 账号 {} 登录成功", entry.account);

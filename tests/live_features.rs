@@ -82,11 +82,11 @@ fn load_config() -> Option<TestConfig> {
 
 /// 登录单个账号,成功返回 token;失败返回 None(不 panic,便于多账号逐个报告)
 fn login(account: &str, password: &str) -> Option<String> {
-    let mut session = LoginBuilder::new()
+    match LoginBuilder::new()
         .identity(account)
         .password(password)
-        .build();
-    match session.execute() {
+        .execute()
+    {
         Ok(result) if result.success => Some(result.token),
         Ok(result) => {
             eprintln!(

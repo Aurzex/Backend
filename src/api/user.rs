@@ -355,7 +355,7 @@ impl UserDataFetcher {
     }
 
     /// 用户作品列表分页迭代器(Web 端)
-    pub fn fetch_user_works_web_gen(
+    pub fn fetch_user_works_web_iter(
         &self,
         user_id: i32,
         types: Option<WorksListType>,
@@ -434,7 +434,7 @@ impl UserDataFetcher {
     }
 
     /// 用户已发布 Nemo 作品分页迭代器
-    pub fn fetch_published_nemo_works_gen(&self, limit: Option<usize>) -> PaginatedIter {
+    pub fn fetch_published_nemo_works_iter(&self, limit: Option<usize>) -> PaginatedIter {
         debug!("获取已发布Nemo作品迭代器");
         self.client
             .build_paginated("/nemo/v2/works/list/user/published")
@@ -443,7 +443,7 @@ impl UserDataFetcher {
     }
 
     /// 用户 KN 作品分页迭代器
-    pub fn fetch_kn_works_gen(
+    pub fn fetch_kn_works_iter(
         &self,
         method: PublishStatus,
         extra_params: Option<Vec<(String, String)>>,
@@ -469,7 +469,7 @@ impl UserDataFetcher {
     }
 
     /// 用户 Kitten 作品分页迭代器
-    pub fn fetch_kitten_works_gen(
+    pub fn fetch_kitten_works_iter(
         &self,
         version: KittenVersion,
         status: PublishStatus,
@@ -494,7 +494,7 @@ impl UserDataFetcher {
     }
 
     /// 用户 Nemo 作品分页迭代器
-    pub fn fetch_nemo_works_gen(
+    pub fn fetch_nemo_works_iter(
         &self,
         status: PublishStatus,
         limit: Option<usize>,
@@ -508,7 +508,7 @@ impl UserDataFetcher {
     }
 
     /// 用户海龟编辑器作品分页迭代器
-    pub fn fetch_wood_works_gen(
+    pub fn fetch_wood_works_iter(
         &self,
         status: PublishStatus,
         language_type: Option<i32>,
@@ -533,7 +533,7 @@ impl UserDataFetcher {
     }
 
     /// 用户 Box 作品分页迭代器
-    pub fn fetch_box_works_gen(
+    pub fn fetch_box_works_iter(
         &self,
         status: PublishStatus,
         work_status: Option<WorkShowStatus>,
@@ -553,7 +553,7 @@ impl UserDataFetcher {
     }
 
     /// 用户小说分页迭代器
-    pub fn fetch_fanfics_gen(
+    pub fn fetch_fanfics_iter(
         &self,
         fiction_status: Option<WorkShowStatus>,
         limit: Option<usize>,
@@ -570,7 +570,7 @@ impl UserDataFetcher {
     }
 
     /// 用户 Coco 作品分页迭代器
-    pub fn fetch_coco_works_gen(
+    pub fn fetch_coco_works_iter(
         &self,
         status: Option<i32>,
         published: Option<bool>,
@@ -610,7 +610,7 @@ impl UserDataFetcher {
     }
 
     /// 用户粉丝列表分页迭代器
-    pub fn fetch_followers_gen(&self, user_id: i32, limit: Option<usize>) -> PaginatedIter {
+    pub fn fetch_followers_iter(&self, user_id: i32, limit: Option<usize>) -> PaginatedIter {
         debug!("获取粉丝迭代器: user_id={}", user_id);
         self.client
             .build_paginated("/creation-tools/v1/user/fans")
@@ -621,7 +621,7 @@ impl UserDataFetcher {
     }
 
     /// 用户关注列表分页迭代器
-    pub fn fetch_following_gen(&self, user_id: i32, limit: Option<usize>) -> PaginatedIter {
+    pub fn fetch_following_iter(&self, user_id: i32, limit: Option<usize>) -> PaginatedIter {
         debug!("获取关注迭代器: user_id={}", user_id);
         self.client
             .build_paginated("/creation-tools/v1/user/followers")
@@ -694,7 +694,7 @@ impl UserDataFetcher {
     }
 
     /// 用户收藏作品分页迭代器
-    pub fn fetch_collections_gen(&self, user_id: i32, limit: Option<usize>) -> PaginatedIter {
+    pub fn fetch_collections_iter(&self, user_id: i32, limit: Option<usize>) -> PaginatedIter {
         debug!("获取收藏作品迭代器: user_id={}", user_id);
         self.client
             .build_paginated("/creation-tools/v2/user/center/collect/list")

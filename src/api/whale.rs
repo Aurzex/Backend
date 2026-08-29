@@ -187,7 +187,7 @@ impl WhaleReportFetcher {
     // 公共方法
 
     /// 作品举报分页迭代器
-    pub fn fetch_work_reports_gen(
+    pub fn fetch_work_reports_iter(
         &self,
         source_type: WorkSourceType,
         status: ReportStatus,
@@ -211,7 +211,7 @@ impl WhaleReportFetcher {
     }
 
     /// 评论举报分页迭代器
-    pub fn fetch_comment_reports_gen(
+    pub fn fetch_comment_reports_iter(
         &self,
         source_type: CommentSourceType,
         status: ReportStatus,
@@ -235,7 +235,7 @@ impl WhaleReportFetcher {
     }
 
     /// 帖子举报分页迭代器
-    pub fn fetch_post_reports_gen(
+    pub fn fetch_post_reports_iter(
         &self,
         status: ReportStatus,
         board_id: Option<i32>,
@@ -259,7 +259,7 @@ impl WhaleReportFetcher {
     }
 
     /// 讨论区举报分页迭代器
-    pub fn fetch_discussion_reports_gen(
+    pub fn fetch_discussion_reports_iter(
         &self,
         status: ReportStatus,
         board_id: Option<i32>,
@@ -386,7 +386,7 @@ impl ReportHandler {
             Resolution::Pass | Resolution::Delete | Resolution::Unload | Resolution::Tobedone => {
                 resolution.as_str()
             }
-            _ => return Err(MewError::Other("作品举报不支持此决议类型".into())),
+            _ => return Err(MewError::InvalidArgument("作品举报不支持此决议类型".into())),
         };
 
         let endpoint = format!("/reports/works/{}", report_id);

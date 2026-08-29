@@ -424,7 +424,7 @@ impl ReportFetcher {
                     move |status| {
                         total_from(
                             WhaleReportFetcher::new_with_client(c.clone())
-                                .fetch_comment_reports_gen(
+                                .fetch_comment_reports_iter(
                                     CommentSourceType::All,
                                     status,
                                     None,
@@ -439,7 +439,7 @@ impl ReportFetcher {
                     move |status| {
                         gen_from(
                             WhaleReportFetcher::new_with_client(c.clone())
-                                .fetch_comment_reports_gen(
+                                .fetch_comment_reports_iter(
                                     CommentSourceType::All,
                                     status,
                                     None,
@@ -485,7 +485,7 @@ impl ReportFetcher {
                     let c = client.clone();
                     move |status| {
                         total_from(
-                            WhaleReportFetcher::new_with_client(c.clone()).fetch_work_reports_gen(
+                            WhaleReportFetcher::new_with_client(c.clone()).fetch_work_reports_iter(
                                 WorkSourceType::All,
                                 status,
                                 None,
@@ -499,7 +499,7 @@ impl ReportFetcher {
                     let c = client.clone();
                     move |status| {
                         gen_from(
-                            WhaleReportFetcher::new_with_client(c.clone()).fetch_work_reports_gen(
+                            WhaleReportFetcher::new_with_client(c.clone()).fetch_work_reports_iter(
                                 WorkSourceType::All,
                                 status,
                                 None,
@@ -540,7 +540,7 @@ impl ReportFetcher {
                     move |status| {
                         total_from(
                             WhaleReportFetcher::new_with_client(c.clone())
-                                .fetch_post_reports_gen(status, None, None, None, None),
+                                .fetch_post_reports_iter(status, None, None, None, None),
                         )
                     }
                 },
@@ -549,7 +549,7 @@ impl ReportFetcher {
                     move |status| {
                         gen_from(
                             WhaleReportFetcher::new_with_client(c.clone())
-                                .fetch_post_reports_gen(status, None, None, None, None),
+                                .fetch_post_reports_iter(status, None, None, None, None),
                         )
                     }
                 },
@@ -587,7 +587,7 @@ impl ReportFetcher {
                     move |status| {
                         total_from(
                             WhaleReportFetcher::new_with_client(c.clone())
-                                .fetch_discussion_reports_gen(status, None, None, None, None),
+                                .fetch_discussion_reports_iter(status, None, None, None, None),
                         )
                     }
                 },
@@ -596,7 +596,7 @@ impl ReportFetcher {
                     move |status| {
                         gen_from(
                             WhaleReportFetcher::new_with_client(c.clone())
-                                .fetch_discussion_reports_gen(status, None, None, None, None),
+                                .fetch_discussion_reports_iter(status, None, None, None, None),
                         )
                     }
                 },
@@ -667,7 +667,7 @@ impl ReportFetcher {
                     });
                 }
 
-                let source = active.as_mut().unwrap();
+                let Some(source) = active.as_mut() else { break };
                 let chunk_size = source.config.chunk_size;
 
                 // 单页瞬时错误:PaginatedIter 已保证错误后 next() 重试同一页,这里做有界重试

@@ -494,8 +494,9 @@ impl AuthProcessor {
 
         if response.status() == 200 {
             let bytes = response.into_body().read_to_vec()?;
-            CodeMaoFile::write_bytes(&PathConfig::global().captcha_file_path(), &bytes)
-                .map_err(|e| MewError::Other(format!("验证码文件写入失败: {}", e)))?;
+            CodeMaoFile::write_bytes(&PathConfig::global().captcha_file_path(), &bytes).map_err(
+                |e| MewError::Io(std::io::Error::other(format!("验证码文件写入失败: {}", e))),
+            )?;
             debug!("管理员验证码已保存至文件");
             Ok(timestamp)
         } else {
@@ -821,8 +822,6 @@ impl Default for LoginHandler {
 /// 可通过 `new()` 创建默认实例,或使用 `new_with_provider` 注入自定义客户端
 #[derive(Debug)]
 pub struct AuthManager {
-    client_provider: Box<dyn ClientProvider>,
-    processor: AuthProcessor,
     handler: LoginHandler,
     current_credentials: Option<LoginCredentials>,
     current_method: Option<LoginMethod>,
@@ -830,12 +829,8 @@ pub struct AuthManager {
 
 impl AuthManager {
     pub fn new_with_provider(provider: Box<dyn ClientProvider>) -> Self {
-        let processor = AuthProcessor::new_with_provider(provider.clone_box());
-        let handler = LoginHandler::new_with_provider(provider.clone_box());
         Self {
-            client_provider: provider,
-            processor,
-            handler,
+            handler: LoginHandler::new_with_provider(provider),
             current_credentials: None,
             current_method: None,
         }
@@ -846,7 +841,7 @@ impl AuthManager {
     }
 
     fn client(&self) -> &CodeMaoClient {
-        self.client_provider.client()
+        self.handler.client()
     }
 
     /// 执行登录,自动根据角色和凭据选择登录方式
@@ -1051,7 +1046,7 @@ impl AuthManager {
         if result.success && result.auth_details.is_none() {
             // 仅在尚未获取管理员详情时才请求;
             // 与 handle_admin_token 一致,保存完整响应形态(AdminInfo::from_details 依赖)
-            match self.processor.fetch_admin_details() {
+            match self.handler.processor.fetch_admin_details() {
                 Ok(dashboard) => {
                     result = result.with_auth_details(dashboard);
                 }
@@ -1196,7 +1191,10 @@ impl CloudAuthenticator {
             self.time_difference = Some(local_time - server_time);
         }
         let now = current_timestamp_secs();
-        Ok(now - self.time_difference.unwrap())
+        let diff = self
+            .time_difference
+            .ok_or_else(|| MewError::Auth("时间差未校准".into()))?;
+        Ok(now - diff)
     }
 
     /// 生成 `x-device-auth` 头所需的 JSON 字符串
@@ -1320,45 +1318,25 @@ impl LoginBuilder {
         self
     }
 
-    /// 构建登录会话(不含网络请求,构造阶段无副作用)
-    pub fn build(self) -> LoginSession {
+    /// 执行登录(网络请求)。构造阶段无副作用,此处才发起请求。
+    pub fn execute(&mut self) -> MewResult<LoginResult> {
         let credentials = LoginCredentials {
-            identity: self.identity.unwrap_or_default(),
-            password: self.password.unwrap_or_default(),
-            token: self.token.unwrap_or_default(),
-            pid: self.pid.unwrap_or_else(|| DEFAULT_PID.to_string()),
+            identity: self.identity.take().unwrap_or_default(),
+            password: self.password.take().unwrap_or_default(),
+            token: self.token.take().unwrap_or_default(),
+            pid: self.pid.take().unwrap_or_else(|| DEFAULT_PID.to_string()),
             status: self.status,
             role: self.role,
             timestamp: self.timestamp,
-            captcha: self.captcha,
+            captcha: self.captcha.take(),
         };
-        LoginSession {
-            auth_manager: self.auth_manager,
-            credentials,
-            prefer_method: self.prefer_method,
-        }
+        self.auth_manager.login(&credentials, self.prefer_method)
     }
 }
 
 impl Default for LoginBuilder {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-/// 登录会话:由 [`LoginBuilder::build`] 构造,执行网络登录
-#[derive(Debug)]
-pub struct LoginSession {
-    auth_manager: AuthManager,
-    credentials: LoginCredentials,
-    prefer_method: Option<LoginMethod>,
-}
-
-impl LoginSession {
-    /// 执行登录(网络请求),返回登录结果
-    pub fn execute(&mut self) -> MewResult<LoginResult> {
-        self.auth_manager
-            .login(&self.credentials, self.prefer_method)
     }
 }
 
