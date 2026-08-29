@@ -115,17 +115,17 @@ fn login_all(cfg: &TestConfig) -> usize {
 /// 反编译单个作品,断言返回的路径存在
 /// 注意:Kitten/NEKO 返回 JSON 文件路径;NEMO 返回资源目录路径(且忽略 output_dir)。
 /// 此处仅断言成功与路径存在,不校验内容格式(各类型产物形态不同)。
-fn decompile_ok(work: &WorkEntry, work_dir: &Path) -> String {
+fn decompile_ok(work: &WorkEntry, work_dir: &Path) -> PathBuf {
     let options = DecompileOptions::new()
         .output_dir(work_dir.to_path_buf())
         .save_raw(false);
     let saved = decompile_work_with(work.id, options)
         .unwrap_or_else(|e| panic!("作品 {} ({}) 反编译失败: {e}", work.id, work.kind));
     assert!(
-        Path::new(&saved).exists(),
+        saved.exists(),
         "作品 {} 反编译产物不存在: {}",
         work.id,
-        saved
+        saved.display()
     );
     saved
 }
@@ -182,7 +182,8 @@ fn decompile_nemo_works() {
         let saved = decompile_ok(work, &work_dir);
         eprintln!(
             "[compile_live] NEMO 作品 {} 反编译产物(下载目录): {}",
-            work.id, saved
+            work.id,
+            saved.display()
         );
         // NEMO 的 save_result 忽略 output_dir,产物写入默认 download/compile/,
         // 测试后清理避免污染仓库目录

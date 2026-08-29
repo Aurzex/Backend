@@ -148,7 +148,7 @@ let reply = chat.send_and_wait("你好", HistoryMode::Exclude)?;
 ```rust
 use backend::core::compiler::{DecompileOptions, decompile_work, decompile_works};
 
-let json = decompile_work(123456, None)?; // None = 不写文件,只返回 JSON 字符串
+let path = decompile_work(123456, None)?; // None = 写入默认输出目录,返回文件路径
 
 let results = decompile_works(
     &[111, 222],

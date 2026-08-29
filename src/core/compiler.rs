@@ -1,6 +1,6 @@
 use crate::api::auth::CloudAuthenticator;
 use crate::utils::filedata::PathConfig;
-use crate::utils::requests::{CodeMaoClient, HttpMethod};
+use crate::utils::requests::{CodeMaoClient, HttpMethod, MewError};
 use aes_gcm::aead::array::Array;
 use aes_gcm::aead::array::typenum::{U12, U32};
 use aes_gcm::{
@@ -22,12 +22,8 @@ use thiserror::Error;
 // 错误定义
 #[derive(Error, Debug)]
 pub enum DecompilerError {
-    #[error("IO错误: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("JSON错误: {0}")]
-    Json(#[from] serde_json::Error),
-    #[error("HTTP错误: {0}")]
-    Http(String),
+    #[error("外部错误: {0}")]
+    Mew(#[from] MewError),
     #[error("加密错误: {0}")]
     Crypto(String),
     #[error("反编译错误: {0}")]
@@ -46,6 +42,18 @@ pub enum DecompilerError {
         #[source]
         source: Option<Box<dyn Error + Send + Sync>>,
     },
+}
+
+impl From<std::io::Error> for DecompilerError {
+    fn from(e: std::io::Error) -> Self {
+        DecompilerError::Mew(e.into())
+    }
+}
+
+impl From<serde_json::Error> for DecompilerError {
+    fn from(e: serde_json::Error) -> Self {
+        DecompilerError::Mew(e.into())
+    }
 }
 
 pub(crate) type Result<T> = std::result::Result<T, DecompilerError>;
@@ -1546,7 +1554,7 @@ pub(crate) trait WorkDecompiler: Send + Sync {
         result: &DecompileResult,
         output_dir: Option<&Path>,
         context: &DecompilerContext,
-    ) -> Result<String>;
+    ) -> Result<PathBuf>;
 }
 
 /// 将 JSON 反编译结果写入输出目录,返回文件路径(供各反编译器共用)
@@ -1556,7 +1564,7 @@ fn save_json_result(
     context: &DecompilerContext,
     extension: &str,
     decompiler_name: &str,
-) -> Result<String> {
+) -> Result<PathBuf> {
     match result {
         DecompileResult::Json(json) => {
             let output_path = output_dir.unwrap_or(&context.config.default_output_dir);
@@ -1568,7 +1576,7 @@ fn save_json_result(
             );
             let filepath = output_path.join(filename);
             FileService::write_json(&filepath, json)?;
-            Ok(filepath.to_string_lossy().to_string())
+            Ok(filepath)
         }
         _ => Err(DecompilerError::Decompile(format!(
             "{}反编译器应返回JSON",
@@ -1578,9 +1586,9 @@ fn save_json_result(
 }
 
 /// 返回路径型反编译结果(供返回路径的反编译器共用)
-fn save_path_result(result: &DecompileResult, decompiler_name: &str) -> Result<String> {
+fn save_path_result(result: &DecompileResult, decompiler_name: &str) -> Result<PathBuf> {
     match result {
-        DecompileResult::Path(path) => Ok(path.clone()),
+        DecompileResult::Path(path) => Ok(PathBuf::from(path)),
         _ => Err(DecompilerError::Decompile(format!(
             "{}反编译器应返回路径",
             decompiler_name
@@ -1672,7 +1680,7 @@ impl WorkDecompiler for NekoDecompiler {
         result: &DecompileResult,
         output_dir: Option<&Path>,
         context: &DecompilerContext,
-    ) -> Result<String> {
+    ) -> Result<PathBuf> {
         save_json_result(result, output_dir, context, "bcmkn", "NEKO")
     }
 }
@@ -2464,7 +2472,7 @@ impl WorkDecompiler for KittenDecompiler {
         result: &DecompileResult,
         output_dir: Option<&Path>,
         context: &DecompilerContext,
-    ) -> Result<String> {
+    ) -> Result<PathBuf> {
         let extension = context
             .work_info
             .file_extension(&context.config)
@@ -2565,7 +2573,7 @@ impl WorkDecompiler for NemoDecompiler {
         result: &DecompileResult,
         _output_dir: Option<&Path>,
         _context: &DecompilerContext,
-    ) -> Result<String> {
+    ) -> Result<PathBuf> {
         save_path_result(result, "NEMO")
     }
 }
@@ -2829,7 +2837,7 @@ impl WorkDecompiler for WoodDecompiler {
         result: &DecompileResult,
         _output_dir: Option<&Path>,
         _context: &DecompilerContext,
-    ) -> Result<String> {
+    ) -> Result<PathBuf> {
         save_path_result(result, "WOOD")
     }
 }
@@ -3173,7 +3181,7 @@ impl WorkDecompiler for CocoDecompiler {
         result: &DecompileResult,
         output_dir: Option<&Path>,
         context: &DecompilerContext,
-    ) -> Result<String> {
+    ) -> Result<PathBuf> {
         let extension = context
             .work_info
             .file_extension(&context.config)
@@ -3728,34 +3736,24 @@ impl HttpClient for CodeMaoHttpClient {
         if let Some(headers_map) = headers {
             request_builder = request_builder.with_headers(headers_map);
         }
-        let response = request_builder
-            .send()
-            .map_err(|e| DecompilerError::Http(format!("请求失败: {}", e)))?;
-        self.client
-            .response_to_json(response)
-            .map_err(|e| DecompilerError::Http(format!("JSON解析失败: {}", e)))
+        let response = request_builder.send()?;
+        Ok(self.client.response_to_json(response)?)
     }
 
     fn get_binary(&self, url: &str) -> Result<Vec<u8>> {
         let response = self
             .client
             .build_request(HttpMethod::Get, url, None)
-            .send()
-            .map_err(|e| DecompilerError::Http(format!("请求失败: {}", e)))?;
-        self.client
-            .response_to_binary(response)
-            .map_err(|e| DecompilerError::Http(format!("Binary解析失败: {}", e)))
+            .send()?;
+        Ok(self.client.response_to_binary(response)?)
     }
 
     fn get_text(&self, url: &str) -> Result<String> {
         let response = self
             .client
             .build_request(HttpMethod::Get, url, None)
-            .send()
-            .map_err(|e| DecompilerError::Http(format!("请求失败: {}", e)))?;
-        self.client
-            .response_to_string(response)
-            .map_err(|e| DecompilerError::Http(format!("String解析失败: {}", e)))
+            .send()?;
+        Ok(self.client.response_to_string(response)?)
     }
 
     fn box_clone(&self) -> Box<dyn HttpClient> {
@@ -3943,7 +3941,7 @@ impl CodemaoDecompiler {
         })
     }
     /// 反编译单个作品(默认选项,向后兼容)
-    pub fn decompile(&self, work_id: i64, output_dir: Option<&Path>) -> Result<String> {
+    pub fn decompile(&self, work_id: i64, output_dir: Option<&Path>) -> Result<PathBuf> {
         let mut options = DecompileOptions::new();
         if let Some(dir) = output_dir {
             options = options.output_dir(dir.to_path_buf());
@@ -3956,7 +3954,7 @@ impl CodemaoDecompiler {
         &self,
         work_id: i64,
         options: DecompileOptions,
-    ) -> Result<String> {
+    ) -> Result<PathBuf> {
         self.decompile_inner(work_id, &options)
     }
 
@@ -3965,7 +3963,7 @@ impl CodemaoDecompiler {
         &self,
         work_ids: &[i64],
         options: DecompileOptions,
-    ) -> Vec<Result<String>> {
+    ) -> Vec<Result<PathBuf>> {
         let concurrency = options.batch_concurrency.max(1);
         if concurrency == 1 || work_ids.len() <= 1 {
             return work_ids
@@ -3977,7 +3975,7 @@ impl CodemaoDecompiler {
         let options_ref = &options;
         let mut results = Vec::with_capacity(work_ids.len());
         for chunk in work_ids.chunks(concurrency) {
-            let chunk_results: Vec<Result<String>> = std::thread::scope(|scope| {
+            let chunk_results: Vec<Result<PathBuf>> = std::thread::scope(|scope| {
                 let handles: Vec<_> = chunk
                     .iter()
                     .map(|&id| scope.spawn(move || self.decompile_inner(id, options_ref)))
@@ -4001,7 +3999,7 @@ impl CodemaoDecompiler {
 
     /// 反编译主流程(模板方法)
     /// 流程为:获取信息 → 创建处理器 → 取原始数据 → (可选)保存原始数据 → 反编译 → 保存结果
-    fn decompile_inner(&self, work_id: i64, options: &DecompileOptions) -> Result<String> {
+    fn decompile_inner(&self, work_id: i64, options: &DecompileOptions) -> Result<PathBuf> {
         info!("开始反编译作品 [work_id={}]", work_id);
         let http_client = Box::new(CodeMaoHttpClient::new(self.client.clone()));
         let work_info = self
@@ -4045,7 +4043,11 @@ impl CodemaoDecompiler {
 
         let result = decompiler.decompile(raw, &context)?;
         let saved = decompiler.save_result(&result, Some(output_path), &context)?;
-        info!("作品 [work_id={}] 反编译完成,保存至: {}", work_id, saved);
+        info!(
+            "作品 [work_id={}] 反编译完成,保存至: {}",
+            work_id,
+            saved.display()
+        );
         Ok(saved)
     }
     /// 将获取到的未编译原始数据保存到 `output_dir/raw/` 目录下
@@ -4099,17 +4101,17 @@ impl CodemaoDecompiler {
 }
 
 /// 便捷反编译函数:使用全局单例门面(复用 HTTP 客户端),功能与之前一致
-/// `output_dir` 传 `None` 表示不落盘,仅返回 JSON 字符串;自定义客户端请用 `CodemaoDecompiler::new(client)`
-pub fn decompile_work(work_id: i64, output_dir: Option<&Path>) -> Result<String> {
+/// `output_dir` 传 `None` 时写入 `default_output_dir`,返回产物文件路径;自定义客户端请用 `CodemaoDecompiler::new(client)`
+pub fn decompile_work(work_id: i64, output_dir: Option<&Path>) -> Result<PathBuf> {
     CodemaoDecompiler::global().decompile(work_id, output_dir)
 }
 
 /// 便捷反编译函数:使用自定义选项;自定义客户端请用 `CodemaoDecompiler::new(client)`
-pub fn decompile_work_with(work_id: i64, options: DecompileOptions) -> Result<String> {
+pub fn decompile_work_with(work_id: i64, options: DecompileOptions) -> Result<PathBuf> {
     CodemaoDecompiler::global().decompile_with_options(work_id, options)
 }
 
-/// 便捷批量反编译函数:返回与输入顺序一致的 `Vec<Result<String>>`;自定义客户端请用 `CodemaoDecompiler::new(client)`
-pub fn decompile_works(work_ids: &[i64], options: DecompileOptions) -> Vec<Result<String>> {
+/// 便捷批量反编译函数:返回与输入顺序一致的 `Vec<Result<PathBuf>>`;自定义客户端请用 `CodemaoDecompiler::new(client)`
+pub fn decompile_works(work_ids: &[i64], options: DecompileOptions) -> Vec<Result<PathBuf>> {
     CodemaoDecompiler::global().decompile_batch(work_ids, options)
 }

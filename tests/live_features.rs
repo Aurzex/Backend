@@ -202,10 +202,10 @@ fn decompile_ok(work: &WorkEntry, work_dir: &Path) {
     let saved = decompile_work_with(work.id, options)
         .unwrap_or_else(|e| panic!("作品 {} ({}) 反编译失败: {e}", work.id, work.kind));
     assert!(
-        Path::new(&saved).exists(),
+        saved.exists(),
         "作品 {} 反编译产物不存在: {}",
         work.id,
-        saved
+        saved.display()
     );
 }
 

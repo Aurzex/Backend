@@ -21,6 +21,9 @@ use log::{debug, warn};
 pub enum MewError {
     #[error("HTTP error: {0}")]
     Http(#[from] ureq::Error),
+    /// 服务端返回 4xx/5xx 时的结构化错误(状态码 + 响应体)
+    #[error("HTTP {status}: {body}")]
+    HttpStatus { status: u16, body: String },
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
     #[error("JSON error: {0}")]
@@ -1901,7 +1904,10 @@ fn send_checked(builder: KittyRequestBuilder) -> MewResult<Response<Body>> {
     let status = response.status();
     if status.is_client_error() || status.is_server_error() {
         let body = response.into_body().read_to_string().unwrap_or_default();
-        return Err(MewError::Other(format!("HTTP {status}: {body}")));
+        return Err(MewError::HttpStatus {
+            status: status.as_u16(),
+            body,
+        });
     }
     Ok(response)
 }
