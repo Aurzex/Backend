@@ -1,5 +1,5 @@
 use crate::utils::requests::{
-    BaseKey, ClientAccess, CodeMaoClient, DEFAULT_LIMIT, DEFAULT_PAGE_SIZE, HTTPStatus, HttpMethod,
+    BaseKey, ClientAccess, CodeMaoClient, DEFAULT_LIMIT, DEFAULT_PAGE_SIZE, StatusCode, HttpMethod,
     MewResult, PaginatedIter,
 };
 use log::debug;
@@ -770,7 +770,7 @@ impl UserManager {
             .client
             .build_request(HttpMethod::Put, "/nemo/v2/user/basic", None)
             .with_payload(payload);
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 
     /// 移除头像框
@@ -781,7 +781,7 @@ impl UserManager {
             "/creation-tools/v1/user/avatar-frame/cancel",
             None,
         );
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 
     /// 应用头像框
@@ -789,7 +789,7 @@ impl UserManager {
         debug!("应用头像框: frame_id={:?}", frame_id);
         let endpoint = format!("/creation-tools/v1/user/avatar-frame/{}", frame_id as i32);
         let builder = self.client.build_request(HttpMethod::Put, &endpoint, None);
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 
     /// 更新个人主页封面
@@ -800,7 +800,7 @@ impl UserManager {
             .client
             .build_request(HttpMethod::Post, "/nemo/v2/user/preview", None)
             .with_payload(payload);
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 }
 

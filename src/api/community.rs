@@ -1,6 +1,6 @@
 use crate::utils::filedata::value_to_i64;
 use crate::utils::requests::{
-    BaseKey, ClientAccess, CodeMaoClient, DEFAULT_LIMIT, DEFAULT_PAGE_SIZE, HTTPStatus, HttpMethod,
+    BaseKey, ClientAccess, CodeMaoClient, DEFAULT_LIMIT, DEFAULT_PAGE_SIZE, StatusCode, HttpMethod,
     MewResult, PaginatedIter, PaginationMethod,
 };
 use log::{debug, warn};
@@ -786,7 +786,7 @@ impl UserAction {
             self.client
                 .build_request(HttpMethod::Post, "/nemo/v3/user/level/signature", None)
                 .with_payload(json!({})),
-            HTTPStatus::Ok,
+            StatusCode::Ok,
         )
     }
 
@@ -797,7 +797,7 @@ impl UserAction {
         self.check_status(
             self.client
                 .build_request(HttpMethod::Delete, &endpoint, None),
-            HTTPStatus::NoContent,
+            StatusCode::NoContent,
         )
     }
 

@@ -1,6 +1,7 @@
 pub mod cloudvar;
 pub mod compiler;
 pub mod converse;
+pub(crate) mod decoders;
 pub mod pipeline;
 pub mod registry;
 pub mod retrieve;

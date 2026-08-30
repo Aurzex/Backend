@@ -182,50 +182,50 @@ fn is_header_overridden(name: &str, extra_headers: &[(String, String)]) -> bool 
         .any(|(k, _)| k.eq_ignore_ascii_case(name))
 }
 
-// 身份枚举(萌化:Catsona)
+// 身份枚举(萌化:Identity)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Catsona {
+pub enum Identity {
     Fluffy,  // 普通用户(原 Average)
     Scholar, // 教育(原 Edu)
     Judge,   // 评审(原 Judgement)
     Blanky,  // 空白(原 Blank),此身份不应持有令牌
 }
 
-impl Catsona {
+impl Identity {
     /// 转换为数组索引(范围 0 到 3), 与 `ALL` 中声明顺序一致
     fn index(self) -> usize {
         self as usize
     }
 
     /// 所有身份变体
-    pub const ALL: [Catsona; 4] = [
-        Catsona::Fluffy,
-        Catsona::Scholar,
-        Catsona::Judge,
-        Catsona::Blanky,
+    pub const ALL: [Identity; 4] = [
+        Identity::Fluffy,
+        Identity::Scholar,
+        Identity::Judge,
+        Identity::Blanky,
     ];
 }
 
-impl FromStr for Catsona {
+impl FromStr for Identity {
     type Err = MewError;
     fn from_str(s: &str) -> MewResult<Self> {
         match s {
-            "average" => Ok(Catsona::Fluffy),
-            "edu" => Ok(Catsona::Scholar),
-            "judgement" => Ok(Catsona::Judge),
-            "blank" => Ok(Catsona::Blanky),
+            "average" => Ok(Identity::Fluffy),
+            "edu" => Ok(Identity::Scholar),
+            "judgement" => Ok(Identity::Judge),
+            "blank" => Ok(Identity::Blanky),
             _ => Err(MewError::Auth(format!("invalid identity: {}", s))),
         }
     }
 }
 
-impl AsRef<str> for Catsona {
+impl AsRef<str> for Identity {
     fn as_ref(&self) -> &str {
         match self {
-            Catsona::Fluffy => "average",
-            Catsona::Scholar => "edu",
-            Catsona::Judge => "judgement",
-            Catsona::Blanky => "blank",
+            Identity::Fluffy => "average",
+            Identity::Scholar => "edu",
+            Identity::Judge => "judgement",
+            Identity::Blanky => "blank",
         }
     }
 }
@@ -235,37 +235,37 @@ impl AsRef<str> for Catsona {
 /// 采用 `RwLock` + `AtomicUsize` 分离 token 存储和当前身份索引
 /// `AtomicUsize` 使用 `Release/Acquire` 排序保证身份切换后令牌可见
 #[derive(Debug)]
-pub(crate) struct KittyIdentityManager {
+pub(crate) struct IdentityManager {
     token_bowl: RwLock<[Option<Arc<str>>; 4]>,
     current_cat: AtomicUsize,
 }
 
-impl KittyIdentityManager {
+impl IdentityManager {
     fn new() -> Self {
         Self {
             token_bowl: RwLock::new(Default::default()),
-            current_cat: AtomicUsize::new(Catsona::Fluffy.index()),
+            current_cat: AtomicUsize::new(Identity::Fluffy.index()),
         }
     }
 }
 
 /// 全局身份管理器单例
 /// 使用 `OnceLock` 确保线程安全的懒加载初始化
-static GLOBAL_IDENTITY_MANAGER: OnceLock<KittyIdentityManager> = OnceLock::new();
+static GLOBAL_IDENTITY_MANAGER: OnceLock<IdentityManager> = OnceLock::new();
 
-fn get_global_identity_manager() -> &'static KittyIdentityManager {
-    GLOBAL_IDENTITY_MANAGER.get_or_init(KittyIdentityManager::new)
+fn get_global_identity_manager() -> &'static IdentityManager {
+    GLOBAL_IDENTITY_MANAGER.get_or_init(IdentityManager::new)
 }
 
 // 客户端配置
 #[derive(Debug, Clone)]
-pub struct KittyConfig {
+pub struct ClientConfig {
     default_base_key: BaseKey,
     timeout: Duration,
     log_requests: bool,
 }
 
-impl Default for KittyConfig {
+impl Default for ClientConfig {
     fn default() -> Self {
         Self {
             default_base_key: BaseKey::Default,
@@ -275,7 +275,7 @@ impl Default for KittyConfig {
     }
 }
 
-impl KittyConfig {
+impl ClientConfig {
     pub fn new() -> Self {
         Self::default()
     }
@@ -334,25 +334,25 @@ impl From<HttpMethod> for &'static str {
 
 // 认证特质
 /// 认证提供者特质,允许不同的认证实现
-pub trait KittyAuth: Send + Sync + std::fmt::Debug {
-    fn current_identity(&self) -> Catsona;
+pub trait AuthProvider: Send + Sync + std::fmt::Debug {
+    fn current_identity(&self) -> Identity;
     fn current_token(&self) -> Option<Arc<str>>;
     fn auth_header(&self) -> Option<(&'static str, String)> {
         self.current_token()
             .map(|token| ("Authorization", format!("Bearer {}", token)))
     }
-    fn set_token(&self, identity: Catsona, token: String) -> MewResult<()>;
-    fn switch_identity(&self, identity: Catsona) -> MewResult<()>;
+    fn set_token(&self, identity: Identity, token: String) -> MewResult<()>;
+    fn switch_identity(&self, identity: Identity) -> MewResult<()>;
 }
 
 // 身份管理器实现认证特质
-/// 直接为 `KittyIdentityManager` 实现 `KittyAuth`,
+/// 直接为 `IdentityManager` 实现 `AuthProvider`,
 /// 使其成为唯一的认证逻辑实现点,全局与本地提供者只做轻量委托
-impl KittyAuth for KittyIdentityManager {
+impl AuthProvider for IdentityManager {
     /// 当前身份(使用 `Acquire` 加载,与切换时的 `Release` 配对,保证可见性)
-    fn current_identity(&self) -> Catsona {
+    fn current_identity(&self) -> Identity {
         let idx = self.current_cat.load(Ordering::Acquire);
-        Catsona::ALL[idx]
+        Identity::ALL[idx]
     }
 
     /// 当前身份对应的令牌
@@ -366,8 +366,8 @@ impl KittyAuth for KittyIdentityManager {
     /// - 若 token 非空,则设置该身份的令牌
     /// - 若 token 为空字符串,则**清除**该身份的令牌(设为 None)
     /// - `Blanky` 身份不允许持有令牌,尝试设置将返回错误
-    fn set_token(&self, identity: Catsona, token: String) -> MewResult<()> {
-        if identity == Catsona::Blanky {
+    fn set_token(&self, identity: Identity, token: String) -> MewResult<()> {
+        if identity == Identity::Blanky {
             return Err(MewError::Auth("Blanky identity cannot hold a token".into()));
         }
         let mut bowl = self.token_bowl.write().unwrap();
@@ -383,8 +383,8 @@ impl KittyAuth for KittyIdentityManager {
     /// 切换到指定身份
     /// 切换使用 `Release` 存储,确保之前的 token 写入对后续 `current_token` 可见
     /// Blanky 可以无条件切换(不需要令牌),其他身份必须已持有令牌
-    fn switch_identity(&self, identity: Catsona) -> MewResult<()> {
-        if identity != Catsona::Blanky
+    fn switch_identity(&self, identity: Identity) -> MewResult<()> {
+        if identity != Identity::Blanky
             && self.token_bowl.read().unwrap()[identity.index()].is_none()
         {
             return Err(MewError::Auth(format!(
@@ -413,8 +413,8 @@ impl GlobalKittyAuth {
     }
 }
 
-impl KittyAuth for GlobalKittyAuth {
-    fn current_identity(&self) -> Catsona {
+impl AuthProvider for GlobalKittyAuth {
+    fn current_identity(&self) -> Identity {
         get_global_identity_manager().current_identity()
     }
 
@@ -422,12 +422,12 @@ impl KittyAuth for GlobalKittyAuth {
         get_global_identity_manager().current_token()
     }
 
-    fn set_token(&self, identity: Catsona, token: String) -> MewResult<()> {
+    fn set_token(&self, identity: Identity, token: String) -> MewResult<()> {
         // 委托给全局管理器,会检查 Blanky 限制和空字符串清除
         get_global_identity_manager().set_token(identity, token)
     }
 
-    fn switch_identity(&self, identity: Catsona) -> MewResult<()> {
+    fn switch_identity(&self, identity: Identity) -> MewResult<()> {
         get_global_identity_manager().switch_identity(identity)
     }
 }
@@ -435,7 +435,7 @@ impl KittyAuth for GlobalKittyAuth {
 /// 本地认证提供者(独立实例)
 #[derive(Debug, Clone)]
 pub(crate) struct LocalKittyAuth {
-    inner: Arc<KittyIdentityManager>,
+    inner: Arc<IdentityManager>,
 }
 
 impl Default for LocalKittyAuth {
@@ -447,13 +447,13 @@ impl Default for LocalKittyAuth {
 impl LocalKittyAuth {
     pub(crate) fn new() -> Self {
         Self {
-            inner: Arc::new(KittyIdentityManager::new()),
+            inner: Arc::new(IdentityManager::new()),
         }
     }
 }
 
-impl KittyAuth for LocalKittyAuth {
-    fn current_identity(&self) -> Catsona {
+impl AuthProvider for LocalKittyAuth {
+    fn current_identity(&self) -> Identity {
         self.inner.current_identity()
     }
 
@@ -461,19 +461,19 @@ impl KittyAuth for LocalKittyAuth {
         self.inner.current_token()
     }
 
-    fn set_token(&self, identity: Catsona, token: String) -> MewResult<()> {
+    fn set_token(&self, identity: Identity, token: String) -> MewResult<()> {
         // 委托给本地管理器,会检查 Blanky 限制和空字符串清除
         self.inner.set_token(identity, token)
     }
 
-    fn switch_identity(&self, identity: Catsona) -> MewResult<()> {
+    fn switch_identity(&self, identity: Identity) -> MewResult<()> {
         self.inner.switch_identity(identity)
     }
 }
 
 // 请求构建器
-/// 请求构建器,支持链式设置可选参数(萌化名:KittyRequestBuilder)
-pub struct KittyRequestBuilder {
+/// 请求构建器,支持链式设置可选参数(萌化名:MewRequestBuilder)
+pub struct MewRequestBuilder {
     client: CodeMaoClient,
     method: HttpMethod,
     endpoint: String,
@@ -486,7 +486,7 @@ pub struct KittyRequestBuilder {
     status_as_error: bool,
 }
 
-impl KittyRequestBuilder {
+impl MewRequestBuilder {
     fn new(
         client: CodeMaoClient,
         method: HttpMethod,
@@ -605,8 +605,8 @@ struct RequestSpec<'a> {
     status_as_error: bool,
 }
 
-impl<'a> From<&'a KittyRequestBuilder> for RequestSpec<'a> {
-    fn from(builder: &'a KittyRequestBuilder) -> Self {
+impl<'a> From<&'a MewRequestBuilder> for RequestSpec<'a> {
+    fn from(builder: &'a MewRequestBuilder) -> Self {
         RequestSpec {
             method: builder.method,
             endpoint: &builder.endpoint,
@@ -622,12 +622,12 @@ impl<'a> From<&'a KittyRequestBuilder> for RequestSpec<'a> {
 #[derive(Clone)]
 struct KittyCore {
     agent: Agent,
-    config: KittyConfig,
-    auth: Arc<dyn KittyAuth>,
+    config: ClientConfig,
+    auth: Arc<dyn AuthProvider>,
 }
 
 impl KittyCore {
-    fn new(config: KittyConfig, auth: Arc<dyn KittyAuth>) -> Self {
+    fn new(config: ClientConfig, auth: Arc<dyn AuthProvider>) -> Self {
         let agent = Agent::config_builder()
             .timeout_global(Some(config.timeout))
             .build()
@@ -737,7 +737,7 @@ impl KittyCore {
     /// 为 ureq RequestBuilder 统一设置默认头,认证头,额外头及查询参数
     fn apply_to_request_builder<B>(
         mut builder: RequestBuilder<B>,
-        auth: &dyn KittyAuth,
+        auth: &dyn AuthProvider,
         params: &[(String, String)],
         extra_headers: &[(String, String)],
     ) -> RequestBuilder<B> {
@@ -930,22 +930,22 @@ impl CodeMaoClient {
     pub fn global() -> &'static Self {
         static INSTANCE: OnceLock<CodeMaoClient> = OnceLock::new();
         INSTANCE.get_or_init(|| {
-            CodeMaoClient::new_with_auth(KittyConfig::default(), Arc::new(GlobalKittyAuth::new()))
+            CodeMaoClient::new_with_auth(ClientConfig::default(), Arc::new(GlobalKittyAuth::new()))
         })
     }
 
     /// 创建使用全局身份管理器的客户端(可自定义配置)
-    pub fn new_with_global_auth(config: KittyConfig) -> Self {
+    pub fn new_with_global_auth(config: ClientConfig) -> Self {
         Self::new_with_auth(config, Arc::new(GlobalKittyAuth::new()))
     }
 
     /// 创建使用独立身份管理器的客户端
-    pub fn new_independent(config: KittyConfig) -> Self {
+    pub fn new_independent(config: ClientConfig) -> Self {
         Self::new_with_auth(config, Arc::new(LocalKittyAuth::new()))
     }
 
     /// 使用自定义认证提供者创建客户端
-    pub fn new_with_auth(config: KittyConfig, auth: Arc<dyn KittyAuth>) -> Self {
+    pub fn new_with_auth(config: ClientConfig, auth: Arc<dyn AuthProvider>) -> Self {
         Self {
             inner: Arc::new(KittyCore::new(config, auth)),
         }
@@ -960,17 +960,17 @@ impl CodeMaoClient {
     /// - 非空 token:设置该身份的令牌
     /// - 空字符串:清除该身份的令牌(设为 None)
     /// - `Blanky` 身份不允许设置令牌
-    pub fn set_token(&self, identity: Catsona, token: impl Into<String>) -> MewResult<()> {
+    pub fn set_token(&self, identity: Identity, token: impl Into<String>) -> MewResult<()> {
         self.inner.auth.set_token(identity, token.into())
     }
 
     /// 切换到指定身份
-    pub fn switch_identity(&self, identity: Catsona) -> MewResult<()> {
+    pub fn switch_identity(&self, identity: Identity) -> MewResult<()> {
         self.inner.auth.switch_identity(identity)
     }
 
     /// 获取当前身份
-    pub fn current_identity(&self) -> Catsona {
+    pub fn current_identity(&self) -> Identity {
         self.inner.auth.current_identity()
     }
 
@@ -979,14 +979,14 @@ impl CodeMaoClient {
         self.inner.auth.current_token().map(|t| t.to_string())
     }
 
-    /// 构建请求,返回支持链式设置的 KittyRequestBuilder
+    /// 构建请求,返回支持链式设置的 MewRequestBuilder
     pub fn build_request(
         &self,
         method: HttpMethod,
         endpoint: &str,
         base_key: Option<BaseKey>,
-    ) -> KittyRequestBuilder {
-        KittyRequestBuilder::new(self.clone(), method, endpoint, base_key)
+    ) -> MewRequestBuilder {
+        MewRequestBuilder::new(self.clone(), method, endpoint, base_key)
     }
 
     /// 将响应体解析为 JSON
@@ -1726,7 +1726,7 @@ fn generate_meow_id(length: usize) -> String {
 
 // HTTP 状态码枚举
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HTTPStatus {
+pub enum StatusCode {
     Continue = 100,
     SwitchingProtocols = 101,
     Processing = 102,
@@ -1760,51 +1760,51 @@ pub enum HTTPStatus {
     GatewayTimeout = 504,
 }
 
-impl HTTPStatus {
+impl StatusCode {
     pub fn reason_phrase(&self) -> &'static str {
         match self {
-            HTTPStatus::Continue => "Continue",
-            HTTPStatus::SwitchingProtocols => "Switching Protocols",
-            HTTPStatus::Processing => "Processing",
-            HTTPStatus::Ok => "OK",
-            HTTPStatus::Created => "Created",
-            HTTPStatus::Accepted => "Accepted",
-            HTTPStatus::NonAuthoritativeInfo => "Non-Authoritative Information",
-            HTTPStatus::NoContent => "No Content",
-            HTTPStatus::ResetContent => "Reset Content",
-            HTTPStatus::PartialContent => "Partial Content",
-            HTTPStatus::MultipleChoices => "Multiple Choices",
-            HTTPStatus::MovedPermanently => "Moved Permanently",
-            HTTPStatus::Found => "Found",
-            HTTPStatus::SeeOther => "See Other",
-            HTTPStatus::NotModified => "Not Modified",
-            HTTPStatus::TemporaryRedirect => "Temporary Redirect",
-            HTTPStatus::PermanentRedirect => "Permanent Redirect",
-            HTTPStatus::BadRequest => "Bad Request",
-            HTTPStatus::Unauthorized => "Unauthorized",
-            HTTPStatus::PaymentRequired => "Payment Required",
-            HTTPStatus::Forbidden => "Forbidden",
-            HTTPStatus::NotFound => "Not Found",
-            HTTPStatus::MethodNotAllowed => "Method Not Allowed",
-            HTTPStatus::NotAcceptable => "Not Acceptable",
-            HTTPStatus::Conflict => "Conflict",
-            HTTPStatus::Gone => "Gone",
-            HTTPStatus::InternalServerError => "Internal Server Error",
-            HTTPStatus::NotImplemented => "Not Implemented",
-            HTTPStatus::BadGateway => "Bad Gateway",
-            HTTPStatus::ServiceUnavailable => "Service Unavailable",
-            HTTPStatus::GatewayTimeout => "Gateway Timeout",
+            StatusCode::Continue => "Continue",
+            StatusCode::SwitchingProtocols => "Switching Protocols",
+            StatusCode::Processing => "Processing",
+            StatusCode::Ok => "OK",
+            StatusCode::Created => "Created",
+            StatusCode::Accepted => "Accepted",
+            StatusCode::NonAuthoritativeInfo => "Non-Authoritative Information",
+            StatusCode::NoContent => "No Content",
+            StatusCode::ResetContent => "Reset Content",
+            StatusCode::PartialContent => "Partial Content",
+            StatusCode::MultipleChoices => "Multiple Choices",
+            StatusCode::MovedPermanently => "Moved Permanently",
+            StatusCode::Found => "Found",
+            StatusCode::SeeOther => "See Other",
+            StatusCode::NotModified => "Not Modified",
+            StatusCode::TemporaryRedirect => "Temporary Redirect",
+            StatusCode::PermanentRedirect => "Permanent Redirect",
+            StatusCode::BadRequest => "Bad Request",
+            StatusCode::Unauthorized => "Unauthorized",
+            StatusCode::PaymentRequired => "Payment Required",
+            StatusCode::Forbidden => "Forbidden",
+            StatusCode::NotFound => "Not Found",
+            StatusCode::MethodNotAllowed => "Method Not Allowed",
+            StatusCode::NotAcceptable => "Not Acceptable",
+            StatusCode::Conflict => "Conflict",
+            StatusCode::Gone => "Gone",
+            StatusCode::InternalServerError => "Internal Server Error",
+            StatusCode::NotImplemented => "Not Implemented",
+            StatusCode::BadGateway => "Bad Gateway",
+            StatusCode::ServiceUnavailable => "Service Unavailable",
+            StatusCode::GatewayTimeout => "Gateway Timeout",
         }
     }
 }
 
-impl From<HTTPStatus> for u16 {
-    fn from(status: HTTPStatus) -> Self {
+impl From<StatusCode> for u16 {
+    fn from(status: StatusCode) -> Self {
         status as u16
     }
 }
 
-impl fmt::Display for HTTPStatus {
+impl fmt::Display for StatusCode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} {}", *self as u16, self.reason_phrase())
     }
@@ -1885,13 +1885,13 @@ pub trait ClientAccess {
     fn client(&self) -> &CodeMaoClient;
 
     /// 发送请求并检查响应状态码是否为预期值
-    fn check_status(&self, builder: KittyRequestBuilder, expected: HTTPStatus) -> MewResult<bool> {
+    fn check_status(&self, builder: MewRequestBuilder, expected: StatusCode) -> MewResult<bool> {
         let response = send_checked(builder)?;
         Ok(response.status() == expected as u16)
     }
 
     /// 发送请求并将响应解析为 JSON
-    fn send_and_parse(&self, builder: KittyRequestBuilder) -> MewResult<Value> {
+    fn send_and_parse(&self, builder: MewRequestBuilder) -> MewResult<Value> {
         let response = send_checked(builder)?;
         self.client().response_to_json(response)
     }
@@ -1899,9 +1899,9 @@ pub trait ClientAccess {
     /// 发送请求,根据 `mode` 决定返回 JSON 数据或成功标志
     fn send_maybe_parse(
         &self,
-        builder: KittyRequestBuilder,
+        builder: MewRequestBuilder,
         mode: ResponseMode,
-        expected: HTTPStatus,
+        expected: StatusCode,
     ) -> MewResult<Value> {
         let response = send_checked(builder)?;
         if mode == ResponseMode::Data {
@@ -1914,7 +1914,7 @@ pub trait ClientAccess {
 
 /// 发送请求并统一处理 4xx/5xx:错误时读取服务端错误体并包装为 `MewError`。
 /// builder 已持有客户端,无需额外 client 参数;供 `ClientAccess` 默认方法复用。
-fn send_checked(builder: KittyRequestBuilder) -> MewResult<Response<Body>> {
+fn send_checked(builder: MewRequestBuilder) -> MewResult<Response<Body>> {
     let response = builder.with_error_body().send()?;
     let status = response.status();
     if status.is_client_error() || status.is_server_error() {

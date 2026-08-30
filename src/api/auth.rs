@@ -1,6 +1,6 @@
 use crate::utils::filedata::{CodeMaoFile, PathConfig, value_to_i64};
 use crate::utils::requests::{
-    BaseKey, Catsona, ClientAccess, CodeMaoClient, DEFAULT_PID, HttpMethod, MewError, MewResult,
+    BaseKey, Identity, ClientAccess, CodeMaoClient, DEFAULT_PID, HttpMethod, MewError, MewResult,
     current_timestamp_13, current_timestamp_secs, generate_random_id,
 };
 use log::{debug, warn};
@@ -129,12 +129,12 @@ impl AccountStatus {
         }
     }
 
-    /// 映射为身份枚举 `Catsona`
-    pub fn to_identity(self) -> Catsona {
+    /// 映射为身份枚举 `Identity`
+    pub fn to_identity(self) -> Identity {
         match self {
-            AccountStatus::Judgement => Catsona::Judge,
-            AccountStatus::Average => Catsona::Fluffy,
-            AccountStatus::Edu => Catsona::Scholar,
+            AccountStatus::Judgement => Identity::Judge,
+            AccountStatus::Average => Identity::Fluffy,
+            AccountStatus::Edu => Identity::Scholar,
         }
     }
 }
@@ -601,7 +601,7 @@ impl LoginHandler {
     }
 
     /// 将令牌设置到客户端,并切换到对应身份
-    fn set_token_and_identity(&self, token: &str, identity: Catsona) -> MewResult<()> {
+    fn set_token_and_identity(&self, token: &str, identity: Identity) -> MewResult<()> {
         self.client().set_token(identity, token)?;
         self.client().switch_identity(identity)?;
         Ok(())
@@ -616,7 +616,7 @@ impl LoginHandler {
         status: AccountStatus,
     ) -> MewResult<LoginResult> {
         let client = self.client();
-        client.switch_identity(Catsona::Blanky)?;
+        client.switch_identity(Identity::Blanky)?;
 
         match self.processor.handle_password_v0(identity, password, pid) {
             Ok(data) => {
@@ -648,7 +648,7 @@ impl LoginHandler {
         status: AccountStatus,
     ) -> MewResult<LoginResult> {
         let client = self.client();
-        client.switch_identity(Catsona::Blanky)?;
+        client.switch_identity(Identity::Blanky)?;
 
         match self.processor.handle_password_v1(identity, password, pid) {
             Ok(data) => {
@@ -684,7 +684,7 @@ impl LoginHandler {
         status: AccountStatus,
     ) -> MewResult<LoginResult> {
         let client = self.client();
-        client.switch_identity(Catsona::Blanky)?;
+        client.switch_identity(Identity::Blanky)?;
 
         match self.processor.handle_password_v2(identity, password, pid) {
             Ok(data) => {
@@ -730,8 +730,8 @@ impl LoginHandler {
             return Err(MewError::Auth("管理员 Token 不能为空".into()));
         }
 
-        self.client().set_token(Catsona::Judge, token)?;
-        self.client().switch_identity(Catsona::Judge)?;
+        self.client().set_token(Identity::Judge, token)?;
+        self.client().switch_identity(Identity::Judge)?;
 
         match self.processor.fetch_admin_details() {
             Ok(data) => {
@@ -742,12 +742,12 @@ impl LoginHandler {
                             .with_auth_details(data),
                     )
                 } else {
-                    let _ = self.client().set_token(Catsona::Judge, "");
+                    let _ = self.client().set_token(Identity::Judge, "");
                     Err(MewError::Auth("管理员 Token 无效或已过期".into()))
                 }
             }
             Err(e) => {
-                let _ = self.client().set_token(Catsona::Judge, "");
+                let _ = self.client().set_token(Identity::Judge, "");
                 Err(MewError::Auth(format!("管理员 Token 验证失败: {}", e)))
             }
         }
@@ -779,8 +779,8 @@ impl LoginHandler {
             .authenticate_admin_user(username, password, timestamp, captcha)?;
 
         if let Some(token) = response.get("token").and_then(|t| t.as_str()) {
-            self.client().set_token(Catsona::Judge, token)?;
-            self.client().switch_identity(Catsona::Judge)?;
+            self.client().set_token(Identity::Judge, token)?;
+            self.client().switch_identity(Identity::Judge)?;
             return Ok(
                 LoginResult::new(true, LoginMethod::AdminPassword, "管理员账密登录成功")
                     .with_token(token),

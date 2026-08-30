@@ -1,5 +1,5 @@
 use crate::utils::requests::{
-    ClientAccess, CodeMaoClient, DEFAULT_PID, HTTPStatus, HttpMethod, MewResult, ResponseMode,
+    ClientAccess, CodeMaoClient, DEFAULT_PID, StatusCode, HttpMethod, MewResult, ResponseMode,
 };
 use log::debug;
 use serde_json::{Value, json};
@@ -383,7 +383,7 @@ impl AccountManager {
             .client
             .build_request(HttpMethod::Patch, "/tiger/v3/web/accounts/info", None)
             .with_payload(payload);
-        self.check_status(builder, HTTPStatus::NoContent)
+        self.check_status(builder, StatusCode::NoContent)
     }
 
     /// 获取平台账号资料
@@ -693,7 +693,7 @@ impl AccountManager {
                 None,
             )
             .with_payload(payload);
-        self.check_status(builder, HTTPStatus::NoContent)
+        self.check_status(builder, StatusCode::NoContent)
     }
 
     // ---- 密码 ----
@@ -710,7 +710,7 @@ impl AccountManager {
             .client
             .build_request(HttpMethod::Patch, "/tiger/v3/web/accounts/password", None)
             .with_payload(payload);
-        self.check_status(builder, HTTPStatus::NoContent)
+        self.check_status(builder, StatusCode::NoContent)
     }
 
     /// 通过手机号修改密码(PUT 或 POST)
@@ -823,7 +823,7 @@ impl AccountManager {
             .client
             .build_request(HttpMethod::Post, "/tiger/v3/web/accounts/close", None)
             .with_payload(payload);
-        self.send_maybe_parse(builder, mode, HTTPStatus::Ok)
+        self.send_maybe_parse(builder, mode, StatusCode::Ok)
     }
 }
 
@@ -842,14 +842,14 @@ impl ClientAccess for AccountManager {
 #[cfg(test)]
 mod tests {
     use super::AccountManager;
-    use crate::utils::requests::{Catsona, ClientAccess, CodeMaoClient, KittyConfig};
+    use crate::utils::requests::{Identity, ClientAccess, CodeMaoClient, ClientConfig};
 
     #[test]
     fn manager_new_with_client_uses_injected_client() {
-        let a = CodeMaoClient::new_independent(KittyConfig::default());
-        let b = CodeMaoClient::new_independent(KittyConfig::default());
+        let a = CodeMaoClient::new_independent(ClientConfig::default());
+        let b = CodeMaoClient::new_independent(ClientConfig::default());
         let m = AccountManager::new_with_client(a.clone());
-        a.set_token(Catsona::Fluffy, "tok-a").unwrap();
+        a.set_token(Identity::Fluffy, "tok-a").unwrap();
         assert_eq!(m.client().current_token().as_deref(), Some("tok-a"));
         assert_eq!(b.current_token(), None); // b 独立,不受影响
     }

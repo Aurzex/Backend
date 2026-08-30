@@ -1,5 +1,5 @@
 use crate::utils::requests::{
-    ClientAccess, CodeMaoClient, DEFAULT_LIMIT, DEFAULT_PAGE_SIZE, HTTPStatus, HttpMethod,
+    ClientAccess, CodeMaoClient, DEFAULT_LIMIT, DEFAULT_PAGE_SIZE, StatusCode, HttpMethod,
     MewResult, PaginatedIter, ResponseMode,
 };
 use log::debug;
@@ -325,7 +325,7 @@ impl WorkshopActionHandler {
             .client
             .build_request(HttpMethod::Post, "/web/work_shops/update", None)
             .with_payload(payload);
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 
     /// 创建工作室
@@ -356,7 +356,7 @@ impl WorkshopActionHandler {
             .client
             .build_request(HttpMethod::Post, "/web/work_shops/dissolve", None)
             .with_payload(payload);
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 
     /// 向工作室投稿作品
@@ -370,7 +370,7 @@ impl WorkshopActionHandler {
             .client
             .build_request(HttpMethod::Post, "/web/work_shops/works/contribute", None)
             .with_payload(payload);
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 
     /// 从工作室移除作品
@@ -384,7 +384,7 @@ impl WorkshopActionHandler {
             .client
             .build_request(HttpMethod::Post, "/web/work_shops/works/remove", None)
             .with_payload(payload);
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 
     /// 申请加入工作室
@@ -398,7 +398,7 @@ impl WorkshopActionHandler {
             .client
             .build_request(HttpMethod::Post, "/web/work_shops/users/apply/join", None)
             .with_payload(payload);
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 
     /// 审核加入工作室的申请
@@ -421,7 +421,7 @@ impl WorkshopActionHandler {
             .client
             .build_request(HttpMethod::Post, "/web/work_shops/users/audit", None)
             .with_payload(payload);
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 
     /// 举报讨论区下的评论
@@ -443,7 +443,7 @@ impl WorkshopActionHandler {
             .client
             .build_request(HttpMethod::Post, "/web/reports/comments", None)
             .with_payload(payload);
-        self.check_status(builder, HTTPStatus::Created)
+        self.check_status(builder, StatusCode::Created)
     }
 
     /// 回复评论
@@ -473,7 +473,7 @@ impl WorkshopActionHandler {
             .client
             .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(payload);
-        self.send_maybe_parse(builder, mode, HTTPStatus::Created)
+        self.send_maybe_parse(builder, mode, StatusCode::Created)
     }
 
     /// 删除回复
@@ -484,7 +484,7 @@ impl WorkshopActionHandler {
             .client
             .build_request(HttpMethod::Delete, &endpoint, None)
             .with_param("source", source.unwrap_or(Source::WorkShop).as_str());
-        self.check_status(builder, HTTPStatus::NoContent)
+        self.check_status(builder, StatusCode::NoContent)
     }
 
     /// 发表评论
@@ -507,7 +507,7 @@ impl WorkshopActionHandler {
             .client
             .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(payload);
-        self.send_maybe_parse(builder, mode, HTTPStatus::Created)
+        self.send_maybe_parse(builder, mode, StatusCode::Created)
     }
 
     /// 删除评论
@@ -518,7 +518,7 @@ impl WorkshopActionHandler {
             .client
             .build_request(HttpMethod::Delete, &endpoint, None)
             .with_param("source", source.unwrap_or(Source::WorkShop).as_str());
-        self.check_status(builder, HTTPStatus::NoContent)
+        self.check_status(builder, StatusCode::NoContent)
     }
 }
 

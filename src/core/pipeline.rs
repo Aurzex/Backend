@@ -17,7 +17,7 @@ use crate::api::whale::{ReportHandler, Resolution};
 use crate::api::work::{BaseWorkOperations, CommentOperations};
 use crate::core::retrieve::{CommentSource, DataQuery, JsonObject};
 use crate::utils::filedata::PathConfig;
-use crate::utils::requests::{Catsona, CodeMaoClient, ResponseMode};
+use crate::utils::requests::{Identity, CodeMaoClient, ResponseMode};
 
 // 配置结构体(依赖注入)
 #[derive(Clone)]
@@ -857,7 +857,7 @@ impl ViolationChecker {
         let violations: HashSet<String> = violations.iter().cloned().collect();
         let mut accounts = multi_account.accounts.clone();
         let success = self.report_violations(&mut accounts, &violations);
-        if let Err(e) = self.client.switch_identity(Catsona::Judge) {
+        if let Err(e) = self.client.switch_identity(Identity::Judge) {
             warn!("切换回管理员身份失败: {}", e);
         }
         info!("自动举报完成,成功 {}/{}", success, violations.len());

@@ -1,5 +1,5 @@
 use crate::utils::requests::{
-    ClientAccess, CodeMaoClient, DEFAULT_LIMIT, DEFAULT_PAGE_SIZE, HTTPStatus, HttpMethod,
+    ClientAccess, CodeMaoClient, DEFAULT_LIMIT, DEFAULT_PAGE_SIZE, StatusCode, HttpMethod,
     MewError, MewResult, PaginatedIter, PaginationMethod, ResponseMode, ToggleAction,
 };
 use log::debug;
@@ -394,7 +394,7 @@ impl ForumActionHandler {
             .client
             .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(payload);
-        self.send_maybe_parse(builder, mode, HTTPStatus::Created)
+        self.send_maybe_parse(builder, mode, StatusCode::Created)
     }
 
     /// 回复评论(在回帖下评论)
@@ -415,7 +415,7 @@ impl ForumActionHandler {
             .client
             .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(payload);
-        self.send_maybe_parse(builder, mode, HTTPStatus::Created)
+        self.send_maybe_parse(builder, mode, StatusCode::Created)
     }
 
     /// 点赞或取消点赞
@@ -435,7 +435,7 @@ impl ForumActionHandler {
             .client
             .build_request(method, &endpoint, None)
             .with_param("source", item_type.as_str());
-        self.check_status(builder, HTTPStatus::NoContent)
+        self.check_status(builder, StatusCode::NoContent)
     }
 
     /// 举报回帖或评论
@@ -458,7 +458,7 @@ impl ForumActionHandler {
             .client
             .build_request(HttpMethod::Post, "/web/reports/posts/discussions", None)
             .with_payload(payload);
-        self.send_maybe_parse(builder, mode, HTTPStatus::Created)
+        self.send_maybe_parse(builder, mode, StatusCode::Created)
     }
 
     /// 举报帖子
@@ -479,7 +479,7 @@ impl ForumActionHandler {
             .client
             .build_request(HttpMethod::Post, "/web/reports/posts", None)
             .with_payload(payload);
-        self.send_maybe_parse(builder, mode, HTTPStatus::Created)
+        self.send_maybe_parse(builder, mode, StatusCode::Created)
     }
 
     /// 删除回帖 / 评论 / 帖子
@@ -493,7 +493,7 @@ impl ForumActionHandler {
         let builder = self
             .client
             .build_request(HttpMethod::Delete, &endpoint, None);
-        self.check_status(builder, HTTPStatus::NoContent)
+        self.check_status(builder, StatusCode::NoContent)
     }
 
     /// 置顶 / 取消置顶回帖
@@ -506,7 +506,7 @@ impl ForumActionHandler {
         debug!("置顶操作: comment_id={}, action={:?}", comment_id, action);
         let endpoint = format!("/web/forums/replies/{}/top", comment_id);
         let builder = self.client.build_request(method, &endpoint, None);
-        self.check_status(builder, HTTPStatus::NoContent)
+        self.check_status(builder, StatusCode::NoContent)
     }
 
     /// 发布帖子
@@ -548,7 +548,7 @@ impl ForumActionHandler {
             .client
             .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(payload);
-        self.send_maybe_parse(builder, mode, HTTPStatus::Created)
+        self.send_maybe_parse(builder, mode, StatusCode::Created)
     }
 }
 

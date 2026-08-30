@@ -1,10 +1,12 @@
-use crate::core::unpacker::{
-    CodeMaoHttpClient, CocoDecompiler, CocoFetcher, DecompilerConfig, DecompilerContextBuilder,
-    FileService, HttpClient, IdGenerator, KittenDecompiler, KittenFetcher, NekoDecompiler,
-    NekoFetcher, NemoDecompiler, NemoFetcher, RawWorkData, Result, ResultExt, WoodDecompiler,
-    WoodFetcher, WorkDecompiler, WorkFetcher, WorkInfo, WorkType,
+use crate::core::decoders::{
+    CocoDecompiler, CocoFetcher, KittenDecompiler, KittenFetcher, NekoDecompiler, NekoFetcher,
+    NemoDecompiler, NemoFetcher, WoodDecompiler, WoodFetcher,
 };
-pub use crate::core::unpacker::DecompilerError;
+use crate::core::unpacker::{
+    CodeMaoHttpClient, DecompilerConfig, DecompilerContextBuilder, FileService, HttpClient,
+    IdGenerator, RawWorkData, Result, ResultExt, WorkDecompiler, WorkFetcher, WorkInfo, WorkType,
+};
+pub use crate::core::unpacker::{DecompilerError, WorkId};
 use crate::utils::requests::CodeMaoClient;
 use log::info;
 use std::collections::HashMap;
@@ -191,7 +193,7 @@ impl CodemaoDecompiler {
         })
     }
     /// 反编译单个作品(默认选项,向后兼容)
-    pub fn decompile(&self, work_id: i64, output_dir: Option<&Path>) -> Result<PathBuf> {
+    pub fn decompile(&self, work_id: WorkId, output_dir: Option<&Path>) -> Result<PathBuf> {
         let mut options = DecompileOptions::new();
         if let Some(dir) = output_dir {
             options = options.output_dir(dir.to_path_buf());
@@ -202,7 +204,7 @@ impl CodemaoDecompiler {
     /// 使用自定义选项反编译单个作品
     pub fn decompile_with_options(
         &self,
-        work_id: i64,
+        work_id: WorkId,
         options: DecompileOptions,
     ) -> Result<PathBuf> {
         self.decompile_inner(work_id, &options)
@@ -211,7 +213,7 @@ impl CodemaoDecompiler {
     /// 批处理反编译多个作品,返回与输入顺序一致的 `Vec<Result>`
     pub fn decompile_batch(
         &self,
-        work_ids: &[i64],
+        work_ids: &[WorkId],
         options: DecompileOptions,
     ) -> Vec<Result<PathBuf>> {
         let concurrency = options.batch_concurrency.max(1);
@@ -249,7 +251,7 @@ impl CodemaoDecompiler {
 
     /// 反编译主流程(模板方法)
     /// 流程为:获取信息 → 创建处理器 → 取原始数据 → (可选)保存原始数据 → 反编译 → 保存结果
-    fn decompile_inner(&self, work_id: i64, options: &DecompileOptions) -> Result<PathBuf> {
+    fn decompile_inner(&self, work_id: WorkId, options: &DecompileOptions) -> Result<PathBuf> {
         info!("开始反编译作品 [work_id={}]", work_id);
         let http_client = Box::new(CodeMaoHttpClient::new(self.client.clone()));
         let work_info = self
@@ -313,7 +315,7 @@ impl CodemaoDecompiler {
         // 安全的基础文件名,不含扩展名
         let base_name = format!(
             "raw-{}",
-            FileService::safe_filename(&work_info.name, work_info.id, "")
+            FileService::safe_filename(&work_info.name, work_info.id.get(), "")
         );
         match raw {
             RawWorkData::Kitten(data) | RawWorkData::Coco(data) | RawWorkData::Wood(data) => {
@@ -340,7 +342,7 @@ impl CodemaoDecompiler {
             }
         }
     }
-    fn fetch_work_info(&self, http_client: &dyn HttpClient, work_id: i64) -> Result<WorkInfo> {
+    fn fetch_work_info(&self, http_client: &dyn HttpClient, work_id: WorkId) -> Result<WorkInfo> {
         let url = format!(
             "{}/creation-tools/v1/works/{}",
             self.config.base_url, work_id
@@ -352,16 +354,16 @@ impl CodemaoDecompiler {
 
 /// 便捷反编译函数:使用全局单例门面(复用 HTTP 客户端),功能与之前一致
 /// `output_dir` 传 `None` 时写入 `default_output_dir`,返回产物文件路径;自定义客户端请用 `CodemaoDecompiler::new(client)`
-pub fn decompile_work(work_id: i64, output_dir: Option<&Path>) -> Result<PathBuf> {
+pub fn decompile_work(work_id: WorkId, output_dir: Option<&Path>) -> Result<PathBuf> {
     CodemaoDecompiler::global().decompile(work_id, output_dir)
 }
 
 /// 便捷反编译函数:使用自定义选项;自定义客户端请用 `CodemaoDecompiler::new(client)`
-pub fn decompile_work_with(work_id: i64, options: DecompileOptions) -> Result<PathBuf> {
+pub fn decompile_work_with(work_id: WorkId, options: DecompileOptions) -> Result<PathBuf> {
     CodemaoDecompiler::global().decompile_with_options(work_id, options)
 }
 
 /// 便捷批量反编译函数:返回与输入顺序一致的 `Vec<Result<PathBuf>>`;自定义客户端请用 `CodemaoDecompiler::new(client)`
-pub fn decompile_works(work_ids: &[i64], options: DecompileOptions) -> Vec<Result<PathBuf>> {
+pub fn decompile_works(work_ids: &[WorkId], options: DecompileOptions) -> Vec<Result<PathBuf>> {
     CodemaoDecompiler::global().decompile_batch(work_ids, options)
 }

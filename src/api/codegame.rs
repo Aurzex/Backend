@@ -1,5 +1,5 @@
 use crate::utils::requests::{
-    BaseKey, ClientAccess, CodeMaoClient, HTTPStatus, HttpMethod, MewResult,
+    BaseKey, ClientAccess, CodeMaoClient, StatusCode, HttpMethod, MewResult,
 };
 use log::debug;
 use serde_json::{Value, json};
@@ -111,7 +111,7 @@ impl UserActionHandler {
                     Some(BaseKey::CodeGame),
                 )
                 .with_payload(payload),
-            HTTPStatus::Created,
+            StatusCode::Created,
         )
     }
 
@@ -138,7 +138,7 @@ impl UserActionHandler {
                     Some(BaseKey::CodeGame),
                 )
                 .with_payload(payload),
-            HTTPStatus::Ok,
+            StatusCode::Ok,
         )
     }
 }

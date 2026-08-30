@@ -25,8 +25,8 @@ cargo test --test live_features
 以简洁、可读为最高原则,避免过早优化。代码可以喵,但不要让别的猫看不懂。
 
 - **不过度抽象**:不引入 trait/泛型/多层抽象,除非能显著减少重复且不损害可读性;不引入宏,除非同样标准。
-- **命名**:基础设施层沿用「萌化」命名约定(已在 `utils/requests.rs` 落地):身份 `Catsona`、身份管理器 `KittyIdentityManager`、认证 `KittyAuth`、请求构建器 `KittyRequestBuilder` 等;业务域命名保持直白(如 `CaptchaManager`、`ReportProcessor`)。新代码要和所在模块既有命名风格一致。
-- **锁**:使用标准库 `std::sync::{Mutex, RwLock, Condvar}` 与 `lock().unwrap()` 风格,不引入额外锁依赖。
+- **命名**:基础设施层「萌化」命名约定(已在 `utils/requests.rs` 落地)已向**公开名直白化**收敛:身份 `Identity`、身份管理器 `IdentityManager`、认证 `AuthProvider`、客户端配置 `ClientConfig`、请求构建器 `MewRequestBuilder`、状态码 `StatusCode`;**保留**错误类型 `MewError`/`MewResult` 与内部私有萌化名(`KittyCore`/`KITTY_HEADERS` 等);业务域命名保持直白(如 `CaptchaManager`、`ReportProcessor`)。新代码要和所在模块既有命名风格一致。
+- **锁**:使用标准库 `std::sync::{Mutex, RwLock, Condvar}` 与 `lock().unwrap()` 风格,不引入额外锁依赖。默认保持 std;仅当测量证明出现竞争/中毒热点时,经评审可对粗粒度令牌(`connect_lock`/`network_lock`)引入 `parking_lot::Mutex`,对读多写少 Map 引入 `RwLock`。
 - **删除代码**:不主动删除,除非已用 `lsp references`(或 `grep`)全仓确证零调用点(死代码)。`Cargo.toml` 已配置 `unused = "allow"`,死代码不阻塞编译,但应避免累积。
 - **请求样板**:优先复用 `utils/requests.rs` 的 `ClientAccess` 默认方法(`send_and_parse` / `check_status` / `send_maybe_parse`),不要手写 `send() + response_to_json`。这些方法已统一携带服务端错误响应体,错误路径可读。
 

@@ -1,5 +1,5 @@
 use crate::utils::requests::{
-    ClientAccess, CodeMaoClient, DEFAULT_LIMIT, HTTPStatus, HttpMethod, MewResult, ResponseMode,
+    ClientAccess, CodeMaoClient, DEFAULT_LIMIT, StatusCode, HttpMethod, MewResult, ResponseMode,
     ToggleAction,
 };
 use log::debug;
@@ -387,7 +387,7 @@ impl NovelActionHandler {
             .client
             .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(payload);
-        self.send_maybe_parse(builder, mode, HTTPStatus::Ok)
+        self.send_maybe_parse(builder, mode, StatusCode::Ok)
     }
 
     /// 点赞 / 取消点赞小说评论
@@ -401,7 +401,7 @@ impl NovelActionHandler {
         debug!("评论点赞: comment_id={}, action={:?}", comment_id, action);
         let endpoint = format!("/api/fanfic/comments/praise/{}", comment_id);
         let builder = self.client.build_request(method, &endpoint, None);
-        self.send_maybe_parse(builder, mode, HTTPStatus::Ok)
+        self.send_maybe_parse(builder, mode, StatusCode::Ok)
     }
 
     /// 删除小说评论
@@ -411,7 +411,7 @@ impl NovelActionHandler {
         let builder = self
             .client
             .build_request(HttpMethod::Delete, &endpoint, None);
-        self.send_maybe_parse(builder, mode, HTTPStatus::Ok)
+        self.send_maybe_parse(builder, mode, StatusCode::Ok)
     }
 
     /// 更新章节内容
@@ -433,7 +433,7 @@ impl NovelActionHandler {
             .client
             .build_request(HttpMethod::Put, &endpoint, None)
             .with_payload(payload);
-        self.check_status(builder, HTTPStatus::NoContent)
+        self.check_status(builder, StatusCode::NoContent)
     }
 
     /// 发布章节
@@ -444,7 +444,7 @@ impl NovelActionHandler {
             .client
             .build_request(HttpMethod::Put, &endpoint, None)
             .with_payload(json!({}));
-        self.check_status(builder, HTTPStatus::NoContent)
+        self.check_status(builder, StatusCode::NoContent)
     }
 
     /// 创建章节
@@ -474,7 +474,7 @@ impl NovelActionHandler {
         let builder = self
             .client
             .build_request(HttpMethod::Delete, &endpoint, None);
-        self.check_status(builder, HTTPStatus::NoContent)
+        self.check_status(builder, StatusCode::NoContent)
     }
 
     /// 恢复已删除章节
@@ -485,7 +485,7 @@ impl NovelActionHandler {
             .client
             .build_request(HttpMethod::Put, &endpoint, None)
             .with_payload(json!({}));
-        self.check_status(builder, HTTPStatus::NoContent)
+        self.check_status(builder, StatusCode::NoContent)
     }
 
     /// 取消发布章节
@@ -496,7 +496,7 @@ impl NovelActionHandler {
             .client
             .build_request(HttpMethod::Put, &endpoint, None)
             .with_payload(json!({}));
-        self.check_status(builder, HTTPStatus::NoContent)
+        self.check_status(builder, StatusCode::NoContent)
     }
 
     /// 更新小说信息
@@ -521,7 +521,7 @@ impl NovelActionHandler {
             .client
             .build_request(HttpMethod::Put, &endpoint, None)
             .with_payload(payload);
-        self.send_maybe_parse(builder, mode, HTTPStatus::Ok)
+        self.send_maybe_parse(builder, mode, StatusCode::Ok)
     }
 
     /// 创建新小说
@@ -546,7 +546,7 @@ impl NovelActionHandler {
             .client
             .build_request(HttpMethod::Post, "/web/fanfic", None)
             .with_payload(payload);
-        self.send_maybe_parse(builder, mode, HTTPStatus::Ok)
+        self.send_maybe_parse(builder, mode, StatusCode::Ok)
     }
 
     /// 删除小说
@@ -556,7 +556,7 @@ impl NovelActionHandler {
         let builder = self
             .client
             .build_request(HttpMethod::Delete, &endpoint, None);
-        self.check_status(builder, HTTPStatus::NoContent)
+        self.check_status(builder, StatusCode::NoContent)
     }
 }
 
@@ -676,7 +676,7 @@ impl BookActionHandler {
         self.send_maybe_parse(
             self.client.build_request(method, &endpoint, None),
             mode,
-            HTTPStatus::Ok,
+            StatusCode::Ok,
         )
     }
 }

@@ -1,5 +1,5 @@
 use crate::utils::requests::{
-    BaseKey, ClientAccess, CodeMaoClient, DEFAULT_LIMIT, DEFAULT_PAGE_SIZE, HTTPStatus, HttpMethod,
+    BaseKey, ClientAccess, CodeMaoClient, DEFAULT_LIMIT, DEFAULT_PAGE_SIZE, StatusCode, HttpMethod,
     MewResult, PaginatedIter, PaginationMethod, ResponseMode, ToggleAction, current_timestamp_13,
 };
 
@@ -132,7 +132,7 @@ impl BaseWorkOperations {
                 None,
             )
             .with_payload(json!({}));
-        self.check_status(builder, HTTPStatus::NoContent)
+        self.check_status(builder, StatusCode::NoContent)
     }
 
     /// 收藏或取消收藏作品
@@ -147,7 +147,7 @@ impl BaseWorkOperations {
                 None,
             )
             .with_payload(json!({}));
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 
     /// 点赞或取消点赞作品
@@ -162,7 +162,7 @@ impl BaseWorkOperations {
                 None,
             )
             .with_payload(json!({}));
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 
     /// 再创作作品
@@ -173,7 +173,7 @@ impl BaseWorkOperations {
             .client
             .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(json!({}));
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 
     /// 分享作品
@@ -184,7 +184,7 @@ impl BaseWorkOperations {
             .client
             .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(json!({}));
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 
     /// 举报作品
@@ -199,7 +199,7 @@ impl BaseWorkOperations {
             .client
             .build_request(HttpMethod::Post, "/nemo/v2/report/work", None)
             .with_payload(data);
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 
     /// 重命名作品
@@ -222,7 +222,7 @@ impl BaseWorkOperations {
         if let Some(wt) = work_type {
             builder = builder.with_param("work_type", wt.to_string());
         }
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 }
 
@@ -266,7 +266,7 @@ impl CommentOperations {
             .client
             .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(payload);
-        self.send_maybe_parse(builder, mode, HTTPStatus::Created)
+        self.send_maybe_parse(builder, mode, StatusCode::Created)
     }
 
     /// 回复作品评论
@@ -294,7 +294,7 @@ impl CommentOperations {
             .client
             .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(data);
-        self.send_maybe_parse(builder, mode, HTTPStatus::Created)
+        self.send_maybe_parse(builder, mode, StatusCode::Created)
     }
 
     /// 删除作品评论
@@ -307,7 +307,7 @@ impl CommentOperations {
         let builder = self
             .client
             .build_request(HttpMethod::Delete, &endpoint, None);
-        self.check_status(builder, HTTPStatus::NoContent)
+        self.check_status(builder, StatusCode::NoContent)
     }
 
     /// 置顶或取消置顶评论
@@ -333,7 +333,7 @@ impl CommentOperations {
                 None,
             )
             .with_payload(json!({}));
-        self.check_status(builder, HTTPStatus::NoContent)
+        self.check_status(builder, StatusCode::NoContent)
     }
 
     /// 点赞或取消点赞评论
@@ -359,7 +359,7 @@ impl CommentOperations {
                 None,
             )
             .with_payload(json!({}));
-        self.check_status(builder, HTTPStatus::Created)
+        self.check_status(builder, StatusCode::Created)
     }
 
     /// 举报作品评论
@@ -377,7 +377,7 @@ impl CommentOperations {
             .client
             .build_request(HttpMethod::Post, &endpoint, None)
             .with_payload(data);
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 }
 
@@ -486,7 +486,7 @@ impl KittenWorkManager {
             .client
             .build_request(HttpMethod::Put, &endpoint, Some(BaseKey::Creation))
             .with_payload(payload);
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 
     /// 删除未发布的 Kitten 作品草稿
@@ -496,7 +496,7 @@ impl KittenWorkManager {
         let builder =
             self.client
                 .build_request(HttpMethod::Delete, &endpoint, Some(BaseKey::Creation));
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 
     /// 取消发布作品
@@ -507,7 +507,7 @@ impl KittenWorkManager {
             .client
             .build_request(HttpMethod::Patch, &endpoint, None)
             .with_payload(json!({}));
-        self.check_status(builder, HTTPStatus::NoContent)
+        self.check_status(builder, StatusCode::NoContent)
     }
 
     /// 通过 Web 端取消发布作品
@@ -518,7 +518,7 @@ impl KittenWorkManager {
             .client
             .build_request(HttpMethod::Put, &endpoint, None)
             .with_payload(json!({}));
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 
     /// 清空 Kitten 作品回收站
@@ -529,7 +529,7 @@ impl KittenWorkManager {
             "/work/user/works/permanently",
             Some(BaseKey::Creation),
         );
-        self.check_status(builder, HTTPStatus::NoContent)
+        self.check_status(builder, StatusCode::NoContent)
     }
 
     /// 翻译 Kitten 作品
@@ -646,7 +646,7 @@ impl NekoWorkManager {
             .client
             .build_request(HttpMethod::Post, &endpoint, Some(BaseKey::Creation))
             .with_payload(payload);
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 
     /// 删除未发布的 KN 作品草稿
@@ -659,7 +659,7 @@ impl NekoWorkManager {
             .build_request(HttpMethod::Delete, &endpoint, Some(BaseKey::Creation))
             .with_param("TIME", timestamp.to_string())
             .with_param("force", force.to_string());
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 
     /// 取消发布 KN 作品
@@ -669,7 +669,7 @@ impl NekoWorkManager {
         let builder =
             self.client
                 .build_request(HttpMethod::Put, &endpoint, Some(BaseKey::Creation));
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 
     /// 清空 KN 作品回收站
@@ -680,7 +680,7 @@ impl NekoWorkManager {
             "/neko/works/permanently",
             Some(BaseKey::Creation),
         );
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 
     /// 恢复 KN 回收站作品
@@ -690,7 +690,7 @@ impl NekoWorkManager {
         let builder =
             self.client
                 .build_request(HttpMethod::Patch, &endpoint, Some(BaseKey::Creation));
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 
     /// 保存教师作品
@@ -812,7 +812,7 @@ impl WoodWorkManager {
         let builder =
             self.client
                 .build_request(HttpMethod::Delete, &endpoint, Some(BaseKey::Creation));
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 
     /// 搜索用户的 Wood 作品
@@ -1143,7 +1143,7 @@ impl CollaborationManager {
             .client
             .build_request(HttpMethod::Post, &endpoint, Some(BaseKey::Collaboration))
             .with_payload(json!({}));
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 
     /// 获取协作的 Coco 作品分页迭代器

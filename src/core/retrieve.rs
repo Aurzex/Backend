@@ -16,7 +16,7 @@ use crate::api::whale::{
 };
 use crate::api::work::{NemoWorkType, WorkDataFetcher};
 use crate::utils::requests::{
-    BaseKey, Catsona, CodeMaoClient, DEFAULT_PAGE_SIZE, MewError, PaginatedIter, PaginationMethod,
+    BaseKey, Identity, CodeMaoClient, DEFAULT_PAGE_SIZE, MewError, PaginatedIter, PaginationMethod,
 };
 
 // 评论流默认值与上限(各语义独立:用户上限/每作品抽样/分页元数据)
@@ -1096,7 +1096,7 @@ impl DataQuery {
     pub fn stream_edu_accounts_with_reset_passwords(&self, limit: Option<usize>) -> JsonPairIter {
         const MAX_EDU_STUDENTS: usize = 2000;
 
-        if let Err(e) = self.client.switch_identity(Catsona::Scholar) {
+        if let Err(e) = self.client.switch_identity(Identity::Scholar) {
             return Box::new(std::iter::once(Err(DataQueryError::from(e))));
         }
 

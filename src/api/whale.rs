@@ -1,5 +1,5 @@
 use crate::utils::requests::{
-    BaseKey, ClientAccess, CodeMaoClient, HTTPStatus, HttpMethod, MewError, MewResult,
+    BaseKey, ClientAccess, CodeMaoClient, StatusCode, HttpMethod, MewError, MewResult,
     PaginatedIter, PaginationMethod, current_timestamp_13,
 };
 use log::debug;
@@ -320,7 +320,7 @@ impl ReportHandler {
             .client
             .build_request(HttpMethod::Patch, endpoint, Some(BaseKey::Whale))
             .with_payload(payload);
-        self.check_status(builder, HTTPStatus::NoContent)
+        self.check_status(builder, StatusCode::NoContent)
     }
 
     // 公共方法

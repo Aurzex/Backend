@@ -1,6 +1,6 @@
 use crate::utils::requests::{
-    BaseKey, ClientAccess, CodeMaoClient, DEFAULT_LIMIT, HTTPStatus, HttpMethod,
-    KittyRequestBuilder, MewResult, PaginatedIter, PaginationMethod, ResponseMode,
+    BaseKey, ClientAccess, CodeMaoClient, DEFAULT_LIMIT, StatusCode, HttpMethod,
+    MewRequestBuilder, MewResult, PaginatedIter, PaginationMethod, ResponseMode,
     current_timestamp_13,
 };
 use log::debug;
@@ -75,7 +75,7 @@ impl EduUserAction {
             .with_param("TIME", timestamp.to_string())
             .with_param("userId", user_id.to_string())
             .with_param("realName", real_name);
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 
     /// 创建班级
@@ -104,7 +104,7 @@ impl EduUserAction {
             .build_request(HttpMethod::Patch, &endpoint, Some(BaseKey::Education))
             .with_param("TIME", timestamp.to_string())
             .with_payload(data);
-        self.check_status(builder, HTTPStatus::NoContent)
+        self.check_status(builder, StatusCode::NoContent)
     }
 
     /// 删除班级
@@ -116,7 +116,7 @@ impl EduUserAction {
             .client
             .build_request(HttpMethod::Delete, &endpoint, Some(BaseKey::Education))
             .with_param("TIME", timestamp.to_string());
-        self.check_status(builder, HTTPStatus::NoContent)
+        self.check_status(builder, StatusCode::NoContent)
     }
 
     /// 向班级添加学生
@@ -128,7 +128,7 @@ impl EduUserAction {
             .client
             .build_request(HttpMethod::Post, &endpoint, Some(BaseKey::Education))
             .with_payload(data);
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 
     /// 重置学生密码
@@ -165,7 +165,7 @@ impl EduUserAction {
             .client
             .build_request(HttpMethod::Post, &endpoint, Some(BaseKey::Education))
             .with_payload(json!({}));
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 
     /// 创建或更新自定义课程包
@@ -192,7 +192,7 @@ impl EduUserAction {
                 )
                 .with_payload(data),
             mode,
-            HTTPStatus::Ok,
+            StatusCode::Ok,
         )
     }
 
@@ -204,7 +204,7 @@ impl EduUserAction {
             .client
             .build_request(HttpMethod::Post, &endpoint, Some(BaseKey::Education))
             .with_payload(json!({}));
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 
     /// 将学生转移到未分班
@@ -215,7 +215,7 @@ impl EduUserAction {
             .client
             .build_request(HttpMethod::Delete, &endpoint, Some(BaseKey::Education))
             .with_param("student_ids[]", stu_id.to_string());
-        self.check_status(builder, HTTPStatus::NoContent)
+        self.check_status(builder, StatusCode::NoContent)
     }
 
     /// 获取活动包详情
@@ -258,7 +258,7 @@ impl EduUserAction {
                 Some(BaseKey::Education),
             )
             .with_payload(json!({}));
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 
     /// 为学生作品评分
@@ -284,7 +284,7 @@ impl EduUserAction {
                 Some(BaseKey::Education),
             )
             .with_payload(data);
-        self.check_status(builder, HTTPStatus::NoContent)
+        self.check_status(builder, StatusCode::NoContent)
     }
 
     /// 邀请学生加入班级
@@ -300,7 +300,7 @@ impl EduUserAction {
             .client
             .build_request(HttpMethod::Post, &endpoint, Some(BaseKey::Education))
             .with_payload(data);
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 
     /// 接受班级邀请
@@ -311,7 +311,7 @@ impl EduUserAction {
             .client
             .build_request(HttpMethod::Post, &endpoint, Some(BaseKey::Education))
             .with_payload(json!({}));
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 
     /// 完善教师信息
@@ -338,7 +338,7 @@ impl EduUserAction {
                 Some(BaseKey::Education),
             )
             .with_payload(data);
-        self.check_status(builder, HTTPStatus::Ok)
+        self.check_status(builder, StatusCode::Ok)
     }
 }
 
@@ -373,7 +373,7 @@ impl EduDataFetcher {
     // 私有辅助
 
     /// 为请求构建器附加当前时间戳参数 `TIME`
-    fn add_timestamp_to_builder(builder: KittyRequestBuilder) -> KittyRequestBuilder {
+    fn add_timestamp_to_builder(builder: MewRequestBuilder) -> MewRequestBuilder {
         let timestamp = current_timestamp_13();
         builder.with_param("TIME", timestamp.to_string())
     }
@@ -867,7 +867,7 @@ impl EduDataFetcher {
         } else {
             ResponseMode::Status
         };
-        self.send_maybe_parse(builder, mode, HTTPStatus::Ok)
+        self.send_maybe_parse(builder, mode, StatusCode::Ok)
     }
 
     /// 获取自定义课程包内容

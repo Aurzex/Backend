@@ -75,7 +75,7 @@ use backend::api::education::EduDataFetcher;
 LoginBuilder::new()
     .identity("13800138000")
     .password("student-pass")
-    .status(AccountStatus::Edu)   // 教育身份,映射到 Catsona::Scholar
+    .status(AccountStatus::Edu)   // 教育身份,映射到 IdentityIdentity::Scholar
     .execute()?;                  // 构造阶段无副作用,execute() 才发网络请求
 //                                  -> MewResult<LoginResult>
 
@@ -148,10 +148,10 @@ let reply = chat.send_and_wait("你好", HistoryMode::Exclude)?;
 ```rust
 use backend::core::compiler::{DecompileOptions, decompile_work, decompile_works};
 
-let path = decompile_work(123456, None)?; // None = 写入默认输出目录,返回文件路径
+let path = decompile_work(123456.into(), None)?; // None = 写入默认输出目录,返回文件路径
 
 let results = decompile_works(
-    &[111, 222],
+    &[111.into(), 222.into()],
     DecompileOptions::new().output_dir("/tmp/works").batch_concurrency(4),
 );
 for result in results {
@@ -207,10 +207,10 @@ for group in session.leftover_groups() {
 库的分层与写法带来的好处:
 
 - **同步阻塞、零异步运行时**:没有 tokio / async 依赖;WebSocket 用线程 + 通道封装成同步接口。嵌进任何项目(包括非 async 环境)零成本,调用栈和错误传播都是普通 Rust 函数。
-- **全局客户端 + 身份槽**:`CodeMaoClient::global()` 单例拿着 `Catsona`(普通用户 `Fluffy` / 教育 `Scholar` / 评审 `Judge` / 空白 `Blanky`)身份和令牌槽。登录一次写入身份,之后所有请求自动带上对应身份的小鱼干——调用方不用手动拼 `Authorization` 头,也不用把 token 传来传去。
+- **全局客户端 + 身份槽**:`CodeMaoClient::global()` 单例拿着 `IdentityIdentity`(普通用户 `Fluffy` / 教育 `Scholar` / 评审 `Judge` / 空白 `Blanky`)身份和令牌槽。登录一次写入身份,之后所有请求自动带上对应身份的小鱼干——调用方不用手动拼 `Authorization` 头,也不用把 token 传来传去。
 - **样板收敛到 `ClientAccess`**:每个业务 Manager 只需要实现 `fn client()`,`send_and_parse` / `check_status` / `send_maybe_parse` 由默认实现提供,4xx/5xx 还会自动带上服务端错误体——几十个 Manager 的请求代码只剩下「端点 + 参数」。
 - **分页统一为 `PaginatedIter`**:惰性初始化、翻页、总数/上限终止、页大小兜底全部内聚,调用方一个 `for` 循环就完事,不关心 offset/page 怎么算。`.with_limit(n)` 设上限,`.with_limit(FETCH_ALL)` 显式全量拉取(直到服务端空页或总数耗尽)。
-- **可替换边界**:`CodeMaoClient` 支持全局单例 / 独立实例(`new_with_global_auth` / `new_independent` / `new_with_auth`)和自定义 `KittyAuth` 认证提供者;业务 Manager、反编译器、举报引擎与登录(`LoginBuilder::new_with_client`)均提供 `new_with_client(client)`(默认 `new()` 走全局),`ClientProvider`(auth 域)与 `PathConfig::with_root`(路径)——核心逻辑不绑定具体 HTTP 实现和目录,方便测试和定制。
+- **可替换边界**:`CodeMaoClient` 支持全局单例 / 独立实例(`new_with_global_auth` / `new_independent` / `new_with_auth`)和自定义 `AuthProviderAuthProvider` 认证提供者;业务 Manager、反编译器、举报引擎与登录(`LoginBuilder::new_with_client`)均提供 `new_with_client(client)`(默认 `new()` 走全局),`ClientProvider`(auth 域)与 `PathConfig::with_root`(路径)——核心逻辑不绑定具体 HTTP 实现和目录,方便测试和定制。
 
 - **错误模型分层**:传输层 / 通用错误归 `MewError`(`Http` / `Io` / `Json` / `HttpStatus` 结构化 4xx/5xx,外加域类别 `Auth` 凭据错误与 `InvalidArgument` 调用方参数错误);WS 客户端共享 `SocketError`(cloudvar / converse);业务域错误(`DecompilerError` / `ProcessorError` / `DataQueryError`)包装 `MewError`,不重复传输层变体。
 - **WS 状态机封装成回调 + 等待原语**:cloudvar / converse 把帧解析、握手、重连、批量合并全部收进库内,外部通过 `on_change` / `on_connection` / `on_stream` 回调和 `connect_and_wait` / `send_and_wait` 同步原语交互;Socket.IO 帧解析与回调存储由 `utils/socketio` 统一提供。
@@ -223,15 +223,18 @@ for group in session.leftover_groups() {
 ├── Cargo.lock
 ├── .github/workflows/CI.yml   # 5 平台 release 构建
 ├── src/
-│   ├── lib.rs                 # 库入口(公开 api/core/utils)
+│   ├── lib.rs                 # 库入口(公开 api/core/prelude/utils)
 │   ├── api.rs                 # api 模块声明(13 个业务域)
 │   ├── core.rs                # core 模块声明
 │   ├── utils.rs               # utils 模块声明
+│   ├── prelude.rs             # 常用类型与 trait 预导入
 │   ├── main.rs                # 演示二进制:举报处理控制台(登录 → 举报审核)
 │   ├── api/                   # 业务域(见「模块一览」)
 │   ├── core/
 │   │   ├── cloudvar.rs        # 云变量 WS 客户端:连接状态机/断线重连/命令批量合并/变量列表排行榜回调
-│   │   ├── compiler.rs        # 作品反编译:7 编辑器抓取/BCMKN 解密/积木树递归反编译/Blockly XML 序列化
+│   │   ├── compiler.rs        # 作品反编译门面:DecompileOptions/CodemaoDecompiler/便捷函数
+│   │   ├── unpacker.rs        # 反编译引擎:抓取/解密/积木块反编译核心/序列化
+│   │   ├── decoders.rs        # 各编辑器实现(Neko/Kitten/Nemo/Wood/Coco 的 fetcher+decompiler)
 │   │   ├── converse.rs        # AI 对话 WS 客户端:流式回复/历史记录/超时断连检测
 │   │   ├── pipeline.rs        # 举报引擎:动作注册表/多账号轮流/违规检查/分块拉取
 │   │   ├── registry.rs        # 举报类型注册表/来源配置/分块迭代与总数统计

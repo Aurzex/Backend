@@ -119,7 +119,7 @@ fn decompile_ok(work: &WorkEntry, work_dir: &Path) -> PathBuf {
     let options = DecompileOptions::new()
         .output_dir(work_dir.to_path_buf())
         .save_raw(false);
-    let saved = decompile_work_with(work.id, options)
+    let saved = decompile_work_with(work.id.into(), options)
         .unwrap_or_else(|e| panic!("作品 {} ({}) 反编译失败: {e}", work.id, work.kind));
     assert!(
         saved.exists(),
