@@ -1,12 +1,21 @@
-use crate::core::decoders::{
+pub(crate) mod blocks;
+pub(crate) mod context;
+pub(crate) mod contract;
+pub(crate) mod editors;
+pub(crate) mod shadow;
+
+use crate::core::convert::decompile::editors::{
     CocoDecompiler, CocoFetcher, KittenDecompiler, KittenFetcher, NekoDecompiler, NekoFetcher,
     NemoDecompiler, NemoFetcher, WoodDecompiler, WoodFetcher,
 };
-use crate::core::unpacker::{
-    CodeMaoHttpClient, DecompilerConfig, DecompilerContextBuilder, FileService, HttpClient,
-    IdGenerator, RawWorkData, Result, ResultExt, WorkDecompiler, WorkFetcher, WorkInfo, WorkType,
+use crate::core::convert::decompile::{
+    context::DecompilerContextBuilder, contract::WorkDecompiler,
 };
-pub use crate::core::unpacker::{DecompilerError, WorkId};
+use crate::core::convert::shared::{
+    CodeMaoHttpClient, DecompilerConfig, EditorType, FileService, HttpClient, IdGenerator,
+    RawWorkData, Result, ResultExt, WorkFetcher, WorkInfo,
+};
+use crate::core::convert::shared::{DecompilerError, WorkId};
 use crate::utils::requests::CodeMaoClient;
 use log::info;
 use std::collections::HashMap;
@@ -70,8 +79,8 @@ pub(crate) type DecompilerFactory =
 /// 作品类型 → 处理器(fetcher/decompiler)的注册表
 /// 新增作品类型时只需 `register`,无需修改门面代码(开闭原则)
 pub(crate) struct WorkProcessorRegistry {
-    fetchers: HashMap<WorkType, FetcherFactory>,
-    decompilers: HashMap<WorkType, DecompilerFactory>,
+    fetchers: HashMap<EditorType, FetcherFactory>,
+    decompilers: HashMap<EditorType, DecompilerFactory>,
 }
 
 impl WorkProcessorRegistry {
@@ -85,7 +94,7 @@ impl WorkProcessorRegistry {
     /// 注册某一作品类型的 fetcher 与 decompiler 构造器
     pub(crate) fn register(
         &mut self,
-        work_type: WorkType,
+        work_type: EditorType,
         fetcher: FetcherFactory,
         decompiler: DecompilerFactory,
     ) {
@@ -96,7 +105,7 @@ impl WorkProcessorRegistry {
     /// 按作品类型创建 fetcher
     pub(crate) fn fetcher_for(
         &self,
-        work_type: &WorkType,
+        work_type: &EditorType,
         client: Box<dyn HttpClient>,
         config: Arc<DecompilerConfig>,
     ) -> Result<Box<dyn WorkFetcher>> {
@@ -109,7 +118,7 @@ impl WorkProcessorRegistry {
     /// 按作品类型创建 decompiler
     pub(crate) fn decompiler_for(
         &self,
-        work_type: &WorkType,
+        work_type: &EditorType,
         config: &Arc<DecompilerConfig>,
     ) -> Result<Box<dyn WorkDecompiler>> {
         self.decompilers
@@ -122,7 +131,11 @@ impl WorkProcessorRegistry {
     fn with_defaults() -> Self {
         let mut registry = Self::new();
         // Kitten2/3/4 共用 KittenFetcher / KittenDecompiler
-        for wt in [WorkType::Kitten2, WorkType::Kitten3, WorkType::Kitten4] {
+        for wt in [
+            EditorType::Kitten2,
+            EditorType::Kitten3,
+            EditorType::Kitten4,
+        ] {
             registry.register(
                 wt,
                 Box::new(|client, config| Box::new(KittenFetcher::new(client, config))),
@@ -130,22 +143,22 @@ impl WorkProcessorRegistry {
             );
         }
         registry.register(
-            WorkType::Neko,
+            EditorType::Neko,
             Box::new(|client, config| Box::new(NekoFetcher::new(client, config))),
             Box::new(|config| Box::new(NekoDecompiler::new(config.crypto_salt.as_slice()))),
         );
         registry.register(
-            WorkType::Nemo,
+            EditorType::Nemo,
             Box::new(|client, config| Box::new(NemoFetcher::new(client, config))),
             Box::new(|_| Box::new(NemoDecompiler)),
         );
         registry.register(
-            WorkType::Wood,
+            EditorType::Wood,
             Box::new(|client, config| Box::new(WoodFetcher::new(client, config))),
             Box::new(|_| Box::new(WoodDecompiler)),
         );
         registry.register(
-            WorkType::Coco,
+            EditorType::Coco,
             Box::new(|client, config| Box::new(CocoFetcher::new(client, config))),
             Box::new(|_| Box::new(CocoDecompiler)),
         );

@@ -66,6 +66,11 @@ impl PathConfig {
         self.download_dir().join("compile")
     }
 
+    /// 转化文件路径(编辑器间互相转化的输出目录)
+    pub fn convert_file_path(&self) -> PathBuf {
+        self.download_dir().join("convert")
+    }
+
     /// 小说文件路径
     pub fn fiction_file_path(&self) -> PathBuf {
         self.download_dir().join("fiction")

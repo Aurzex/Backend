@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 
 use backend::api::auth::LoginBuilder;
 use backend::core::cloudvar::CloudBuilder;
-use backend::core::compiler::{DecompileOptions, decompile_work_with};
+use backend::core::convert::decompile::{DecompileOptions, decompile_work_with};
 use backend::core::converse::{ChatBuilder, ChatEventType, HistoryMode};
 use serde::Deserialize;
 

@@ -19,7 +19,7 @@
 use std::path::{Path, PathBuf};
 
 use backend::api::auth::LoginBuilder;
-use backend::core::compiler::{DecompileOptions, decompile_work_with};
+use backend::core::convert::decompile::{DecompileOptions, decompile_work_with};
 use serde::Deserialize;
 
 /// 单个作品的测试配置

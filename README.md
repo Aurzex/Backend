@@ -21,7 +21,8 @@ Rust 写的同步 HTTP / WebSocket 客户端库,专门和编程猫(codemao)社�
 | 统一认证        | 普通用户 / 教育 / 评审三种身份登录(密码 v0/v1/v2、Token、管理员令牌/密码、验证码票据),小鱼干(令牌)写进全局身份槽,之后的请求自动携带 |
 | 业务 API 全覆盖 | 13 个业务域:账号、认证、人机验证、云数据库、代码岛、社区、教育、论坛、小说、工作室、用户、举报、作品                                |
 | 云变量实时同步  | WebSocket 客户端:断线自动重连、命令批量合并、变量 / 列表 / 排行榜 / 在线人数事件回调                                                |
-| 作品反编译      | Kitten2/3/4、Coco、Neko、Nemo、Wood 七种编辑器,含 `.bcm` / `.bcm4` / `.bcmkn` 解密与 Blockly XML 输出                               |
+| 作品反编译      | Kitten2/3/4、Coco、Neko、Nemo、Wood 七种编辑器,含 `.bcm` / `.bcm4` / `.bcmkn` 解密与 Blockly XML 输出
+| 作品文件互相转化 | Kitten4 `.bcm4` ⇄ KittenN `.bcmkn`(双向);官方算法逐块对齐 + 反向自建,降级/丢弃逐类报告,可选上传并建草稿 |                               |
 | AI 对话         | 流式回复客户端(Start / Text / End / Error 事件),同步等完整回复                                                                      |
 | 举报治理引擎    | 分块拉取、批量分组、逐条 / 一键决策、多账号自动举报、违规检查、处理统计                                                             |
 
@@ -54,7 +55,7 @@ cargo test          # 跑库单测
 - **api/** — 13 个业务域(都实现了 `ClientAccess`,请求走统一客户端):
   `account` 账号 · `auth` 认证 · `captcha` 人机验证 · `clouddb` 云数据库 · `codegame` 代码岛 · `community` 社区 · `education` 教育 · `forum` 论坛 · `library` 小说 · `shop` 工作室 · `user` 用户 · `whale` 举报 · `work` 作品
 - **core/** — 业务引擎:
-  `cloudvar` 云变量 WS 客户端 · `compiler` 作品反编译(七种编辑器) · `converse` AI 对话 · `pipeline` / `services` / `registry` / `retrieve` 举报处理引擎 · `terminal` 交互式 UI(演示用)
+  `cloudvar` 云变量 WS 客户端 · `convert` 作品文件转换域(`decompile` 反编译七种编辑器 / `translate` 编辑器间互相转化) · `converse` AI 对话 · `pipeline` / `services` / `registry` / `retrieve` 举报处理引擎 · `terminal` 交互式 UI(演示用)
 - **utils/** — 基础设施:
   `requests` HTTP 客户端、身份管理、分页迭代器、上传、`ClientAccess` · `filedata` 路径配置、文件写入、`value_to_i64` · `socketio` Socket.IO over WebSocket 共享基础设施(cloudvar / converse 共用),含共享错误类型 `SocketError`
 
@@ -146,7 +147,7 @@ let reply = chat.send_and_wait("你好", HistoryMode::Exclude)?;
 **5. 作品反编译**(支持 Kitten2/3/4、Coco、Neko、Nemo、Wood):
 
 ```rust
-use backend::core::compiler::{DecompileOptions, decompile_work, decompile_works};
+use backend::core::convert::decompile::{DecompileOptions, decompile_work, decompile_works};
 
 let path = decompile_work(123456.into(), None)?; // None = 写入默认输出目录,返回文件路径
 
@@ -159,7 +160,31 @@ for result in results {
 }
 ```
 
-**6. 举报处理引擎**(分块拉取 + 逐条决策):
+**6. 作品文件互相转化**(Kitten4 `.bcm4` ⇄ KittenN `.bcmkn`;加载器/编辑器间搬运积木与资源引用):
+
+```rust
+use backend::core::convert::translate::{TargetEditor, TranslateOptions, translate_file};
+use backend::core::convert::translate_work; // 跨子域编排:按作品 id 取编辑版再转化
+
+// 文件 → 文件(落盘,默认不上传)
+let out = translate_file(
+    "download/compile/某作品_123.bcm4".as_ref(),
+    TargetEditor::KittenN,
+    TranslateOptions::new().deterministic_ids(true),
+)?;
+println!("{} 积木 {} → {}", out.output.display(), out.report.blocks_total, out.report.blocks_converted);
+println!("{}", out.report.to_markdown()); // 降级/丢弃逐类计数,不静默吞
+
+// 作品 id → 转化,可选上传并新建草稿(upload 默认关;开=替用户在平台落一份草稿)
+let out = translate_work(123456.into(), TargetEditor::KittenN, TranslateOptions::new().upload(true))?;
+println!("草稿作品 id = {:?}", out.work_id);
+```
+
+- 方向:当前支持 **Kitten4 编辑版 → KN**(与编辑器官方算法逐块对齐,产物通过编辑器自带的 `validateBcm`)与**反向 KN → Kitten4**(官方无此方向,由本库自建;不可逆项进报告)。
+- 不支持:`.bcm`(Kitten2/3,`blocksXML`)——编辑器本身也拒绝该方向(会引导去 Kitten V4.0)。
+- 有损项(`TranslateWarning`)与覆盖率写在 `TranslateReport` 里,`TranslateOptions::strict(true)` 可让有损直接失败。
+
+**7. 举报处理引擎**(分块拉取 + 逐条决策):
 
 ```rust
 use backend::core::registry::ReportAction;
@@ -191,6 +216,7 @@ for group in session.leftover_groups() {
 | `data/token.txt`    | 小鱼干(令牌)持久化                                                                        |
 | `cache/captcha.jpg` | 登录验证码图片(登录流程自动写入)                                                          |
 | `download/compile/` | 作品反编译输出目录                                                                        |
+| `download/convert/` | 作品互相转化的输出目录(含 `.staging` 中间产物) |
 | `download/fiction/` | 小说文件下载目录                                                                          |
 | `cache/`            | 运行时缓存                                                                                |
 
@@ -231,10 +257,12 @@ for group in session.leftover_groups() {
 │   ├── main.rs                # 演示二进制:举报处理控制台(登录 → 举报审核)
 │   ├── api/                   # 业务域(见「模块一览」)
 │   ├── core/
+│   │   ├── convert/           # 作品文件转换域(读写作品文件的唯一边界)
+│   │   │   ├── mod.rs         #   域门面:子域声明 + 跨子域类型
+│   │   │   ├── shared/        #   共用地基:错误/模型/配置/加密/文件/HTTP/抓取
+│   │   │   ├── decompile/     #   反编译:门面 + 引擎 + 各编辑器实现
+│   │   │   └── translate/     #   互相转化:Kitten ⇄ KittenN 等
 │   │   ├── cloudvar.rs        # 云变量 WS 客户端:连接状态机/断线重连/命令批量合并/变量列表排行榜回调
-│   │   ├── compiler.rs        # 作品反编译门面:DecompileOptions/CodemaoDecompiler/便捷函数
-│   │   ├── unpacker.rs        # 反编译引擎:抓取/解密/积木块反编译核心/序列化
-│   │   ├── decoders.rs        # 各编辑器实现(Neko/Kitten/Nemo/Wood/Coco 的 fetcher+decompiler)
 │   │   ├── converse.rs        # AI 对话 WS 客户端:流式回复/历史记录/超时断连检测
 │   │   ├── pipeline.rs        # 举报引擎:动作注册表/多账号轮流/违规检查/分块拉取
 │   │   ├── registry.rs        # 举报类型注册表/来源配置/分块迭代与总数统计
