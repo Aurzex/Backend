@@ -6,7 +6,7 @@
 
 use super::blockjson::BlockTree;
 use super::finish::{num, project_name_at};
-use super::report::{TranslateReport, TranslateWarning};
+use super::{TranslateReport, TranslateWarning};
 use super::{
     StageOrientation, TranslateError, TranslateOptions, blockjson, ids, kitten, mapping, neko,
     tables_gen,

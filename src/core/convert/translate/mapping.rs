@@ -44,7 +44,7 @@ use serde_json::{Value, json};
 
 use super::blockjson::{BlockJson, BlockTree};
 use super::ids::IdSource;
-use super::report::{TranslateReport, TranslateWarning};
+use super::{TranslateReport, TranslateWarning};
 use super::tables_gen::{
     KITTEN_MUTATION_TEXT, KITTEN_MUTATION_TEXT_SELECT, KITTEN_TO_KN, SHADOW_XML,
     TEXT_PLACEHOLDER_BLOCKS, ZH_NAME_BY_TYPE,

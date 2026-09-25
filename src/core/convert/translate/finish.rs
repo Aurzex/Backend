@@ -56,7 +56,7 @@ use crate::core::convert::shared::{DecompilerError, Result};
 use super::blockjson::type_name;
 use super::mapping::truthy;
 use super::neko::{ProcedureEntry, procedures_to_json};
-use super::report::{TranslateReport, TranslateWarning};
+use super::{TranslateReport, TranslateWarning};
 use super::tables_gen::{BCM_VERSION, STAGE_LANDSCAPE, STAGE_PORTRAIT};
 
 /// 官方 `A.W$`:`workspaceScrollXy` 的兜底值(CDN 模板里恰好是 `{100,30}`,**别**把模板值当兜底)
