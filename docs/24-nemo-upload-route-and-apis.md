@@ -235,3 +235,57 @@ tshark -r temp/PCAPdroid_25_9月_13_59_21.pcap \
 (用 PCAPdroid 的 TLS-keylog 导出,和上次同样的方式),要么在 NEMO App 里"保存/发布作品"时重新抓一次包 + 导出 keylog;
 拿到后 `tshark -o tls.keylog_file:… -Y http2 -T fields -e http2.headers.authority -e http2.headers.method -e http2.headers.path`
 即可一眼看出那条 POST。**不需要**再花时间在 Web bundle / APK 静态挖(App 代码已加固:加密的 `classes0.jar`/`classes.dgc`)。
+
+---
+
+## 11. 第三份抓包(17:12,NEMO App + KN 编辑器混合)的结论
+
+用 `temp/PCAPdroid_25_9月_17_12_46.keylog` 解密后,拿到了 **NEMO 侧"保存已有作品"的完整链路**,
+以及一个此前完全没有的端点。**新建作品那一步仍然没有被抓到**(理由见 §11.3)。
+
+### 11.1 NEMO 保存(已有作品)的完整链路
+
+| 步 | 调用 | 证据 |
+| -- | ---- | ---- |
+| 1 | `GET open-service.codemao.cn/cdn/qi-niu/tokens/uploading?projectName=nemo_android_ios&cdnName=qiniu&filePaths=<b64 文件名>` | 4 次 token(2 次 `.bcm` + 2 次 `.cover`) |
+
+> 第 1 步的文件名形如 `and_2002_<uid>_0_<毫秒时间戳>_<随机后缀>.bcm`(由 App 生成),`.cover` 同族。
+| 2 | `POST upload.qiniup.com/`(multipart,上传 `.bcm`) | 2 次 |
+| 3 | `POST upload.qiniup.com/putb64/-1/key/<b64 路径>.cover`(封面 base64 上传) | 2 次 |
+| 4 | **`POST https://api.codemao.cn/nemo/qiniu/upload/business/bind`** | **2 次**;完整体:`{"business_id":"330816585","url_list":["https://creation.bcmcdn.com/490/YW5kXzIwMDFfMTI3NzAxMTRfMF8xNzkwMzI3NTkxMjY5X1d2cmxqNkpL.cover"]}`(另一条 `business_id=330816598`) |
+
+⇒ 也就是说:**"保存" = 上传 `.bcm` + 上传 `.cover` + 把封面 URL 绑到作品 id**。
+`bind` 是通用绑定服务(`business_id` + `url_list`),绑的是**已存在**的作品 id。
+
+### 11.2 探测方法自证 + 新增已验证端点
+
+**方法自证**:用"无鉴权 GET + 错误码判别"(`40103015`=路由存在但方法不对、`Path-Not-Found@Common`=无此路由)
+去探抓包**已证实**的 `POST /nemo/qiniu/upload/business/bind`,得到 `404 + 40103015` —— 与抓包一致,
+⇒ §9 那套判别器可信。
+
+| 端点 | 方法 | 结果 |
+| ---- | ---- | ---- |
+| `/nemo/qiniu/upload/business/bind` | POST | ✅ 存在(抓包 + 探测双证),体见 §11.1 |
+| `/nemo/v2/works/list/user` | GET | ✅ 存在;无鉴权 406 `40100004 参数不能为空`(要令牌)⇒ **NEMO 草稿列表** |
+| `/nemo/v2/works/list/user/published?user_id=<id>&offset=&limit=` | GET | ✅ **200 公开可用**(无需登录)⇒ 某用户已发布的 NEMO 作品列表 |
+| `/nemo/v2/works/business/total?user_id=`、`/nemo/v2/home/banners`、`/nemo/v3/user/level/info`、`/nemo/v3/user/level/report/login`、`/nemo/v3/dialog/get`、`/creation-tools/v1/home/{discover,especially/course}` | GET | ✅ 同轮抓到 |
+| `/nemo/qiniu/upload/business{,/create,/bind/list}`、`/nemo/v2/works/{list/user/draft,user,save,draft}`、`/nemo/v2/work` | — | ❌ `Path-Not-Found@Common`(无此路由) |
+
+### 11.3 为什么"新建作品"还是没抓到
+
+- 两条 `bind` 的作品 id(`330816585` / `330816598`)**在本抓包全部 body 里都搜不到**,
+  也没有任何 POST 提交 `work_url`/`bcm_version`(只有 GET 列表响应里带这些字段)⇒
+  这一轮是**在保存两份已存在的作品**(App 本地已知这两个 id),不是新建。
+- 与 §9 的第一份抓包结论一致(那份也只有"上传",没有注册)。
+
+⇒ **仍缺的一步**:在 NEMO App 里**新建一个空白作品**再保存/发布,同时开 PCAPdroid 的
+TLS-keylog 导出。拿到后优先在这几个族里找:`/nemo/v2/**`、`/nemo/v3/**`、`/creation-tools/v1/**`
+(判别器已经能区分"存在/不存在",扫一遍只要几十秒)。
+
+### 11.4 对"方案 B"(上传建作品)的影响
+
+- **链路已明确 3/4**:token(`nemo_android_ios`)→ 上传 `.bcm` → 传 `.cover` → `bind`。
+- 缺的只有**第 0 步:作品 id 从哪来**。拿到它之后,`bind` 的参数已经逐字段清楚,
+  实现是一层薄封装(现在不实现,避免造出"能上传但落不到作品"的半成品)。
+- 顺带新增两个**可用于转换功能**的读接口:`/nemo/v2/works/list/user`(草稿,需令牌)、
+  `/nemo/v2/works/list/user/published`(公开)—— 前者正好能用来"枚举自己的 NEMO 作品再批量转化"。
