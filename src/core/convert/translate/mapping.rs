@@ -37,7 +37,7 @@
 //!   序列化字节等价(实测 jsdom 往返不变),畸形输入原样保留而不是产出 `parsererror` 文本。
 
 use std::borrow::Cow;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
 
 use serde_json::{Value, json};
@@ -206,13 +206,84 @@ pub(crate) fn translate_kitten_to_kn(
         .collect();
 }
 
+// ---------------------------------------------------------------- 正向查表索引
+//
+// 表是生成的 `&[(k, v)]`,直接 `iter().find` 是 O(表长) 线性扫描,而每积木每影子都会查。
+// 这里建 `LazyLock` 索引;一律用 `entry().or_insert()`(**首个命中优先**),
+// 与原来的 `iter().find(...)` 逐键等价(表里真有重复键时也保持"取第一个")。
+static KITTEN_TO_KN_INDEX: std::sync::LazyLock<HashMap<&'static str, &'static str>> =
+    std::sync::LazyLock::new(|| {
+        let mut map = HashMap::with_capacity(KITTEN_TO_KN.len());
+        for (kitten, kn) in KITTEN_TO_KN {
+            map.entry(*kitten).or_insert(*kn);
+        }
+        map
+    });
+
+static SHADOW_XML_INDEX: std::sync::LazyLock<
+    HashMap<&'static str, HashMap<&'static str, &'static str>>,
+> = std::sync::LazyLock::new(|| {
+    let mut map: HashMap<&'static str, HashMap<&'static str, &'static str>> =
+        HashMap::with_capacity(SHADOW_XML.len());
+    for (kind, slots) in SHADOW_XML {
+        let entry = map.entry(*kind).or_default();
+        for (slot, xml) in *slots {
+            entry.entry(*slot).or_insert(*xml);
+        }
+    }
+    map
+});
+
+static FIELD_NAME_MAP_INDEX: std::sync::LazyLock<HashMap<&'static str, &'static str>> =
+    std::sync::LazyLock::new(|| {
+        let mut map = HashMap::with_capacity(FIELD_NAME_MAP.len());
+        for (from, to) in FIELD_NAME_MAP {
+            map.entry(*from).or_insert(*to);
+        }
+        map
+    });
+
+static SPECIAL_FIELD_VALUES_INDEX: std::sync::LazyLock<
+    HashMap<&'static str, HashMap<&'static str, &'static str>>,
+> = std::sync::LazyLock::new(|| {
+    let mut map: HashMap<&'static str, HashMap<&'static str, &'static str>> =
+        HashMap::with_capacity(SPECIAL_FIELD_VALUES.len());
+    for (field, entries) in SPECIAL_FIELD_VALUES {
+        let entry = map.entry(*field).or_default();
+        for (text, mapped) in *entries {
+            entry.entry(*text).or_insert(*mapped);
+        }
+    }
+    map
+});
+
+static INPUT_NAME_MAP_INDEX: std::sync::LazyLock<
+    HashMap<&'static str, HashMap<&'static str, &'static str>>,
+> = std::sync::LazyLock::new(|| {
+    let mut map: HashMap<&'static str, HashMap<&'static str, &'static str>> =
+        HashMap::with_capacity(INPUT_NAME_MAP.len());
+    for (kind, slots) in INPUT_NAME_MAP {
+        let entry = map.entry(*kind).or_default();
+        for (slot, mapped) in *slots {
+            entry.entry(*slot).or_insert(*mapped);
+        }
+    }
+    map
+});
+
+static APPEARANCE_ATTRIBUTE_INDEX: std::sync::LazyLock<
+    HashMap<&'static str, (&'static str, &'static str)>,
+> = std::sync::LazyLock::new(|| {
+    let mut map = HashMap::with_capacity(APPEARANCE_ATTRIBUTE.len());
+    for (key, mapped) in APPEARANCE_ATTRIBUTE {
+        map.entry(*key).or_insert(*mapped);
+    }
+    map
+});
+
 /// `LC` 查表(`translateBlockType` 77860),表里没有就返回原值
 fn translate_type(kind: &str) -> &str {
-    KITTEN_TO_KN
-        .iter()
-        .find(|(k, _)| *k == kind)
-        .map(|(_, v)| *v)
-        .unwrap_or(kind)
+    KITTEN_TO_KN_INDEX.get(kind).copied().unwrap_or(kind)
 }
 
 /// 是否 KN 的四种「文本占位积木」(降级产物)
@@ -222,10 +293,7 @@ fn is_text_placeholder(kind: &str) -> bool {
 
 /// 官方 `cy` 表:某积木某槽位的默认影子 XML
 fn shadow_xml(kind: &str, slot: &str) -> Option<&'static str> {
-    SHADOW_XML
-        .iter()
-        .find(|(k, _)| *k == kind)
-        .and_then(|(_, slots)| slots.iter().find(|(s, _)| *s == slot).map(|(_, xml)| *xml))
+    SHADOW_XML_INDEX.get(kind)?.get(slot).copied()
 }
 
 // ---------------------------------------------------------------- 查表
@@ -283,11 +351,10 @@ fn map_field_name<'a>(block_type: &str, name: &'a str) -> Cow<'a, str> {
                 Cow::Borrowed("type")
             }
         }
-        _ => FIELD_NAME_MAP
-            .iter()
-            .find(|(k, _)| *k == name)
-            .map(|(_, v)| Cow::Borrowed(*v))
-            .unwrap_or(Cow::Borrowed(name)),
+        _ => match FIELD_NAME_MAP_INDEX.get(name) {
+            Some(mapped) => Cow::Borrowed(*mapped),
+            None => Cow::Borrowed(name),
+        },
     }
 }
 
@@ -304,11 +371,10 @@ fn map_field_value(name: &str, value: &Value) -> Value {
 
 /// 取值的映射结果(未命中 → `None`);影子 XML 的文本改写也用它
 fn mapped_field_text(name: &str, text: &str) -> Option<String> {
-    let entries = SPECIAL_FIELD_VALUES.iter().find(|(k, _)| *k == name)?.1;
-    entries
-        .iter()
-        .find(|(k, _)| *k == text)
-        .map(|(_, v)| (*v).to_string())
+    SPECIAL_FIELD_VALUES_INDEX
+        .get(name)?
+        .get(text)
+        .map(|v| (*v).to_string())
 }
 
 /// `getMappedName`(77497):槽位改名(含 `procedures_2_defnoreturn` 的 `PARAMS{n}` 后移)
@@ -319,22 +385,15 @@ fn get_mapped_name<'a>(block_type: &str, input_name: &'a str) -> Cow<'a, str> {
             Err(_) => Cow::Borrowed(input_name),
         };
     }
-    match INPUT_NAME_MAP
-        .iter()
-        .find(|(k, _)| *k == block_type)
-        .and_then(|(_, slots)| slots.iter().find(|(s, _)| *s == input_name))
-    {
-        Some((_, mapped)) => Cow::Borrowed(*mapped),
+    match INPUT_NAME_MAP_INDEX.get(block_type).and_then(|slots| slots.get(input_name)) {
+        Some(mapped) => Cow::Borrowed(*mapped),
         None => Cow::Borrowed(input_name),
     }
 }
 
 /// `processAppearanceAttribute`(77313)
 fn process_appearance_attribute(key: &str) -> Option<(&'static str, &'static str)> {
-    APPEARANCE_ATTRIBUTE
-        .iter()
-        .find(|(k, _)| *k == key)
-        .map(|(_, v)| *v)
+    APPEARANCE_ATTRIBUTE_INDEX.get(key).copied()
 }
 
 /// 官方 UUID 正则 `/^[0-9a-f]{8}-…$/i` 的等价判断
