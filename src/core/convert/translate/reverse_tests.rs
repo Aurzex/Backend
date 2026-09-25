@@ -1009,10 +1009,11 @@ mod reverse_tests_inner {
             }
             if std::env::var("DUMP_K4").is_ok() {
                 // 把中间态落盘,便于用外部工具精查(平时不写)
-                let _ = std::fs::write(
-                    format!("/tmp/k4-dump-{}.json", std::process::id()),
-                    k4.to_string(),
-                );
+                let tag: String = label
+                    .chars()
+                    .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+                    .collect();
+                let _ = std::fs::write(format!("/tmp/k4-dump-{tag}.json"), k4.to_string());
             }
             if std::env::var("DUMP_K4").as_deref() == Ok("full") {
                 // 调试:一个 K4 定义块长什么样(名字字段在哪)
