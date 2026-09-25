@@ -214,3 +214,24 @@ tshark -r temp/PCAPdroid_25_9月_13_59_21.pcap \
 | `temp/pcap_v4.py` / `pcap_upload.py` / `pcap_conn3.py` | 纯标准库 pcap 解析:主机/连接/时序/七牛上传链 |
 | `temp/dec/decrypt.js` + `match.js` | TLS 解密尝试(keylog → 记录解密 → HPACK 解 h2);`match.js` 做 keylog↔pcap 配对量化 |
 | `temp/web_dig.py` | 前端入口 bundle 抓取 + 关键词抽取(本轮用它挖了 nemoy 与 tools-entry) |
+
+---
+
+## 9. 抓包解密成功后的结论(2026-09-25 续二)
+
+用 `tshark -o tls.keylog_file:…` 解开 `temp/PCAPdroid_25_9月_13_59_21.pcap`(1729 个 HTTP/2 帧):
+
+| 发现 | 证据 |
+| ---- | ---- |
+| **KN 建作品 payload 与我们的实现逐字段一致** | `POST api-creation.codemao.cn/neko/works` 实体(`{"bcm_version":"0.27.4","save_type":1,"name":"我的作品","work_url":"…/922/user-files/*.bcmkn","preview_url":"…jpeg","stage_type":1,"work_classify":0,"n_blocks":0,"n_roles":2,"n_scenes":1}`),带 `work_id` 时为**更新**;`pic_need_check_file_url` 指向一个 `.json` |
+| **KN 删除草稿** | `DELETE /neko/works/330803731?force=2`(我们已有 `delete_kn_draft`) |
+| **上传 token 的项目名按编辑器区分** | KN:`projectName=neko` + `insertOnly=true` + `filePaths=922%2Fuser-files%2F*.bcmkn\|*.json`;NEMO:`projectName=nemo_android_ios` + `filePaths=<b64>.bcm` 与 `<b64>.cover`(封面走 `upload.qiniup.com/putb64/-1/key/<b64 路径>.cover`) |
+| **平台自己的"用本地文件打开编辑器"入口** | `GET tools-entry.codemao.cn/?fileUrl=<作品文件 URL>&appId=1&signature=123456&api_env=production&toolType=KN`(先上传作品文件,再把 URL 交给该入口) |
+| **统一作品列表(跨编辑器)** | `GET api.codemao.cn/creation-tools/v1/works/list/user?offset&limit` 一次性返回 84 条,字段 `work_id`/`work_type`/`bcm_version`/`work_url`/`preview`/`publish_time`/`update_time`;实测:`work_type=8` 全是 NEMO(`.bcm` + `.cover`,如 `work_id=330803896` 的 `work_url` 尾部与本机抓到的 NEMO 上传文件同名 `…_8nHvxlvm.bcm`)、`work_type=1` 是 Kitten(预览 URL 走 `120/kitten/…`)、KN 自己的列表返回 `type=15` |
+| **这份抓包里没有 NEMO 建作品调用** | 全量 POST 清单只有 `shence/collection/qiniup/sentry/**neko/works**`;搜 `330803896`(NEMO 新作品 id)在**全部解密流量里不存在**;两个 pcap 均无 QUIC(`udp.port==443` 计数 0),keylog 也只有标准 TLS 标签 ⇒ 该作品的注册调用发生在**另一次会话**(很可能就是 `PCAPdroid_25_9月_12_11_14.pcap`,而它**没有配套 keylog**,只有 SNI 可读:主要是 `api.codemao.cn`,符合 `/nemo/**`、`/creation-tools/**` 被网关路由到 `api-nemo-app` 服务) |
+| **NEMO 建作品路由扫描:0 命中** | 先校准判别器:`GET` 已知 POST-only 路由(`/neko/works`)= **405 "请求方式不支持"**;`api.codemao.cn` 上方法不符 = **404 + `error_code 40103015`**,路由不存在 = **404 + `Path-Not-Found@Common`**,未带鉴权的已知路由 = **406 + 40100004**。随后扫 408 个候选(`/creation-tools/v1/**`、`/nemo/v2|v3/**` × `/works|/work|/user/works|…` × `/create|/save|/upload|/submit|…`),**全部 `Path-Not-Found@Common`**,对照组正常 |
+
+**结论**:NEMO 侧"建作品"这一个端点仍缺,且**只能从运行时拿**——要么给 `PCAPdroid_25_9月_12_11_14.pcap` 配一份 keylog
+(用 PCAPdroid 的 TLS-keylog 导出,和上次同样的方式),要么在 NEMO App 里"保存/发布作品"时重新抓一次包 + 导出 keylog;
+拿到后 `tshark -o tls.keylog_file:… -Y http2 -T fields -e http2.headers.authority -e http2.headers.method -e http2.headers.path`
+即可一眼看出那条 POST。**不需要**再花时间在 Web bundle / APK 静态挖(App 代码已加固:加密的 `classes0.jar`/`classes.dgc`)。
