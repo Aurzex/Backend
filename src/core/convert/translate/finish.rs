@@ -341,7 +341,7 @@ fn build_styles(
         }
         let effective = entry.get("url").and_then(Value::as_str).unwrap_or_default();
         if !effective.is_empty() && !effective.starts_with("https://") {
-            report.warn(TranslateWarning::DroppedProperty {
+            report.warn(TranslateWarning::ReuploadedOnImport {
                 path: "theatre.styles[*].url(官方会重新上传并替换;我们保留源 url/cdn_url)".into(),
             });
         }
@@ -369,7 +369,7 @@ fn build_audios(
                 Some(cdn) => {
                     entry.insert("url".into(), cdn);
                 }
-                None => report.warn(TranslateWarning::DroppedProperty {
+                None => report.warn(TranslateWarning::ReuploadedOnImport {
                     path: "audio[*].url(官方会重新上传;我们保留源键)".into(),
                 }),
             }
@@ -1158,7 +1158,14 @@ mod tests {
             "rotate_center → centerPoint"
         );
         assert_eq!(style["pivot"], json!({ "x": 0, "y": 0 }), "其余键保真");
-        assert!(report.warnings().iter().any(|w| matches!(w, TranslateWarning::DroppedProperty { path } if path.contains("theatre.styles[*]"))));
+        // 「官方会重新上传」按**非损失**类记(C3):产物 url 由平台重写,我们保留源 url
+        assert!(report.warnings().iter().any(
+            |w| matches!(w, TranslateWarning::ReuploadedOnImport { path } if path.contains("theatre.styles[*]"))
+        ));
+        assert!(
+            !report.is_lossy(),
+            "重传资源不算有损(否则 strict 在任何含 data:/非 https 造型的真作品上必失败)"
+        );
 
         // 音频:没有 cdn_url → 官方必然重传,源 url 保真 + 报告;sortList/currentAudioId 取 audio_order
         let audios = &doc["audios"];
@@ -1169,7 +1176,7 @@ mod tests {
         assert_eq!(audios["sortList"], json!(["audio-1"]));
         assert_eq!(audios["currentAudioId"], json!("audio-1"));
         assert!(report.warnings().iter().any(
-            |w| matches!(w, TranslateWarning::DroppedProperty { path } if path.contains("audio[*]"))
+            |w| matches!(w, TranslateWarning::ReuploadedOnImport { path } if path.contains("audio[*]"))
         ));
 
         // 没有 audio_order 时 sortList = 遍历顺序,currentAudioId 取首个

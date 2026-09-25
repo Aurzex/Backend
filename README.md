@@ -182,7 +182,7 @@ println!("草稿作品 id = {:?}", out.work_id);
 
 - 方向:当前支持 **Kitten4 编辑版 → KN**(与编辑器官方算法逐块对齐,产物通过编辑器自带的 `validateBcm`)与**反向 KN → Kitten4**(官方无此方向,由本库自建;不可逆项进报告)。
 - 不支持:`.bcm`(Kitten2/3,`blocksXML`)——编辑器本身也拒绝该方向(会引导去 Kitten V4.0)。
-- 有损项(`TranslateWarning`)与覆盖率写在 `TranslateReport` 里,`TranslateOptions::strict(true)` 可让有损直接失败。
+- 有损项(`TranslateWarning`)与覆盖率写在 `TranslateReport` 里,`TranslateOptions::strict(true)` 可让**真损失**(未映射/降级/丢字段)直接失败;新铸 id 与「官方导入时会重传资源」不算损失。
 
 **7. 举报处理引擎**(分块拉取 + 逐条决策):
 

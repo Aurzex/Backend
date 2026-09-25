@@ -25,7 +25,8 @@ use crate::api::work::{
 };
 use crate::core::convert::decompile::{CodemaoDecompiler, DecompileOptions};
 use crate::core::convert::translate::{
-    TargetEditor, TranslateError, TranslateOptions, TranslateOutcome, translate_file,
+    TargetEditor, TranslateError, TranslateOptions, TranslateOutcome, set_source_reference,
+    translate_file,
 };
 use crate::utils::filedata::{PathConfig, value_to_i64};
 use crate::utils::requests::{MewError, UploadChannel};
@@ -75,7 +76,21 @@ fn translate_work_in(
         .map_err(TranslateError::Decompiler)?;
 
     // 2. 转化
-    let outcome = translate_file(&source_path, target, options.clone())?;
+    let mut outcome = translate_file(&source_path, target, options.clone())?;
+
+    // 2.5 可选:把源作品文件引用写进产物(仅 Kitten → KN,官方「保留原件」行为)
+    //
+    // 官方把原始 Kitten 文件重新上传、URL 挂到 KN 的 `source`;失败不影响转化结果,
+    // 只记日志(产品语义:源引用是附加信息,不该让转化整体失败)。
+    if options.keeps_source()
+        && target == TargetEditor::KittenN
+        && matches!(outcome.report.from, EditorType::Kitten2 | EditorType::Kitten3 | EditorType::Kitten4)
+    {
+        match attach_source_reference(&outcome, &source_path) {
+            Ok(()) => log::debug!("已写入源作品引用:{:?}", outcome.output),
+            Err(error) => log::warn!("写入源作品引用失败(产物照常输出):{error}"),
+        }
+    }
 
     // 3. 可选:上传产物并新建草稿作品(默认关;开=替用户在平台落一份草稿)
     let work_id_created = if options.upload_enabled() {
@@ -86,7 +101,8 @@ fn translate_work_in(
 
     Ok(TranslateOutcome {
         output: outcome.output,
-        work_id: work_id_created.or(outcome.work_id),
+        // `translate_file` 只写文件、不建作品,所以 `outcome.work_id` 恒为 None
+        work_id: work_id_created,
         target: outcome.target,
         report: outcome.report,
     })
@@ -132,6 +148,32 @@ pub fn translate_works(
     results
 }
 
+/// 上传源作品文件,并把返回的 URL 写进产物顶层 `source`(见 [`set_source_reference`])
+///
+/// 偏差记录:官方上传的是**原始** Kitten 文件字节,我们只有反编译重建的编辑版
+/// (`staging` 里的那一份),故上传它(`docs/21` §4-10)。
+fn attach_source_reference(
+    outcome: &TranslateOutcome,
+    source_path: &std::path::Path,
+) -> Result<(), TranslateError> {
+    let client = crate::utils::requests::CodeMaoClient::global().clone();
+    let url = client
+        .file_uploader()
+        .upload(source_path, UploadChannel::Codemao, "convert-source")
+        .map_err(TranslateError::Mew)?;
+    set_source_reference(&outcome.output, &url)
+}
+
+/// 草稿作品名:标注目标编辑器与来源作品 id,并显式标「可删」
+/// (会直接展示在用户的平台草稿列表里)
+fn draft_name(source_work_id: WorkId, target: TargetEditor) -> String {
+    let label = match target {
+        TargetEditor::KittenN => "KittenN",
+        TargetEditor::Kitten4 => "Kitten4",
+    };
+    format!("转化副本 {label} ← {source_work_id}(可删)")
+}
+
 /// 上传产物并新建同名草稿作品,返回新作品 id
 fn create_draft_work(
     outcome: &TranslateOutcome,
@@ -144,8 +186,7 @@ fn create_draft_work(
         .upload(&outcome.output, UploadChannel::Codemao, "convert")
         .map_err(TranslateError::Mew)?;
 
-    // 名称:沿用源作品名 + 明确标注是转化产物(便于用户识别与删除)
-    let name = format!("转化自检 {} (可删)", i64::from(source_work_id));
+    let name = draft_name(source_work_id, target);
     let created: Value = match target {
         TargetEditor::KittenN => NekoWorkManager::new()
             .create_kn_work(CreateKnWorkArgs {
@@ -195,6 +236,15 @@ fn create_draft_work(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 草稿名要能看出目标与来源,并标明可删(会展示在平台草稿列表里)
+    #[test]
+    fn draft_name_marks_target_source_and_deletable() {
+        let name = draft_name(WorkId::new(123), TargetEditor::KittenN);
+        assert!(name.contains("KittenN"), "{name}");
+        assert!(name.contains("123"), "{name}");
+        assert!(name.contains("可删"), "{name}");
+    }
 
     /// P0-1 回归:staging 必须是"每作品每次调用"独立目录(曾共用一个目录导致并发互删)
     #[test]

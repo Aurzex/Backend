@@ -207,7 +207,7 @@ pub(crate) fn translate_kitten_to_kn(
 }
 
 /// `LC` 查表(`translateBlockType` 77860),表里没有就返回原值
-pub(crate) fn translate_type(kind: &str) -> &str {
+fn translate_type(kind: &str) -> &str {
     KITTEN_TO_KN
         .iter()
         .find(|(k, _)| *k == kind)
@@ -216,12 +216,12 @@ pub(crate) fn translate_type(kind: &str) -> &str {
 }
 
 /// 是否 KN 的四种「文本占位积木」(降级产物)
-pub(crate) fn is_text_placeholder(kind: &str) -> bool {
+fn is_text_placeholder(kind: &str) -> bool {
     TEXT_PLACEHOLDER_BLOCKS.contains(&kind)
 }
 
 /// 官方 `cy` 表:某积木某槽位的默认影子 XML
-pub(crate) fn shadow_xml(kind: &str, slot: &str) -> Option<&'static str> {
+fn shadow_xml(kind: &str, slot: &str) -> Option<&'static str> {
     SHADOW_XML
         .iter()
         .find(|(k, _)| *k == kind)

@@ -204,7 +204,7 @@ fn kn_work_to_kitten4_file() {
 
 /// 端到端(写平台):作品 → 转化 → 上传 → 建草稿
 ///
-/// 默认 `#[ignore]`:这是平台写操作,会在账号下留草稿(名字含「转化自检…(可删)」)。
+/// 默认 `#[ignore]`:这是平台写操作,会在账号下留草稿(名字形如「转化副本 KittenN ← <作品 id>(可删)」)。
 #[test]
 #[ignore = "会调用平台写接口(上传 + 建草稿),需显式 --ignored 运行"]
 fn translate_work_creates_draft_when_ignored() {

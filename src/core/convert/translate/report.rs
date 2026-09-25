@@ -19,6 +19,8 @@ pub enum TranslateWarning {
     DroppedProperty { path: String },
     /// 新铸了 id(影子/参数),便于对齐时忽略
     RemintedId { from: String },
+    /// 官方导入时会重新上传资源、产物里的 url 由平台重写(我们保留源 url)——**不是损失**
+    ReuploadedOnImport { path: String },
 }
 
 impl TranslateWarning {
@@ -30,6 +32,7 @@ impl TranslateWarning {
             TranslateWarning::DroppedField { path } => (2, path.clone()),
             TranslateWarning::DroppedProperty { path } => (3, path.clone()),
             TranslateWarning::RemintedId { from } => (4, from.clone()),
+            TranslateWarning::ReuploadedOnImport { path } => (5, path.clone()),
         }
     }
 
@@ -40,6 +43,7 @@ impl TranslateWarning {
             TranslateWarning::DroppedField { .. } => "丢弃字段",
             TranslateWarning::DroppedProperty { .. } => "丢弃实体属性",
             TranslateWarning::RemintedId { .. } => "重新生成 id",
+            TranslateWarning::ReuploadedOnImport { .. } => "官方重传资源(非损失)",
         }
     }
 
@@ -50,6 +54,7 @@ impl TranslateWarning {
             TranslateWarning::DroppedField { path }
             | TranslateWarning::DroppedProperty { path } => path,
             TranslateWarning::RemintedId { from } => from,
+            TranslateWarning::ReuploadedOnImport { path } => path,
         }
     }
 }
@@ -85,11 +90,17 @@ impl TranslateReport {
         &self.warnings
     }
 
-    /// 是否有"不可逆"损失(未映射/降级/丢弃)
+    /// 是否有"不可逆"损失(未映射/降级/丢弃)。
+    ///
+    /// 不算损失的:新铸 id(内容都在,只换了 id)、官方导入时重传资源
+    /// (产物 url 由平台重写,我们保留源 url)。
     pub fn is_lossy(&self) -> bool {
-        self.warnings
-            .iter()
-            .any(|w| !matches!(w, TranslateWarning::RemintedId { .. }))
+        self.warnings.iter().any(|w| {
+            !matches!(
+                w,
+                TranslateWarning::RemintedId { .. } | TranslateWarning::ReuploadedOnImport { .. }
+            )
+        })
     }
 
     /// 计数(类别 → 主体 → 次数)

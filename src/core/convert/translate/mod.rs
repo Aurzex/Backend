@@ -396,7 +396,36 @@ pub fn translate_file(
     })
 }
 
-/// 识别源作品属于哪个编辑器(按顶层结构判定,不用扩展名)
+/// 把源作品文件引用写进**已产出**的 KN 文档顶层 `source` 字段。
+///
+/// 官方做法:KN 编辑器导入 Kitten 作品时,把原始 Kitten 文件字节重新上传,
+/// 并把 URL 写到 KN 作品的 `source`(即"保留原件",见 `docs/20` §3.1 的 `w.source = T`)。
+/// 这里只做**纯文件改写**,上传由 `convert` 门面编排(保持本子域不碰网络)。
+///
+/// 已知偏差:我们手里只有反编译重建的编辑版,官方上传的是原始文件字节
+/// (见 `docs/21` §4-10)。
+pub fn set_source_reference(
+    output: &std::path::Path,
+    url: &str,
+) -> std::result::Result<(), TranslateError> {
+    let text = std::fs::read_to_string(output)?;
+    let mut document: serde_json::Value = serde_json::from_str(&text)?;
+    let Some(object) = document.as_object_mut() else {
+        return Err(TranslateError::InvalidArgument(format!(
+            "产物不是 JSON 对象:{output:?}"
+        )));
+    };
+    object.insert("source".to_string(), serde_json::Value::String(url.to_string()));
+    // 与 `translate_file` 同一序列化口径(serde_json 默认按键排序,round-trip 稳定)
+    std::fs::write(output, serde_json::to_string(&document)?)?;
+    Ok(())
+}
+
+/// 识别源作品属于哪个编辑器(按顶层结构判定,不用扩展名)。
+///
+/// Kitten2 与 Kitten3 的编辑版都是 `blocksXML`,本地样本与 `docs/20` 都没有可靠的
+/// 区分标记,而**两者都不支持转化**(编辑器自己会拒绝,见 `docs/20` §3.1),
+/// 故统一按 Kitten3 报;不编造 `size` 之类的判据。
 pub(crate) fn detect_editor(
     source: &serde_json::Value,
 ) -> Option<crate::core::convert::EditorType> {
@@ -452,6 +481,36 @@ mod diff_tests {
     use crate::core::convert::translate::blockjson::BlockJson;
     use serde_json::Value;
     use std::collections::{BTreeMap, BTreeSet};
+
+    /// `set_source_reference`:把原件 URL 写进产物顶层,其余键原样保留;非对象产物显式报错
+    #[test]
+    fn set_source_reference_writes_top_level_source() {
+        let dir = std::env::temp_dir().join(format!(
+            "backend-convert-source-{}-{}",
+            std::process::id(),
+            fastrand::u32(..)
+        ));
+        std::fs::create_dir_all(&dir).expect("建目录");
+        let path = dir.join("work.kn.bcmkn");
+        std::fs::write(
+            &path,
+            r#"{"stageSize":{"width":900,"height":562},"projectName":"样例"}"#,
+        )
+        .expect("写文件");
+
+        set_source_reference(&path, "https://creation.codemao.cn/src.bcm4").expect("写引用");
+        let doc: Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("读文件")).expect("JSON");
+        assert_eq!(doc["source"], serde_json::json!("https://creation.codemao.cn/src.bcm4"));
+        assert_eq!(doc["projectName"], serde_json::json!("样例"), "其余键原样保留");
+
+        // 非对象产物:显式报错,不静默写出半成品
+        let bad = dir.join("bad.json");
+        std::fs::write(&bad, "[1,2]").expect("写文件");
+        assert!(set_source_reference(&bad, "x").is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     fn fixture() -> Value {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

@@ -9,7 +9,7 @@ pub enum DecompilerError {
     Mew(#[from] MewError),
     #[error("加密错误: {0}")]
     Crypto(String),
-    #[error("反编译错误: {0}")]
+    #[error("作品解析失败: {0}")]
     Decompile(String),
     #[error("不支持的作品类型: {0}")]
     UnsupportedType(String),
