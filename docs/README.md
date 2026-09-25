@@ -1,6 +1,6 @@
 # docs 导航
 
-本目录按**用途**分成两块库 + 一块历史记录。原来的 `NN-*.md`(31 篇演进式轮次文档)**原样保留**在 `rounds/`,
+本目录按**用途**分成两块库 + 一块历史记录。原来的 `NN-*.md`(32 篇演进式轮次文档)**原样保留**在 `rounds/`,
 只做搬迁与交叉引用重写,内容不改写(约定见 `rounds/20` §6.1「历史保真」)。
 
 ## 知识库 `knowledge/`(是什么 / 为什么)
@@ -31,8 +31,8 @@
 
 ## 历史记录 `rounds/`(过程)
 
-`rounds/01-websocket-pitfalls.md` … `rounds/31-convert-layout-consolidation-plan.md` —— 每轮一份的方案/评审/整改记录。
+`rounds/01-websocket-pitfalls.md` … `rounds/32-reverse-definition-body-investigation.md` —— 每轮一份的方案/评审/整改记录。
 价值在**证据链**(真机实测、抓包、官方 bundle 逆向、逐条评审),以及"为什么当初这么决定"。
 读它们时先看 `knowledge/errata.md`:早期文档里的文件名/类型名/行号多数已经漂移。
 
-**本轮(文档整理)新增**:知识库 7 篇、目标库 5 篇(含本文件)。原 29 篇移入(第三十、三十一轮又新增 2 篇) `rounds/`。
+**本轮(文档整理)新增**:知识库 7 篇、目标库 5 篇(含本文件)。原 29 篇移入(第三十至三十二轮又新增 3 篇) `rounds/`。

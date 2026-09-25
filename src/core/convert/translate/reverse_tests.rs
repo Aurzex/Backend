@@ -997,6 +997,17 @@ mod reverse_tests_inner {
             // **预算断言(只许变小)**:今天 `Node VM v3` 是 6 个定义 / 净减 133 块,
             // `now` 是 0 / 0。变大就是回退 —— 这批缺口本身**已知未修**,
             // 根因、证据与后续研究步骤见 `docs/rounds/28-convert-reverse-fidelity-gaps.md`。
+            if deficit > 0 {
+                // 定位用:反向报告的分类分布(缺口若来自"某个不可映射的容器吞掉子树",这里能看出来)
+                let top: Vec<String> = report
+                    .counts()
+                    .into_iter()
+                    .map(|(cat, subjects)| {
+                        format!("{cat}×{} ({})", subjects.values().sum::<usize>(), subjects.keys().take(4).cloned().collect::<Vec<_>>().join(","))
+                    })
+                    .collect();
+                eprintln!("[反向报告] {label}: {}", top.join(" | "));
+            }
             assert!(
                 affected <= 6 && deficit <= 133,
                 "{label}:反向保真缺口扩大(受影响定义 {affected}/{}，净减块 {deficit};基线 6 / 133)",
