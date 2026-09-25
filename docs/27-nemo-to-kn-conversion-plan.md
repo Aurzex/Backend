@@ -182,3 +182,31 @@ Rust 侧实现留到研究结论到手后再开工(见 §5 的 S1–S4,顺序不
 - **新增 S1.5**:版本迁移(QC/YC)—— 老作品不做迁移会直接产出与官方不同的产物;
 - S3(资源)按 §9.2 的 url 规则即可,不再需要上传;
 - 验收换成本文 §9.1 的两份真作品 + `validateBcm` 硬门 + 与 `temp/harness/out-*.json` 的语义 diff(忽略 id/location/createTime)。
+
+---
+
+## 10. 里程碑:仓库的"官方校验器"硬门**首次真正生效**(2026-09-25)
+
+`src/core/convert/translate/mod.rs::generated_bcmkn_passes_official_validator_when_harness_present`
+自加入仓库起,只要 `temp/harness/harness.js` 不存在就**静默跳过**(打一行提示后 `return`,测试仍然算 pass)
+—— 也就是说这条"最强门"在过去的会话里**从未真正验过任何东西**。
+
+今天 harness 按契约补齐(`require(id)` 首次调用自动 boot ✓),这条测试**真跑了**:
+
+| 检查 | 命令 | 结果 |
+| ---- | ---- | ---- |
+| 我们 Rust 的 Kitten4→KN 产物过官方校验 | `cargo test --lib generated_bcmkn_passes_official_validator -- --nocapture` | **通过**(断言 `stdout` 含 `VALID`) |
+| 两份官方 NEMO→KN 产物过校验(独立复验) | `node temp/harness/harness.js --validate temp/harness/out-eggparty-194684070.json` / `…out-wuxian-103791894.json` | 两次 `validateBcm -> true` |
+| 官方解析器交叉核对(独立复验) | `node temp/harness/map_tables.js` | `XML slots dropped: {}`、`lost next chains: {}`,仅 `self_broadcast:73`/`self_listen:94` 的 message 按官方规则搬进 KN 输入槽 |
+
+⇒ 结论:**"产物能被官方编辑器加载"从"声称"变成了"可执行的门"**;NEMO→KN 的验收也因此有了硬依据。
+
+### 10.1 harness 的保真注意事项(用之前先看)
+
+1. **DOM 是手写的**(`temp/harness/dom.js`),不是浏览器:XML 严格性有差异(容忍裸 `&`;结构错误产出
+   `<html><body><parsererror>` 形态);选择器只实现转换器用到的那一小撮(`:scope`、子/后代、标签、`[attr]`、
+   `[attr="v"]`、逗号列表),超出即显式抛错。
+2. **曾经因为缺一个 DOM 成员静默降级**:没有 `Element.nextElementSibling` 时,官方解析器走了"只看 shadow"的
+   退化分支,**悄悄丢掉覆盖 shadow 的块**(产物 11.8/4.05 MB,而且**照样过 validateBcm**);补上后是 14.1/4.59 MB。
+   ⇒ 教训:**只有在 `map_tables.js` 报 0 交叉核对不一致时,harness 产物才可信**;bundle 升级后必须重跑它。
+3. harness 是**逆向工具、不入库**(`temp/` 已 gitignore);仓库测试在缺少它时跳过,CI 不受影响。
