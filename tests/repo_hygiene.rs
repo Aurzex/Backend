@@ -280,8 +280,14 @@ fn scanner_catches_realistic_leaks_and_ignores_examples() {
             "| `mapping.rs` | `Kitten4Backend` 重建 `connections` |",
         ),
         ("src/x.rs", r#"let token = "REPLACE_ME";"#),
-        ("src/api/auth.rs", r#"LoginMethod::PasswordV0 => "password_v0","#),
-        ("docs/x.md", "| `AES-256-GCM`;key = `SHA256(salt)`,`salt = 0x00..0x1E` |"),
+        (
+            "src/api/auth.rs",
+            r#"LoginMethod::PasswordV0 => "password_v0","#,
+        ),
+        (
+            "docs/x.md",
+            "| `AES-256-GCM`;key = `SHA256(salt)`,`salt = 0x00..0x1E` |",
+        ),
         ("docs/x.md", "密码: 见 `data/test-config.json`"),
         ("README.md", "| `data/password.txt` | 每行 `用户名:密码` |"),
     ] {

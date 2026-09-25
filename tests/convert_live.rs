@@ -100,7 +100,10 @@ fn login(cfg: &TestConfig) -> Option<String> {
         Ok(r) if r.success => Some(r.token),
         Ok(r) => {
             if require_live() {
-                panic!("[live] 登录失败:{};BACKEND_REQUIRE_LIVE=1 时视为失败", r.message);
+                panic!(
+                    "[live] 登录失败:{};BACKEND_REQUIRE_LIVE=1 时视为失败",
+                    r.message
+                );
             }
             eprintln!("[convert_live] 登录失败:{}", r.message);
             None

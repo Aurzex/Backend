@@ -148,8 +148,10 @@ fn convert_facade_flow_bench() {
         return;
     }
     let dir = bench_dir("facade");
-    println!("
-| 样本 | 旧流程 ms(盘→盘 + 读回改写) | 内存直通 ms | 加速 | 产物 SHA256 |");
+    println!(
+        "
+| 样本 | 旧流程 ms(盘→盘 + 读回改写) | 内存直通 ms | 加速 | 产物 SHA256 |"
+    );
     println!("| --- | --- | --- | --- | --- |");
     for sample in SAMPLES {
         if !Path::new(sample.path).exists() {

@@ -19,8 +19,8 @@ use std::path::{Path, PathBuf};
 
 use backend::api::auth::LoginBuilder;
 use backend::core::cloudvar::CloudBuilder;
-use backend::core::convert::decompile::{DecompileOptions, decompile_work_with};
 use backend::core::converse::{ChatBuilder, ChatEventType, HistoryMode};
+use backend::core::convert::decompile::{DecompileOptions, decompile_work_with};
 use serde::Deserialize;
 
 /// 单个作品的测试配置(反编译用)
@@ -84,9 +84,11 @@ fn load_config() -> Option<TestConfig> {
         .ok()
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("data/test-config.json"));
-    if !path.exists() && skip_or_fail(&format!(
-        "未找到测试配置 {path:?}(可复制 tests/fixtures/test-config.example.json 为 data/test-config.json 后填写)"
-    )) {
+    if !path.exists()
+        && skip_or_fail(&format!(
+            "未找到测试配置 {path:?}(可复制 tests/fixtures/test-config.example.json 为 data/test-config.json 后填写)"
+        ))
+    {
         return None;
     }
     let text = std::fs::read_to_string(&path).expect("读取测试配置失败");
@@ -109,9 +111,15 @@ fn login(account: &str, password: &str) -> Option<String> {
         Ok(result) if result.success => Some(result.token),
         Ok(result) => {
             if require_live() {
-                panic!("[live] 账号 {account} 登录失败: {};BACKEND_REQUIRE_LIVE=1 时视为失败", result.message);
+                panic!(
+                    "[live] 账号 {account} 登录失败: {};BACKEND_REQUIRE_LIVE=1 时视为失败",
+                    result.message
+                );
             }
-            eprintln!("[live_features] 账号 {account} 登录失败: {}", result.message);
+            eprintln!(
+                "[live_features] 账号 {account} 登录失败: {}",
+                result.message
+            );
             None
         }
         Err(e) => {

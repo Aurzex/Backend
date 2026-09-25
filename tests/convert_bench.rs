@@ -296,7 +296,11 @@ fn convert_bench() {
             m.e2e_ms,
             p.e2e_ms,
             m.e2e_ms / p.e2e_ms.max(f64::MIN_POSITIVE),
-            if p.sha256 == m.sha256 { "相同 ✅" } else { "不同 ❌" },
+            if p.sha256 == m.sha256 {
+                "相同 ✅"
+            } else {
+                "不同 ❌"
+            },
         );
 
         // 空门守卫:若本机可用核数 ≥ 2,则正向样本的"实体并发=8"必须真的开起多线程,
@@ -318,10 +322,7 @@ fn convert_bench() {
         {
             mismatched.push((key.clone(), old.to_string(), m.sha256.clone()));
         }
-        fresh.insert(
-            key.clone(),
-            serde_json::Value::String(m.sha256.clone()),
-        );
+        fresh.insert(key.clone(), serde_json::Value::String(m.sha256.clone()));
         fresh.insert(
             format!("{key}#meta"),
             serde_json::json!({
