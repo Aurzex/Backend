@@ -113,7 +113,7 @@ fn login_all(cfg: &TestConfig) -> usize {
 }
 
 /// 反编译单个作品,断言返回的路径存在
-/// 注意:Kitten/NEKO 返回 JSON 文件路径;NEMO 返回资源目录路径(且忽略 output_dir)。
+/// 注意:Kitten/NEKO 返回 JSON 文件路径;NEMO/WOOD 返回资源目录路径(output_dir 生效)。
 /// 此处仅断言成功与路径存在,不校验内容格式(各类型产物形态不同)。
 fn decompile_ok(work: &WorkEntry, work_dir: &Path) -> PathBuf {
     let options = DecompileOptions::new()
@@ -185,9 +185,8 @@ fn decompile_nemo_works() {
             work.id,
             saved.display()
         );
-        // NEMO 的 save_result 忽略 output_dir,产物写入默认 download/compile/,
-        // 测试后清理避免污染仓库目录
-        let _ = std::fs::remove_file(&saved);
+        // 产物落在本次的临时目录里(NEMO 现已尊重 output_dir),按目录形态清理
+        let _ = std::fs::remove_dir_all(&saved);
     }
     let _ = std::fs::remove_dir_all(&base);
 }

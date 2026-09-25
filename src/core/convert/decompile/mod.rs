@@ -295,6 +295,7 @@ impl CodemaoDecompiler {
         }
 
         let context = DecompilerContextBuilder::new()
+            .output_dir(output_path)
             .work_info(work_info)
             .http_client(http_client)
             .config(self.config.clone())
@@ -381,6 +382,9 @@ pub fn decompile_works(work_ids: &[WorkId], options: DecompileOptions) -> Vec<Re
 // 反编译上下文(原 context.rs)
 // ===========================================================================
 pub(crate) struct DecompilerContext {
+    /// 本次调用的输出目录(`DecompileOptions::output_dir`),供**自建目录树**的反编译器
+    /// (NEMO/WOOD)与 `save_result` 用同一个落点;`None` 时回退 `config.default_output_dir`
+    pub(crate) output_dir: Option<PathBuf>,
     pub(crate) work_info: WorkInfo,
     pub(crate) http_client: Box<dyn HttpClient>,
     pub(crate) file_service: FileService,
@@ -390,6 +394,7 @@ pub(crate) struct DecompilerContext {
 
 // Context Builder
 pub(crate) struct DecompilerContextBuilder {
+    output_dir: Option<PathBuf>,
     work_info: Option<WorkInfo>,
     http_client: Option<Box<dyn HttpClient>>,
     config: Option<Arc<DecompilerConfig>>,
@@ -405,11 +410,18 @@ impl Default for DecompilerContextBuilder {
 impl DecompilerContextBuilder {
     pub(crate) fn new() -> Self {
         Self {
+            output_dir: None,
             work_info: None,
             http_client: None,
             config: None,
             id_generator: None,
         }
+    }
+
+    /// 本次调用的输出目录(自建目录树的反编译器用它当根)
+    pub(crate) fn output_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.output_dir = Some(dir.into());
+        self
     }
 
     pub(crate) fn work_info(mut self, info: WorkInfo) -> Self {
@@ -435,6 +447,7 @@ impl DecompilerContextBuilder {
     pub(crate) fn build(self) -> Result<DecompilerContext> {
         let config = self.config.unwrap_or_default();
         Ok(DecompilerContext {
+            output_dir: self.output_dir,
             work_info: self.work_info.ok_or_else(|| DecompilerError::Other {
                 msg: "缺少work_info".into(),
                 source: None,

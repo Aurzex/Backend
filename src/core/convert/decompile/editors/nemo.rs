@@ -63,7 +63,11 @@ impl NemoDecompiler {
     ) -> Result<String> {
         let work_id = context.work_info.id;
         let folder_name = FileService::safe_filename(&context.work_info.name, work_id.get(), "");
-        let base_dir = &context.config.default_output_dir;
+        // 与 `save_result` 同一落点:调用方指定了就写它,否则回退默认目录
+        let base_dir = context
+            .output_dir
+            .as_deref()
+            .unwrap_or(&context.config.default_output_dir);
         let work_dir = base_dir.join(folder_name);
 
         let resource_config = NemoResourceConfig {
