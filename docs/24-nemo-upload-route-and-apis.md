@@ -289,3 +289,50 @@ TLS-keylog 导出。拿到后优先在这几个族里找:`/nemo/v2/**`、`/nemo/
   实现是一层薄封装(现在不实现,避免造出"能上传但落不到作品"的半成品)。
 - 顺带新增两个**可用于转换功能**的读接口:`/nemo/v2/works/list/user`(草稿,需令牌)、
   `/nemo/v2/works/list/user/published`(公开)—— 前者正好能用来"枚举自己的 NEMO 作品再批量转化"。
+
+---
+
+## 12. 缺口补齐:第三份抓包里找到了 **NEMO 建作品** 调用(2026-09-25)
+
+§9/§11 一直缺的"作品 id 从哪来",在同一份 17:12 抓包里被找到(这次是把**全部 POST 体**都解出来看,
+不再按路径过滤 —— 教训:过滤会漏)。
+
+### 12.1 完整链路(新建一个 NEMO 作品)
+
+| 步 | 调用 | 证据 |
+| -- | ---- | ---- |
+| 1 | `GET /cdn/qi-niu/tokens/uploading?projectName=nemo_android_ios&filePaths=<b64>.bcm` / `.cover` | 4 次 token |
+| 2 | `POST upload.qiniup.com/`(上传 `.bcm`)、`POST upload.qiniup.com/putb64/-1/key/<b64>.cover` | 各 2 次 |
+| 3 | **`POST https://api.codemao.cn/nemo/v3/works/upload/1`** | 2 次;体见下 |
+| 4 | `POST https://api.codemao.cn/nemo/qiniu/upload/business/bind` | 2 次(§11.1) |
+
+**第 3 步的完整体**(两件的差别只有 `orientation` 与 URL):
+
+```json
+{"bcm_version":"0.16.2","cloud_variables":[],"n_blocks":0,"n_roles":1,"name":"新的作品",
+ "orientation":1,"preview":"https://creation.bcmcdn.com/490/…cover",
+ "root_ids":[],"template_type":0,"work_url":"https://creation.bcmcdn.com/490/…bcm"}
+```
+
+**响应**(同一 TCP 流上的 200):
+
+```json
+{"id":330816585,"work_name":"新的作品","description":""}
+```
+
+⇒ **作品 id 由第 3 步返回**(`330816585` / `330816598`),第 4 步的 `bind` 拿它去绑封面。
+链路里其他的:App 侧日志(`collection.codemao.cn/report/sysinfo`)出现
+`正在打开创作页面: WorksEvent{type=0, name='新的作品', workId='null', …}` —— 与"新建"语义对上。
+
+### 12.2 探测记录
+
+无鉴权 `GET /nemo/v3/works/upload/1` → `404 + 40103015`(请求方式不支持):与 §11.2 的判别器一致
+(抓包已证实存在 ⇒ 应得"方法不对"类错误码),可作 §9 判别器的第二个对照点。
+
+### 12.3 对方案 B 的意义
+
+- 现在**四步齐全**:token(`nemo_android_ios`)→ 上传 `.bcm` → 上传 `.cover` → `POST /nemo/v3/works/upload/<n>` → `bind`。
+- 但要注意:第 3 步要求 `work_url` 指向一个**合法 NEMO `.bcm`**;我们自己能产出的只有
+  KN/Kitten4 文件 ⇒ 走"上传"路线回到 NEMO 还缺 **KN→NEMO** 这个方向(平台**不存在**,
+  见 `docs/27`)。所以方案 B 的现实用法是:**把 NEMO 作品转出来**(NEMO→KN→Kitten4),
+  而不是把我们的产物塞回 NEMO。
