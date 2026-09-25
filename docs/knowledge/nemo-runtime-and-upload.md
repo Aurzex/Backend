@@ -51,7 +51,9 @@
 
 - KN 作品的 `.bcmkn` 只有通过 **NEKO 播放器详情接口**取回时才加密(见 `work-file-formats.md` §5);平台存储的产物本身是明文。
 - 本库建的 KN 草稿已实测:平台回读 `work_type=15`、`bcm_version=0.16.2`、`work_url=…bcmkn`,该文件交官方 `validateBcm` 通过。
-- 上传**大作品(≈9 MB)在全局 30 s 超时下会失败**(实测 31.2 s / 35.5 s 超时)⇒ 见目标库(上传需独立超时或分片)。
+- 上传**大作品曾必失败**:≈9 MB 产物在全局 30 s 超时下超时(实测 31.2 s / 35.5 s)。**已修**(2026-09-26):
+  上传请求改用请求级超时 `UPLOAD_TIMEOUT = 600 s`(`MewRequestBuilder::with_timeout`,ureq 3 per-request config),
+  其余请求仍走全局 30 s。下载侧的大文件单请求(如 63 MB 作品)是同类风险,尚未处理。
 
 ## 依据
 

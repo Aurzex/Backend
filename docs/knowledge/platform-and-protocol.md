@@ -52,6 +52,7 @@
 | NEMO 建作品 | `POST /nemo/v3/works/upload/<orientation>`(JSON;**作品 id 由它返回**) | **不需要资源字节**;但要有一个**合法 NEMO `.bcm` 的 `work_url`**。接口已实现(`create_nemo_work`)+ 上传渠道已就绪(`UploadChannel::Nemo` → 凭证项目名 `nemo_android_ios`),**尚未真机验证**(NEMO 侧删除端点未知,避免留草稿) |
 | KN 建作品 | `POST /neko/works` | 本库 `create_kn_work` 已真机验证(建出草稿并过官方校验器);**反编译可选上传**也在此端点验证通过(`DecompileOptions::upload_to_account`,自建自删) |
 | 资源上传 | 七牛 `upload.qiniup.com` / `up.qiniup.com`,凭证走 `GET /cdn/qi-niu/tokens/uploading?projectName=…` | 凭证**按渠道区分**:社区前端 `community_frontend`、NEMO `nemo_android_ios`(见 `UploadChannel`)。抓包实测 288 KB 上行,全是小文件 |
+| 超时口径 | 客户端全局 30 s(`ClientConfig::timeout`);**上传**请求用请求级覆盖 `UPLOAD_TIMEOUT=600 s` | 9 MB 产物在慢网上要 31~35 s ⇒ 全局 30 s 下必失败(A1,已修);下载侧大文件单请求仍是同类风险 |
 | 时间校准 | `/coconut/clouddb/currentTime` | **返回形态/单位未实测**(毫秒则会误当秒 ⇒ 见目标库) |
 
 抓包量级参照(156.4 s / 386 连接 / 16 582 包):上下行 **1.99 MB / 22.40 MB**,`api.codemao.cn` 独占 **249 条连接** 1.46 MB,下行大头是 `creation.codemao.cn` 12.8 MB ⇒ **控制面连接数**才是 NEMO 反编译慢的根源,不是字节量。

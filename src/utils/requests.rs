@@ -484,6 +484,8 @@ pub struct MewRequestBuilder {
     /// 是否将 4xx/5xx 状态码视为错误(ureq 默认行为)。
     /// 置为 false 时保留错误响应体,供调用方读取服务器错误信息。
     status_as_error: bool,
+    /// 请求级超时覆盖(默认 `None` = 用客户端的全局 timeout)
+    timeout: Option<Duration>,
 }
 
 impl MewRequestBuilder {
@@ -502,7 +504,18 @@ impl MewRequestBuilder {
             payload: None,
             headers: Vec::new(),
             status_as_error: true,
+            timeout: None,
         }
+    }
+
+    /// 覆盖本次请求的全局超时(默认用客户端的 `timeout`)
+    ///
+    /// 用途:**大请求体**——上传一个 9 MB 的作品产物在慢网上就要 30 s 以上,
+    /// 而客户端全局超时是 30 s(`ClientConfig::default`),不覆盖就是必失败
+    /// (实测 31.2 s / 35.5 s 超时,见 `docs/rounds/21` §8.4 N1、`docs/goals/pending-decisions.md` A1)。
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = Some(timeout);
+        self
     }
 
     /// 保留 4xx/5xx 错误响应体,使 `send` 返回可读的响应(而非直接报错)
@@ -603,6 +616,7 @@ struct RequestSpec<'a> {
     params: &'a [(String, String)],
     extra_headers: &'a [(String, String)],
     status_as_error: bool,
+    timeout: Option<Duration>,
 }
 
 impl<'a> From<&'a MewRequestBuilder> for RequestSpec<'a> {
@@ -614,6 +628,7 @@ impl<'a> From<&'a MewRequestBuilder> for RequestSpec<'a> {
             params: &builder.params,
             extra_headers: &builder.headers,
             status_as_error: builder.status_as_error,
+            timeout: builder.timeout,
         }
     }
 }
@@ -807,7 +822,8 @@ impl KittyCore {
                     spec.params,
                     spec.extra_headers,
                 );
-                let builder = Self::with_error_body_config(builder, spec.status_as_error);
+                let builder =
+                    Self::apply_request_config(builder, spec.status_as_error, spec.timeout);
                 builder.call()?
             }
             // 带请求体方法: 按负载形态发送 JSON/表单/空请求体
@@ -819,7 +835,8 @@ impl KittyCore {
                     spec.params,
                     spec.extra_headers,
                 );
-                let builder = Self::with_error_body_config(builder, spec.status_as_error);
+                let builder =
+                    Self::apply_request_config(builder, spec.status_as_error, spec.timeout);
                 match body {
                     RequestBody::Json(payload) => builder.send_json(payload)?,
                     RequestBody::Form(form) => builder.send(form)?,
@@ -832,16 +849,25 @@ impl KittyCore {
         Ok(response)
     }
 
-    /// 需要保留错误响应体时,在请求级关闭 ureq 的 http_status_as_error
-    fn with_error_body_config<B>(
+    /// 请求级配置:错误响应体保留(4xx/5xx 不直接报错)+ 超时覆盖(大请求体用)
+    ///
+    /// 两者都没设时原样返回,避免无谓地重建 ureq 的请求构建器。
+    fn apply_request_config<B>(
         builder: RequestBuilder<B>,
         status_as_error: bool,
+        timeout: Option<Duration>,
     ) -> RequestBuilder<B> {
-        if status_as_error {
-            builder
-        } else {
-            builder.config().http_status_as_error(false).build()
+        if status_as_error && timeout.is_none() {
+            return builder;
         }
+        let mut config = builder.config();
+        if !status_as_error {
+            config = config.http_status_as_error(false);
+        }
+        if let Some(timeout) = timeout {
+            config = config.timeout_global(Some(timeout));
+        }
+        config.build()
     }
 
     /// 将响应体解析为 JSON
@@ -1514,6 +1540,13 @@ impl Iterator for PaginatedIter {
     }
 }
 
+/// 上传请求的超时上限
+///
+/// 实测:9 MB 作品产物在慢网上要 31~35 s(全局 30 s ⇒ 必失败)。
+/// 真实作品最大到 63 MB,按同一带宽约 4 分钟;留足余量取 10 分钟。
+/// 只作用于**上传请求**(下载与普通接口请求仍用客户端全局 30 s 超时)。
+const UPLOAD_TIMEOUT: Duration = Duration::from_secs(600);
+
 // 文件上传器
 pub struct FileUploader {
     client: CodeMaoClient,
@@ -1551,6 +1584,7 @@ impl FileUploader {
                 "https://api.pgaot.com/user/up_cat_file",
                 None,
             )
+            .with_timeout(UPLOAD_TIMEOUT)
             .send_multipart(form)?;
 
         let json = self.client.response_to_json(response)?;
@@ -1628,6 +1662,8 @@ impl FileUploader {
         let response = self
             .client
             .build_request(HttpMethod::Post, upload_url, None)
+            // 大作品产物上传会超过全局 30 s 超时(A1),这里单独放宽
+            .with_timeout(UPLOAD_TIMEOUT)
             .send_multipart(form)?;
         self.client.response_to_json(response)
     }
@@ -1952,6 +1988,23 @@ pub(crate) fn send_checked(builder: MewRequestBuilder) -> MewResult<Response<Bod
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 请求级超时必须真的落到 `RequestSpec`(A1:上传大作品靠它放宽)
+    #[test]
+    fn request_level_timeout_reaches_spec() {
+        let client = CodeMaoClient::global().clone();
+        let plain = MewRequestBuilder::new(client.clone(), HttpMethod::Get, "probe", None);
+        assert_eq!(RequestSpec::from(&plain).timeout, None);
+
+        let capped = MewRequestBuilder::new(client, HttpMethod::Post, "probe", None)
+            .with_timeout(UPLOAD_TIMEOUT);
+        let spec = RequestSpec::from(&capped);
+        assert_eq!(spec.timeout, Some(UPLOAD_TIMEOUT));
+        assert!(
+            UPLOAD_TIMEOUT > Duration::from_secs(30),
+            "上传超时必须大于客户端全局 30 s(A1 的根因)"
+        );
+    }
 
     #[test]
     fn header_override_is_case_insensitive() {

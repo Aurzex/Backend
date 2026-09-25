@@ -24,7 +24,7 @@
 | 文件 | 内容 |
 | ---- | ---- |
 | `goals/README.md` | 当前主线与优先级、条目统计、维护约定 |
-| `goals/pending-decisions.md` | 需要你拍板的事(阻塞 4 / 大方向 8 / 小项 10 / 已决) |
+| `goals/pending-decisions.md` | 需要你拍板的事(阻塞 3 / 大方向 8 / 小项 10 / 已决) |
 | `goals/convert-backlog.md` | 转换域待办 |
 | `goals/platform-backlog.md` | 平台/接口域待办 |
 | `goals/infra-backlog.md` | 仓库结构/工程待办 |

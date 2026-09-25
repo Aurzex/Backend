@@ -369,6 +369,41 @@ fn has_unmapped(report: &TranslateReport) -> bool {
     })
 }
 
+/// 大包上传(A1 回归):传输耗时**明显超过 30 s** 的一次上传,确认不再被全局超时掐断
+///
+/// 用 12 MB(本机上行约 130 KB/s ⇒ 传输 ~90 s,远超旧的 30 s 全局超时)。
+/// ⚠️ 不要调大到 30 MB:qiniu 侧对单包有大小上限,30 MB 会被 **413** 拒绝
+/// (实测 2026-09-26;而 9.3 MB 的平台产物写入是成功的,见 `docs/rounds/21` §11.2)
+/// —— 那是与超时无关的另一条限制,已记进目标库。
+///
+/// 只上传、**不建作品** ⇒ 账号里不会留草稿(CDN 上留一个一次性探测对象)。
+/// 默认 `#[ignore]`:约 2 分钟。
+#[test]
+#[ignore = "会真机上传 ~12 MB 到 CDN(约 2 分钟)"]
+fn upload_survives_transfer_longer_than_global_timeout_when_ignored() {
+    let Some(cfg) = load_config() else { return };
+    if login(&cfg).is_none() {
+        return;
+    }
+    let dir = work_dir("bigupload");
+    let path = dir.join("a1-upload-probe.bin");
+    std::fs::write(&path, vec![0u8; 12 * 1024 * 1024]).expect("造 12 MB 样本");
+    let started = std::time::Instant::now();
+    let url = backend::utils::requests::CodeMaoClient::global()
+        .file_uploader()
+        .upload(
+            &path,
+            backend::utils::requests::UploadChannel::Codemao,
+            "a1-probe",
+        )
+        .expect("12 MB 上传应在放宽后的超时内成功(旧的全局 30 s 会掐断)");
+    assert!(url.starts_with("http"), "{url}");
+    eprintln!(
+        "[convert_live] 12 MB 上传成功,耗时 {:?}(> 30 s 即证明超时放宽生效)→ {url}",
+        started.elapsed()
+    );
+}
+
 /// 端到端(写平台):反编译 → **上传到当前账号** → 建草稿 → 回读 → **删掉自己建的草稿**
 ///
 /// 默认 `#[ignore]`(平台写操作)。与 `translate_work_creates_draft_when_ignored` 的区别:
