@@ -14,6 +14,7 @@
 | 最大文件 | `mapping.rs` 1 923 行 | `mapping.rs` ~1610(去内联测试)、`assembly.rs` ~1430 |
 | 纯 plumbing 文件 | `shared/mod.rs` 37 行、`editors/mod.rs` 36 行纯再导出 | 合并/收敛(见 §3) |
 | 已知缺陷 | 1 条并发竞态(P0)、1 条目录失效(P0)、1 条弱化 XML 工具(P0) | 本轮方案的第一批提交修掉 |
+| 三条待定已定 | 编译版引用=内联对象(2 236 处取样)、`keep_source` 接线、重传资源不算有损 | 见 §7(2026-09-25 定) |
 
 三条判断(与直觉不同,但证据在 §2):
 
@@ -222,15 +223,18 @@
    → 风险:低(纯抽取;`num` 逐字节相同、坐标公式互逆已由往返测试覆盖)。
    → 验证:官方差分门(正向)+ KN→K4→KN 往返(反向)全绿;补一个「显式 Portrait/Landscape」的反向测试(填 T4 缺口,顺带 C6)。
 
-8. **`is_lossy` 分类修正**(C3)→ 把「官方会重新上传资源」从有损里拆出(新增 `TranslateWarning::Advisory`/`ReuploadedResource` 之类的非有损类别),`is_lossy` 只看真损失;`strict` 语义随之明确。
+8. **`is_lossy` 分类修正**(C3,已定)→ 新增 `TranslateWarning::ReuploadedOnImport { path }`(非有损,文案:「官方导入时会重新上传资源,产物 url 由平台重写;我们保留源 url/cdn_url」),`finish.rs:343`(theatre.styles[*].url)与 `:371`(audio[*].url)两处改用它;`is_lossy`(report.rs:88-93)豁免集合从 `{RemintedId}` 扩为 `{RemintedId, ReuploadedOnImport}`。`DroppedProperty` 只留真损失(KN 顶层键、变量样式图标),因此**反向** strict 测试(`reverse_tests.rs:1080-1086`)仍按原样失败,行为不变。`TranslateWarning` 是公开枚举,新增变体对下游穷举匹配是破坏性变更(0.1.0 窗口内可接受),README:185 的 strict 说明同步为「只挡真损失」。
    → 风险:改变正向 `strict` 的接受度(此前必失败,此后可用)—— 属修正,需在文档注明。
    → 验证:新增正向 `strict` 测试(含 `data:` 造型的真作品片段)。
 
 9. **`detect_editor` 与文案对齐**(C4)→ 增加 `Kitten2` 判定(有 `blocksXML` 且顶层无 `size`),错误文案按实际类型给(Kitten2/3 不支持)。
    → 风险:低(仅影响报错文案与 `EditorType` 值)。→ 验证:单测覆盖 Kitten2/Kitten3/Nemo/Neko 四种输入。
 
-10. **`keep_source` 二选一**(§2.3)→ 建议**删除**(零消费、承诺未实现),需要时再按官方 `source` 语义接线;若产品需要保留源引用,则在 `translate_work` 里把源 `work_url` 写入文档 `source` 并补测试。
-    → 风险:删除是公开构建器 API 变更(0.1.0 窗口内允许,仓内无调用点)。→ 验证:编译 + grep 零引用。
+10. **`keep_source` 接线**(§2.3/§7-2,已定;不删)→ 官方行为是「导入 Kitten 作品时把原始 Kitten 文件字节作为 `bcm4` 重新上传,URL 写进 KN 作品的 `source` 字段」(`docs/20:127,156`)。落地分两层,保持 `translate` 子域**不碰网络**(docs/20 §6.1):
+    - `translate` 侧新增纯函数入口(如 `TranslateOptions::source_url: Option<&str>`,`translate_file` 在写盘前把 `source` 注入 KN 文档顶层)——纯逻辑、可单测;
+    - `convert/mod.rs::translate_work` 侧编排:当 `options.keeps_source()` 且目标为 KN 时,把第 1 步已落地的源作品文件(`staging` 里的编辑版/原件字节,`convert/mod.rs:50-52`)上传,拿 URL 交给 `translate_file`;上传或注入失败 → 记 `TranslateWarning`(非致命),继续出产物。
+    → 风险:每次转发多一次原件上传(样例原件 0.7~6 MB);KN 文档多一个平台侧字段。反向不受影响(`source` 在 Kitten4 侧仍是 `DroppedProperty`,`kitten4_finish.rs:331`)。
+    → 验证:单测(注入 URL 后断言产物 `source` 等于该 URL;未开启时产物无 `source` 键)+ 真机一次 Kitten4→KN 上传,确认 KN 作品详情里 `source` 指向原件。
 
 11. **草稿名修正**(C5)→ 取源作品名(`<源名> - 转换副本`),或去掉「自检」字样;抽成纯函数以便单测。
     → 风险:用户侧名字变化。→ 验证:纯函数单测。
@@ -249,9 +253,10 @@
 15. **去热路径 clone**(F2)+ **crypto 瘦身**(F3)→ `route_children` 先借 `&str` 再 `mem::take`;`Cow` 只在变化时 `into_owned`;`parse_kn_entity` 对 `Vec` 直接迭代;`BCMKNDecryptor` 并入 `CryptoService`,salt 用 `Arc` 避免克隆;`neko` 的 `"bcmkn"` 改走 `file_extension` 表。
     → 风险:无/极低。→ 验证:62 单测 + 真机 `convert_live`(3.7 MB 作品)+ `compile_live`(NEKO 产物扩展名仍 `.bcmkn`)。
 
-16. **Kitten 编译版根块/插槽规则合一**(D11,D12)→ 抽 `referenced_ids(blocks)`(字符串与对象引用都识别)与 `child_input_name(kind, index, conditions_len)`,`decompiler.rs`/`xml.rs`/`blocks` 共用。
-    → 风险:**中**——须先确认编译格式的引用形态(见 §7 未决),统一为「两者都识别」是最保守做法。
-    → 验证:Kitten2/3 与 Kitten4 各跑一个真实作品,根块集合与槽名与改造前一致(可用 `compile_live` 对比产物)。
+16. **Kitten 编译版根块/插槽规则合一**(D11,D12,§7-1 已定)→ 抽一份 `referenced_ids(&Map<String,Value>)`:**只按对象读**(`next_block.id`、`child_block[*].id`、`conditions[*].id`、`params.*.id`),与 `xml.rs:26-55` 现有形态一致;`decompiler.rs:51-57,61-67,72-78` 里那三处字符串分支删除,改为遇字符串返回 `DecompilerError::InvalidResponse`(显式失败)。同时把 `child_input_name` 抽到同一处,`xml.rs:130-141` 与 `blocks/mod.rs:25-40` 共用。
+    为什么不留容错:字符串引用在编译版里 0/2 236 命中(§7-1),留着只会让"格式变了"变成**静默少积木**(`xml.rs` 现在跳过字符串 → 根块集合算错 → 产物少块且不报错);显式失败能立刻暴露格式漂移。
+    → 风险:低(行为只在"格式未知"时从静默变报错)。
+    → 验证:Kitten3/Kitten4 各跑一个真实作品,根块集合与槽名与改造前逐字节一致(比对 `download/compile/raw/*` 的编译版输出);**Kitten2 无本地样本**(3 个样本是 Kitten3+Kitten4),实施前补一个真机 Kitten2 作品确认形态;若 Kitten2 确为字符串引用,则把字符串分支保留在**这一份**共享助手里(而非两处)。
 
 17. **错误语义与命名**(C2)→ 最小改动:把 `DecompilerError::Decompile` 的显示文案改为域中立(如「作品解析失败:…」),不改枚举名(公开面已定档);如需彻底,另开一轮把域级错误改名 `ConvertError`(会动公开路径,收益中等)。
     → 风险:低(文案)/中(改名)。→ 验证:文案改动不影响断言(现有测试不校验文案)。
@@ -302,11 +307,13 @@
 
 ## 7. 需在实施前定/核实的三件事
 
-| # | 事项 | 现状 | 建议 |
-| - | ---- | ---- | ---- |
-| 1 | **编译格式的块引用形态**:`next_block`/`child_block`/`conditions` 是内联对象还是字符串 UUID?`core.rs:86` 按对象读,`editors/kitten/decompiler.rs:47-90` 又防字符串,说明作者也不确定 | 三处假设不一致 | 实施 S1 前用真作品(两种路径各一)打印一次实际形态,再决定 D11 的统一实现 |
-| 2 | **`keep_source` 的去留** | 死选项 | 需产品决定:删除 or 接线(官方 `source` 字段语义见 `docs/20` §3.1) |
-| 3 | **`is_lossy`/`strict` 的验收口径**(官方会重传资源算不算损失) | 现按「算」 | 需产品/评审确认按「不算」修正 |
+三条已于 2026-09-25 定论(证据见各条目),S1 按此实施。
+
+| # | 事项 | 决定 | 证据与落地 |
+| - | ---- | ---- | ---------- |
+| 1 | **编译版块引用形态** | **只按内联对象读**;遇字符串显式报错,不再静默容错 | 对 `download/compile/raw/` 3 个真作品(`春风得意`=Kitten3、`几何对战-联机`/`原气骑士`=Kitten4)取样 **2 236 处**:`next_block` 100% 是内联对象,`child_block`/`conditions` 是内联对象数组,**字符串引用 0 处**。字符串 id 只存在于**编辑版**(`block_data_json` 的 `blocks`+`connections`,见 `translate/kitten.rs:143-160`),两处混用是这次"三处假设不一致"的根因。落地见 §4-16 |
+| 2 | **`keep_source`** | **接线(实现),不删除**;仅 Kitten4→KN 方向生效;上传失败降级为报告告警 | 官方反混淆代码 `w.source = '' + T;`(docs/20 §3.1,原文见 `docs/20:156`)、`docs/20:127`「保留原件」、`docs/20:528` 的字段注释均确认这是官方行为;`finish.rs:39` 我们自己写了「`source` 字段不在这里」= 已知未实现。删除会砍掉一个官方式功能,保留不实现则是静默假承诺。落地见 §4-10 |
+| 3 | **「官方会重传资源」算不算有损** | **不算**:新增非有损类别 `TranslateWarning::ReuploadedOnImport`,`is_lossy` 豁免它 | 现 `DroppedProperty` 混装两类:(a) 真丢(KN 顶层键 `guideUrl`/`resourceZip`/`courseMaterials`/`source` 在 Kitten4 无对应字段,`kitten4_finish.rs:315-335`);(b) 官方导入时会重新上传资源、产物 url 由平台重写,我们保留源 url(`finish.rs:343,371`)。把 (b) 并入有损会让 `strict(true)` **在任何含非 https/`data:` 造型的真作品上必失败**。落地见 §4-8 |
 
 ---
 
