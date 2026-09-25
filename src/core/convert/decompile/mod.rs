@@ -1,15 +1,10 @@
 pub(crate) mod blocks;
-pub(crate) mod context;
-pub(crate) mod contract;
 pub(crate) mod editors;
 pub(crate) mod shadow;
 
 use crate::core::convert::decompile::editors::{
     CocoDecompiler, CocoFetcher, KittenDecompiler, KittenFetcher, NekoDecompiler, NekoFetcher,
     NemoDecompiler, NemoFetcher, WoodDecompiler, WoodFetcher,
-};
-use crate::core::convert::decompile::{
-    context::DecompilerContextBuilder, contract::WorkDecompiler,
 };
 use crate::core::convert::shared::{
     CodeMaoHttpClient, DecompilerConfig, EditorType, FileService, HttpClient, IdGenerator,
@@ -18,6 +13,7 @@ use crate::core::convert::shared::{
 use crate::core::convert::shared::{DecompilerError, WorkId};
 use crate::utils::requests::CodeMaoClient;
 use log::info;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
@@ -379,4 +375,137 @@ pub fn decompile_work_with(work_id: WorkId, options: DecompileOptions) -> Result
 /// 便捷批量反编译函数:返回与输入顺序一致的 `Vec<Result<PathBuf>>`;自定义客户端请用 `CodemaoDecompiler::new(client)`
 pub fn decompile_works(work_ids: &[WorkId], options: DecompileOptions) -> Vec<Result<PathBuf>> {
     CodemaoDecompiler::global().decompile_batch(work_ids, options)
+}
+
+
+// ===========================================================================
+// 反编译上下文(原 context.rs)
+// ===========================================================================
+pub(crate) struct DecompilerContext {
+    pub(crate) work_info: WorkInfo,
+    pub(crate) http_client: Box<dyn HttpClient>,
+    pub(crate) file_service: FileService,
+    pub(crate) id_generator: IdGenerator,
+    pub(crate) config: Arc<DecompilerConfig>,
+}
+
+// Context Builder
+pub(crate) struct DecompilerContextBuilder {
+    work_info: Option<WorkInfo>,
+    http_client: Option<Box<dyn HttpClient>>,
+    config: Option<Arc<DecompilerConfig>>,
+    id_generator: Option<IdGenerator>,
+}
+
+impl Default for DecompilerContextBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DecompilerContextBuilder {
+    pub(crate) fn new() -> Self {
+        Self {
+            work_info: None,
+            http_client: None,
+            config: None,
+            id_generator: None,
+        }
+    }
+
+    pub(crate) fn work_info(mut self, info: WorkInfo) -> Self {
+        self.work_info = Some(info);
+        self
+    }
+
+    pub(crate) fn http_client(mut self, client: Box<dyn HttpClient>) -> Self {
+        self.http_client = Some(client);
+        self
+    }
+
+    pub(crate) fn config(mut self, config: Arc<DecompilerConfig>) -> Self {
+        self.config = Some(config);
+        self
+    }
+
+    pub(crate) fn id_generator(mut self, generator: IdGenerator) -> Self {
+        self.id_generator = Some(generator);
+        self
+    }
+
+    pub(crate) fn build(self) -> Result<DecompilerContext> {
+        let config = self.config.unwrap_or_default();
+        Ok(DecompilerContext {
+            work_info: self.work_info.ok_or_else(|| DecompilerError::Other {
+                msg: "缺少work_info".into(),
+                source: None,
+            })?,
+            http_client: self.http_client.ok_or_else(|| DecompilerError::Other {
+                msg: "缺少http_client".into(),
+                source: None,
+            })?,
+            file_service: FileService::new(config.clone()),
+            id_generator: self.id_generator.unwrap_or_default(),
+            config,
+        })
+    }
+}
+
+// ===========================================================================
+// 反编译契约(原 contract.rs)
+// ===========================================================================
+// 结果类型与 Trait
+#[derive(Debug)]
+pub(crate) enum DecompileResult {
+    Json(Value),
+    Path(String),
+}
+
+pub(crate) trait WorkDecompiler: Send + Sync {
+    fn decompile(&self, raw: RawWorkData, context: &DecompilerContext) -> Result<DecompileResult>;
+    fn save_result(
+        &self,
+        result: &DecompileResult,
+        output_dir: Option<&Path>,
+        context: &DecompilerContext,
+    ) -> Result<PathBuf>;
+}
+
+/// 将 JSON 反编译结果写入输出目录,返回文件路径(供各反编译器共用)
+pub(crate) fn save_json_result(
+    result: &DecompileResult,
+    output_dir: Option<&Path>,
+    context: &DecompilerContext,
+    extension: &str,
+    decompiler_name: &str,
+) -> Result<PathBuf> {
+    match result {
+        DecompileResult::Json(json) => {
+            let output_path = output_dir.unwrap_or(&context.config.default_output_dir);
+            FileService::ensure_dir(output_path)?;
+            let filename = FileService::safe_filename(
+                &context.work_info.name,
+                context.work_info.id.get(),
+                extension,
+            );
+            let filepath = output_path.join(filename);
+            FileService::write_json(&filepath, json)?;
+            Ok(filepath)
+        }
+        _ => Err(DecompilerError::Decompile(format!(
+            "{}反编译器应返回JSON",
+            decompiler_name
+        ))),
+    }
+}
+
+/// 返回路径型反编译结果(供返回路径的反编译器共用)
+pub(crate) fn save_path_result(result: &DecompileResult, decompiler_name: &str) -> Result<PathBuf> {
+    match result {
+        DecompileResult::Path(path) => Ok(PathBuf::from(path)),
+        _ => Err(DecompilerError::Decompile(format!(
+            "{}反编译器应返回路径",
+            decompiler_name
+        ))),
+    }
 }

@@ -1,6 +1,5 @@
 use crate::core::convert::decompile::{
-    context::DecompilerContext,
-    contract::{DecompileResult, WorkDecompiler, save_path_result},
+    DecompileResult, DecompilerContext, WorkDecompiler, save_path_result,
 };
 use crate::core::convert::shared::{
     CryptoService, DecompilerConfig, DecompilerError, FileService, HttpClient, RawWorkData, Result,

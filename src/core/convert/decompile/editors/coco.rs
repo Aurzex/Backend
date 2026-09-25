@@ -1,6 +1,5 @@
 use crate::core::convert::decompile::{
-    context::DecompilerContext,
-    contract::{DecompileResult, WorkDecompiler, save_json_result},
+    DecompileResult, DecompilerContext, WorkDecompiler, save_json_result,
 };
 use crate::core::convert::shared::{
     DecompilerConfig, DecompilerError, HttpClient, RawWorkData, Result, WorkFetcher, WorkInfo,
