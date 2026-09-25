@@ -140,3 +140,53 @@
 - 不改公开 API 形状(`translate_file`/`TranslateOptions`/`TranslateOutcome`/`TranslateReport` 的字段不变;新增入口只做**加法**);
 - 不为"看起来更快"牺牲对齐:任何产物字节变化都必须先解释再接受;
 - 不在本轮改 NEMO 的抓包未能证实的东西(见 `docs/22` §5/§6)。
+
+---
+
+## 7. 落地记录(2026-09-25:S1 + S2 已完成)
+
+### 7.1 已实现(`d355cbe`)
+
+| 项 | 内容 | 关键位置 |
+| -- | ---- | -------- |
+| P0-1 流式落盘 | `FileService::write_json` 改 `to_writer` + `BufWriter`(与 `to_string` 逐字节相同);`translate_file` 与 `set_source_reference` 都走它 | `shared/infra.rs`、`translate/mod.rs` |
+| P0-2 内存直通 | 新增 `translate::translate_value` / `TranslateDocument` 与 `decompile::decompile_artifact_with` / `DecompiledArtifact`;`translate_work_in` 全程内存(源引用直接改内存文档,只有"要上传源文件"那一路才落一次盘,文件名与旧路径逐字一致);`set_source_reference_in`(内存)+ 文件版保留为壳 | `translate/mod.rs`、`decompile/mod.rs`、`convert/mod.rs` |
+| P0-3 去整块克隆 | `BlockJson::from_value` 改**借用**反序列化(旧:`Value::Object(obj.clone())` 每块深拷贝一次);`neko::parse_kn_entity` 字符串态移动数组(旧:`as_array().cloned()`);正向取走 `block_data_json` 再克隆实体、装配后**原样放回**(源文档不变);反向 `build_kitten4_document` 改按值消费 `entities` / `blocks_by_entity` | `translate/model.rs`、`neko.rs`、`mod.rs`、`assembly.rs` |
+| P0-4 告警轻量化 | `counts()` 改借用键聚合,最后只对去重后的类别/主体字符串化;删掉 `TranslateWarning::key()`(旧实现每条告警 3 次 `String` 分配,且 `key()` 的结果被 `let _ =` 丢弃) | `translate/mod.rs` |
+| 死代码 | 删 `scene_order`(克隆一份 `scenes_order` 后被 `let _ =` 丢弃) | `translate/mod.rs` |
+| S2 基准 | 新档 `profile bench_perf`(不动发布档:`opt-level="z"`+`panic="abort"` 会污染量测);`tests/convert_bench.rs`(分阶段耗时 + 四样本产物 SHA256 基线守门)、`tests/convert_facade_bench.rs`(同轮内并排比"旧盘→盘流程"与"内存直通");基线 `tests/fixtures/translate/convert_bench_baseline.json` | `Cargo.toml`、`tests/` |
+
+### 7.2 验收证据
+
+- 单测 **67 项全绿**,含差分门(`diff_tests`)、往返类型多重集守恒(`reverse_tests`)、
+  "确定性 id 下两次转换逐字节一致"的门。
+- 四个样本产物 SHA256 与基线**逐字节一致**(`bafeb50c…` / `d653a8a5…` / `e7680dcc…` / `bfde1fc1…`)。
+- 绑核(`taskset -c 2`)A/B,同估计量(5 轮取最小)。样本代号:
+  ① 正向 10.8 MB(`download/compile/原气骑士 且听风吟_136021231.bcm4`)、
+  ② 正向 0.3 MB(`download/compile/几何对战-联机_215246857.bcm4`)、
+  ③ 反向 9.4 MB(`download/convert/Phigros 自制谱模拟器_195038626.kn.bcmkn`)、
+  ④ 反向 3.7 MB(`download/compile/HEX Editor_317683843.bcmkn`)。
+
+| 样本代号 | 旧 `core`/`e2e` ms | 新 `core`/`e2e` ms | 判断 |
+| -------- | ------------------ | ------------------ | ---- |
+| ① 正向 10.8 MB | 243 / 644 | 261 / 658 | **在噪声内**:该样本的对照指标 `ser_ms` 自身 58→81(+40%),无法判定 |
+| ② 正向 0.3 MB | 8 / 23 | 6 / 16 | 小幅变快 |
+| ③ 反向 9.4 MB | 217 / 424 | 184 / 323 | **-15% / -24%** |
+| ④ 反向 3.7 MB | 57 / 114 | 53 / 91 | -7% / -20% |
+
+- 域门面路径(`translate_work` 实际走的"内存直通")**同一轮内**并排比旧流程:1.34–1.51×
+  (旧流程 = `translate_file` 盘→盘 + `set_source_reference` 读回-改写-写回,两者产物 SHA256 相同)。
+- **测量纪律**(已写进 `tests/convert_bench.rs` 头注释):这台机器上绝对毫秒会漂(同一二进制两次跑
+  `core` 差 20–40%),跨轮只能看量级,"谁更快"必须在**同一轮内并排比**;每样本 5 轮取**最小值**,
+  首个样本前加一轮预热(否则冷缓存/调频爬升会污染它,10.8 MB 正向样本正是首样本)。
+
+### 7.3 未做 / 转下一轮
+
+- **P1-5 实体级并行** → `docs/25-convert-entity-parallelism-plan.md`(先拆方案 + 子代理评审;
+  实测正向 10.8 MB 有 209 个实体、最大实体仅占 4%,而反向 9.4 MB 的积木 97% 在 `proceduresDict`
+  ⇒ 两方向都要拆工作项,只并行实体对反向几乎无收益)。
+- **P1-6 `RawValue` / P1-7 单遍遍历** → `docs/26-convert-rawvalue-single-pass-plan.md`
+  (先做预研 A 透传占比 / B 趟数占比 / C 键序口径,再决定是否动顶层读写路径)。
+- **P1-8 字符串手术减负**(`transform_shadow_xml` 的 `Cow::Borrowed`、`map_field_name` 原地 rename)
+  本轮未做:它属"逐块小改",与实体级并行正交,等 S3 落地后再评(避免与 id 改写方案互相干扰)。
+- **P2-9 / P2-10 / P2-11 / P2-12** 未动。
