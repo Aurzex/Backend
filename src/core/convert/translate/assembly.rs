@@ -903,8 +903,8 @@ pub(crate) fn convert_kn_document(
 
     Ok(build_kitten4_document(
         src,
-        &entities,
-        &blocks_by_entity,
+        entities,
+        blocks_by_entity,
         landscape,
         (canvas_w, canvas_h),
         (kn_w, kn_h),
@@ -955,19 +955,17 @@ fn kn_stage_size(src: &serde_json::Map<String, serde_json::Value>) -> (f64, f64)
 /// 装配 Kitten4 编辑版文档
 fn build_kitten4_document(
     src: &serde_json::Map<String, serde_json::Value>,
-    entities: &[KnEntity],
-    blocks_by_entity: &[(usize, serde_json::Value)],
+    // `entities` / `blocks_by_entity` 都**按值**收:装配阶段要移动实体源对象与
+    // 已编码的积木数据,旧实现每个实体各 clone 一次(含整份 `nekoBlockJsonList`)
+    // —— 一份文档级别的白拷贝(方案 23 P0-3)
+    entities: Vec<KnEntity>,
+    blocks_by_entity: Vec<(usize, serde_json::Value)>,
     landscape: bool,
     canvas: (f64, f64),
     kn_stage: (f64, f64),
     report: &mut TranslateReport,
 ) -> serde_json::Value {
     use serde_json::{Map, Value, json};
-
-    let mut block_of: std::collections::BTreeMap<&str, &Value> = std::collections::BTreeMap::new();
-    for (index, value) in blocks_by_entity {
-        block_of.insert(entities[*index].source_id.as_str(), value);
-    }
 
     // actor → 所属场景:KN 的场景用 `actorIds` 反向指认;找不到就落到第一个场景
     let first_scene = entities
@@ -992,15 +990,17 @@ fn build_kitten4_document(
 
     let mut actors = Map::new();
     let mut scenes = Map::new();
-    for entity in entities {
-        let source = entity.source.clone();
-        let Some(blocks) = block_of.get(entity.source_id.as_str()) else {
-            continue;
-        };
+    // 编码阶段的 `blocks_by_entity` 与 `entities` 同序同长(见调用点)
+    for (position, (entity, (index, blocks))) in
+        entities.into_iter().zip(blocks_by_entity).enumerate()
+    {
+        debug_assert_eq!(position, index, "blocks_by_entity 顺序须与 entities 一致");
+        // 移动实体源对象与积木数据(都不再 clone)
+        let source = entity.source;
         if entity.is_scene {
             scenes.insert(
                 entity.source_id.clone(),
-                Value::Object(kitten4_scene(&source, (*blocks).clone(), report)),
+                Value::Object(kitten4_scene(&source, blocks, report)),
             );
         } else {
             let scene = scene_of_actor
@@ -1009,13 +1009,7 @@ fn build_kitten4_document(
                 .or_else(|| first_scene.clone());
             actors.insert(
                 entity.source_id.clone(),
-                Value::Object(kitten4_actor(
-                    &source,
-                    (*blocks).clone(),
-                    scene,
-                    landscape,
-                    report,
-                )),
+                Value::Object(kitten4_actor(&source, blocks, scene, landscape, report)),
             );
         }
     }

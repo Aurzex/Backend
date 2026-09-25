@@ -121,16 +121,19 @@ where
 
 impl BlockJson {
     /// 从 JSON 对象建节点(未知键进 `extra`)
+    ///
+    /// **借用**反序列化:`serde_json` 为 `&Value` 实现了 `Deserializer`,直接读原树即可。
+    /// 旧实现是 `serde_json::from_value(Value::Object(obj.clone()))` —— 每块先深拷贝一份
+    /// 整块 JSON(含 `fields`/`inputs`/`shadows`)再消费它;10 万级块时是纯浪费
+    /// (方案 23 P0-3)。`kind` 走 `de_string` 容错解析:缺失/显式 null 都折成空串。
     pub(crate) fn from_value(value: &Value) -> Result<Self> {
-        let obj = value
-            .as_object()
-            .ok_or_else(|| DecompilerError::TypeMismatch {
+        if !value.is_object() {
+            return Err(DecompilerError::TypeMismatch {
                 expected: "object(block json)".into(),
                 actual: type_name(value).into(),
-            })?;
-        // `kind` 走 `de_string` 容错解析:缺失/显式 null 都折成空串(无需再兜底)
-        let node: BlockJson =
-            serde_json::from_value(Value::Object(obj.clone())).map_err(DecompilerError::from)?;
+            });
+        }
+        let node: BlockJson = serde::Deserialize::deserialize(value).map_err(DecompilerError::from)?;
         Ok(node)
     }
 

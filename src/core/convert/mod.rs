@@ -23,10 +23,13 @@ pub use crate::core::convert::shared::{DecompilerError, EditorType, WorkId};
 use crate::api::work::{
     CreateKittenWorkArgs, CreateKnWorkArgs, KittenWorkManager, NekoWorkManager,
 };
-use crate::core::convert::decompile::{CodemaoDecompiler, DecompileOptions};
+use crate::core::convert::decompile::{
+    CodemaoDecompiler, DecompileOptions, DecompiledArtifact,
+};
+use crate::core::convert::shared::FileService;
 use crate::core::convert::translate::{
-    TargetEditor, TranslateError, TranslateOptions, TranslateOutcome, set_source_reference,
-    translate_file,
+    TargetEditor, TranslateError, TranslateOptions, TranslateOutcome, detect_editor,
+    product_path, set_source_reference_in, translate_value,
 };
 use crate::utils::filedata::{PathConfig, value_to_i64};
 use crate::utils::requests::{MewError, UploadChannel};
@@ -63,49 +66,88 @@ fn staging_dir(work_id: WorkId) -> std::path::PathBuf {
         .join(format!("{work_id}-{:08x}", fastrand::u32(..)))
 }
 
-/// `translate_work` 的主体:在 `staging` 里取编辑版 → 转化 → 可选上传
+/// `translate_work` 的主体:取**内存**编辑版 → 转化 → 可选源引用 → 落盘 → 可选上传
+///
+/// 方案 23 P0-2:全程内存直通,不再"反编译落盘 → `translate_file` 读回 → 改写产物
+/// 再读回-写回":
+///
+/// 1. 反编译走 [`CodemaoDecompiler::decompile_artifact_with`](Kitten/NEKO 直接给内存文档);
+/// 2. 转化走 [`translate_value`];
+/// 3. 源作品引用直接改内存文档([`set_source_reference_in`]);只有**要上传源文件**
+///    的那一路(`keep_source` 且 Kitten → KN)才把源文档落一次盘,文件名与旧路径逐字一致
+///    (官方导入时也重传原件,这一步省不掉,但省掉了随后的读回-改写-再写);
+/// 4. 产物只在最后流式写一次。
 fn translate_work_in(
     work_id: WorkId,
     target: TargetEditor,
     options: TranslateOptions,
     staging: &std::path::Path,
 ) -> Result<TranslateOutcome, TranslateError> {
-    // 1. 取编辑版:反编译(Kitten 会重建成 block_data_json;NEKO 会解密成明文 KN 文档)
-    let source_path = CodemaoDecompiler::global()
-        .decompile_with_options(work_id, DecompileOptions::new().output_dir(staging))
+    // 1. 取编辑版(Kitten 会重建成 block_data_json;NEKO 会解密成明文 KN 文档)
+    let artifact = CodemaoDecompiler::global()
+        .decompile_artifact_with(work_id, DecompileOptions::new().output_dir(staging))
         .map_err(TranslateError::Decompiler)?;
-
-    // 2. 转化
-    let mut outcome = translate_file(&source_path, target, options.clone())?;
-
-    // 2.5 可选:把源作品文件引用写进产物(仅 Kitten → KN,官方「保留原件」行为)
-    //
-    // 官方把原始 Kitten 文件重新上传、URL 挂到 KN 的 `source`;失败不影响转化结果,
-    // 只记日志(产品语义:源引用是附加信息,不该让转化整体失败)。
-    if options.keeps_source()
-        && target == TargetEditor::KittenN
-        && matches!(outcome.report.from, EditorType::Kitten2 | EditorType::Kitten3 | EditorType::Kitten4)
-    {
-        match attach_source_reference(&outcome, &source_path) {
-            Ok(()) => log::debug!("已写入源作品引用:{:?}", outcome.output),
-            Err(error) => log::warn!("写入源作品引用失败(产物照常输出):{error}"),
+    let (source_document, source_file_name) = match artifact {
+        DecompiledArtifact::Document {
+            document,
+            file_name,
+        } => (document, file_name),
+        DecompiledArtifact::Path(path) => {
+            return Err(TranslateError::InvalidArgument(format!(
+                "作品 {work_id} 的产物是资源形态({}):互相转化只支持编辑版文档 \
+                 (Kitten4 ⇄ KittenN);NEMO / WOOD 请用反编译接口另行处理",
+                path.display()
+            )));
         }
-    }
+    };
 
-    // 3. 可选:上传产物并新建草稿作品(默认关;开=替用户在平台落一份草稿)
-    let work_id_created = if options.upload_enabled() {
-        Some(create_draft_work(&outcome, work_id, target)?)
+    // 2. 需要上传源文件时,先把源文档落一次盘(上传接口吃文件路径)
+    let needs_source_upload = options.keeps_source()
+        && target == TargetEditor::KittenN
+        && matches!(
+            detect_editor(&source_document),
+            Some(EditorType::Kitten2 | EditorType::Kitten3 | EditorType::Kitten4)
+        );
+    let source_path = if needs_source_upload {
+        let path = staging.join(&source_file_name);
+        FileService::write_json(&path, &source_document)?;
+        Some(path)
     } else {
         None
     };
 
-    Ok(TranslateOutcome {
-        output: outcome.output,
-        // `translate_file` 只写文件、不建作品,所以 `outcome.work_id` 恒为 None
-        work_id: work_id_created,
-        target: outcome.target,
-        report: outcome.report,
-    })
+    // 3. 转化(内存)
+    let converted = translate_value(source_document, target, &options)?;
+    let mut document = converted.document;
+
+    // 4. 可选:把源作品文件引用写进产物(仅 Kitten → KN,官方「保留原件」行为)
+    //
+    // 官方把原始 Kitten 文件重新上传、URL 挂到 KN 的 `source`;失败不影响转化结果,
+    // 只记日志(产品语义:源引用是附加信息,不该让转化整体失败)。
+    if let Some(source_path) = source_path {
+        match upload_source_file(&source_path)
+            .and_then(|url| set_source_reference_in(&mut document, &url))
+        {
+            Ok(()) => log::debug!("已写入源作品引用"),
+            Err(error) => log::warn!("写入源作品引用失败(产物照常输出):{error}"),
+        }
+    }
+
+    // 5. 落盘产物(整份文档只写这一次)
+    let output = product_path(std::path::Path::new(&source_file_name), target, &options)?;
+    FileService::write_json(&output, &document)?;
+
+    // 6. 可选:上传产物并新建草稿作品(默认关;开=替用户在平台落一份草稿)
+    let mut outcome = TranslateOutcome {
+        output,
+        work_id: None,
+        target,
+        report: converted.report,
+    };
+    if options.upload_enabled() {
+        outcome.work_id = Some(create_draft_work(&outcome, work_id, target)?);
+    }
+    Ok(outcome)
 }
 
 /// 批量转化(顺序与输入一致;并发模型与 `CodemaoDecompiler::decompile_batch` 一致:
@@ -148,20 +190,16 @@ pub fn translate_works(
     results
 }
 
-/// 上传源作品文件,并把返回的 URL 写进产物顶层 `source`(见 [`set_source_reference`])
+/// 上传源作品文件,返回可挂到产物 `source` 的 URL(见 [`set_source_reference_in`])
 ///
 /// 偏差记录:官方上传的是**原始** Kitten 文件字节,我们只有反编译重建的编辑版
-/// (`staging` 里的那一份),故上传它(`docs/21` §4-10)。
-fn attach_source_reference(
-    outcome: &TranslateOutcome,
-    source_path: &std::path::Path,
-) -> Result<(), TranslateError> {
+/// (即这里落盘的这一份),故上传它(`docs/21` §4-10)。
+fn upload_source_file(source_path: &std::path::Path) -> Result<String, TranslateError> {
     let client = crate::utils::requests::CodeMaoClient::global().clone();
-    let url = client
+    client
         .file_uploader()
         .upload(source_path, UploadChannel::Codemao, "convert-source")
-        .map_err(TranslateError::Mew)?;
-    set_source_reference(&outcome.output, &url)
+        .map_err(TranslateError::Mew)
 }
 
 /// 草稿作品名:标注目标编辑器与来源作品 id,并显式标「可删」

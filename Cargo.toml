@@ -13,6 +13,16 @@ opt-level = "z"
 lto = true
 panic = "abort"
 
+# 性能基准专用档:发布档是 `opt-level = "z"` + `panic = "abort"`(为体积/嵌入),
+# 量测热路径会失真。本档只服务 `tests/convert_bench.rs`(方案 23 §5),
+# 不影响发布产物;跑法见该文件头注释。
+[profile.bench_perf]
+inherits = "release"
+opt-level = 3
+lto = false
+debug = false
+panic = "unwind"
+
 [lints.rust]
 unused = "allow"
 

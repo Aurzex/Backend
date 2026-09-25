@@ -278,9 +278,84 @@ impl CodemaoDecompiler {
         results
     }
 
+    /// 反编译成**内存产物**(Kitten/NEKO 不落盘;方案 23 P0-2)
+    ///
+    /// 与 [`Self::decompile_with_options`] 共用同一段主流程(取信息 → 取原始数据 →
+    /// 反编译),区别只在最后**不**调 `save_result`:
+    ///
+    /// - Kitten / NEKO:直接返回内存文档 —— 旧路径是"写 JSON → `translate` 再读回",
+    ///   10 MB 级作品白付一次 serialize + 一次 parse;
+    /// - NEMO / WOOD:只有落盘形态,退回旧路径(落盘并返回路径),调用方按文件处理。
+    pub fn decompile_artifact_with(
+        &self,
+        work_id: WorkId,
+        options: DecompileOptions,
+    ) -> Result<DecompiledArtifact> {
+        let (decompiler, result, context) = self.decompile_core(work_id, &options)?;
+        match result {
+            DecompileResult::Json(document) => {
+                let extension = context
+                    .work_info
+                    .file_extension(&context.config)
+                    .trim_start_matches('.')
+                    .to_owned();
+                // 与 `save_json_result` 同一命名口径(同名同扩展名,只是不落盘),
+                // 让调用方在需要落盘/上传时拿到**逐字一致**的文件名
+                let file_name = FileService::safe_filename(
+                    &context.work_info.name,
+                    context.work_info.id.get(),
+                    &extension,
+                );
+                info!(
+                    "作品 [work_id={}] 反编译完成(内存,未落盘;将命名为 {file_name})",
+                    work_id
+                );
+                Ok(DecompiledArtifact::Document {
+                    document,
+                    file_name,
+                })
+            }
+            result @ DecompileResult::Path(_) => {
+                let output_path = options
+                    .output_dir
+                    .as_deref()
+                    .unwrap_or(&self.config.default_output_dir);
+                let saved = decompiler.save_result(&result, Some(output_path), &context)?;
+                info!(
+                    "作品 [work_id={}] 反编译完成,保存至: {}",
+                    work_id,
+                    saved.display()
+                );
+                Ok(DecompiledArtifact::Path(saved))
+            }
+        }
+    }
+
     /// 反编译主流程(模板方法)
     /// 流程为:获取信息 → 创建处理器 → 取原始数据 → (可选)保存原始数据 → 反编译 → 保存结果
     fn decompile_inner(&self, work_id: WorkId, options: &DecompileOptions) -> Result<PathBuf> {
+        let (decompiler, result, context) = self.decompile_core(work_id, options)?;
+        // 确定输出目录(用户指定或默认)
+        let output_path = options
+            .output_dir
+            .as_deref()
+            .unwrap_or(&self.config.default_output_dir);
+        let saved = decompiler.save_result(&result, Some(output_path), &context)?;
+        info!(
+            "作品 [work_id={}] 反编译完成,保存至: {}",
+            work_id,
+            saved.display()
+        );
+        Ok(saved)
+    }
+
+    /// 反编译主流程的**核心**(模板方法的前半段):取信息 → 建上下文 → 取原始数据
+    /// → (可选)存原始数据 → 反编译。落盘与否由调用方决定。
+    fn decompile_core(
+        &self,
+        work_id: WorkId,
+        options: &DecompileOptions,
+    ) -> Result<(Box<dyn WorkDecompiler>, DecompileResult, DecompilerContext)> {
         info!("开始反编译作品 [work_id={}]", work_id);
         let http_client = Box::new(CodeMaoHttpClient::new(self.client.clone()));
         let work_info = self
@@ -325,14 +400,9 @@ impl CodemaoDecompiler {
             .build()?;
 
         let result = decompiler.decompile(raw, &context)?;
-        let saved = decompiler.save_result(&result, Some(output_path), &context)?;
-        info!(
-            "作品 [work_id={}] 反编译完成,保存至: {}",
-            work_id,
-            saved.display()
-        );
-        Ok(saved)
+        Ok((decompiler, result, context))
     }
+
     /// 将获取到的未编译原始数据保存到 `output_dir/raw/` 目录下
     /// 文件名格式为 `raw-{作品名称}.{扩展名}`,其中名称经过安全过滤
     fn save_raw_data(
@@ -629,6 +699,23 @@ impl DecompilerContextBuilder {
 pub(crate) enum DecompileResult {
     Json(Value),
     Path(String),
+}
+
+/// 反编译产物(内存形态,方案 23 P0-2)
+///
+/// 与 `DecompileResult` 的区别:这是**对外**的产物描述(Kitten/NEKO 直接在内存里,
+/// 不再"先落盘再读回"),`DecompiledArtifact::Path` 用于只有落盘形态的 NEMO/WOOD。
+#[derive(Debug)]
+pub enum DecompiledArtifact {
+    /// 编辑版文档(Kitten/NEKO 族):内容在内存里,**未落盘**
+    Document {
+        /// 编辑版文档
+        document: Value,
+        /// 该文档落盘时应当使用的文件名(含扩展名,与 `save_result` 一致)
+        file_name: String,
+    },
+    /// 只有落盘形态的产物(NEMO/WOOD):文件或资源目录
+    Path(PathBuf),
 }
 
 pub(crate) trait WorkDecompiler: Send + Sync {

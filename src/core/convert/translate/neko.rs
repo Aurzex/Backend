@@ -482,8 +482,12 @@ pub(crate) fn parse_kn_entity(list: &Value) -> Result<BlockTree> {
         Value::Array(items) => items,
         // 少数链路把该字段存成 JSON 字符串(与 Kitten 侧 `block_data_json` 的容错一致)
         Value::String(text) if !text.trim().is_empty() => {
+            // 取出数组本体(移动),不再 `as_array().cloned()` 白拷一份整表
             let parsed: Value = serde_json::from_str(text).map_err(DecompilerError::from)?;
-            owned = parsed.as_array().cloned().unwrap_or_default();
+            owned = match parsed {
+                Value::Array(items) => items,
+                _ => Vec::new(),
+            };
             &owned
         }
         _ => &[],

@@ -808,12 +808,12 @@ mod reverse_tests_inner {
             crate::core::convert::EditorType::Neko,
             TargetEditor::Kitten4,
         );
-        let k4 = convert_kn_document(&source, &options, &mut reverse_report).expect("反向");
+        let mut k4 = convert_kn_document(&source, &options, &mut reverse_report).expect("反向");
         let mut back_report = TranslateReport::new(
             crate::core::convert::EditorType::Kitten4,
             TargetEditor::KittenN,
         );
-        let kn2 = convert_kitten4_document(&k4, &options, &mut back_report).expect("再次正向");
+        let kn2 = convert_kitten4_document(&mut k4, &options, &mut back_report).expect("再次正向");
 
         // ---- 1) 实体侧
         let before_entities = census_entities_with(&source, true);
@@ -900,7 +900,7 @@ mod reverse_tests_inner {
             eprintln!("跳过:缺少真作品样例 {}", path.display());
             return;
         }
-        let source: Value =
+        let mut source: Value =
             serde_json::from_str(&std::fs::read_to_string(&path).expect("读作品")).expect("JSON");
         let options = TranslateOptions::new().deterministic_ids(true);
 
@@ -908,7 +908,7 @@ mod reverse_tests_inner {
             crate::core::convert::EditorType::Kitten4,
             TargetEditor::KittenN,
         );
-        let kn = convert_kitten4_document(&source, &options, &mut forward_report).expect("正向");
+        let kn = convert_kitten4_document(&mut source, &options, &mut forward_report).expect("正向");
         let before = census_of_kn(&kn);
         assert!(before.values().sum::<usize>() > 300, "样例应含数百个积木");
 
@@ -916,12 +916,12 @@ mod reverse_tests_inner {
             crate::core::convert::EditorType::Neko,
             TargetEditor::Kitten4,
         );
-        let k4 = convert_kn_document(&kn, &options, &mut reverse_report).expect("反向");
+        let mut k4 = convert_kn_document(&kn, &options, &mut reverse_report).expect("反向");
         let mut back_report = TranslateReport::new(
             crate::core::convert::EditorType::Kitten4,
             TargetEditor::KittenN,
         );
-        let kn2 = convert_kitten4_document(&k4, &options, &mut back_report).expect("再次正向");
+        let kn2 = convert_kitten4_document(&mut k4, &options, &mut back_report).expect("再次正向");
         let after = census_of_kn(&kn2);
 
         // 允许的差异(逐条有因):

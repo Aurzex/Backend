@@ -221,7 +221,10 @@ impl From<serde_json::Error> for TranslateError {
 
 /// Kitten4 编辑版 → KN 编辑版(纯文档级管线,与官方两步对齐)
 pub(crate) fn convert_kitten4_document(
-    source: &serde_json::Value,
+    // `&mut`:装配阶段用不到源实体的 `block_data_json`,而它是整棵积木树(源文档里
+    // 最大的字段)。取走它再克隆实体对象,省掉"每个实体复制一份完整积木树"的
+    // 文档级白拷贝(方案 23 P0-3)。
+    source: &mut serde_json::Value,
     options: &TranslateOptions,
     report: &mut TranslateReport,
 ) -> std::result::Result<serde_json::Value, TranslateError> {
@@ -245,8 +248,8 @@ pub(crate) fn convert_kitten4_document(
     };
 
     let theatre = source
-        .get("theatre")
-        .and_then(Value::as_object)
+        .get_mut("theatre")
+        .and_then(Value::as_object_mut)
         .ok_or_else(|| TranslateError::InvalidArgument("源作品没有 theatre".into()))?;
 
     let mut ids = super::translate::model::IdSource::new(options.ids_deterministic());
@@ -260,17 +263,21 @@ pub(crate) fn convert_kitten4_document(
     )> = Vec::new();
     let mut procedures: Vec<neko::ProcedureEntry> = Vec::new();
 
-    let scene_order = source
-        .pointer("/theatre/scenes_order")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
     for (role_is_scene, container) in [(true, "scenes"), (false, "actors")] {
-        let Some(map) = theatre.get(container).and_then(Value::as_object) else {
+        let Some(map) = theatre
+            .get_mut(container)
+            .and_then(Value::as_object_mut)
+        else {
             continue;
         };
-        for (id, entity) in map {
-            let mut tree = match entity.get("block_data_json") {
+        for (id, entity) in map.iter_mut() {
+            let Some(entity) = entity.as_object_mut() else {
+                continue;
+            };
+            // 取走 `block_data_json`:它只服务解析,装配侧本来就会删掉它
+            // (assembly `actor_entry` 里那句 `remove` 保留作兜底)
+            let bdj = entity.remove("block_data_json");
+            let mut tree = match &bdj {
                 Some(bdj) => kitten::parse_block_data_json(bdj)?.tree,
                 None => model::BlockTree::default(),
             };
@@ -278,15 +285,14 @@ pub(crate) fn convert_kitten4_document(
             mapping::translate_kitten_to_kn(&mut tree, landscape, &mut ids, report);
             let (kept, mut extracted) = neko::split_procedures(tree, &mut ids, report);
             procedures.append(&mut extracted);
-            parsed.push((
-                id.clone(),
-                role_is_scene,
-                kept,
-                entity.as_object().cloned().unwrap_or_default(),
-            ));
+            // 装配只要实体元数据(`x/y/scale/…`),所以趁 `block_data_json` 不在时克隆;
+            // 随后**原样放回**,维持"转换不改源文档"的约定(可复用、可重复转换)
+            parsed.push((id.clone(), role_is_scene, kept, entity.clone()));
+            if let Some(bdj) = bdj {
+                entity.insert("block_data_json".into(), bdj);
+            }
         }
     }
-    let _ = scene_order;
 
     // ── 第二遍:程序集调用点重写(官方 KC:所有实体共用同一张 proceduresDict)
     for (_, _, tree, _) in parsed.iter_mut() {
@@ -322,16 +328,28 @@ pub(crate) fn convert_kitten4_document(
         .map_err(TranslateError::from)
 }
 
-/// 把一个作品文件转化成另一种编辑器的作品文件
-pub fn translate_file(
-    input: &std::path::Path,
-    target: TargetEditor,
-    options: TranslateOptions,
-) -> std::result::Result<TranslateOutcome, TranslateError> {
-    use crate::utils::filedata::PathConfig;
+/// 文档级转化结果([`translate_value`] 的产物:文档留在内存,不落盘)
+#[derive(Debug)]
+pub struct TranslateDocument {
+    /// 目标编辑器的编辑版文档
+    pub document: serde_json::Value,
+    /// 目标编辑器
+    pub target: TargetEditor,
+    /// 报告(覆盖率/降级/丢弃)
+    pub report: TranslateReport,
+}
 
-    let text = std::fs::read_to_string(input)?;
-    let source: serde_json::Value = serde_json::from_str(&text)?;
+/// 把**内存里的**编辑版文档转化成另一种编辑器(不碰文件系统)
+///
+/// 与 [`translate_file`] 共用同一条管线,区别只在 IO:`translate_file`
+/// = 读盘 → 本函数 → 流式写盘。`translate_work`(域门面)用本入口把
+/// 「反编译落盘 → translate 读回」这一段整个省掉(方案 23 P0-2):
+/// 10 MB 级作品实测省一次 serialize + 一次 parse(墙钟 10–20%)。
+pub fn translate_value(
+    mut source: serde_json::Value,
+    target: TargetEditor,
+    options: &TranslateOptions,
+) -> std::result::Result<TranslateDocument, TranslateError> {
     let from = detect_editor(&source);
 
     let (document, report) = match (from, target) {
@@ -340,7 +358,7 @@ pub fn translate_file(
                 crate::core::convert::EditorType::Kitten4,
                 TargetEditor::KittenN,
             );
-            let document = convert_kitten4_document(&source, &options, &mut report)?;
+            let document = convert_kitten4_document(&mut source, options, &mut report)?;
             (document, report)
         }
         (Some(crate::core::convert::EditorType::Neko), TargetEditor::Kitten4) => {
@@ -348,7 +366,7 @@ pub fn translate_file(
                 crate::core::convert::EditorType::Neko,
                 TargetEditor::Kitten4,
             );
-            let document = assembly::convert_kn_document(&source, &options, &mut report)?;
+            let document = assembly::convert_kn_document(&source, options, &mut report)?;
             (document, report)
         }
         (Some(from), to) => return Err(TranslateError::Unsupported { from, to }),
@@ -365,7 +383,49 @@ pub fn translate_file(
         });
     }
 
-    // 产物命名:`<源文件名>.<target>.bcmkn|bcm4`
+    Ok(TranslateDocument {
+        document,
+        target,
+        report,
+    })
+}
+
+/// 把一个作品文件转化成另一种编辑器的作品文件
+pub fn translate_file(
+    input: &std::path::Path,
+    target: TargetEditor,
+    options: TranslateOptions,
+) -> std::result::Result<TranslateOutcome, TranslateError> {
+    use crate::core::convert::shared::FileService;
+    use crate::utils::filedata::PathConfig;
+
+    let text = std::fs::read_to_string(input)?;
+    let source: serde_json::Value = serde_json::from_str(&text)?;
+    let converted = translate_value(source, target, &options)?;
+
+    let output = product_path(input, target, &options)?;
+
+    // 流式写盘(方案 23 P0-1):与 `to_string` 逐字节相同,省掉整份中间串与一次整块拷贝
+    FileService::write_json(&output, &converted.document)?;
+
+    Ok(TranslateOutcome {
+        output,
+        work_id: None,
+        target: converted.target,
+        report: converted.report,
+    })
+}
+
+/// 产物路径口径:`<源文件名主干>.<slug>.<bcmkn|bcm4>`
+///
+/// `translate_file` 与域门面(内存直通路径)共用同一口径,避免两条入口命名分叉。
+pub(crate) fn product_path(
+    source_file: &std::path::Path,
+    target: TargetEditor,
+    options: &TranslateOptions,
+) -> std::result::Result<std::path::PathBuf, TranslateError> {
+    use crate::utils::filedata::PathConfig;
+
     let slug = match target {
         TargetEditor::KittenN => "kn",
         TargetEditor::Kitten4 => "kitten4",
@@ -374,27 +434,31 @@ pub fn translate_file(
         TargetEditor::KittenN => "bcmkn",
         TargetEditor::Kitten4 => "bcm4",
     };
-    let stem = input
+    let stem = source_file
         .file_stem()
         .and_then(|s| s.to_str())
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| TranslateError::InvalidArgument(format!("输入路径没有文件名:{input:?}")))?;
+        .ok_or_else(|| {
+            TranslateError::InvalidArgument(format!("源文件名没有主干:{source_file:?}"))
+        })?;
     let dir = options
         .output_dir_ref()
         .map(std::path::Path::to_path_buf)
         .unwrap_or_else(|| PathConfig::global().convert_file_path());
     std::fs::create_dir_all(&dir)?;
-    let output = dir.join(format!("{stem}.{slug}.{ext}"));
+    Ok(dir.join(format!("{stem}.{slug}.{ext}")))
+}
 
-    let serialized = serde_json::to_string(&document)?;
-    std::fs::write(&output, serialized)?;
-
-    Ok(TranslateOutcome {
-        output,
-        work_id: None,
-        target,
-        report,
-    })
+/// 把源作品文件引用写进**内存里**的 KN 文档顶层 `source` 字段(纯函数)
+pub fn set_source_reference_in(
+    document: &mut serde_json::Value,
+    url: &str,
+) -> std::result::Result<(), TranslateError> {
+    let Some(object) = document.as_object_mut() else {
+        return Err(TranslateError::InvalidArgument("产物不是 JSON 对象".into()));
+    };
+    object.insert("source".to_string(), serde_json::Value::String(url.to_string()));
+    Ok(())
 }
 
 /// 把源作品文件引用写进**已产出**的 KN 文档顶层 `source` 字段。
@@ -405,20 +469,25 @@ pub fn translate_file(
 ///
 /// 已知偏差:我们手里只有反编译重建的编辑版,官方上传的是原始文件字节
 /// (见 `docs/21` §4-10)。
+///
+/// 域内编排([`crate::core::convert::translate_work`])走 [`set_source_reference_in`]
+/// 直接改内存文档,不读回-写回产物文件(方案 23 P0-2)。
 pub fn set_source_reference(
     output: &std::path::Path,
     url: &str,
 ) -> std::result::Result<(), TranslateError> {
+    use crate::core::convert::shared::FileService;
+
     let text = std::fs::read_to_string(output)?;
     let mut document: serde_json::Value = serde_json::from_str(&text)?;
-    let Some(object) = document.as_object_mut() else {
-        return Err(TranslateError::InvalidArgument(format!(
-            "产物不是 JSON 对象:{output:?}"
-        )));
-    };
-    object.insert("source".to_string(), serde_json::Value::String(url.to_string()));
+    set_source_reference_in(&mut document, url).map_err(|error| match error {
+        TranslateError::InvalidArgument(_) => {
+            TranslateError::InvalidArgument(format!("产物不是 JSON 对象:{output:?}"))
+        }
+        other => other,
+    })?;
     // 与 `translate_file` 同一序列化口径(serde_json 默认按键排序,round-trip 稳定)
-    std::fs::write(output, serde_json::to_string(&document)?)?;
+    FileService::write_json(output, &document)?;
     Ok(())
 }
 
@@ -486,18 +555,6 @@ pub enum TranslateWarning {
 }
 
 impl TranslateWarning {
-    /// 聚合键:同类别 + 同主体算一类
-    fn key(&self) -> (u8, String) {
-        match self {
-            TranslateWarning::UnmappedBlock { kind } => (0, kind.clone()),
-            TranslateWarning::DegradedToText { kind } => (1, kind.clone()),
-            TranslateWarning::DroppedField { path } => (2, path.clone()),
-            TranslateWarning::DroppedProperty { path } => (3, path.clone()),
-            TranslateWarning::RemintedId { from } => (4, from.clone()),
-            TranslateWarning::ReuploadedOnImport { path } => (5, path.clone()),
-        }
-    }
-
     fn category(&self) -> &'static str {
         match self {
             TranslateWarning::UnmappedBlock { .. } => "未映射积木(已丢弃)",
@@ -566,14 +623,21 @@ impl TranslateReport {
     }
 
     /// 计数(类别 → 主体 → 次数)
+    ///
+    /// 先按**借用键**聚合,最后只对去重后的类别/主体做一次字符串化:
+    /// 告警可达上万条(反向 10 MB 作品 1 817 条),旧实现每条要 3 次 `String`
+    /// 分配(`key()` 克隆 + 类别 + 主体),而 `key()` 的结果其实被丢弃
+    /// (方案 23 P0-4)。
     pub fn counts(&self) -> BTreeMap<String, BTreeMap<String, usize>> {
-        let mut out: BTreeMap<String, BTreeMap<String, usize>> = BTreeMap::new();
+        let mut agg: BTreeMap<(&'static str, &str), usize> = BTreeMap::new();
         for w in &self.warnings {
-            let _ = w.key();
-            *out.entry(w.category().to_string())
+            *agg.entry((w.category(), w.subject())).or_default() += 1;
+        }
+        let mut out: BTreeMap<String, BTreeMap<String, usize>> = BTreeMap::new();
+        for ((category, subject), n) in agg {
+            out.entry(category.to_string())
                 .or_default()
-                .entry(w.subject().to_string())
-                .or_default() += 1;
+                .insert(subject.to_string(), n);
         }
         out
     }
@@ -940,14 +1004,14 @@ mod diff_tests {
             eprintln!("跳过:缺少真作品样本 {}", path.display());
             return;
         }
-        let source: Value =
+        let mut source: Value =
             serde_json::from_str(&std::fs::read_to_string(&path).expect("读作品")).expect("JSON");
         let mut report = TranslateReport::new(
             crate::core::convert::EditorType::Kitten4,
             TargetEditor::KittenN,
         );
         let options = TranslateOptions::new().deterministic_ids(true);
-        let doc = convert_kitten4_document(&source, &options, &mut report).expect("转换");
+        let doc = convert_kitten4_document(&mut source, &options, &mut report).expect("转换");
 
         for key in ["actors", "scenes", "styles", "stageSize"] {
             assert!(doc.get(key).is_some(), "缺必填结构 {key}");
@@ -983,7 +1047,7 @@ mod diff_tests {
             crate::core::convert::EditorType::Kitten4,
             TargetEditor::KittenN,
         );
-        let doc2 = convert_kitten4_document(&source, &options, &mut report2).expect("转换2");
+        let doc2 = convert_kitten4_document(&mut source, &options, &mut report2).expect("转换2");
         assert_eq!(doc, doc2, "确定性 id 模式下两次转换必须一致");
     }
 
@@ -1002,14 +1066,14 @@ mod diff_tests {
             eprintln!("跳过:缺少真作品样本 {}", sample.display());
             return;
         }
-        let source: Value =
+        let mut source: Value =
             serde_json::from_str(&std::fs::read_to_string(&sample).expect("读作品")).expect("JSON");
         let mut report = TranslateReport::new(
             crate::core::convert::EditorType::Kitten4,
             TargetEditor::KittenN,
         );
         let options = TranslateOptions::new().deterministic_ids(true);
-        let doc = convert_kitten4_document(&source, &options, &mut report).expect("转换");
+        let doc = convert_kitten4_document(&mut source, &options, &mut report).expect("转换");
         let dir = unique_test_dir("forward");
         std::fs::create_dir_all(&dir).expect("建目录");
         let out = dir.join("geoduel.kn.bcmkn");
@@ -1051,13 +1115,13 @@ mod diff_tests {
         if !path.exists() {
             return;
         }
-        let source: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let mut source: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         let mut report = TranslateReport::new(
             crate::core::convert::EditorType::Kitten4,
             TargetEditor::KittenN,
         );
         let options = TranslateOptions::new().deterministic_ids(true);
-        let doc = convert_kitten4_document(&source, &options, &mut report).unwrap();
+        let doc = convert_kitten4_document(&mut source, &options, &mut report).unwrap();
         let dir = unique_test_dir("forward2");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(

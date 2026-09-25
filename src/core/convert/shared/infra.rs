@@ -236,9 +236,17 @@ impl FileService {
         Ok(path.to_path_buf())
     }
 
+    /// 写 JSON:**流式**(`to_writer` + `BufWriter`),不产生整份中间 `String`。
+    ///
+    /// 与 `to_string` 逐字节相同(同一个序列化器),只省掉"文档大小 ×1 的中间串
+    /// + 一次整块拷贝"与相应峰值内存(方案 23 P0-1)。10 MB 级作品实测占
+    /// `serialize` 的 15–25%。
     pub(crate) fn write_json(path: &Path, data: &Value) -> Result<()> {
-        let json_str = to_string(data)?;
-        std::fs::write(path, json_str)?;
+        use std::io::Write as _;
+        let file = std::fs::File::create(path)?;
+        let mut writer = std::io::BufWriter::new(file);
+        serde_json::to_writer(&mut writer, data)?;
+        writer.flush()?;
         Ok(())
     }
 
