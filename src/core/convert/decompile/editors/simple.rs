@@ -6,13 +6,14 @@
 
 use crate::api::auth::CloudAuthenticator;
 use crate::core::convert::decompile::{
-    DecompileResult, DecompilerContext, WorkDecompiler, save_json_result, save_path_result,
+    DecompileResult, DecompilerContext, ResourceTask, WorkDecompiler, download_resources_parallel,
+    save_json_result, save_path_result,
 };
 use crate::core::convert::shared::{
     CryptoService, DecompilerConfig, DecompilerError, FileService, HttpClient, RawWorkData, Result,
     ValueExt, WorkFetcher, WorkId, WorkInfo,
 };
-use log::warn;
+use log::{info, warn};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -349,6 +350,10 @@ pub(crate) struct WoodResourceConfig<'a> {
     pub(crate) http_client: &'a dyn HttpClient,
     pub(crate) file_service: &'a FileService,
     pub(crate) work_id: WorkId,
+    /// 资源下载并发数(见 [`DecompileOptions::resource_concurrency`])
+    pub(crate) resource_concurrency: usize,
+    /// 是否下载资源文件(见 [`DecompileOptions::skip_resources`])
+    pub(crate) download_resources: bool,
 }
 
 pub(crate) struct WoodFetcher {
@@ -393,6 +398,8 @@ impl WoodDecompiler {
             http_client: &*context.http_client,
             file_service: &context.file_service,
             work_id,
+            resource_concurrency: context.resource_concurrency,
+            download_resources: context.download_resources,
         };
         let mut resource_manager = WoodResourceManager::new(resource_config, work_dir.clone());
 
@@ -516,6 +523,10 @@ impl<'a> WoodResourceManager<'a> {
     }
 
     fn download_images(&self, work_data: &Value) -> Result<()> {
+        if !self.config.download_resources {
+            info!("已按 skip_resources 跳过 WOOD 资源下载");
+            return Ok(());
+        }
         let images_dir = self
             .dirs
             .get("images")
@@ -523,30 +534,46 @@ impl<'a> WoodResourceManager<'a> {
                 msg: "images目录不存在".to_string(),
                 source: None,
             })?;
-        if let Some(content) = work_data.get("content").and_then(|v| v.as_array()) {
-            for file_info in content {
-                if file_info.get_i64_or_default("file_type", 0) == 3
-                    && let Some(image_url) = file_info.get("url").and_then(|v| v.as_str())
-                {
-                    match self.config.http_client.get_binary(image_url) {
-                        Ok(data) => {
-                            let name = file_info.get_str_or("file_name", "");
-                            let name = if name.is_empty() {
-                                self.extract_filename_from_url(image_url)
-                            } else {
-                                name.to_string()
-                            };
-                            let name = if name.is_empty() {
-                                "image.png".to_string()
-                            } else {
-                                name
-                            };
-                            FileService::write_binary(&images_dir.join(name), &data)?;
-                        }
-                        Err(e) => warn!("图片下载失败 {}: {}", image_url, e),
-                    }
-                }
+        // 收集任务:同一 url 只下一次;文件名按平台给的 `file_name`,缺失时从 URL 推
+        let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        let mut tasks = Vec::new();
+        for file_info in work_data
+            .get("content")
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+        {
+            if file_info.get_i64_or_default("file_type", 0) != 3 {
+                continue;
             }
+            let Some(image_url) = file_info.get("url").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            if !seen.insert(image_url) {
+                continue;
+            }
+            let name = file_info.get_str_or("file_name", "");
+            let name = if name.is_empty() {
+                self.extract_filename_from_url(image_url)
+            } else {
+                name.to_string()
+            };
+            let name = if name.is_empty() {
+                "image.png".to_string()
+            } else {
+                name
+            };
+            tasks.push(ResourceTask {
+                url: image_url.to_string(),
+                dest: images_dir.join(name),
+            });
+        }
+        for failure in download_resources_parallel(
+            self.config.http_client,
+            tasks,
+            self.config.resource_concurrency,
+        ) {
+            warn!("图片下载失败 {failure}");
         }
         Ok(())
     }

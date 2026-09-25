@@ -1,5 +1,6 @@
 use crate::core::convert::decompile::{
-    DecompileResult, DecompilerContext, WorkDecompiler, save_path_result,
+    DecompileResult, DecompilerContext, ResourceTask, WorkDecompiler, download_resources_parallel,
+    save_path_result,
 };
 use crate::core::convert::shared::{
     CryptoService, DecompilerConfig, DecompilerError, FileService, HttpClient, RawWorkData, Result,
@@ -17,6 +18,10 @@ pub(crate) struct NemoResourceConfig<'a> {
     pub(crate) http_client: &'a dyn HttpClient,
     pub(crate) file_service: &'a FileService,
     pub(crate) work_id: WorkId,
+    /// 资源下载并发数(见 [`DecompileOptions::resource_concurrency`])
+    pub(crate) resource_concurrency: usize,
+    /// 是否下载资源文件(见 [`DecompileOptions::skip_resources`])
+    pub(crate) download_resources: bool,
 }
 
 pub(crate) struct NemoFetcher {
@@ -74,6 +79,8 @@ impl NemoDecompiler {
             http_client: &*context.http_client,
             file_service: &context.file_service,
             work_id,
+            resource_concurrency: context.resource_concurrency,
+            download_resources: context.download_resources,
         };
         let mut resource_manager = NemoResourceManager::new(resource_config, work_dir.clone());
 
@@ -268,6 +275,10 @@ impl<'a> NemoResourceManager<'a> {
     }
 
     pub(crate) fn download_resources(&self, bcm_data: &Value) -> Result<()> {
+        if !self.config.download_resources {
+            info!("已按 skip_resources 跳过 NEMO 资源下载");
+            return Ok(());
+        }
         let material_dir = self
             .dirs
             .get("material")
@@ -276,23 +287,33 @@ impl<'a> NemoResourceManager<'a> {
                 source: None,
             })?;
 
+        // 收集任务:同一 url 只下一次(内容寻址文件名 = sha256(url),与 `.userimg` 里的 path 对齐)
+        let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        let mut tasks = Vec::new();
         if let Some(styles) = bcm_data
             .get("styles")
             .and_then(|v| v.get("styles_dict"))
             .and_then(|v| v.as_object())
         {
             for style_data in styles.values() {
-                if let Some(image_url) = style_data.get("url").and_then(|v| v.as_str()) {
-                    match self.config.http_client.get_binary(image_url) {
-                        Ok(image_data) => {
-                            let sha_hash = self.get_sha(image_url);
-                            let image_path = material_dir.join(format!("{}.webp", sha_hash));
-                            FileService::write_binary(&image_path, &image_data)?;
-                        }
-                        Err(e) => warn!("资源下载失败 {}: {}", image_url, e),
-                    }
+                let Some(image_url) = style_data.get("url").and_then(|v| v.as_str()) else {
+                    continue;
+                };
+                if !seen.insert(image_url) {
+                    continue;
                 }
+                tasks.push(ResourceTask {
+                    url: image_url.to_string(),
+                    dest: material_dir.join(format!("{}.webp", self.get_sha(image_url))),
+                });
             }
+        }
+        for failure in download_resources_parallel(
+            self.config.http_client,
+            tasks,
+            self.config.resource_concurrency,
+        ) {
+            warn!("资源下载失败 {failure}");
         }
         Ok(())
     }
