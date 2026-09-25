@@ -238,7 +238,7 @@ fn kn_work_to_kitten4_file() {
     // 告警总数没有意义(大量是 id 重铸,不是损失)⇒ 按类型统计,让人一眼看到真实缺口
     let mut kinds: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
     for w in out.report.warnings() {
-        *kinds.entry(w.kind_label()).or_default() += 1;
+        *kinds.entry(w.category()).or_default() += 1;
     }
     eprintln!(
         "[convert_live] {work_id} → Kitten4 完成:{:?}(有损:{};告警 {} 条:{} )",
@@ -247,6 +247,25 @@ fn kn_work_to_kitten4_file() {
         out.report.warnings().len(),
         kinds
             .iter()
+            .map(|(k, n)| format!("{k}={n}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
+    // 未映射积木按 KN 侧类型名聚合(判断"缺的是哪些能力"的唯一依据)
+    let mut unmapped: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for w in out.report.warnings() {
+        if let backend::core::convert::translate::TranslateWarning::UnmappedBlock { kind } = w {
+            *unmapped.entry(kind.as_str()).or_default() += 1;
+        }
+    }
+    let mut top: Vec<_> = unmapped.iter().collect();
+    top.sort_by(|a, b| b.1.cmp(a.1));
+    eprintln!(
+        "[convert_live] 未映射积木 {} 种 / {} 个,Top20:{}",
+        unmapped.len(),
+        unmapped.values().sum::<usize>(),
+        top.iter()
+            .take(20)
             .map(|(k, n)| format!("{k}={n}"))
             .collect::<Vec<_>>()
             .join(" ")

@@ -852,7 +852,8 @@ pub(crate) fn detect_editor(
 /// 一类告警
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TranslateWarning {
-    /// 目标编辑器没有对应积木(反向默认策略:丢弃)
+    /// 目标编辑器没有对应积木:**保留 KN 原类型名 + 告警**(不丢弃积木 ⇒ 往返的类型多重集仍守恒,
+    /// 但 Kitten4 侧可能不认这个类型名)。判定"哪些类型属此类"见 `mapping.rs` 顶部注释。
     UnmappedBlock { kind: String },
     /// 映射到文本占位积木(`bcm_translator_text_*`),原文进 mutation
     DegradedToText { kind: String },
@@ -867,9 +868,10 @@ pub enum TranslateWarning {
 }
 
 impl TranslateWarning {
-    fn category(&self) -> &'static str {
+    /// 告警类别标签(日志与集成测试按类别统计用)
+    pub fn category(&self) -> &'static str {
         match self {
-            TranslateWarning::UnmappedBlock { .. } => "未映射积木(已丢弃)",
+            TranslateWarning::UnmappedBlock { .. } => "未映射积木(保留原类型名)",
             TranslateWarning::DegradedToText { .. } => "降级为文本占位积木",
             TranslateWarning::DroppedField { .. } => "丢弃字段",
             TranslateWarning::DroppedProperty { .. } => "丢弃实体属性",
@@ -886,17 +888,6 @@ impl TranslateWarning {
             | TranslateWarning::DroppedProperty { path } => path,
             TranslateWarning::RemintedId { from } => from,
             TranslateWarning::ReuploadedOnImport { path } => path,
-        }
-    }
-    /// 告警类型的中文标签(日志/真机用例按类型统计用)
-    pub fn kind_label(&self) -> &'static str {
-        match self {
-            TranslateWarning::UnmappedBlock { .. } => "未映射积木",
-            TranslateWarning::DegradedToText { .. } => "降级为文本",
-            TranslateWarning::DroppedField { .. } => "丢弃字段",
-            TranslateWarning::DroppedProperty { .. } => "丢弃属性",
-            TranslateWarning::RemintedId { .. } => "id 重铸",
-            TranslateWarning::ReuploadedOnImport { .. } => "官方会重传资源",
         }
     }
 }
