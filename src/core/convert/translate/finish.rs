@@ -53,10 +53,10 @@ use serde_json::{Map, Value, json};
 
 use crate::core::convert::shared::{DecompilerError, Result};
 
-use super::blockjson::type_name;
+use super::model::type_name;
 use super::mapping::truthy;
 use super::neko::{ProcedureEntry, procedures_to_json};
-use super::{TranslateReport, TranslateWarning};
+use super::{ TranslateReport, TranslateWarning};
 use super::tables_gen::{BCM_VERSION, STAGE_LANDSCAPE, STAGE_PORTRAIT};
 
 /// 官方 `A.W$`:`workspaceScrollXy` 的兜底值(CDN 模板里恰好是 `{100,30}`,**别**把模板值当兜底)
@@ -760,7 +760,7 @@ mod tests {
     use super::*;
     use crate::core::convert::shared::EditorType;
 
-    use super::super::{TargetEditor, ids::IdSource, neko::split_procedures};
+    use super::super::{TargetEditor, model::IdSource, neko::split_procedures};
 
     fn report() -> TranslateReport {
         TranslateReport::new(EditorType::Kitten4, TargetEditor::KittenN)
@@ -1102,8 +1102,8 @@ mod tests {
             "type": "procedures_2_defnoreturn", "id": "proc-1", "fields": { "NAME": "跳跃" },
             "inputs": { "STACK": { "type": "self_go_forward", "id": "fwd" } }
         });
-        let tree = super::super::blockjson::BlockTree::new(vec![
-            super::super::blockjson::BlockJson::from_value(&def).expect("节点"),
+        let tree = super::super::model::BlockTree::new(vec![
+            super::super::model::BlockJson::from_value(&def).expect("节点"),
         ]);
         let (_, procedures) = split_procedures(tree, &mut ids, &mut report);
         let doc =

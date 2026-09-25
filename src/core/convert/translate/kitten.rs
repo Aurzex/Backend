@@ -23,8 +23,8 @@ use crate::core::convert::shared::{DecompilerError, Result};
 use serde_json::{Map, Value, json};
 use std::collections::HashSet;
 
-use super::blockjson::{BlockJson, BlockTree, type_name};
-use super::ids::IdSource;
+use super::model::{BlockJson, BlockTree, type_name};
+use super::model::IdSource;
 
 /// 一个实体的解析结果
 #[derive(Debug, Clone, Default)]

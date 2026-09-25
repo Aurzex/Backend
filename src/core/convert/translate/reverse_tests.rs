@@ -9,14 +9,14 @@ mod reverse_tests_inner {
 
     use super::kitten4_finish::*;
     use super::*;
-    use crate::core::convert::translate::blockjson::{BlockJson, BlockTree};
-    use crate::core::convert::translate::{ids, kitten, mapping, neko};
+    use crate::core::convert::translate::model::{BlockJson, BlockTree};
+    use crate::core::convert::translate::{kitten, mapping, model, neko};
     use serde_json::{Value, json};
     use std::collections::BTreeMap;
 
     fn reverse(block: Value, landscape: bool) -> (BlockJson, TranslateReport) {
         let mut tree = BlockTree::new(vec![BlockJson::from_value(&block).expect("块 JSON")]);
-        let mut ids = ids::IdSource::new(true);
+        let mut ids = model::IdSource::new(true);
         let mut report = TranslateReport::new(
             crate::core::convert::EditorType::Neko,
             TargetEditor::Kitten4,
@@ -316,7 +316,7 @@ mod reverse_tests_inner {
                 "px": { "type": "math_number", "id": "a0", "fields": { "NUM": "160" } }
             }
         })).expect("调用点")]);
-        let mut ids = ids::IdSource::new(true);
+        let mut ids = model::IdSource::new(true);
         let mut report = TranslateReport::new(
             crate::core::convert::EditorType::Neko,
             TargetEditor::Kitten4,
@@ -379,7 +379,7 @@ mod reverse_tests_inner {
             }]
         } } });
         let mut procedures = neko::parse_kn_procedures(&dict).expect("解析程序集");
-        let mut ids = ids::IdSource::new(true);
+        let mut ids = model::IdSource::new(true);
         let mut report = TranslateReport::new(
             crate::core::convert::EditorType::Neko,
             TargetEditor::Kitten4,
@@ -456,7 +456,7 @@ mod reverse_tests_inner {
             eprintln!("跳过:缺少真作品样例");
             return;
         };
-        let mut ids = ids::IdSource::new(false);
+        let mut ids = model::IdSource::new(false);
         let mut entities = 0usize;
         for (id, is_scene, entity) in kn_entities(&doc) {
             let tree = neko::parse_kn_entity(&entity["nekoBlockJsonList"]).expect("解析实体");
@@ -513,7 +513,7 @@ mod reverse_tests_inner {
             )
             .unwrap(),
         ]);
-        let mut ids = ids::IdSource::new(true);
+        let mut ids = model::IdSource::new(true);
         let bdj = kitten::build_block_data_json(&tree, &mut ids).expect("编码");
         assert_eq!(bdj["blocks"]["r1"]["location"], json!([0, 80]));
         assert_eq!(bdj["blocks"]["r2"]["location"], json!([0, 300]));
@@ -539,7 +539,7 @@ mod reverse_tests_inner {
             }))
             .unwrap(),
         ]);
-        let mut ids = ids::IdSource::new(true);
+        let mut ids = model::IdSource::new(true);
         let bdj = kitten::build_block_data_json(&tree, &mut ids).expect("编码");
         let blocks = bdj["blocks"].as_object().expect("blocks");
         assert_eq!(
@@ -679,7 +679,7 @@ mod reverse_tests_inner {
     /// 实体侧的类型频次;`normalize_calls` 会先跑 [`neko::unrewrite_calls`] 抵消正向 `KC` 的复制语义
     fn census_entities_with(doc: &Value, normalize_calls: bool) -> BTreeMap<String, usize> {
         let mut out = BTreeMap::new();
-        let mut ids = ids::IdSource::new(true);
+        let mut ids = model::IdSource::new(true);
         let mut report = TranslateReport::new(
             crate::core::convert::EditorType::Neko,
             TargetEditor::Kitten4,

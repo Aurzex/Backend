@@ -39,12 +39,11 @@ use std::collections::BTreeMap;
 
 use std::fmt::Write as _;
 
-pub(crate) mod blockjson;
 pub(crate) mod finish;
-pub(crate) mod ids;
 pub(crate) mod kitten;
 pub(crate) mod kitten4_finish;
 pub(crate) mod mapping;
+pub(crate) mod model;
 pub(crate) mod neko;
 #[cfg(test)]
 mod reverse_tests;
@@ -251,13 +250,13 @@ pub(crate) fn convert_kitten4_document(
         .and_then(Value::as_object)
         .ok_or_else(|| TranslateError::InvalidArgument("源作品没有 theatre".into()))?;
 
-    let mut ids = super::translate::ids::IdSource::new(options.ids_deterministic());
+    let mut ids = super::translate::model::IdSource::new(options.ids_deterministic());
 
     // ── 第一遍:解析 + 语义映射 + 抽程序集(官方:scenes.forEach → actors.forEach → zC)
     let mut parsed: Vec<(
         String,
         bool,
-        blockjson::BlockTree,
+        model::BlockTree,
         serde_json::Map<String, Value>,
     )> = Vec::new();
     let mut procedures: Vec<neko::ProcedureEntry> = Vec::new();
@@ -274,7 +273,7 @@ pub(crate) fn convert_kitten4_document(
         for (id, entity) in map {
             let mut tree = match entity.get("block_data_json") {
                 Some(bdj) => kitten::parse_block_data_json(bdj)?.tree,
-                None => blockjson::BlockTree::default(),
+                None => model::BlockTree::default(),
             };
             report.blocks_total += tree.count(); // 源文件里的积木数(映射前)
             mapping::translate_kitten_to_kn(&mut tree, landscape, &mut ids, report);
@@ -638,7 +637,7 @@ mod diff_tests {
     //! - 官方 UUID 每次运行都变 → 涉及 id 的等价性只在「输入里已存在的 id」上比较。
 
     use super::*;
-    use crate::core::convert::translate::blockjson::BlockJson;
+    use crate::core::convert::translate::model::BlockJson;
     use serde_json::Value;
     use std::collections::{BTreeMap, BTreeSet};
 
@@ -689,7 +688,7 @@ mod diff_tests {
             crate::core::convert::EditorType::Kitten4,
             TargetEditor::KittenN,
         );
-        let mut ids = ids::IdSource::new(true); // 确定性 id:对齐测试必需
+        let mut ids = model::IdSource::new(true); // 确定性 id:对齐测试必需
         let mut tree = kitten::parse_block_data_json(bdj).expect("解析实体").tree;
         mapping::translate_kitten_to_kn(&mut tree, landscape, &mut ids, &mut report);
         let (kept, procs) = neko::split_procedures(tree, &mut ids, &mut report);

@@ -4,12 +4,11 @@
 //! 官方没有反向实现(编辑器只做 K→KN),所以本文件是**自建**的逆映射,规则见
 //! `docs/20-kitten-kn-work-conversion-plan.md` §4;所有无法回填的字段都进报告。
 
-use super::blockjson::BlockTree;
+use super::model::BlockTree;
 use super::finish::{num, project_name_at};
-use super::{TranslateReport, TranslateWarning};
-use super::{
-    StageOrientation, TranslateError, TranslateOptions, blockjson, ids, kitten, mapping, neko,
-    tables_gen,
+use super::{ TranslateReport, TranslateWarning};
+use super::{ 
+    StageOrientation, TranslateError, TranslateOptions, kitten, mapping, model, neko, tables_gen,
 };
 use crate::core::convert::shared::{DecompilerError, Result};
 use serde_json::{Map, Value, json};
@@ -68,7 +67,7 @@ pub(crate) fn convert_kn_document(
         StageOrientation::Auto => (kn_w, kn_h),
     };
 
-    let mut ids = ids::IdSource::new(options.ids_deterministic());
+    let mut ids = model::IdSource::new(options.ids_deterministic());
 
     // ── 第一遍:解析 + 语义反演(场景在前、角色在后,与正向一致)
     let mut entities: Vec<KnEntity> = Vec::new();
@@ -154,7 +153,7 @@ pub(crate) fn convert_kn_document(
 }
 
 /// 树里出现两次以上的 id(每个重复值报一次)
-fn duplicate_ids(tree: &blockjson::BlockTree) -> Vec<String> {
+fn duplicate_ids(tree: &model::BlockTree) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
     let mut counted: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut duplicated = Vec::new();
@@ -173,7 +172,7 @@ fn duplicate_ids(tree: &blockjson::BlockTree) -> Vec<String> {
 struct KnEntity {
     source_id: String,
     is_scene: bool,
-    tree: blockjson::BlockTree,
+    tree: model::BlockTree,
     source: serde_json::Map<String, serde_json::Value>,
 }
 

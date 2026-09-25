@@ -42,7 +42,7 @@
 //!
 //! - **id 重铸不进报告**:合成 `Label`/影子/默认输入的 id 都是新铸的、且没有对应的"旧 id"被丢,
 //!   逐个记 [`TranslateWarning::RemintedId`](super::TranslateWarning::RemintedId) 只会淹没报告;
-//!   确定性模式([`IdSource::new(true)`](super::ids::IdSource::new))下它们本来就稳定可对齐。
+//!   确定性模式([`IdSource::new(true)`](super::model::IdSource::new))下它们本来就稳定可对齐。
 //! - **静默覆盖改成有据可查**:官方把定义积木的 `statements` 整体换成 `{STACK}`、把 `fields`
 //!   整体换成 `{NAME: id}`,多出来的槽位会被无声丢掉;本实现照做但逐条记
 //!   [`TranslateWarning::DroppedField`](super::TranslateWarning::DroppedField)。
@@ -65,10 +65,10 @@ use serde_json::{Map, Value, json};
 
 use crate::core::convert::shared::{DecompilerError, Result};
 
-use super::blockjson::{BlockJson, BlockTree};
-use super::ids::IdSource;
+use super::model::{BlockJson, BlockTree};
+use super::model::IdSource;
 use super::mapping::{XHTML, math_number_node, math_number_shadow, xml_attr_value};
-use super::{TranslateReport, TranslateWarning};
+use super::{ TranslateReport, TranslateWarning};
 
 /// 程序集定义根积木(`HC` 拆出来的那一类)
 const DEF_ROOT: &str = "procedures_2_defnoreturn";
