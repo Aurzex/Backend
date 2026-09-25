@@ -396,6 +396,12 @@ fn mutation_xml(text: &str) -> String {
 
 // ---------------------------------------------------------------- 影子 / mutation 的字符串级 XML 手术
 
+/// 从整段 XML 取开始标签里 `attr="…"` 的值(先按引号感知找标签尾,再取属性)
+/// 唯一的 XML 属性读取实现:本模块与 `neko.rs` 的 mutation 改写共用
+pub(crate) fn xml_attr_value<'a>(xml: &'a str, attr: &str) -> Option<&'a str> {
+    attr_value(&xml[..start_tag_end(xml)?], attr)
+}
+
 /// 开始标签里 `attr="…"` 的值区间(只认双引号属性;属性名前须是空白,避免 `xname=` 误命中)
 fn attr_span(tag: &str, attr: &str) -> Option<Range<usize>> {
     let bytes = tag.as_bytes();
@@ -691,7 +697,11 @@ fn parse_node(mut node: BlockJson, ctx: &mut Ctx) -> BlockJson {
                 map_field_value(&name, &value),
             );
         }
-        // (5b) 云列表三型:list 字段变成 inputs.list 上的 pure_list_get 影子
+        // (5b) 云列表三型:list 字段变成 inputs.list 上的 pure_list_get 影子。
+        //
+        // **官方就是不对称的,别"修"**:官方 `list` 分支(byte 77699+)同时写
+        // `inputs.list` 与 `shadows.list`,而云列表分支(byte 5922654)只写 `inputs.list`
+        // 并 `delete c.fields.list`。我们照抄该不对称(见 docs/20 §3.2 的对齐实验)。
         if matches!(
             orig.as_str(),
             "cloud_lists_length" | "cloud_lists_get_value" | "cloud_lists_delete"
@@ -1603,6 +1613,17 @@ fn disable_audio_in_chain(node: &mut BlockJson) {
 
 #[cfg(test)]
 mod tests {
+    /// P0-3 回归:标签里前一个属性值含 `>` 时,标签尾必须按引号感知找。
+    /// 旧实现(neko.rs 的 `xml.find('>')`)会把标签截断在引号内的 `>`,导致后面的属性读不到。
+    #[test]
+    fn xml_attr_value_is_quote_aware_about_tag_end() {
+        let xml = r#"<mutation items="2" def_id="a>b" name="x">"#;
+        assert_eq!(xml_attr_value(xml, "name"), Some("x"));
+        assert_eq!(xml_attr_value(xml, "def_id"), Some("a>b"));
+        assert_eq!(xml_attr_value(xml, "items"), Some("2"));
+        assert_eq!(xml_attr_value(xml, "missing"), None);
+    }
+
     use super::*;
     use crate::core::convert::shared::EditorType;
     use crate::core::convert::translate::TargetEditor;

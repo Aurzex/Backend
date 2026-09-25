@@ -67,7 +67,7 @@ use crate::core::convert::shared::{DecompilerError, Result};
 
 use super::blockjson::{BlockJson, BlockTree};
 use super::ids::IdSource;
-use super::mapping::math_number_shadow;
+use super::mapping::{math_number_shadow, xml_attr_value};
 use super::report::{TranslateReport, TranslateWarning};
 
 /// 官方 mutation 的命名空间(xhtml)
@@ -646,7 +646,7 @@ fn resolve_callee<'a>(
     }
     let mutation = node.mutation.as_deref()?;
     for attr in ["def_id", "name"] {
-        if let Some(id) = attr_value(mutation, attr)
+        if let Some(id) = xml_attr_value(mutation, attr)
             && let Some(entry) = procedures.iter().find(|p| p.id == id || p.name == id)
         {
             return Some(entry);
@@ -805,25 +805,6 @@ fn default_value_shadow(id: &str, value: &str) -> String {
     format!(
         "<shadow xmlns=\"{XHTML}\" type=\"default_value\" id=\"{id}\" visible=\"visible\"><field has_been_edited=\"false\" name=\"TEXT\">{value}</field></shadow>"
     )
-}
-
-/// `mutation` 里某个属性的值(与 `mapping.rs` 的同名工具同语义)
-fn attr_value<'a>(xml: &'a str, attr: &str) -> Option<&'a str> {
-    let end = xml.find('>')?;
-    let tag = &xml[..end];
-    let mut from = 0;
-    loop {
-        let at = from + tag[from..].find(attr)?;
-        let name_end = at + attr.len();
-        if (at == 0 || tag.as_bytes()[at - 1].is_ascii_whitespace())
-            && tag.as_bytes().get(name_end) == Some(&b'=')
-            && tag.as_bytes().get(name_end + 1) == Some(&b'"')
-        {
-            let start = name_end + 2;
-            return Some(&tag[start..start + tag[start..].find('"')?]);
-        }
-        from = name_end;
-    }
 }
 
 // ---------------------------------------------------------------- 编码

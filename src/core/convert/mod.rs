@@ -40,15 +40,38 @@ pub fn translate_work(
     target: TargetEditor,
     options: TranslateOptions,
 ) -> Result<TranslateOutcome, TranslateError> {
-    let staging = PathConfig::global()
-        .download_dir()
-        .join("convert")
-        .join("staging");
+    let staging = staging_dir(work_id);
     std::fs::create_dir_all(&staging)?;
 
+    let result = translate_work_in(work_id, target, options, &staging);
+
+    // 收尾:只清本作品自己的中间产物(失败路径也清,不留垃圾;
+    // 编辑版原文由调用方按需另行反编译,产物落在 `staging` 之外)
+    let _ = std::fs::remove_dir_all(&staging);
+    result
+}
+
+/// `translate_work` 的中间产物目录:每个作品**每次调用**一个独立子目录。
+///
+/// `translate_works` 会并发跑同一批次,共用一个目录时先完成的线程会把其它线程
+/// 正在读的源文件一起删掉;随机后缀兜住"同一作品重跑"的情况。
+fn staging_dir(work_id: WorkId) -> std::path::PathBuf {
+    PathConfig::global()
+        .convert_file_path()
+        .join("staging")
+        .join(format!("{work_id}-{:08x}", fastrand::u32(..)))
+}
+
+/// `translate_work` 的主体:在 `staging` 里取编辑版 → 转化 → 可选上传
+fn translate_work_in(
+    work_id: WorkId,
+    target: TargetEditor,
+    options: TranslateOptions,
+    staging: &std::path::Path,
+) -> Result<TranslateOutcome, TranslateError> {
     // 1. 取编辑版:反编译(Kitten 会重建成 block_data_json;NEKO 会解密成明文 KN 文档)
     let source_path = CodemaoDecompiler::global()
-        .decompile_with_options(work_id, DecompileOptions::new().output_dir(&staging))
+        .decompile_with_options(work_id, DecompileOptions::new().output_dir(staging))
         .map_err(TranslateError::Decompiler)?;
 
     // 2. 转化
@@ -60,9 +83,6 @@ pub fn translate_work(
     } else {
         None
     };
-
-    // 4. 清掉中间产物(编辑版原文由调用方按需另行反编译)
-    let _ = std::fs::remove_dir_all(&staging);
 
     Ok(TranslateOutcome {
         output: outcome.output,
@@ -170,4 +190,24 @@ fn create_draft_work(
             )))
         })?;
     Ok(id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// P0-1 回归:staging 必须是"每作品每次调用"独立目录(曾共用一个目录导致并发互删)
+    #[test]
+    fn staging_dir_is_unique_per_call_and_scoped_to_work() {
+        let a = staging_dir(WorkId::new(7));
+        let b = staging_dir(WorkId::new(7));
+        assert_ne!(a, b, "同作品两次调用也不能共用目录");
+        assert!(a.starts_with(PathConfig::global().convert_file_path().join("staging")));
+        assert!(
+            a.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("7-")),
+            "目录名要能看出来源作品:{a:?}"
+        );
+    }
 }
