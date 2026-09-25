@@ -13,7 +13,7 @@
 //!
 //! | 方向 | 前端 | 语义 | 后端 | 装配 |
 //! | --- | --- | --- | --- | --- |
-//! | Kitten4 → KN | [`kitten::parse_block_data_json`] | [`mapping::translate_kitten_to_kn`] | [`neko::split_procedures`]/[`neko::rewrite_calls`]/[`neko::tree_to_json`] | [`finish::build_document`] |
+//! | Kitten4 → KN | [`kitten::parse_block_data_json`] | [`mapping::translate_kitten_to_kn`] | [`neko::split_procedures`]/[`neko::rewrite_calls`]/[`neko::tree_to_json`] | [`assembly::build_document`] |
 //! | KN → Kitten4 | [`neko::parse_kn_entity`]/[`neko::parse_kn_procedures`] | [`mapping::translate_kn_to_kitten`] | [`neko::unrewrite_calls`]/[`neko::def_root_from_entry`]/[`kitten::build_block_data_json`] | [`build_kitten4_document`] |
 //!
 //! 分层纪律:
@@ -39,9 +39,8 @@ use std::collections::BTreeMap;
 
 use std::fmt::Write as _;
 
-pub(crate) mod finish;
+pub(crate) mod assembly;
 pub(crate) mod kitten;
-pub(crate) mod kitten4_finish;
 pub(crate) mod mapping;
 pub(crate) mod model;
 pub(crate) mod neko;
@@ -303,7 +302,7 @@ pub(crate) fn convert_kitten4_document(
     for (id, is_scene, tree, src) in parsed {
         let blocks = neko::tree_to_json(&tree)?;
         converted += tree.count();
-        entities.push(finish::ConvertedEntity {
+        entities.push(assembly::ConvertedEntity {
             source_id: id,
             is_scene,
             blocks,
@@ -317,9 +316,9 @@ pub(crate) fn convert_kitten4_document(
     let now_ms = if options.ids_deterministic() {
         0
     } else {
-        finish::current_epoch_ms()
+        assembly::current_epoch_ms()
     };
-    finish::build_document(source, entities, &procedures, now_ms, report)
+    assembly::build_document(source, entities, &procedures, now_ms, report)
         .map_err(TranslateError::from)
 }
 
@@ -349,7 +348,7 @@ pub fn translate_file(
                 crate::core::convert::EditorType::Neko,
                 TargetEditor::Kitten4,
             );
-            let document = kitten4_finish::convert_kn_document(&source, &options, &mut report)?;
+            let document = assembly::convert_kn_document(&source, &options, &mut report)?;
             (document, report)
         }
         (Some(from), to) => return Err(TranslateError::Unsupported { from, to }),

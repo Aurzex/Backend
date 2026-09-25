@@ -1,13 +1,13 @@
 //! 反向转化(KN → Kitten4)与往返测试。
 
-use super::kitten4_finish::*;
+use super::assembly::*;
 use super::*;
 
 mod reverse_tests_inner {
     //! 反向(KN → Kitten4)单测:类型/字段/槽位反演、`KC`/`zC` 的逆、邻接表往返、
     //! 以及「KN → Kitten4 → KN 类型多重集守恒」(docs/20 §7 Phase 4 验收)。
 
-    use super::kitten4_finish::*;
+    use super::assembly::*;
     use super::*;
     use crate::core::convert::translate::model::{BlockJson, BlockTree};
     use crate::core::convert::translate::{kitten, mapping, model, neko};
