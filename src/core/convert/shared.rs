@@ -1070,6 +1070,57 @@ impl FileService {
 }
 
 // ---------------------------------------------------------------------------
+// 常量
+
+/// 影子 / 变异 XML 的命名空间(两处装配与 NEMO 映射原先各有一份逐字节相同的副本,
+/// 见 `docs/rounds/31` §3.6 D3)
+pub(crate) const XHTML: &str = "http://www.w3.org/1999/xhtml";
+
+// ---------------------------------------------------------------------------
+// 批量执行(反编译 / 转化两个子域共用)
+
+/// 分块并发执行:块内 `thread::scope`、块间按原顺序收集 —— 不引入锁,结果顺序与输入一致。
+///
+/// 两个批量入口(`CodemaoDecompiler::decompile_batch_outcomes` 与
+/// `convert::translate_works`)的并发要求完全一致,原来各写了一份一模一样的
+/// chunk + `thread::scope` + 保序收集(见 `docs/rounds/31` §3 A6)。子线程 panic
+/// 由 `on_panic` 折成调用方的错误类型。
+///
+/// `concurrency <= 1` 或只有一个工作项时直接串行执行(调用方需在此前完成并发预算折算)。
+pub(crate) fn batch_map<T, R, E, F, P>(
+    items: &[T],
+    concurrency: usize,
+    work: F,
+    on_panic: P,
+) -> Vec<std::result::Result<R, E>>
+where
+    T: Sync,
+    R: Send,
+    E: Send,
+    F: Fn(&T) -> std::result::Result<R, E> + Sync,
+    P: Fn() -> E + Sync,
+{
+    if concurrency <= 1 || items.len() <= 1 {
+        return items.iter().map(|item| work(item)).collect();
+    }
+    let mut results = Vec::with_capacity(items.len());
+    for chunk in items.chunks(concurrency) {
+        let chunk_results: Vec<std::result::Result<R, E>> = std::thread::scope(|scope| {
+            let handles: Vec<_> = chunk
+                .iter()
+                .map(|item| scope.spawn(|| work(item)))
+                .collect();
+            handles
+                .into_iter()
+                .map(|handle| handle.join().unwrap_or_else(|_| Err(on_panic())))
+                .collect()
+        });
+        results.extend(chunk_results);
+    }
+    results
+}
+
+// ---------------------------------------------------------------------------
 // 来自 shared/upload.rs
 // 把产物上传到当前账号,并在平台建一份同名草稿(反编译 / 转化两个子域共用)
 // 只做三件事:**上传文件 → 建作品 → 取回 id**。不做资源重传、不做 URL 改写

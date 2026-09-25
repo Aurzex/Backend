@@ -8,7 +8,7 @@ use crate::core::convert::shared::ShadowBuilder;
 use crate::core::convert::shared::ValueExt;
 use crate::core::convert::shared::{
     CodeMaoHttpClient, DecompilerConfig, DraftUpload, EditorType, FileService, HttpClient,
-    IdGenerator, RawWorkData, Result, ResultExt, WorkFetcher, WorkInfo, create_draft,
+    IdGenerator, RawWorkData, Result, ResultExt, WorkFetcher, WorkInfo, batch_map, create_draft,
     supports_account_upload,
 };
 use crate::core::convert::shared::{DecompilerError, WorkId};
@@ -110,107 +110,44 @@ impl DecompileOptions {
     }
 }
 
-// 作品处理器注册表(注册表模式)
-/// fetcher 构造器:按作品类型创建对应的 `WorkFetcher`
-pub(crate) type FetcherFactory =
-    Box<dyn Fn(Box<dyn HttpClient>, Arc<DecompilerConfig>) -> Box<dyn WorkFetcher> + Send + Sync>;
-/// decompiler 构造器:按作品类型创建对应的 `WorkDecompiler`
-pub(crate) type DecompilerFactory =
-    Box<dyn Fn(&Arc<DecompilerConfig>) -> Box<dyn WorkDecompiler> + Send + Sync>;
+// 作品类型 → 处理器(静态分派)
+//
+// 这里原本是一张 `HashMap<EditorType, Box<dyn Fn(..) -> Box<dyn ..>>>` 注册表(工厂模式)。
+// 编辑器集合是**固定的 7 种**(由 `EditorType` 枚举穷尽),没有外部注册方,注册表只带来两层
+// 动态分派与两个工厂类型别名 ⇒ 换成 `match`,编译期穷尽性同时成为"新编辑器必须接线"的检查。
+// 作品类型集合见 `shared.rs::EditorType`(见 `docs/rounds/31` §3 A2)。
 
-/// 作品类型 → 处理器(fetcher/decompiler)的注册表
-/// 新增作品类型时只需 `register`,无需修改门面代码(开闭原则)
-pub(crate) struct WorkProcessorRegistry {
-    fetchers: HashMap<EditorType, FetcherFactory>,
-    decompilers: HashMap<EditorType, DecompilerFactory>,
-}
-
-impl WorkProcessorRegistry {
-    pub(crate) fn new() -> Self {
-        Self {
-            fetchers: HashMap::new(),
-            decompilers: HashMap::new(),
+/// 按作品类型构造抓取器
+fn fetcher_for(
+    work_type: EditorType,
+    client: Box<dyn HttpClient>,
+    config: Arc<DecompilerConfig>,
+) -> Box<dyn WorkFetcher> {
+    match work_type {
+        // Kitten2/3/4 共用同一套抓取与反编译
+        EditorType::Kitten2 | EditorType::Kitten3 | EditorType::Kitten4 => {
+            Box::new(KittenFetcher::new(client, config))
         }
-    }
-
-    /// 注册某一作品类型的 fetcher 与 decompiler 构造器
-    pub(crate) fn register(
-        &mut self,
-        work_type: EditorType,
-        fetcher: FetcherFactory,
-        decompiler: DecompilerFactory,
-    ) {
-        self.fetchers.insert(work_type, fetcher);
-        self.decompilers.insert(work_type, decompiler);
-    }
-
-    /// 按作品类型创建 fetcher
-    pub(crate) fn fetcher_for(
-        &self,
-        work_type: &EditorType,
-        client: Box<dyn HttpClient>,
-        config: Arc<DecompilerConfig>,
-    ) -> Result<Box<dyn WorkFetcher>> {
-        self.fetchers
-            .get(work_type)
-            .ok_or_else(|| DecompilerError::UnsupportedType(format!("{:?}", work_type)))
-            .map(|factory| factory(client, config))
-    }
-
-    /// 按作品类型创建 decompiler
-    pub(crate) fn decompiler_for(
-        &self,
-        work_type: &EditorType,
-        config: &Arc<DecompilerConfig>,
-    ) -> Result<Box<dyn WorkDecompiler>> {
-        self.decompilers
-            .get(work_type)
-            .ok_or_else(|| DecompilerError::UnsupportedType(format!("{:?}", work_type)))
-            .map(|factory| factory(config))
-    }
-
-    /// 内置全部作品类型的默认注册
-    fn with_defaults() -> Self {
-        let mut registry = Self::new();
-        // Kitten2/3/4 共用 KittenFetcher / KittenDecompiler
-        for wt in [
-            EditorType::Kitten2,
-            EditorType::Kitten3,
-            EditorType::Kitten4,
-        ] {
-            registry.register(
-                wt,
-                Box::new(|client, config| Box::new(KittenFetcher::new(client, config))),
-                Box::new(|_| Box::new(KittenDecompiler)),
-            );
-        }
-        registry.register(
-            EditorType::Neko,
-            Box::new(|client, config| Box::new(NekoFetcher::new(client, config))),
-            Box::new(|config| Box::new(NekoDecompiler::new(config.crypto_salt.as_slice()))),
-        );
-        registry.register(
-            EditorType::Nemo,
-            Box::new(|client, config| Box::new(NemoFetcher::new(client, config))),
-            Box::new(|_| Box::new(NemoDecompiler)),
-        );
-        registry.register(
-            EditorType::Wood,
-            Box::new(|client, config| Box::new(WoodFetcher::new(client, config))),
-            Box::new(|_| Box::new(WoodDecompiler)),
-        );
-        registry.register(
-            EditorType::Coco,
-            Box::new(|client, config| Box::new(CocoFetcher::new(client, config))),
-            Box::new(|_| Box::new(CocoDecompiler)),
-        );
-        registry
+        EditorType::Neko => Box::new(NekoFetcher::new(client, config)),
+        EditorType::Nemo => Box::new(NemoFetcher::new(client, config)),
+        EditorType::Wood => Box::new(WoodFetcher::new(client, config)),
+        EditorType::Coco => Box::new(CocoFetcher::new(client, config)),
     }
 }
 
-impl Default for WorkProcessorRegistry {
-    fn default() -> Self {
-        Self::with_defaults()
+/// 按作品类型构造反编译器
+fn decompiler_for(
+    work_type: EditorType,
+    config: &Arc<DecompilerConfig>,
+) -> Box<dyn WorkDecompiler> {
+    match work_type {
+        EditorType::Kitten2 | EditorType::Kitten3 | EditorType::Kitten4 => {
+            Box::new(KittenDecompiler)
+        }
+        EditorType::Neko => Box::new(NekoDecompiler::new(config.crypto_salt.as_slice())),
+        EditorType::Nemo => Box::new(NemoDecompiler),
+        EditorType::Wood => Box::new(WoodDecompiler),
+        EditorType::Coco => Box::new(CocoDecompiler),
     }
 }
 
@@ -230,7 +167,6 @@ pub struct CodemaoDecompiler {
     config: Arc<DecompilerConfig>,
     client: Arc<CodeMaoClient>,
     id_generator: IdGenerator,
-    registry: Arc<WorkProcessorRegistry>,
 }
 
 impl CodemaoDecompiler {
@@ -245,7 +181,6 @@ impl CodemaoDecompiler {
             config,
             client,
             id_generator: IdGenerator::new(),
-            registry: Arc::new(WorkProcessorRegistry::default()),
         }
     }
 
@@ -328,30 +263,16 @@ impl CodemaoDecompiler {
             "批量反编译并发预算:作品级 {concurrency} × 资源级 {} ≤ {RESOURCE_DOWNLOAD_BUDGET}",
             per_work.resource_concurrency
         );
-        // 按并发数分块,块内并发执行(thread::scope),块间顺序收集保持结果顺序
         let options_ref = &per_work;
-        let mut results = Vec::with_capacity(work_ids.len());
-        for chunk in work_ids.chunks(concurrency) {
-            let chunk_results: Vec<Result<DecompileOutcome>> = std::thread::scope(|scope| {
-                let handles: Vec<_> = chunk
-                    .iter()
-                    .map(|&id| scope.spawn(move || self.decompile_inner(id, options_ref)))
-                    .collect();
-                handles
-                    .into_iter()
-                    .map(|handle| {
-                        handle.join().unwrap_or_else(|_| {
-                            Err(DecompilerError::Other {
-                                msg: "反编译线程异常".to_string(),
-                                source: None,
-                            })
-                        })
-                    })
-                    .collect()
-            });
-            results.extend(chunk_results);
-        }
-        results
+        batch_map(
+            work_ids,
+            concurrency,
+            |&id| self.decompile_inner(id, options_ref),
+            || DecompilerError::Other {
+                msg: "反编译线程异常".to_string(),
+                source: None,
+            },
+        )
     }
 
     /// 反编译成**内存产物**(Kitten/NEKO 不落盘;方案 23 P0-2)
@@ -533,18 +454,13 @@ impl CodemaoDecompiler {
             .fetch_work_info(&*http_client, work_id)
             .with_context(|| format!("获取作品 {} 信息失败", work_id))?;
 
-        let fetcher = self
-            .registry
-            .fetcher_for(
-                &work_info.work_type,
-                http_client.clone(),
-                self.config.clone(),
-            )
-            .with_context(|| format!("不支持的{}作品类型", work_id))?;
-        let decompiler = self
-            .registry
-            .decompiler_for(&work_info.work_type, &self.config)
-            .with_context(|| format!("不支持的{}作品类型", work_id))?;
+        // 静态分派(见上方 `fetcher_for` / `decompiler_for`):7 种类型穷尽匹配,没有"不支持"分支
+        let fetcher = fetcher_for(
+            work_info.work_type,
+            http_client.clone(),
+            self.config.clone(),
+        );
+        let decompiler = decompiler_for(work_info.work_type, &self.config);
         let raw = fetcher
             .fetch(&work_info)
             .with_context(|| format!("获取作品 {} 原始数据失败", work_id))?;
@@ -561,14 +477,19 @@ impl CodemaoDecompiler {
                 .with_context(|| format!("保存作品 {} 原始数据失败", work_id))?;
         }
 
-        let context = DecompilerContextBuilder::new()
-            .output_dir(output_path)
-            .resources(options.resource_concurrency, !options.skip_resources)
-            .work_info(work_info)
-            .http_client(http_client)
-            .config(self.config.clone())
-            .id_generator(self.id_generator.clone())
-            .build()?;
+        // 直接构造(原先套了一层 builder:7 个 Option 字段 + 6 个 setter + 一个零调用的
+        // `Default`,只服务这一处构造 ⇒ 纯仪式,见 `docs/rounds/31` §3.6 骨架评审)
+        let config = self.config.clone();
+        let context = DecompilerContext {
+            output_dir: Some(output_path.to_path_buf()),
+            resource_concurrency: options.resource_concurrency.max(1),
+            download_resources: !options.skip_resources,
+            work_info,
+            http_client,
+            file_service: FileService::new(config.clone()),
+            id_generator: self.id_generator.clone(),
+            config,
+        };
 
         Ok((decompiler, raw, context))
     }
@@ -784,90 +705,6 @@ pub(crate) struct DecompilerContext {
     pub(crate) file_service: FileService,
     pub(crate) id_generator: IdGenerator,
     pub(crate) config: Arc<DecompilerConfig>,
-}
-
-// Context Builder
-pub(crate) struct DecompilerContextBuilder {
-    output_dir: Option<PathBuf>,
-    resource_concurrency: usize,
-    download_resources: bool,
-    work_info: Option<WorkInfo>,
-    http_client: Option<Box<dyn HttpClient>>,
-    config: Option<Arc<DecompilerConfig>>,
-    id_generator: Option<IdGenerator>,
-}
-
-impl Default for DecompilerContextBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl DecompilerContextBuilder {
-    pub(crate) fn new() -> Self {
-        Self {
-            output_dir: None,
-            resource_concurrency: 8,
-            download_resources: true,
-            work_info: None,
-            http_client: None,
-            config: None,
-            id_generator: None,
-        }
-    }
-
-    /// 资源下载并发数 / 是否下载资源(见 [`DecompileOptions`])
-    pub(crate) fn resources(mut self, concurrency: usize, download: bool) -> Self {
-        self.resource_concurrency = concurrency.max(1);
-        self.download_resources = download;
-        self
-    }
-
-    /// 本次调用的输出目录(自建目录树的反编译器用它当根)
-    pub(crate) fn output_dir(mut self, dir: impl Into<PathBuf>) -> Self {
-        self.output_dir = Some(dir.into());
-        self
-    }
-
-    pub(crate) fn work_info(mut self, info: WorkInfo) -> Self {
-        self.work_info = Some(info);
-        self
-    }
-
-    pub(crate) fn http_client(mut self, client: Box<dyn HttpClient>) -> Self {
-        self.http_client = Some(client);
-        self
-    }
-
-    pub(crate) fn config(mut self, config: Arc<DecompilerConfig>) -> Self {
-        self.config = Some(config);
-        self
-    }
-
-    pub(crate) fn id_generator(mut self, generator: IdGenerator) -> Self {
-        self.id_generator = Some(generator);
-        self
-    }
-
-    pub(crate) fn build(self) -> Result<DecompilerContext> {
-        let config = self.config.unwrap_or_default();
-        Ok(DecompilerContext {
-            output_dir: self.output_dir,
-            resource_concurrency: self.resource_concurrency,
-            download_resources: self.download_resources,
-            work_info: self.work_info.ok_or_else(|| DecompilerError::Other {
-                msg: "缺少work_info".into(),
-                source: None,
-            })?,
-            http_client: self.http_client.ok_or_else(|| DecompilerError::Other {
-                msg: "缺少http_client".into(),
-                source: None,
-            })?,
-            file_service: FileService::new(config.clone()),
-            id_generator: self.id_generator.unwrap_or_default(),
-            config,
-        })
-    }
 }
 
 // ===========================================================================

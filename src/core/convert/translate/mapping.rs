@@ -36,6 +36,7 @@
 //! - 影子 XML / mutation 的改写用字符串级手术(官方走 `DOMParser`+`XMLSerializer`):对良构输入
 //!   序列化字节等价(实测 jsdom 往返不变),畸形输入原样保留而不是产出 `parsererror` 文本。
 
+use crate::core::convert::shared::XHTML;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
@@ -67,7 +68,6 @@ const LANDSCAPE_WRAP_TYPES: &[&str] = &["self_go_forward", "self_move_to", "self
 
 const SHADOW_TEXT_MUTATION: &str =
     "<mutation xmlns=\"http://www.w3.org/1999/xhtml\" items=\"1\"></mutation>";
-pub(crate) const XHTML: &str = "http://www.w3.org/1999/xhtml";
 
 /// 官方 `createMutationForBlockType` 有专门 `handle*` 的 31 型(标题由字段拼词,我们只近似)
 #[rustfmt::skip]
@@ -287,7 +287,7 @@ fn translate_type(kind: &str) -> &str {
 }
 
 /// 是否 KN 的四种「文本占位积木」(降级产物)
-fn is_text_placeholder(kind: &str) -> bool {
+pub(crate) fn is_text_placeholder(kind: &str) -> bool {
     TEXT_PLACEHOLDER_BLOCKS.contains(&kind)
 }
 

@@ -180,26 +180,12 @@ pub fn translate_works(
             .collect();
     }
     let options_ref = &options;
-    let mut results = Vec::with_capacity(work_ids.len());
-    for chunk in work_ids.chunks(concurrency) {
-        let chunk_results: Vec<Result<TranslateOutcome, TranslateError>> =
-            std::thread::scope(|scope| {
-                let handles: Vec<_> = chunk
-                    .iter()
-                    .map(|&id| scope.spawn(move || translate_work(id, target, options_ref.clone())))
-                    .collect();
-                handles
-                    .into_iter()
-                    .map(|handle| {
-                        handle.join().unwrap_or_else(|_| {
-                            Err(TranslateError::InvalidArgument("转化线程异常".to_string()))
-                        })
-                    })
-                    .collect()
-            });
-        results.extend(chunk_results);
-    }
-    results
+    shared::batch_map(
+        work_ids,
+        concurrency,
+        |&id| translate_work(id, target, options_ref.clone()),
+        || TranslateError::InvalidArgument("转化线程异常".to_string()),
+    )
 }
 
 /// 上传源作品文件,返回可挂到产物 `source` 的 URL(见 [`set_source_reference_in`])
@@ -226,10 +212,7 @@ fn create_draft_work(
     let client = crate::utils::requests::CodeMaoClient::global().clone();
     let spec = DraftUpload {
         artifact: &outcome.output,
-        editor: match target {
-            TargetEditor::KittenN => EditorType::Neko,
-            TargetEditor::Kitten4 => EditorType::Kitten4,
-        },
+        editor: target.as_editor(),
         source_work_id,
         kind: "转化",
         save_path: "convert",

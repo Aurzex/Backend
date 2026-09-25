@@ -1,5 +1,6 @@
-use super::mapping::{XHTML, math_number_node, math_number_shadow, xml_attr_value};
+use super::mapping::{math_number_node, math_number_shadow, xml_attr_value};
 use super::{TranslateReport, TranslateWarning};
+use crate::core::convert::shared::XHTML;
 use crate::core::convert::shared::{DecompilerError, IdGenerator, Result};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::json;

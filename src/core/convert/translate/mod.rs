@@ -65,6 +65,33 @@ pub enum TargetEditor {
     Kitten4,
 }
 
+impl TargetEditor {
+    /// 该目标对应的编辑器类型 —— **域内唯一的 `TargetEditor → EditorType` 转换点**,
+    /// 消除散落的 `match`(见 `docs/rounds/31` §3 A4)
+    pub(crate) fn as_editor(self) -> EditorType {
+        match self {
+            TargetEditor::KittenN => EditorType::Neko,
+            TargetEditor::Kitten4 => EditorType::Kitten4,
+        }
+    }
+
+    /// 产物文件名中的目标标识
+    pub(crate) fn file_slug(self) -> &'static str {
+        match self {
+            TargetEditor::KittenN => "kn",
+            TargetEditor::Kitten4 => "kitten4",
+        }
+    }
+
+    /// 产物扩展名(不含点)
+    pub(crate) fn file_extension(self) -> &'static str {
+        match self {
+            TargetEditor::KittenN => "bcmkn",
+            TargetEditor::Kitten4 => "bcm4",
+        }
+    }
+}
+
 /// 舞台朝向(KN 只有两种画布尺寸;Kitten 侧要挑一个)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StageOrientation {
@@ -714,14 +741,8 @@ pub(crate) fn product_path(
 ) -> std::result::Result<std::path::PathBuf, TranslateError> {
     use crate::utils::filedata::PathConfig;
 
-    let slug = match target {
-        TargetEditor::KittenN => "kn",
-        TargetEditor::Kitten4 => "kitten4",
-    };
-    let ext = match target {
-        TargetEditor::KittenN => "bcmkn",
-        TargetEditor::Kitten4 => "bcm4",
-    };
+    let slug = target.file_slug();
+    let ext = target.file_extension();
     let stem = source_file
         .file_stem()
         .and_then(|s| s.to_str())

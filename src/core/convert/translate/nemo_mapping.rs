@@ -2,6 +2,11 @@ use super::TranslateReport;
 use super::TranslateWarning;
 use super::model::{BlockJson, BlockTree, IdSource};
 use super::nemo::XmlNode;
+use crate::core::convert::shared::XHTML;
+// 文本占位积木集合的唯一定义在生成物 `tables_gen`(原先此处手抄了一份逐字节相同的副本,
+// 见 `docs/rounds/31` §3.6 N1);谓词复用 `mapping` 的那一份
+use super::mapping::is_text_placeholder;
+use super::tables_gen::TEXT_PLACEHOLDER_BLOCKS;
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::LazyLock;
@@ -48,7 +53,6 @@ use std::sync::LazyLock;
 // 非数字时就会这样);这里同样**丢弃该键**,不落 `null`。
 
 /// 官方 `lI`:影子 / 变异 XML 的命名空间
-pub(crate) const XHTML: &str = "http://www.w3.org/1999/xhtml";
 
 /// 程序集类型:普通(官方 `iI.NORMAL`)
 pub(crate) const PROCEDURE_NORMAL: &str = "NORMAL";
@@ -217,12 +221,6 @@ const SPECIAL_BLOCK_TYPES: &[&str] = &[
 
 /// KN 的四种"文本占位积木"(降级产物)
 #[rustfmt::skip]
-const TEXT_PLACEHOLDERS: &[&str] = &[
-    "bcm_translator_text_execution_block",
-    "bcm_translator_text_event_block",
-    "bcm_translator_text_return_value_block",
-    "bcm_translator_text_return_boolean_block",
-];
 
 pub(crate) fn is_logic_compare_block(kind: &str) -> bool {
     LOGIC_COMPARE_BLOCKS.contains(&kind)
@@ -238,10 +236,6 @@ pub(crate) fn is_procedure_block(kind: &str) -> bool {
 
 fn is_special_block_type(kind: &str) -> bool {
     SPECIAL_BLOCK_TYPES.contains(&kind)
-}
-
-fn is_text_placeholder(kind: &str) -> bool {
-    TEXT_PLACEHOLDERS.contains(&kind)
 }
 
 fn is_procedure_call_block(kind: &str) -> bool {
