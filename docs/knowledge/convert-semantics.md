@@ -45,7 +45,7 @@ NEMO → KN 是另一条前端(`hI.parseBlocksXML`),官方管线共 12 步(`main
 ## 5. 反向(KN → Kitten4)是自建且有损
 
 - 逐条与正面对称反查(改名逆表、字段反查、槽位还原),但不变量只能靠**往返 + 预算断言**守。
-- **已知保真缺口**:inline `pure_list_get` 影子在往返中丢失,实体侧与定义体侧都出现(受影响定义 6 / 净减块 133,已写成断言,扩大会失败)。根因与后续研究见 `docs/rounds/28-*`。
+- **已知保真缺口**:inline `pure_list_get` 影子在往返中丢失,实体侧与定义体侧都出现(受影响定义 6 / 净减块 **21** —— 原记录的 133 里约 118 是测试口径把「调用树」当定义体的假象,见 `docs/rounds/32` §3.2;已写成断言,扩大会失败)。根因与后续研究见 `docs/rounds/28-*`。
 - **整作品实测(2026-09-26,真作品 `325806995` = `now但是1080P`,KN → Kitten4)**:
   告警 3 973 条按类别 = `未映射积木 643 · 丢弃实体属性 3 301 · 丢弃字段 12 · 重铸 id 17`
   (由 `tests/convert_live::kn_work_to_kitten4_file` 按类别打印)。
@@ -60,7 +60,7 @@ NEMO → KN 是另一条前端(`hI.parseBlocksXML`),官方管线共 12 步(`main
     `controls_if` 291 · `variables_set` 253 · `on_running_group_activated` 215),
     **不是属性丢失**;真正的实体键丢弃只有 ≈333 条(`comments` 113 · `editable` 112 · `deletable` 104 ——
     KN 实体的渲染标志,Kitten4 无此键;`rotation` 4)外加 5 条程序集形参类型。
-  - 因此**反向的产物丢失实际很小**;剩下可评估的是 round 28 的定义体积木类型差(6 / 21(旧口径 6 / 133,见第三十二轮 §3.2))与
+  - 因此**反向的产物丢失实际很小**;剩下可评估的是 round 28 的定义体积木类型差(**6 条定义 / 净减 21 块**,见 `docs/rounds/32` §3.2)与
     "类型歧义"这类**单向**信息损失(Kitten 原类型名不可恢复,但语义等价)。
   - ✅ **告警分类已修正**(2026-09-26):类型歧义原先借用 `DroppedProperty` 上报,类别标签「丢弃实体属性」与事实不符。
     现拆出独立变体 [`TranslateWarning::AmbiguousType`](`kind`/`candidates`/`chosen`),

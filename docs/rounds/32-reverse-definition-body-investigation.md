@@ -103,7 +103,7 @@ Kitten4 是 Scratch 派生的参数体系(字符串/标签),**没有 list 类型
 (Kitten4 参数体系没有 list 类型,见 §2);其余 ~15 块分散在 `script_variables`/`break`/`repeat_n_times`/
 `logic_compare`/`callnoreturn`/`temporary_list` 上。
 
-**预算已按 round 28 §4.3 收紧**:`affected <= 6 && deficit <= 21`(原 6 / 21(旧口径 6 / 133,见第三十二轮 §3.2)),并在断言里写明口径变更。
+**预算已按 round 28 §4.3 收紧**:`affected <= 6 && deficit <= 21`(原为 6 / 133),并在断言里写明口径变更的原因。
 
 ## 4. 下一步(必须先拿中间态,再谈修)
 
@@ -112,7 +112,7 @@ Kitten4 是 Scratch 派生的参数体系(字符串/标签),**没有 list 类型
    (`assembly.rs` 的 `def_root_from_entry` / `entities[index].tree.roots.push(root)` 一带)。
 2. **最小复现**:把那条定义(及其宿主实体)从作品里切出来做成夹具(`tests/fixtures/`),
    让修复有秒级反馈(现在每次都要跑 3.4 MB 真作品)。
-3. 定位后再决定:若确为实现缺陷 ⇒ 修 + 把预算从 `affected<=6 && deficit<=133` **收紧到 0**
+3. 定位后再决定:若确为实现缺陷 ⇒ 修 + 把预算从 `affected<=6 && deficit<=21` **收紧到 0**
    (`docs/rounds/28` §4.3);若属结构性(如 List 参数)⇒ 从预算里剔除并写明理由。
 
 > **不做**:不动 `docs/rounds/28`(历史保真);不在没有中间态证据前改反向映射(那是本域风险最高的代码)。
