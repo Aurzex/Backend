@@ -349,3 +349,61 @@
 | `translate/assembly.rs` | `finish 763 + kitten4_finish 667` | ~1430 | 2 → 1 |
 | **生产合计**(不含生成物/内联测试) | **9 801** | **≈9 600(删死代码后)** | 34 → 16 文件 |
 | `translate/tests/*` | 2 855 | ~2 900 | 7 处内联 + 1 外置 → 3 文件 |
+
+---
+
+## 8. 实施记录(2026-09-25)
+
+### 8.1 S1 死代码 + P0 + 去重 + 一致性 + 性能(5 提交,已完成)
+
+| 提交 | 内容 | 验证 |
+| ---- | ---- | ---- |
+| `ff887d1` S1.1 | 删零引用代码块:blockjson 6 方法 + 不可达兜底、`EditorType` 5 谓词、`WorkInfo` 3 字段、`ValueExt` 6 方法、`BlockBehavior`/`BlockDecompilerBehavior`/`BlockDecompilerFactory`、`ParsedEntity.comments`、`client_secret`、`file_service` 注入、恒 `Ok` 的 `Result`、反向未读的 `ids` 参数;D12 插槽命名合一 | 62 单测 |
+| `917fa8e` S1.2 | P0-1 staging 竞态(每作品每次调用独立子目录 + 失败也清理);P0-3 删掉 `neko::attr_value` 弱化版改用 `mapping::xml_attr_value`;P0-4 云列表不对称补注释;两个回归测试 | 64 单测 + convert_live/compile_live |
+| `7b1c77c` S1.3 | 去重:`num`/`truthy`/`project_name_at`/`XHTML`/`math_number_node` 收敛为唯一实现;D11 `referenced_ids` 合一并改**对象-only + 遇字符串显式报错** | 64 单测;真样本 462 块上新旧集合逐一相等、插槽名与旧枚举全组合相同 |
+| `c4d22f7` S1.4 | C3 新增 `ReuploadedOnImport`(非有损,`is_lossy` 豁免);`keep_source` 接线(官方「保留原件」);草稿名修正;`detect_editor` 说明;C7 可见性收紧;C10 死回退;C2 文案中立 | 66 单测 + 真机离线门 |
+| `d28f872` S1.5b | F2 去热路径分配;F3 `BCMKNDecryptor` 并入 `CryptoService` + salt 用 `Arc` + NEKO 扩展名走表;C9 `cloudvar::EditorType` → `CloudEditorType`;T3 测试落盘目录唯一化 | 66 单测 + 三个真机门 |
+| `caf5daa` S1.5a | F1 正向查表改 `LazyLock<HashMap>`(6 个索引,`or_insert` = 首个命中) | 全表键逐一等价;真夹具正向管线 1.739ms → 1.487ms/轮(-15%) |
+
+### 8.2 S2 文件合并:34 → **18** 个生产文件(已完成主体)
+
+| 提交 | 合并 | 结果 |
+| ---- | ---- | ---- |
+| `3cad268` | `report.rs` → `translate/mod.rs` | -1 |
+| `e70b06b` | `blockjson.rs` + `ids.rs` → `translate/model.rs` | -1 |
+| `9858b8b` | `finish.rs` + `kitten4_finish.rs` → `translate/assembly.rs` | -1 |
+| D7/D8 | 主题表合一为 `VAR_STYLE_TABLE`;坐标公式不合并、同文件相邻 + 互逆说明 | — |
+| S2.2a | `{context,contract}.rs` → `decompile/mod.rs` | -2 |
+| S2.2b | `blocks/{mod,core,special}` → `decompile/blocks.rs` | -2 |
+| S2.2c | `editors/{coco,neko,wood}` → `editors/simple.rs`;`editors/kitten/{mod,decompiler,xml}` → `editors/kitten.rs` | -4 |
+| S2.2d | `shared/` 9 → 5(`infra.rs` 收 crypto/http/json/FileService;`model.rs` 收 fetch/IdGenerator;`config.rs` 收 shadow) | -4 |
+
+最终:`convert/mod.rs`、`convert/shared/{mod,error,model,config,infra}.rs`、`convert/decompile/{mod,blocks,editors/{mod,kitten,nemo,simple}}.rs`、`convert/translate/{mod,model,kitten,neko,mapping,assembly}.rs` = **18 个生产文件**(+生成物 `tables_gen.rs`、测试 `reverse_tests.rs`)。
+
+### 8.3 执行中与方案的偏差(按证据调整)
+
+| 项 | 方案 | 实际 | 理由 |
+| -- | ---- | ---- | ---- |
+| D2 强转族 | 合一 `truthy/as_text/as_number/value_key/field_text` | 只合一 `truthy`(+`num`) | 实测 `js_text`/`text`/`field_text` 对 `undefined`/`null`/数字 0 的处理**本来就不同**(各自照抄官方不同分支),合并会改行为 |
+| D5~D9 | 全部合一 | D5/D6/D7 合一,D8 改为同文件对照 | 坐标两式参数形态与 `num()` 取整口径不同,强行抽象掩盖差异(与「不为对称而合并」一致) |
+| D11 | 字符串与对象都识别 | **对象-only** + 字符串显式报错 | 真样本 462 块 4 256 处引用无一是字符串(字符串 id 属编辑版 `connections`);静默容错会让格式漂移变成"少积木不报错" |
+| C4 `detect_editor` | 增加 Kitten2 判据 | 只补说明,不加判据 | 本地无 Kitten2 样本、`docs/20` 无区分标记,且 2/3 都不支持转化;不编造判据 |
+| C8 双 `pub use` 链 | 合并为一条 | 保持两层(内部再导出 + 对外门面) | 11 个文件按 `shared::{...}` 取用;合并只会让导入更啰嗦,两层分工明确已加注释 |
+| keep_source | `TranslateOptions` 加字段、装配时写 `source` | `convert` 编排上传 + `translate::set_source_reference` 纯函数 | 避免"先上传再转化"的失败浪费,并保持 `translate` 不碰网络(分层纪律) |
+| S2.3 测试抽取 | 内联测试抽到 `translate/tests/*` | **不做** | 被抽测试大量访问**私有项**,搬出文件必须放宽可见性(与 C7 直接冲突);Rust 惯例本就是同文件 `#[cfg(test)]`。改为规则:测试模块一律放文件末尾(已对 `assembly.rs` 执行,消除 clippy `items_after_test_module`) |
+| `decompile/engine.rs` | mod+context+contract 合成 engine.rs | 并入 `decompile/mod.rs` | 少一层门面文件,引用改写面更小,文件数收益相同 |
+| `shared.rs` 单文件 | shared → 1 文件 | shared 保留 5 文件 | config(565 行大表)/infra(工具)/model(模型)关注点差异大,合一个文件变杂物箱 |
+
+### 8.4 新发现(本轮记录,未修)
+
+| # | 发现 | 证据 | 影响 |
+| - | ---- | ---- | ---- |
+| N1 | **约 9 MB 作品的 CDN 上传在全局 30s 超时下必失败**,源文件与产物上传同样超时 | 探针:`上传失败 31.2s → Http(Timeout(Global))` / `35.5s`;`requests.rs:272` 全局 30s | `translate_work(upload=true)` 在慢网+大作品下不可用;`keep_source` 的源文件上传也受影响(失败降级为日志,不影响产物)。建议另开一轮:上传走独立超时或分片 |
+| N2 | `keep_source` 上传的是**反编译重建的编辑版**,官方上传原始文件字节 | `docs/20:156`;`convert/mod.rs::attach_source_reference` 注释 | 平台的「保留原件」若要能回打开原件,需拿到作品原始文件字节(当前管线不保留) |
+
+### 8.5 剩余
+
+- **S3.2** `StageOrientation` 语义与文档对齐(C6:`kitten4_position` 实际按画布缩放坐标、`kitten4_variables` 的 `let _ = landscape`);
+- **S3.3** 补覆盖缺口:正向 `strict`、显式 `StageOrientation`、`translate_works` 并发、NEMO/WOOD 自定义输出目录(最后一条已随 S3.1 真机覆盖);
+- **S4** README/docs/20 的路径锚点同步(本轮改了文件结构:README 未涉及 convert 文件路径,`docs/20` 的目录树段落已过时);
+- N1/N2 建议单开一轮。
