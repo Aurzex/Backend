@@ -136,3 +136,49 @@ NEMO 只需要换**前端**与**映射表**,后端与装配**完全复用**:
 ⇒ 这不是"顺手加一个方向",而是一个**独立轮次**(与 `docs/20` 当年做 Kitten→KN 的体量相当)。
 因此本轮的执行边界调整为:**R1–R5 研究先把"官方产物夹具 + 表 + 结构合成规则 + validateBcm 可行性"备齐**,
 Rust 侧实现留到研究结论到手后再开工(见 §5 的 S1–S4,顺序不变)。
+
+---
+
+## 9. 前置研究 R1–R4 结论(2026-09-25,已达成;工件在 `temp/harness/`,不入库)
+
+### 9.1 已跑通的东西
+
+| 项 | 结果 |
+| -- | ---- |
+| harness(契约) | `temp/harness/harness.js`:`require(id)` 首次调用自动 boot(幂等);`require(87123)` → 39 个导出含 `validateBcm`;`require(41888)` → `nemoBcmToNekoBcmUtils`/`kittenBcmToNekoBcmUtils`。**本仓契约测试已真跑并通过** |
+| 真作品 1 | `蛋仔派对2…_194684070`(NEMO 0.16.2;847 角色 / 38 场景 / 2101 造型):输入 15 482 块 → 官方 KN 13 637 块,**`validateBcm → true`**,623 个实体与官方解析器**交叉核对 0 处不一致** |
+| 真作品 2 | 公开作品 103791894「无限战争 2021」(0.11.0;280 角色):4 862 → 4 421 块,**`validateBcm → true`**,241 实体 0 不一致 |
+| 我们的产物 | 本仓 Rust 的 Kitten4→KN 产物经同一 `validateBcm` 判定 **VALID**(契约测试通过;这是本仓最强的门,以前因缺 harness 一直跳过) |
+
+工件:`map-tables.json` / `tables-output.txt`(映射表 + 产品交叉核对)、`doc-transforms-output.txt`(40 项文档级变换检查)、`nemo_parser.js`(官方 NEMO XML 解析器探针)、`fetch_nemo.js`。
+
+### 9.2 必须修正的方案假设(研究直接推翻的)
+
+| 原方案说法 | 实际(研究证据) | 修正 |
+| ---------- | --------------- | ---- |
+| 映射表是"块类型 → 块类型" | **部分是取值驱动的**:`mobile__get`(按 `attribute` 0/1/2/3/5 分成 `coordinate_of_sprite`/`style_of_sprite`/`appearance_of_sprite`)、`self_stress_animation`(按 `appear` 取值)、`get_styles`(无 `currentActor` 时 `style_id → NUM`) | 表要**带谓词**,不能平铺 |
+| 前端"产出 `BlockJson` 树"即可 | 官方产物**保留原始 `blocksXML` 原样**,同时**并行**生成 camelCase(`position`/`currentStyleId`/`nekoBlockJsonList`/`workspaceScrollXy`/`actorIds`/`centerPoint`)⇒ **双形态** | 前端必须同时保留 snake_case 原字段 |
+| 未映射块进 `TranslateReport` | 官方**降级成占位积木**(`bcm_translator_text_execution_block`/`_return_value_block`,两份作品共 16 处) | 与官方一致产占位(同时记报告) |
+| 未提版本迁移 | `bcm_version < 0.9.4`(**QC**:角色 rotation 取反、旧音频块 XML 重写、变量坐标按舞台中心平移)与 `< 0.15.0`(**YC**:旧音频块 XML 重写) | 列为显式任务(两份样本只覆盖 YC,QC 未测到) |
+| 资源"重传再改写" | `WN` **只改写 url**:造型 → `https://static.codemao.cn/nemo/22/` 前缀 + `.webp` 追加 `?imageView2/0/format/png`;音频同理且 `ext=mid` 置空。**重传是编辑器外围流程**(`main.js` 调用点)不是 `WN` | 沿用"离线近似保留 url","重传"当可选步骤 |
+| 未提槽位语义 | `<value>` 里 shadow/empty 与覆盖它的 `<block>` 同时存在时:`inputs[key]` = 块节点,`shadows[key]` = **重新序列化**的 shadow XML(`xmlns=xhtml`、**新 uuid**) | 前端按此实现 |
+| 确定性 | 官方 blockJson id 是**随机 uuid**、缺失 `createTime` 用 `Date.now()` ⇒ 官方 diff **必须忽略 id/location/createTime**(`docs/20 §618` 早已如此) | 我们仍走 `deterministic_ids`,但差异门按语义比 |
+
+### 9.3 官方管线的 12 步(移植顺序,`main-vendors` ~6000071 的 `gI`)
+
+版本迁移(可选)→ 新建 KN 骨架 → `procedure_dict` → `proceduresDict` → 逐 actor/scene `parseBlocksXML`
+→ 场景命名/排序 → 音频 url 规则 → 造型 url 规则 → broadcast 按场景重组 → 变量重定心与类型映射
+→ `stageSize` 归一化 → `timerPosition`/`extension`/`projectName`。
+
+**KN 侧由转换器合成的默认值**(研究已逐条验证):`self_appear.value=appear`、`self_disappear → self_appear+value=disappear`、
+`self_gradually_*.show_hide`、`self_change_coordinate_*/.increase=increase`、`mouse_down.sprite=--screen`、
+`stamp.align`、`self_listen/self_broadcast` 的 `inputs.message`(broadcast_input shadow)、列表块的 `inputs.list`(pure_list_get shadow)、
+`procedures_2_*` 的 mutation 字符串与 `PROCEDURES_2_DEFRETURN_RETURN/VALUE` shadow 槽位。
+
+### 9.4 对 §5 阶段的影响
+
+- S1(前端)要加"XML→`BlockJson`(含 shadow/empty/覆盖语义)+ 双形态文档"两件事,工作量比原估大;
+- S2(映射)要带谓词 + 合成默认值 + 占位降级;
+- **新增 S1.5**:版本迁移(QC/YC)—— 老作品不做迁移会直接产出与官方不同的产物;
+- S3(资源)按 §9.2 的 url 规则即可,不再需要上传;
+- 验收换成本文 §9.1 的两份真作品 + `validateBcm` 硬门 + 与 `temp/harness/out-*.json` 的语义 diff(忽略 id/location/createTime)。

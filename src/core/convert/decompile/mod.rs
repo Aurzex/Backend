@@ -11,7 +11,7 @@ use crate::core::convert::shared::{
 };
 use crate::core::convert::shared::{DecompilerError, WorkId};
 use crate::utils::requests::CodeMaoClient;
-use log::{info, warn};
+use log::{debug, info, warn};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -252,8 +252,25 @@ impl CodemaoDecompiler {
                 .map(|&id| self.decompile_inner(id, &options))
                 .collect();
         }
+        // 两级并发预算:**资源下载是 I/O 密集(RTT 主导),上限必须是固定常量而不是核数**。
+        //
+        // `docs/22` §3 实测(同一 NEMO 作品):并发 1 = 402s、8 = 103s、16 = 92s、
+        // **32 = 127s 且被 CDN 限流丢了 2 个文件**。所以:
+        // - 按 `available_parallelism` 折算会两头都错:低核机器折到近串行、高核机器放宽到限流区;
+        // - 正确做法是把"作品级 × 单作品资源级"的**总线程数**封在 16
+        //   (即 `batch=4` 时每个作品 4 个下载线程,而不是 4×8=32)。
+        // 默认 `batch_concurrency = 1`(单作品 8)时本折算不退化为任何变化。
+        let mut per_work = options.clone();
+        per_work.resource_concurrency = options
+            .resource_concurrency
+            .max(1)
+            .min((RESOURCE_DOWNLOAD_BUDGET / concurrency).max(1));
+        debug!(
+            "批量反编译并发预算:作品级 {concurrency} × 资源级 {} ≤ {RESOURCE_DOWNLOAD_BUDGET}",
+            per_work.resource_concurrency
+        );
         // 按并发数分块,块内并发执行(thread::scope),块间顺序收集保持结果顺序
-        let options_ref = &options;
+        let options_ref = &per_work;
         let mut results = Vec::with_capacity(work_ids.len());
         for chunk in work_ids.chunks(concurrency) {
             let chunk_results: Vec<Result<PathBuf>> = std::thread::scope(|scope| {
@@ -490,6 +507,12 @@ pub(crate) struct ResourceTask {
 /// - **按 url 去重**:同一 url 在多个造型/素材里复用时只下一次;
 /// - **跳过已存在且非空的文件**:重跑/断点续传接近零成本(内容寻址命名下同名即同内容)。
 ///
+/// 资源下载的**总线程预算**(作品级 × 单作品资源级的上限)。
+///
+/// 取值依据:`docs/22` §3 的实测曲线(8 = 103s、16 = 92s、32 = 127s 且 CDN 限流丢文件),
+/// 最优区间 8–16;下载耗时几乎全在请求数 × RTT,与核数无关,所以这里是**固定常量**。
+const RESOURCE_DOWNLOAD_BUDGET: usize = 16;
+
 /// `concurrency` 来自 [`DecompileOptions::resource_concurrency`]。
 pub(crate) fn download_resources_parallel(
     client: &dyn HttpClient,

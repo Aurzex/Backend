@@ -1,5 +1,5 @@
 use log::debug;
-use serde_json::{Value, to_string_pretty};
+use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -9,8 +9,6 @@ use thiserror::Error;
 pub enum FileError {
     #[error("I/O 错误: {0}")]
     Io(#[from] std::io::Error),
-    #[error("JSON 序列化错误: {0}")]
-    Json(#[from] serde_json::Error),
 }
 
 // 路径配置(可自定义根目录)
@@ -71,71 +69,16 @@ impl PathConfig {
         self.download_dir().join("convert")
     }
 
-    /// 小说文件路径
-    pub fn fiction_file_path(&self) -> PathBuf {
-        self.download_dir().join("fiction")
-    }
-
-    /// Token 文件路径
-    pub fn token_file_path(&self) -> PathBuf {
-        self.data_dir().join("token.txt")
-    }
-
     /// 密码文件路径
     pub fn password_file_path(&self) -> PathBuf {
         self.data_dir().join("password.txt")
     }
 
-    /// 确保所有需要的目录存在
-    pub fn ensure_directories(&self) -> Result<(), FileError> {
-        debug!("创建必要的目录结构 (root: {:?})", self.root);
-        fs::create_dir_all(self.cache_dir())?;
-        fs::create_dir_all(self.data_dir())?;
-        fs::create_dir_all(self.download_dir())?;
-        Ok(())
-    }
 }
 
-// 文件内容类型
-/// 表示要写入文件的不同内容形式
-pub enum FileContent {
-    /// 普通文本
-    Text(String),
-    /// 二进制数据
-    Bytes(Vec<u8>),
-    /// JSON 值(会格式化为美化文本)
-    Json(Value),
-    /// 多行文本,会以换行符连接
-    Lines(Vec<String>),
-}
-
-// 文件写入工具
-/// 封装了基于 `FileContent` 的安全文件写入操作
-/// 所有写入方法都会自动创建父目录,并记录相应日志
 pub struct CodeMaoFile;
 
 impl CodeMaoFile {
-    /// 将 `FileContent` 写入到指定路径,根据内容类型自动选择写入模式
-    /// 此方法为统一入口,内部委托给具体类型方法
-    pub fn file_write(path: &Path, content: &FileContent) -> Result<(), FileError> {
-        match content {
-            FileContent::Text(s) => Self::write_text(path, s),
-            FileContent::Bytes(b) => Self::write_bytes(path, b),
-            FileContent::Json(obj) => Self::write_json(path, obj),
-            FileContent::Lines(lines) => Self::write_lines(path, lines),
-        }
-    }
-
-    /// 写入普通文本字符串
-    pub fn write_text(path: &Path, text: &str) -> Result<(), FileError> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        debug!("写入文本文件: {:?} ({} 字符)", path, text.len());
-        fs::write(path, text)?;
-        Ok(())
-    }
-
     /// 写入字节数组
     pub fn write_bytes(path: &Path, data: &[u8]) -> Result<(), FileError> {
         if let Some(parent) = path.parent() {
@@ -146,17 +89,6 @@ impl CodeMaoFile {
         Ok(())
     }
 
-    /// 将 JSON 值序列化为美化的字符串后写入
-    pub fn write_json(path: &Path, value: &Value) -> Result<(), FileError> {
-        let json_str = to_string_pretty(value)?;
-        Self::write_text(path, &json_str)
-    }
-
-    /// 将字符串数组以换行符连接后写入文本文件
-    pub fn write_lines(path: &Path, lines: &[String]) -> Result<(), FileError> {
-        let content = lines.join("\n");
-        Self::write_text(path, &content)
-    }
 }
 
 /// 将 JSON 值转为 i64(数字直接取,字符串尝试解析)
