@@ -245,6 +245,6 @@ fn manager_new_with_client_uses_injected_client() {
 ## Assumptions & contingencies
 
 - **`WorkType`/`KittenVersion` 判别值一致**:已读取两处定义确认完全一致(均为 `Kitten=1,Nemo=3,CodeGame=5` 与 `{V3,V4}`)。若实现时发现某处被第三方外部 crate 以 `backend::api::work::WorkType` 路径引用(仓内 grep 已确认零引用),无需保留兼容别名——用户已授权破坏性变更,直接删除。
-- **`KittyFactory` 处置**:`docs/12` 记载其为「冗余门面,被多处引用,非死代码」。Phase 2 只移除其唯一与全局强耦合的使用(`KittyFactory::global_client()`);若改后 `grep -rn "KittyFactory" src/` 返回 0,则删除该 struct 及其 impl(遵守 `CONTRIBUTING.md`「全仓确证零调用点才删」);若仍有调用点,保留不动,不阻塞。
+- **`KittyFactory` 处置**:`docs/rounds/12` 记载其为「冗余门面,被多处引用,非死代码」。Phase 2 只移除其唯一与全局强耦合的使用(`KittyFactory::global_client()`);若改后 `grep -rn "KittyFactory" src/` 返回 0,则删除该 struct 及其 impl(遵守 `CONTRIBUTING.md`「全仓确证零调用点才删」);若仍有调用点,保留不动,不阻塞。
 - **`CodeMaoClient::new(config)` 删除安全性**:已 grep 确证 `CodeMaoClient::new(` 全仓仅命中定义本身,零调用点;`use_global_auth` 仅被 `new()` 读取。删除无外部影响。
 - **`SocketError` 放置位置**:若 `src/utils/socketio.rs` 未直接依赖 `serde_json`/`std::sync::mpsc`(其已解析 tungstenite 帧,必然依赖 tungstenite;serde_json 为全仓公共依赖),按需补 `use` 即可,不新增 Cargo 依赖。

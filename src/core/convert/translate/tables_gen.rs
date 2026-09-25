@@ -1050,7 +1050,7 @@ pub(crate) const KITTEN_MUTATION_TEXT: &[(&str, &str)] = &[
     ("wood_block_set", "海龟函数{value}"),
 ];
 
-/// `RC` 里由官方 handler 按字段选词的部分(我们按选择器近似,见 docs/20 已知偏差)
+/// `RC` 里由官方 handler 按字段选词的部分(我们按选择器近似,见 docs/rounds/20 已知偏差)
 pub(crate) const KITTEN_MUTATION_TEXT_SELECT: &[(&str, &[(&str, &str)])] = &[
     (
         "change_volume_or_rate_2",

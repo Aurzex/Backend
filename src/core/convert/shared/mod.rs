@@ -20,5 +20,5 @@ pub(crate) use model::{IdGenerator, RawWorkData, WorkFetcher, WorkInfo};
 // 门面项(`convert/mod.rs` 对外再导出,保持 `pub` 可见性)
 pub use error::DecompilerError;
 pub use model::WorkId;
-// 编辑器枚举:两子域公开面都要用,`EditorType` 对外暴露(见 docs/20 §6.1 D3)
+// 编辑器枚举:两子域公开面都要用,`EditorType` 对外暴露(见 docs/rounds/20 §6.1 D3)
 pub use model::EditorType;

@@ -1,7 +1,7 @@
 //! 编辑器间互相转化:Kitten4 `.bcm4` ⇄ KittenN `.bcmkn`,以及 **NEMO → KittenN**(单向,
-//! 方案见 `docs/27-nemo-to-kn-conversion-plan.md`)。
+//! 方案见 `docs/rounds/27-nemo-to-kn-conversion-plan.md`)。
 //!
-//! 管线(正向与官方编辑器一致,见 `docs/20-kitten-kn-work-conversion-plan.md` §3.2/§3.3/§6.2;
+//! 管线(正向与官方编辑器一致,见 `docs/rounds/20-kitten-kn-work-conversion-plan.md` §3.2/§3.3/§6.2;
 //! 反向是本项目自建,见同一文档 §4):
 //!
 //! ```text
@@ -19,7 +19,7 @@
 //! | NEMO → KN | [`nemo::prepare_blocks_xml`](`nemo_xml` 解析 + 版本迁移 + 9 个前置改写) | [`nemo_mapping::translate_nemo_to_kn`](官方把映射折进解析,见该模块文档) | 不需要(程序集在解析器内就位) | [`nemo::convert_nemo_document`] |
 //!
 //! 三条路的**不变量**相同:产物是能过官方 `validateBcm` 的 `.bcmkn`;有损之处一律进
-//! [`TranslateReport`]。NEMO 侧只有 `bcm_version` 这个额外输入(老作品要迁移,`docs/27` §9.3),
+//! [`TranslateReport`]。NEMO 侧只有 `bcm_version` 这个额外输入(老作品要迁移,`docs/rounds/27` §9.3),
 //! 走 [`TranslateOptions::source_version`]。
 //!
 //! 分层纪律:
@@ -447,7 +447,7 @@ pub(crate) fn convert_kitten4_document(
     let started = std::time::Instant::now();
 
     // 官方 GN 第一行就读 `size`,Kitten2/3(`.bcm` + blocksXML)没有它 —— 直接给明确错误,
-    // 而不是像官方那样抛 TypeError(见 docs/20 §1/§11.1)。
+    // 而不是像官方那样抛 TypeError(见 docs/rounds/20 §1/§11.1)。
     let size = source.get("size").ok_or_else(|| {
         TranslateError::InvalidArgument(
             "源作品没有 size 字段:这看起来是 Kitten2/3(.bcm/blocksXML)作品,本库暂不支持该方向"
@@ -754,11 +754,11 @@ pub fn set_source_reference_in(
 /// 把源作品文件引用写进**已产出**的 KN 文档顶层 `source` 字段。
 ///
 /// 官方做法:KN 编辑器导入 Kitten 作品时,把原始 Kitten 文件字节重新上传,
-/// 并把 URL 写到 KN 作品的 `source`(即"保留原件",见 `docs/20` §3.1 的 `w.source = T`)。
+/// 并把 URL 写到 KN 作品的 `source`(即"保留原件",见 `docs/rounds/20` §3.1 的 `w.source = T`)。
 /// 这里只做**纯文件改写**,上传由 `convert` 门面编排(保持本子域不碰网络)。
 ///
 /// 已知偏差:我们手里只有反编译重建的编辑版,官方上传的是原始文件字节
-/// (见 `docs/21` §4-10)。
+/// (见 `docs/rounds/21` §4-10)。
 ///
 /// 域内编排([`crate::core::convert::translate_work`])走 [`set_source_reference_in`]
 /// 直接改内存文档,不读回-写回产物文件(方案 23 P0-2)。
@@ -783,8 +783,8 @@ pub fn set_source_reference(
 
 /// 识别源作品属于哪个编辑器(按顶层结构判定,不用扩展名)。
 ///
-/// Kitten2 与 Kitten3 的编辑版都是 `blocksXML`,本地样本与 `docs/20` 都没有可靠的
-/// 区分标记,而**两者都不支持转化**(编辑器自己会拒绝,见 `docs/20` §3.1),
+/// Kitten2 与 Kitten3 的编辑版都是 `blocksXML`,本地样本与 `docs/rounds/20` 都没有可靠的
+/// 区分标记,而**两者都不支持转化**(编辑器自己会拒绝,见 `docs/rounds/20` §3.1),
 /// 故统一按 Kitten3 报;不编造 `size` 之类的判据。
 pub(crate) fn detect_editor(
     source: &serde_json::Value,
@@ -990,11 +990,11 @@ pub(crate) fn unique_test_dir(tag: &str) -> std::path::PathBuf {
 
 #[cfg(test)]
 mod diff_tests {
-    //! 与官方产物对齐的差分门(docs/20 §7 Phase 2 验收)。
+    //! 与官方产物对齐的差分门(docs/rounds/20 §7 Phase 2 验收)。
     //!
     //! 夹具 `tests/fixtures/translate/geoduel_scene_actor.json` 里是**真实作品**的
     //! 「Kitten4 输入 block_data_json」与「官方 `kittenBcmToNekoBcmUtils` 输出」成对切片
-    //! (来自 `temp/baseline/out-kitten4.json`,基线 bundle sha256 见 docs/20 附录 C)。
+    //! (来自 `temp/baseline/out-kitten4.json`,基线 bundle sha256 见 docs/rounds/20 附录 C)。
     //!
     //! 比较口径(为什么不做整段 JSON diff):
     //! - 官方新建节点(shadow 实体化、`pure_list_get`、`math_arithmetic` 包裹)拿不到稳定 id → 按类型计数比较;
@@ -1674,7 +1674,7 @@ mod forward_parallel_tests {
     /// 真作品差分门(缺样本即跳过,与仓库其它真机测试同约定):自造文档挡不住"只有真作品
     /// 里才有的铸造点",所以对真实 `.bcm4` 再做一次三方逐字节对照。
     ///
-    /// 这条门正是抓出"阶段 1 与阶段 2 记账槽位撞车"的那条(见 `docs/25` §9.3)。
+    /// 这条门正是抓出"阶段 1 与阶段 2 记账槽位撞车"的那条(见 `docs/rounds/25` §9.3)。
     #[test]
     fn real_work_matches_serial_reference_when_sample_present() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

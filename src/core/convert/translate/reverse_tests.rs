@@ -5,7 +5,7 @@ use super::*;
 
 mod reverse_tests_inner {
     //! 反向(KN → Kitten4)单测:类型/字段/槽位反演、`KC`/`zC` 的逆、邻接表往返、
-    //! 以及「KN → Kitten4 → KN 类型多重集守恒」(docs/20 §7 Phase 4 验收)。
+    //! 以及「KN → Kitten4 → KN 类型多重集守恒」(docs/rounds/20 §7 Phase 4 验收)。
 
     use super::assembly::*;
     use super::*;
@@ -902,7 +902,7 @@ mod reverse_tests_inner {
             // ① 横屏坐标包装(math_arithmetic + math_number 成对);
             // ② KN 原生 `calculate` 在正向被降级成文本占位积木(1:1)
             // ③ 已知保真缺口(本测试抓到,未修):inline `pure_list_get` 影子在往返里丢失,
-            //    实体侧与定义体侧都出现(见 `docs/28`)
+            //    实体侧与定义体侧都出现(见 `docs/rounds/28`)
             let allowed_entity = [
                 "math_arithmetic:",
                 "math_number:",
@@ -986,7 +986,7 @@ mod reverse_tests_inner {
             }
             // **预算断言(只许变小)**:今天 `Node VM v3` 是 6 个定义 / 净减 133 块,
             // `now` 是 0 / 0。变大就是回退 —— 这批缺口本身**已知未修**,
-            // 根因、证据与后续研究步骤见 `docs/28-convert-reverse-fidelity-gaps.md`。
+            // 根因、证据与后续研究步骤见 `docs/rounds/28-convert-reverse-fidelity-gaps.md`。
             assert!(
                 affected <= 6 && deficit <= 133,
                 "{label}:反向保真缺口扩大(受影响定义 {affected}/{}，净减块 {deficit};基线 6 / 133)",
@@ -1251,7 +1251,7 @@ mod reverse_tests_inner {
     }
 
     /// `translate_file(input, TargetEditor::Kitten4)` 必须真能读 `.bcmkn` 并落盘 `.bcm4`
-    /// **实体级并行的前置守门**(docs/25 §8):多实体 + 程序集定义,不依赖 `download/` 样本。
+    /// **实体级并行的前置守门**(docs/rounds/25 §8):多实体 + 程序集定义,不依赖 `download/` 样本。
     ///
     /// 覆盖两处跨实体结构:① 反向 `def_root_from_entry` 把程序集定义根**挂到宿主实体**上
     /// (`assembly.rs:878-886`);② 正向把定义从实体树里 `split_procedures` 抽走、再

@@ -20,7 +20,7 @@
 //! 逐条反转、`GC` 两个算术壳的拆解、列表积木 `pure_list_get` 的折叠、占位积木按 mutation 标题
 //! 还原原类型;不可逆处一律进 [`TranslateReport`](见该节的分节说明)。
 //!
-//! ## 与官方的刻意差异(见 docs/20 §6.2「逃生舱」)
+//! ## 与官方的刻意差异(见 docs/rounds/20 §6.2「逃生舱」)
 //!
 //! - 官方为每个节点**新建**对象(`c`,只带 `type/id/location/shield/is_shadow/mutation`),渲染性键
 //!   (`collapsed`/`deletable`/`movable`/`editable`/`visible`/`comment`/`field_extra_attr`)与
@@ -774,7 +774,7 @@ fn parse_node(mut node: BlockJson, ctx: &mut Ctx) -> BlockJson {
         //
         // **官方就是不对称的,别"修"**:官方 `list` 分支(byte 77699+)同时写
         // `inputs.list` 与 `shadows.list`,而云列表分支(byte 5922654)只写 `inputs.list`
-        // 并 `delete c.fields.list`。我们照抄该不对称(见 docs/20 §3.2 的对齐实验)。
+        // 并 `delete c.fields.list`。我们照抄该不对称(见 docs/rounds/20 §3.2 的对齐实验)。
         if matches!(
             orig.as_str(),
             "cloud_lists_length" | "cloud_lists_get_value" | "cloud_lists_delete"
@@ -888,7 +888,7 @@ fn route_children(node: &mut BlockJson, ctx: &mut Ctx) {
 }
 
 // ============================================================================================
-// 反向:KN → Kitten4(官方无此方向,本库自建;见 docs/20 §4)
+// 反向:KN → Kitten4(官方无此方向,本库自建;见 docs/rounds/20 §4)
 // ============================================================================================
 //
 // 与正向**逐条对称**:正向做的每一步改名/取值/槽位/影子改写,这里都按表反查回去;

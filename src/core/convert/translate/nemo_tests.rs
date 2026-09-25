@@ -193,7 +193,7 @@ fn document_keeps_source_fields_and_adds_camel_case() {
     assert_eq!(document["previewUrl"], "");
 }
 
-/// 版本迁移(`docs/27` §9.3):`< 0.15.0` 走 YC(`controls_if` 补 `else="1"` 变异),
+/// 版本迁移(`docs/rounds/27` §9.3):`< 0.15.0` 走 YC(`controls_if` 补 `else="1"` 变异),
 /// `< 0.9.4` 走 QC(角色 rotation 取反 + 旧音频块 `<field name="audio">` 包成影子)。
 #[test]
 fn version_migration_rewrites_legacy_documents() {
@@ -583,7 +583,7 @@ fn diff_value(ours: &Value, theirs: &Value, path: &str, out: &mut Vec<String>) {
 }
 
 /// 标量比较:数字按 `f64` 比(消掉 `10` 与 `10.0` 的表示差);
-/// 影子/变异 **XML 串**里的 `id="…"` 归一(官方每次现铸随机 id,见 docs/27 §9.2),其余严格相等
+/// 影子/变异 **XML 串**里的 `id="…"` 归一(官方每次现铸随机 id,见 docs/rounds/27 §9.2),其余严格相等
 fn same_scalar(ours: &Value, theirs: &Value) -> bool {
     match (ours, theirs) {
         (Value::Number(a), Value::Number(b)) => a.as_f64() == b.as_f64(),

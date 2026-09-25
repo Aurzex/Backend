@@ -29,7 +29,7 @@
 
 | # | 位置 | 证据 | 判断 |
 | - | ---- | ---- | ---- |
-| A | **整份文档 JSON 三进三出** | 上表 parse/serialize;`translate_file` 先 `read_to_string`+`from_str`,产物再 `to_string`+`write` | 最大单项。**该判断已被预研否证**(见 `docs/26` §6):`theatre`(含 `block_data_json`)占文档 **99.2–99.5%** 且**全部重写**,`styles`/`audios`/`variables`/`broadcasts` 也都改名/重算/包裹 ⇒ **没有「只透传」的大块**,A 项只能靠「少一轮往返 + 去克隆」来削(已在 P0 做完) |
+| A | **整份文档 JSON 三进三出** | 上表 parse/serialize;`translate_file` 先 `read_to_string`+`from_str`,产物再 `to_string`+`write` | 最大单项。**该判断已被预研否证**(见 `docs/rounds/26` §6):`theatre`(含 `block_data_json`)占文档 **99.2–99.5%** 且**全部重写**,`styles`/`audios`/`variables`/`broadcasts` 也都改名/重算/包裹 ⇒ **没有「只透传」的大块**,A 项只能靠「少一轮往返 + 去克隆」来削(已在 P0 做完) |
 | B | **`translate_work` 多一轮落盘+读回** | `decompile_with_options` 把编辑版 **写盘** → `translate_file(&source_path)` 再 **读回并解析** | 10 MB 级:白付一次 serialize + 一次 parse(≈0.3–1.0 s) |
 | C | **逐块克隆** | `BlockJson::from_value`:`serde_json::from_value(Value::Object(obj.clone()))` | 每个块复制一次 JSON Map(12 764 块);`extra`/`fields`/`inputs`/`shadows` 全在里面 |
 | D | **多趟遍历** | `parse_node` → `route_children` → `gc_deep` → `wrap_arithmetic` … 正反向各 3~5 次 walk | 每趟都要匹配 `kind`、改 map;树越大越贵 |
@@ -71,7 +71,7 @@
 ### P1(收益大,但要认真做)
 
 5. **G:实体级并行(角色 / 场景)** —— ✅ **正向已落地(2026-09-25)**,见
-   `docs/25-convert-entity-parallelism-plan.md` §9(反向仍待按该文 §7 #1 三段重设计);
+   `docs/rounds/25-convert-entity-parallelism-plan.md` §9(反向仍待按该文 §7 #1 三段重设计);
    结论摘要:临时 id + 串行兑现/改写,`entity_concurrency` 默认 1,
    **并发 1 产物与基线逐字节一致**、**1 vs N 同 SHA256**,公开 API 只做加法。
    → 正反向都对"每个实体的积木树"独立处理,天然可并行:先串行扫一遍收集工作项(实体 → 树),再用 `thread::scope` + 固定并发消费,最后**按原顺序**装配(顺序敏感:官方产物里实体顺序影响 `actors_order`/`scenes_order`)。
@@ -83,13 +83,13 @@
 6. **A:未触碰子树零拷贝透传(`serde_json::value::RawValue`)**
    → 打开 `serde_json` 的 `raw_value` feature(**不是新依赖**,只是既有依赖开 feature),把顶层文档里"只透传"的部分(`styles`/`audios`/`variables`/`cloud_variables`/`broadcasts`/`scenes_order`…)保留为 `Box<RawValue>`(切片,不解析),只对 `theatre.actors[*].block_data_json` 与必须重写的字段做真解析。
    → 收益:A 项里最大的那块 —— 期望把 10 MB 文档的 parse/serialize 成本砍到"只覆盖真正要改的子树"(文档越大越划算;官方 40 MB 级作品收益更明显)。
-   → **结论:不做**(`docs/26` §6 评审):装配阶段「只透传不改」的顶层字段占比 **≈0%**(theatre 99.2–99.5% 全部重写;styles/audios/variables/broadcasts 均被变换;cloud_variables/size/scenes_order 是**只读输入**不输出),收益上限 ≈0%,远低于 §2 预研 A 的 30% 门槛。
+   → **结论:不做**(`docs/rounds/26` §6 评审):装配阶段「只透传不改」的顶层字段占比 **≈0%**(theatre 99.2–99.5% 全部重写;styles/audios/variables/broadcasts 均被变换;cloud_variables/size/scenes_order 是**只读输入**不输出),收益上限 ≈0%,远低于 §2 预研 A 的 30% 门槛。
    → 验证:差分门 + 往返;对同一输入与旧实现产物做**逐字节**比较(允许差异必须先解释清楚)。
    → 建议:**单独一轮**做,作为本轮之后的"大重构"。
 
 7. **D:合并遍历(单遍后序)**
    → 现在 `parse_node`/`route_children`/`gc_deep`/`wrap_arithmetic`/`unwrap_*` 各自一遍树。可以合并成一次后序遍历 + 每节点按固定顺序执行子步骤(把"看完再改"的步骤显式标注)。
-   → 收益:~~遍历次数 3–5 → 1–2~~ **结论:不做**(`docs/26` §6 评审):正向实为 **2 趟**全遍历(`parse_node` 内含 `route_children` 再 `gc_deep`),反向本已单遍;合并只省遍历与缓存未命中,**不省逐块 `kind` 匹配 / `transform_shadow_xml` / `map_field_name`** 这些主要成本;且 `gc_node` 依赖子树**已 parse**、`shadow_number` 还自递归 ⇒ 改后序会双重应用。
+   → 收益:~~遍历次数 3–5 → 1–2~~ **结论:不做**(`docs/rounds/26` §6 评审):正向实为 **2 趟**全遍历(`parse_node` 内含 `route_children` 再 `gc_deep`),反向本已单遍;合并只省遍历与缓存未命中,**不省逐块 `kind` 匹配 / `transform_shadow_xml` / `map_field_name`** 这些主要成本;且 `gc_node` 依赖子树**已 parse**、`shadow_number` 还自递归 ⇒ 改后序会双重应用。
    → 风险:**中高** —— 顺序耦合(某些步骤依赖前一步已经改过的子树/字段)。必须先写出步骤依赖表,再按依赖分层合并。
    → 验证:差分门 + 往返 + 真机门;合并过程中每一步都保持产物字节不变。
 
@@ -119,8 +119,8 @@
 10. **映射结果缓存**:`translate_type`/`map_field_name` 已是 O(1) 查表;再进一步可对"（kind, slot, field) → 结果"做 memo(命中率高时省表查找与 `format!`)。
 11. **批处理并发**：`translate_works` 的 `batch_concurrency` 默认 1 偏保守;在内存直通(2 号)与实体级并行(5 号)落地后,建议给"每作品并发 × 每作品内实体并发"两级预算,避免线程数爆掉。
     → ✅ **已落地(2026-09-25)**:`translate_works` 折算 `entity_concurrency =
-    min(请求, 可用核数 / 有效作品并发)`(`docs/25` §7 阻塞 #6),折算只改并行度不碰产物。
-12. **反编译侧复用同一并发器**:`decompile_batch` 现在按作品并发;NEMO/WOOD 资源下载已并发(见 `docs/22`);Kitten/NEKO 的实体反编译也可实体级并行(同 5 号的 id 问题)。
+    min(请求, 可用核数 / 有效作品并发)`(`docs/rounds/25` §7 阻塞 #6),折算只改并行度不碰产物。
+12. **反编译侧复用同一并发器**:`decompile_batch` 现在按作品并发;NEMO/WOOD 资源下载已并发(见 `docs/rounds/22`);Kitten/NEKO 的实体反编译也可实体级并行(同 5 号的 id 问题)。
 
 ## 4. 阶段与验收
 
@@ -129,7 +129,7 @@
 | **S1** | P0 四项(流式输出 / 内存直通 / 去克隆 / 告警轻量化) | 产物**字节相同**(与旧实现比 SHA256)+ 全部单测 + 差分门 + 真机门 |
 | **S2** | 建基准:release 下跑 §1 的三个样本 + 官方夹具,**打印分阶段耗时**(解析 / 映射 / 编码 / 装配 / 序列化)与"每块 µs";基准以 `#[test] #[ignore]` 形式进仓(不引 criterion) | 基线数字写进文档;后续每阶段对比 |
 | **S3** | P1 的 5(实体级并行)与 8(字符串手术) | 并发 1 vs 并发 8 产物 SHA256 相同;基准加速比记录 |
-| **S4** | ~~P1 的 6 与 7~~ **预研后判不做**(`docs/26` §6:透传占比≈0%、正向本已 2 趟) | 预研证据留档即可,不动代码 |
+| **S4** | ~~P1 的 6 与 7~~ **预研后判不做**(`docs/rounds/26` §6:透传占比≈0%、正向本已 2 趟) | 预研证据留档即可,不动代码 |
 | **S5** | P2 收尾 + 文档 | — |
 
 > S1 与 S2 建议**先做**,因为"先有基准再谈优化"——否则第 6/7 项这种大改无法判断是否真的变快。
@@ -148,7 +148,7 @@
 
 | 风险 | 缓解 |
 | ---- | ---- |
-| 大改(6/7 号)改变产物字节 | 6/7 号已按预研判**不做**(`docs/26` §6);若将来重开:唯一的字节门是**自有** SHA256 基线(`tests/convert_bench.rs`),官方差分门只做语义比较(官方产物按键插入序,从未逐字节对齐) |
+| 大改(6/7 号)改变产物字节 | 6/7 号已按预研判**不做**(`docs/rounds/26` §6);若将来重开:唯一的字节门是**自有** SHA256 基线(`tests/convert_bench.rs`),官方差分门只做语义比较(官方产物按键插入序,从未逐字节对齐) |
 | 实体级并行破坏确定性 id | 先做 id 分段设计 + 单测("并发 1/8 产物相同"),再落地 |
 | 为性能牺牲可读性 | 每个优化都要有基准数据支撑;无数据不做 |
 | `RawValue` 与"键排序"冲突 | 先确认官方产物是否按键排序(现有实现是);若冲突,保留原始字节序并更新对齐口径 |
@@ -158,7 +158,7 @@
 - 不引入新依赖(criterion/rayon 等一概不加;并发用 `std::thread::scope`,计数用 `std` 原语);
 - 不改公开 API 形状(`translate_file`/`TranslateOptions`/`TranslateOutcome`/`TranslateReport` 的字段不变;新增入口只做**加法**);
 - 不为"看起来更快"牺牲对齐:任何产物字节变化都必须先解释再接受;
-- 不在本轮改 NEMO 的抓包未能证实的东西(见 `docs/22` §5/§6)。
+- 不在本轮改 NEMO 的抓包未能证实的东西(见 `docs/rounds/22` §5/§6)。
 
 ---
 
@@ -204,7 +204,7 @@
 - **P1-8 字符串手术减负** → ✅ **本会话已落地**(见 §3 P1-8 条目):按值判定后复用原键、
   影子 XML 按值改写、`mapped_field_text` 返回静态借用;产物逐字节不变、67 项单测全绿,
   但**加速在噪声内**(绑核 `core` 259 vs 261 ms)——保留依据是"构造上更少分配"。
-- **P1-5 实体级并行** → ✅ **正向已落地**(`docs/25` §9:临时 id + 串行兑现/改写、
+- **P1-5 实体级并行** → ✅ **正向已落地**(`docs/rounds/25` §9:临时 id + 串行兑现/改写、
   `entity_concurrency` 默认 1、两级预算折算、1 vs N 同 SHA256、基线逐字节不变);**反向一行未动**。
   - **主代理独立复核**(`taskset -c 0-3`、5 轮取最小、本机 2 物理核/4 逻辑核):
     10.8 MB 正向 `core` 285 → 184 ms(**1.55×**)、`e2e` 696 → 590 ms(1.18×);
@@ -215,12 +215,12 @@
     散布盖过了差异 ⇒ **不下结论**;机制上会多"阶段 0 取走 + 兑现改写一趟",量级应在个位数百分比。
     真正需要拍板的是**默认值**:现在默认 1(可预测、行为不变),调用方可显式
     `entity_concurrency(available_parallelism())` 换并行;是否把默认改成"大作品自动开"由使用者定。
-  - 原方案与评审记录仍在 `docs/25`(评审判定**有条件可行**,反向需三段重设计,见该文 §7 #1;
+  - 原方案与评审记录仍在 `docs/rounds/25`(评审判定**有条件可行**,反向需三段重设计,见该文 §7 #1;
     前置守门测试已落地一条,见 §8)。设计依据:正向 10.8 MB 有 209 个实体、最大实体仅占 4%。
-  - **反向(S3b):数据判定不做**(`docs/25` §10):63 个工作项、最大一项占 **36.7%**,
+  - **反向(S3b):数据判定不做**(`docs/rounds/25` §10):63 个工作项、最大一项占 **36.7%**,
     且两段必须串行(`unrewrite_calls` 依赖全局 `call_targets`、`def_root_from_entry` 把定义根
     挂进宿主实体)⇒ Amdahl 上限 1.9×(4 线程**理论上限**),实际远低于 1.5×,而反向 `core` 只有 ~200 ms。
     **并行的收益面集中在正向大实体作品**(已落地并验证)。
-- **P1-6 `RawValue` / P1-7 单遍遍历** → `docs/26-convert-rawvalue-single-pass-plan.md`
+- **P1-6 `RawValue` / P1-7 单遍遍历** → `docs/rounds/26-convert-rawvalue-single-pass-plan.md`
   (先做预研 A 透传占比 / B 趟数占比 / C 键序口径,再决定是否动顶层读写路径)。
 - **P2-9 / P2-10 / P2-11 / P2-12** 未动。

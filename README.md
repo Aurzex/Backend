@@ -298,4 +298,7 @@ GitHub Actions(`.github/workflows/CI.yml`):main/master 推送、tag、PR 和手�
 ## 相关文档
 
 - `CONTRIBUTING.md` — 编码约定与提交规范
-- `docs/` — 历史评审与整改记录(如协议合规、API 类型化重构、风格统一等)
+- `docs/README.md` — 文档总入口(知识库 / 目标库 / 轮次记录)
+- `docs/knowledge/` — **知识库**:平台接口与实时协议、作品文件格式、转换语义、性能基线、仓库约定、历史勘误
+- `docs/goals/` — **目标库**:待决策、待实现、待核验、已决不做
+- `docs/rounds/` — 历史轮次记录(29 篇:方案/评审/真机实测证据;读前先看 `docs/knowledge/errata.md`)

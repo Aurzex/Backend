@@ -108,7 +108,7 @@ impl BlockContext {
 /// 编译版块表里「被引用过」的块 id(`next_block`/`child_block`/`conditions`/`params`)。
 ///
 /// 编译版的引用**恒为内联对象**(Kitten2/3/4 的 `compiled_block_map` 实测 2 236 处采样
-/// 全是对象,见 `docs/21-convert-domain-consolidation-plan.md` §7-1);字符串 id 只出现在
+/// 全是对象,见 `docs/rounds/21-convert-domain-consolidation-plan.md` §7-1);字符串 id 只出现在
 /// **编辑版** `block_data_json` 的 `connections`。真出现字符串说明编译格式漂移了 ——
 /// 这里显式报错,而不是静默漏掉引用(那会把子块当成根块、产物多出一堆散块)。
 pub(crate) fn referenced_ids(blocks: &serde_json::Map<String, Value>) -> Result<HashSet<String>> {
@@ -117,7 +117,7 @@ pub(crate) fn referenced_ids(blocks: &serde_json::Map<String, Value>) -> Result<
     }
     fn reject_string(block_id: &str, field: &str) -> DecompilerError {
         DecompilerError::InvalidResponse(format!(
-            "块 {block_id} 的 {field} 是字符串 id:编译版引用恒为内联对象(见 docs/21 §7-1)"
+            "块 {block_id} 的 {field} 是字符串 id:编译版引用恒为内联对象(见 docs/rounds/21 §7-1)"
         ))
     }
 

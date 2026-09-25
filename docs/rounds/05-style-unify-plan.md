@@ -6,7 +6,7 @@
 
 请求:审阅全仓 Rust 代码(同步命令行/控制台后端),找出**同一语义、多种写法**的调用风格不一致,给出统一修改方案并执行。三轮执行:① 用户指定执行 P2 的 build_paginated/随机 ID/ChangeSource 三项 + WorkType 收敛;② 用户追加执行 P0/P1 全部项;③ 用户要求 WorkType/KittenVersion 回退到原文件(接受重复),不追求 api 层共享枚举。
 
-前两轮评审(`docs/02-review-round1.md` → `docs/03-fix-plan-v2.md` → `docs/04-review-round2.md`,原 `temp/REVIEW.md`/`FIX_PLAN.md`/`backend-review-plan.md`)已整改严重缺陷与样板冗余。
+前两轮评审(`docs/rounds/02-review-round1.md` → `docs/rounds/03-fix-plan-v2.md` → `docs/rounds/04-review-round2.md`,原 `temp/REVIEW.md`/`FIX_PLAN.md`/`backend-review-plan.md`)已整改严重缺陷与样板冗余。
 
 ## 统一规则(目标风格,全仓唯一写法)
 

@@ -95,7 +95,7 @@
 
 ### 5.2 取端点的具体做法
 
-1. 抓 **NEKO/NEMO 前端 bundle**(与 `docs/20` 附录 C 同法:下载主 bundle + chunk,搜 `works`/`create`/`import`/`bcm_url`/`bcm_version`),
+1. 抓 **NEKO/NEMO 前端 bundle**(与 `docs/rounds/20` 附录 C 同法:下载主 bundle + chunk,搜 `works`/`create`/`import`/`bcm_url`/`bcm_version`),
    定位"新建/导入作品"的请求构造;
 2. 与现有三个 create(`/kitten/r2/work`、`/neko/works`、`/wood/project`)对照猜路径族(都在 `BaseKey::Creation` 下);
 3. 真机验证:用配置里的 NEMO 作品(或先 fork 一个可再创作的)建一次,回读详情确认 `bcm_url`/`n_brick`/资源可加载;
@@ -104,7 +104,7 @@
 
 也就是说,剩下唯一缺口是那个 create 接口的**路径与参数**。抓包拿不到:PCAPdroid 里全是 TLS,只能看到主机名(`api.codemao.cn`、`api-creation.codemao.cn`、`creation.codemao.cn`、`open-service.codemao.cn`、`*.bcmcdn.com`、`upload.qiniup.com`),看不到 URL 路径。
 
-可行的取法(本仓库已成功过一次的老办法,见 `docs/20` 附录 C):抓官方 **NEKO/KN Web 编辑器或 NEMO 入口页的前端 bundle**,搜"新建作品/导入作品"的请求构造(关键词:`works`、`create`、`bcm_version`、`work_url`、`upload_status`),用真机验证。落地后即可实现:
+可行的取法(本仓库已成功过一次的老办法,见 `docs/rounds/20` 附录 C):抓官方 **NEKO/KN Web 编辑器或 NEMO 入口页的前端 bundle**,搜"新建作品/导入作品"的请求构造(关键词:`works`、`create`、`bcm_version`、`work_url`、`upload_status`),用真机验证。落地后即可实现:
 
 ```text
 反编译(skip_resources) → 上传 .bcm → create_nemo_work(work_url, bcm_version) → 得新作品 id

@@ -293,12 +293,12 @@ GN(kittenBcm)
 ### 6.1 域结构:把反编译栈与转化能力一起收进 `convert`(先做的重构)
 
 > 本节是**结构重构方案**:允许大规模搬迁,但要求**零行为变更**(只搬文件与改可见性,不改签名、不改逻辑)。它先于功能实现落地;功能方案从 §6.2 起。
-> **2026-09-25 更新(第二十一轮收敛后,见 `docs/21-convert-domain-consolidation-plan.md` §8.2)**:
+> **2026-09-25 更新(第二十一轮收敛后,见 `docs/rounds/21-convert-domain-consolidation-plan.md` §8.2)**:
 > 本节的目录树是第二轮重构(域化)时的布局,此后文件已合并 —— `shared/` 9 → 5(`infra/model/config/error/mod`)、
 > `decompile/{context,contract}` 并入 `decompile/mod.rs`、`blocks/` 三文件 → `blocks.rs`、
 > `editors/kitten/` 三文件 → `kitten.rs`、`editors/{coco,neko,wood}` → `simple.rs`、
 > `translate/{report}` 并入 `mod.rs`、`{blockjson,ids}` → `model.rs`、`{finish,kitten4_finish}` → `assembly.rs`。
-> 生产文件 34 → 18。**当前布局以 docs/21 §8.2 为准**,下表的"重构前/重构后"对应关系仍然有效。
+> 生产文件 34 → 18。**当前布局以 docs/rounds/21 §8.2 为准**,下表的"重构前/重构后"对应关系仍然有效。
 
 > 重构后 `convert/` 成为**作品文件转换域**的唯一边界:读(反编译)与写(互相转化)共用一套地基,域外不再有平铺的 `compiler.rs` / `unpacker.rs` / `decoders.rs`。
 
@@ -458,7 +458,7 @@ backend::core::convert::translate::{TargetEditor, TranslateOptions, TranslateRep
 | 域内 `use`       | `compiler.rs:1-9`、`decoders.rs:2-7` 指向 `crate::core::{unpacker,decoders}`                       | 改 `super::`                                                           |
 | 其他 core 模块   | `cloudvar/converse/pipeline/registry/retrieve/services/terminal` —— 实测 **0 引用**                | 不动                                                                   |
 | `src/main.rs`    | 只用 `core::terminal` / `core::services`                                                           | 不动                                                                   |
-| `docs/01..19`    | 历史记录里出现的 `unpacker.rs` / `compiler.rs` 路径                                                | **不改**(历史文档保真);在 README「相关文档」注明结构以本方案 §6.1 为准 |
+| `docs/rounds/01..19`    | 历史记录里出现的 `unpacker.rs` / `compiler.rs` 路径                                                | **不改**(历史文档保真);在 README「相关文档」注明结构以本方案 §6.1 为准 |
 | `src/prelude.rs` | 只 re-export `utils/requests`(实测)                                                                | 不动(除非决定把 `WorkId` 也放进去,属可选)                              |
 
 #### 风险与缓解
@@ -772,7 +772,7 @@ pub fn translate_works(work_ids: &[WorkId], target: TargetEditor, options: Trans
 | 产物干净度               | 产出**干净文件**(真的删 `block_data_json` 等 Kitten4 噪声),与官方产物差异写进报告/忽略表  | 官方那处删除被 `cloneDeep` 展开盖回(§8.3 已实测)           |
 | 未知积木(正向)           | 沿用官方语义:降级为 `bcm_translator_text_*` 占位积木 + 报告                               | 官方行为,保信息不静默丢(§3.2)                             |
 | 批量并发                 | `translate_works` 复用 `decompile_batch` 的 `thread::scope` 分块模式,默认并发 1            | 与既有代码同构(compiler.rs:214)                          |
-| 历史文档                 | `docs/01..19` **不回改**(历史记录),结构以本方案 §6.1 为准                                 | CONTRIBUTING:记录放 `docs/`,历史保真                      |
+| 历史文档                 | `docs/rounds/01..19` **不回改**(历史记录),结构以本方案 §6.1 为准                                 | CONTRIBUTING:记录放 `docs/`,历史保真                      |
 
 ### 实施进度
 

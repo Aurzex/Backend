@@ -1,7 +1,7 @@
 //! KN 侧积木 adapter(前端 + 后端)。
 //!
 //! 对应官方 webpack module 41888(`temp/ref/mod41888.pretty.js`)里 `kittenBcmToNekoBcmUtils`
-//! 收尾的三段(`docs/20-kitten-kn-work-conversion-plan.md` §3.2):
+//! 收尾的三段(`docs/rounds/20-kitten-kn-work-conversion-plan.md` §3.2):
 //!
 //! - `HC` 的另一半(78421-78440):根积木按类型一分为二——`procedures_2_defnoreturn` 摘出去当
 //!   程序集定义,其余留在实体的 `nekoBlockJsonList`;[`split_procedures`]

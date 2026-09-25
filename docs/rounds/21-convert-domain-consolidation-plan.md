@@ -230,7 +230,7 @@
 9. **`detect_editor` 与文案对齐**(C4)→ 增加 `Kitten2` 判定(有 `blocksXML` 且顶层无 `size`),错误文案按实际类型给(Kitten2/3 不支持)。
    → 风险:低(仅影响报错文案与 `EditorType` 值)。→ 验证:单测覆盖 Kitten2/Kitten3/Nemo/Neko 四种输入。
 
-10. **`keep_source` 接线**(§2.3/§7-2,已定;不删)→ 官方行为是「导入 Kitten 作品时把原始 Kitten 文件字节作为 `bcm4` 重新上传,URL 写进 KN 作品的 `source` 字段」(`docs/20:127,156`)。落地分两层,保持 `translate` 子域**不碰网络**(docs/20 §6.1):
+10. **`keep_source` 接线**(§2.3/§7-2,已定;不删)→ 官方行为是「导入 Kitten 作品时把原始 Kitten 文件字节作为 `bcm4` 重新上传,URL 写进 KN 作品的 `source` 字段」(`docs/rounds/20:127,156`)。落地分两层,保持 `translate` 子域**不碰网络**(docs/rounds/20 §6.1):
     - `translate` 侧新增纯函数入口(如 `TranslateOptions::source_url: Option<&str>`,`translate_file` 在写盘前把 `source` 注入 KN 文档顶层)——纯逻辑、可单测;
     - `convert/mod.rs::translate_work` 侧编排:当 `options.keeps_source()` 且目标为 KN 时,把第 1 步已落地的源作品文件(`staging` 里的编辑版/原件字节,`convert/mod.rs:50-52`)上传,拿 URL 交给 `translate_file`;上传或注入失败 → 记 `TranslateWarning`(非致命),继续出产物。
     → 风险:每次转发多一次原件上传(样例原件 0.7~6 MB);KN 文档多一个平台侧字段。反向不受影响(`source` 在 Kitten4 侧仍是 `DroppedProperty`,`kitten4_finish.rs:331`)。
@@ -276,7 +276,7 @@
 | **S1** | **死代码清理 + 去重**(§4 P1-5~11 中不涉及文件移动的部分 + P2-12~15):删死代码、抽 XML/强转/装配助手、修 P0-1~P0-3、`keep_source` 处理、文案与分类修正 | `cargo check --all-targets` + `cargo test`(62) + `cargo clippy` 全绿;官方差分门与真机 `convert_live` 不改判 |
 | **S2** | **文件合并(纯搬迁)**:按 §3.1 表平移(`git mv` + 逐段剪切);`shared/` 收缩;测试抽到 `translate/tests/` | 同上 + `wc -l` 复核目标表;行多重集核对(搬迁前后 impl 行不丢) |
 | **S3** | **行为修复(单独成提交)**:P0-2(NEMO/WOOD 输出目录)+ C6(StageOrientation 语义与文档对齐)+ 补 T4 的四条覆盖缺口 | 新增测试 + `cargo test --test compile_live`(含临时打开 NEMO 用例) |
-| **S4** | **文档同步**:README(目录树/模块一览/示例路径)、`docs/20` 的路径锚点、本方案的实施进度勾选 | `cargo test` + 示例路径 grep 零残留 |
+| **S4** | **文档同步**:README(目录树/模块一览/示例路径)、`docs/rounds/20` 的路径锚点、本方案的实施进度勾选 | `cargo test` + 示例路径 grep 零残留 |
 
 每步之间不混:搬迁提交不改逻辑(S1 改逻辑但不搬文件),便于定位回归。
 
@@ -296,7 +296,7 @@
 
 **不做**
 
-- 不引入语义 IR(`IrStmt`/`Expr` 那类)——理由见 `docs/20` §6.2;
+- 不引入语义 IR(`IrStmt`/`Expr` 那类)——理由见 `docs/rounds/20` §6.2;
 - 不新增第三方依赖(`parking_lot`/`tempfile` 等一概不加,沿用 std);
 - 不改公开路径与类型名(`convert::{EditorType, WorkId, DecompilerError}`、`translate::{TargetEditor, TranslateOptions, TranslateReport, translate_file}`),`DecompilerError` 改名留待单独评审;
 - 不合并 per-editor 插件文件与 `blocks` 的块类型分派;
@@ -312,7 +312,7 @@
 | # | 事项 | 决定 | 证据与落地 |
 | - | ---- | ---- | ---------- |
 | 1 | **编译版块引用形态** | **只按内联对象读**;遇字符串显式报错,不再静默容错 | 对 `download/compile/raw/` 3 个真作品(`春风得意`=Kitten3、`几何对战-联机`/`原气骑士`=Kitten4)取样 **2 236 处**:`next_block` 100% 是内联对象,`child_block`/`conditions` 是内联对象数组,**字符串引用 0 处**。字符串 id 只存在于**编辑版**(`block_data_json` 的 `blocks`+`connections`,见 `translate/kitten.rs:143-160`),两处混用是这次"三处假设不一致"的根因。落地见 §4-16 |
-| 2 | **`keep_source`** | **接线(实现),不删除**;仅 Kitten4→KN 方向生效;上传失败降级为报告告警 | 官方反混淆代码 `w.source = '' + T;`(docs/20 §3.1,原文见 `docs/20:156`)、`docs/20:127`「保留原件」、`docs/20:528` 的字段注释均确认这是官方行为;`finish.rs:39` 我们自己写了「`source` 字段不在这里」= 已知未实现。删除会砍掉一个官方式功能,保留不实现则是静默假承诺。落地见 §4-10 |
+| 2 | **`keep_source`** | **接线(实现),不删除**;仅 Kitten4→KN 方向生效;上传失败降级为报告告警 | 官方反混淆代码 `w.source = '' + T;`(docs/rounds/20 §3.1,原文见 `docs/rounds/20:156`)、`docs/rounds/20:127`「保留原件」、`docs/rounds/20:528` 的字段注释均确认这是官方行为;`finish.rs:39` 我们自己写了「`source` 字段不在这里」= 已知未实现。删除会砍掉一个官方式功能,保留不实现则是静默假承诺。落地见 §4-10 |
 | 3 | **「官方会重传资源」算不算有损** | **不算**:新增非有损类别 `TranslateWarning::ReuploadedOnImport`,`is_lossy` 豁免它 | 现 `DroppedProperty` 混装两类:(a) 真丢(KN 顶层键 `guideUrl`/`resourceZip`/`courseMaterials`/`source` 在 Kitten4 无对应字段,`kitten4_finish.rs:315-335`);(b) 官方导入时会重新上传资源、产物 url 由平台重写,我们保留源 url(`finish.rs:343,371`)。把 (b) 并入有损会让 `strict(true)` **在任何含非 https/`data:` 造型的真作品上必失败**。落地见 §4-8 |
 
 ---
@@ -387,7 +387,7 @@
 | D2 强转族 | 合一 `truthy/as_text/as_number/value_key/field_text` | 只合一 `truthy`(+`num`) | 实测 `js_text`/`text`/`field_text` 对 `undefined`/`null`/数字 0 的处理**本来就不同**(各自照抄官方不同分支),合并会改行为 |
 | D5~D9 | 全部合一 | D5/D6/D7 合一,D8 改为同文件对照 | 坐标两式参数形态与 `num()` 取整口径不同,强行抽象掩盖差异(与「不为对称而合并」一致) |
 | D11 | 字符串与对象都识别 | **对象-only** + 字符串显式报错 | 真样本 462 块 4 256 处引用无一是字符串(字符串 id 属编辑版 `connections`);静默容错会让格式漂移变成"少积木不报错" |
-| C4 `detect_editor` | 增加 Kitten2 判据 | 只补说明,不加判据 | 本地无 Kitten2 样本、`docs/20` 无区分标记,且 2/3 都不支持转化;不编造判据 |
+| C4 `detect_editor` | 增加 Kitten2 判据 | 只补说明,不加判据 | 本地无 Kitten2 样本、`docs/rounds/20` 无区分标记,且 2/3 都不支持转化;不编造判据 |
 | C8 双 `pub use` 链 | 合并为一条 | 保持两层(内部再导出 + 对外门面) | 11 个文件按 `shared::{...}` 取用;合并只会让导入更啰嗦,两层分工明确已加注释 |
 | keep_source | `TranslateOptions` 加字段、装配时写 `source` | `convert` 编排上传 + `translate::set_source_reference` 纯函数 | 避免"先上传再转化"的失败浪费,并保持 `translate` 不碰网络(分层纪律) |
 | S2.3 测试抽取 | 内联测试抽到 `translate/tests/*` | **不做** | 被抽测试大量访问**私有项**,搬出文件必须放宽可见性(与 C7 直接冲突);Rust 惯例本就是同文件 `#[cfg(test)]`。改为规则:测试模块一律放文件末尾(已对 `assembly.rs` 执行,消除 clippy `items_after_test_module`) |
@@ -399,7 +399,7 @@
 | # | 发现 | 证据 | 影响 |
 | - | ---- | ---- | ---- |
 | N1 | **约 9 MB 作品的 CDN 上传在全局 30s 超时下必失败**,源文件与产物上传同样超时 | 探针:`上传失败 31.2s → Http(Timeout(Global))` / `35.5s`;`requests.rs:272` 全局 30s | `translate_work(upload=true)` 在慢网+大作品下不可用;`keep_source` 的源文件上传也受影响(失败降级为日志,不影响产物)。建议另开一轮:上传走独立超时或分片 |
-| N2 | `keep_source` 上传的是**反编译重建的编辑版**,官方上传原始文件字节 | `docs/20:156`;`convert/mod.rs::attach_source_reference` 注释 | 平台的「保留原件」若要能回打开原件,需拿到作品原始文件字节(当前管线不保留) |
+| N2 | `keep_source` 上传的是**反编译重建的编辑版**,官方上传原始文件字节 | `docs/rounds/20:156`;`convert/mod.rs::attach_source_reference` 注释 | 平台的「保留原件」若要能回打开原件,需拿到作品原始文件字节(当前管线不保留) |
 
 ### 8.5 S3 行为修复 + S4 文档同步(已完成)
 
@@ -407,7 +407,7 @@
 | ---- | ---- | ---- |
 | `c7b6d07` S3.1 | NEMO/WOOD 不再忽略 `DecompileOptions::output_dir`:上下文增加 `output_dir`(builder 注入、与 `save_result` 同落点) | **真机 NEMO**(work 194684070):产物落在调用方目录,修复前写默认目录 |
 | S3.2 | `StageOrientation` 文档与行为对齐(显式方向会按 `canvas/stageSize` 重算坐标);删掉 `kitten4_variables` 全程未用的 `landscape` 形参 | 新增单测:同一点在画布=源 vs 显式竖屏下坐标不同 |
-| S4 | README 目录树/输出目录说明、`docs/20` 目录段加"以 docs/21 §8.2 为准"注记 | — |
+| S4 | README 目录树/输出目录说明、`docs/rounds/20` 目录段加"以 docs/rounds/21 §8.2 为准"注记 | — |
 
 ### 8.6 明确遗留(不在本轮)
 

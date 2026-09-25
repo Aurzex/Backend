@@ -5,7 +5,7 @@
 //! - [`decompile`](反编译):作品(编译版/传输态)→ 编辑版 JSON / 源码目录树。
 //!   门面 + 引擎 + 各编辑器实现都在子域内。
 //! - [`translate`](互相转化):一种编辑器的作品文件 ⇄ 另一种(如 Kitten `.bcm4` ⇄ KittenN `.bcmkn`)。
-//!   方案见 `docs/20-kitten-kn-work-conversion-plan.md`。
+//!   方案见 `docs/rounds/20-kitten-kn-work-conversion-plan.md`。
 //!
 //! 域内约定:
 //!
@@ -38,7 +38,7 @@ use serde_json::Value;
 /// 作品 id → 目标编辑器作品文件(反编译取编辑版,再转化;可选上传并新建草稿作品)
 ///
 /// 这是**跨子域编排**:`decompile` 负责把线上作品取成编辑版 JSON,`translate` 负责重排;
-/// 两个子域彼此不依赖,组合写在这里(docs/20 §6.1 依赖规则)。
+/// 两个子域彼此不依赖,组合写在这里(docs/rounds/20 §6.1 依赖规则)。
 pub fn translate_work(
     work_id: WorkId,
     target: TargetEditor,
@@ -101,7 +101,7 @@ fn translate_work_in(
             )));
         }
     };
-    // NEMO 老作品要按源版本做迁移(`docs/27` §9.3);调用方显式给过版本就尊重调用方
+    // NEMO 老作品要按源版本做迁移(`docs/rounds/27` §9.3);调用方显式给过版本就尊重调用方
     let options = if options.source_version_ref().is_none() && !source_version.is_empty() {
         options.source_version(source_version)
     } else {
@@ -164,7 +164,7 @@ fn translate_work_in(
 /// 按并发数分块、块内 `thread::scope` 并发、块间顺序收集 —— 不引入锁)
 ///
 /// 并发是**两级**的:作品级(本函数的 `batch_concurrency`)× 实体级
-/// ([`TranslateOptions::entity_concurrency`],单文档内按实体并行,见 `docs/25`)。
+/// ([`TranslateOptions::entity_concurrency`],单文档内按实体并行,见 `docs/rounds/25`)。
 /// 两级直接相乘会把 CPU 超订 `batch × entity` 倍,所以在入口把实体级按作品级与
 /// **可用核数**折算一次(方案 25 §7 阻塞 #6):每作品分到的核数
 /// `可用核数 / 有效作品并发`(取整、至少 1)就是实体级上限。折算只改并行度,不改产物。
@@ -211,7 +211,7 @@ pub fn translate_works(
 /// 上传源作品文件,返回可挂到产物 `source` 的 URL(见 [`set_source_reference_in`])
 ///
 /// 偏差记录:官方上传的是**原始** Kitten 文件字节,我们只有反编译重建的编辑版
-/// (即这里落盘的这一份),故上传它(`docs/21` §4-10)。
+/// (即这里落盘的这一份),故上传它(`docs/rounds/21` §4-10)。
 fn upload_source_file(source_path: &std::path::Path) -> Result<String, TranslateError> {
     let client = crate::utils::requests::CodeMaoClient::global().clone();
     client

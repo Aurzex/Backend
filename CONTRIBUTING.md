@@ -70,4 +70,4 @@ cargo test --test live_features
 ## 工作流建议
 
 - 跨文件改动先明确影响面:函数签名变更前用 `lsp references`(或 `grep`)列出全部调用点。
-- 评审与整改记录放 `docs/`,命名沿用编号前缀(如 `docs/02-review-round1.md`、`docs/05-style-unify-plan.md`)。
+- 评审与整改记录放 `docs/`,命名沿用编号前缀(如 `docs/rounds/02-review-round1.md`、`docs/rounds/05-style-unify-plan.md`)。

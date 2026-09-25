@@ -6,9 +6,9 @@
 
 ## Context
 
-按 5 个维度(逻辑错误 / 性能 / 更优实现 / 性能优化 / 设计模式)评审前四轮未覆盖的剩余面。已核实 docs/04 的 Phase 1/2/3/5/6 整改全部落地(分页同名键过滤、`Some(100)`→`None`、process_item Ask 分支、value_to_i64、hex 预分配、`(Captcha)` 结构化判定等),不重复列出。
+按 5 个维度(逻辑错误 / 性能 / 更优实现 / 性能优化 / 设计模式)评审前四轮未覆盖的剩余面。已核实 docs/rounds/04 的 Phase 1/2/3/5/6 整改全部落地(分页同名键过滤、`Some(100)`→`None`、process_item Ask 分支、value_to_i64、hex 预分配、`(Captcha)` 结构化判定等),不重复列出。
 
-本轮落地项:1 处逻辑错误(官方内容自动通过分支单条失败即中断整个会话,与 docs/04 F10 同型但漏改)、1 处数据丢失(`create_wood_file`)、1 处 N+1(`fetch_broadcast_messages_gen`)、1 处热路径深克隆(`parse_frame`),外加若干低风险 idiomatic 收尾。原则同前:简洁可读优先、不引入新依赖、不改破坏性 pub API 签名、不主动删非确证死代码。
+本轮落地项:1 处逻辑错误(官方内容自动通过分支单条失败即中断整个会话,与 docs/rounds/04 F10 同型但漏改)、1 处数据丢失(`create_wood_file`)、1 处 N+1(`fetch_broadcast_messages_gen`)、1 处热路径深克隆(`parse_frame`),外加若干低风险 idiomatic 收尾。原则同前:简洁可读优先、不引入新依赖、不改破坏性 pub API 签名、不主动删非确证死代码。
 
 ## Approach
 
@@ -16,7 +16,7 @@
 
 **位置**:`src/core/terminal.rs:460-471`(`process_item` 的 `if ctx.official[idx]` 分支)。
 
-**问题**:官方内容自动通过调用 `processor.apply_action(item, ReportAction::Pass, admin_id)?`,用 `?` 传播错误。`process_pending`(279-360)仅对 `ProcessorError::Aborted` 特判,其余 `Err` 一路冒泡——一条官方举报的 PATCH 瞬时失败会让整个待处理会话退出,剩余举报全部不处理;若该条持续失败,每次进入都卡在同一项。这与同函数 Ask 分支(498-540)用 `match` 逐条记录错误、不中断的语义矛盾,是 docs/04 F10(Phase 3-2)漏改的分支。
+**问题**:官方内容自动通过调用 `processor.apply_action(item, ReportAction::Pass, admin_id)?`,用 `?` 传播错误。`process_pending`(279-360)仅对 `ProcessorError::Aborted` 特判,其余 `Err` 一路冒泡——一条官方举报的 PATCH 瞬时失败会让整个待处理会话退出,剩余举报全部不处理;若该条持续失败,每次进入都卡在同一项。这与同函数 Ask 分支(498-540)用 `match` 逐条记录错误、不中断的语义矛盾,是 docs/rounds/04 F10(Phase 3-2)漏改的分支。
 
 **改动**:把 `?` 改成 `match`,失败时记录错误并返回 `Ok(RunStats::default())`(跳过本条,不中断会话),与 Ask 分支对齐:
 

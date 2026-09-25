@@ -1,0 +1,63 @@
+# 转换与反编译性能(实测基线)
+
+> 知识库条目:**已经量到的数字、瓶颈归因、已落地优化及其收益、判定不做的项**。
+> 方案与执行记录见 `docs/rounds/22-*`(NEMO 反编译)、`docs/rounds/23-*`(转换总体)、`docs/rounds/25-*`(实体级并行)、`docs/rounds/29-*`(扫描台账)。
+
+## 1. 基线(实测)
+
+| 场景 | 优化前 | 现在 |
+| ---- | ------ | ---- |
+| NEMO 作品反编译(含资源下载) | **2m42s** | **13s**(并发 + `skip_resources`) |
+| KN 作品反编译(模式分派) | 46s | **1.5s** |
+| Kitten4 作品反编译 | 单块 `from_value` | **1.5s**(逐块克隆改掉) |
+| 转换 Kitten4→KN(离线、确定性) | — | **38 ms**(374 输入积木 → 439 产物节点) |
+| 转换(官方 JS 同输入参照) | 355 ms(Node) | — |
+| 资源删除(批量) | 7.9s | **5.3s**(并行 delete) |
+
+## 2. 瓶颈归因(按证据)
+
+1. **请求数 × RTT**,不是 CPU:资源下载耗时几乎全部在这里。实测曲线(同一 NEMO 作品):
+
+   | 并发 | 1 | 8 | 16 | 32 |
+   | ---- | - | - | -- | -- |
+   | 耗时 | 402 s | 103 s | **92 s** | 127 s + **CDN 限流丢 2 个文件** |
+
+   ⇒ 最优区间 8–16。下载是 I/O 密集,**不能用 `available_parallelism` 折算**(低核机器会折到近串行、高核机器会放宽到限流区)。本库把"作品级 × 单作品资源级"总线程**封顶 16**(常量 `RESOURCE_DOWNLOAD_BUDGET`)。
+2. **`locate_resource` 在 hot path 上占比最大**(转换剖析里约 2/3)。
+3. **NEMO 逐条 XML 解析**:3.5 MB 在 Node 下要 4–5 分钟(逐条 `DOMParser`);Rust 侧按"单文件秒级"设计。
+4. **整份文档 JSON 三进三出**:`translate_file` 先 `read_to_string + from_str`,产物再 `to_string + write`;`translate_work` 还多一轮"落盘→读回"。
+
+## 3. 已落地的优化(都有数字)
+
+| 优化 | 做法 | 收益 |
+| ---- | ---- | ---- |
+| 资源下载并发 | 分块并发,总线程封顶 16 | 4× 级(402 → 92 s) |
+| `skip_resources` | 只要积木/结构时跳过资源下载 | 53× 级 |
+| 内存直通 | `DecompiledArtifact` 直接交给 translate,避免落盘→读回 | 省一次 serialize + 一次 parse(10 MB 级 ≈0.3–1.0 s) |
+| 去逐块克隆 | `BlockJson::from_value` 不再 `obj.clone()` | 12 764 块受益 |
+| **实体级并行(正向)** | 临时 id + 串行兑现/改写;`entity_concurrency` 默认 1 | 10.8 MB:`core` 285 → 184 ms(**1.55×**)、`e2e` 696 → 590 ms(1.18×);**并发 1 与并发 N 产物 SHA256 相同** |
+| 两级预算折算 | `entity_concurrency = min(请求, 可用核数 / 有效作品并发)` | 防止 `batch × entity` 超订;只改并行度不碰产物 |
+| 反编译侧并发折算 | `decompile_batch` 作品级 × 资源级总线程封顶 16 | 见 §2 |
+
+## 4. 判定**不做**(有证据)
+
+| 项 | 结论 | 理由 |
+| -- | ---- | ---- |
+| 反向(KN→Kitten4)实体级并行 | **不做** | 63 个工作项、最大一项占 **36.7%**,且两段必须串行(`unrewrite_calls` 依赖全局 `call_targets`、`def_root_from_entry` 把定义根挂进宿主实体)⇒ Amdahl 上限 1.9×,**实际远低于 1.5×**,而反向 `core` 只有 ~200 ms |
+| `RawValue` 顶层只透传 | **不做** | 透传占比 ≈0%(见 `convert-semantics.md` §7) |
+| 单遍遍历合并 | **不做** | 只省遍历,不省逐块匹配/字段改写 |
+
+## 5. 基准方法(避免自欺)
+
+- **绑核**:`taskset -c 0-3`,**5 轮取最小**(本机 2 物理核 / 4 逻辑核);报告要区分 `core` 与 `e2e`。
+- **字节门**:并发优化必须证"并发 1 与并发 N 产物 SHA256 相同",再谈加速比。
+- **无数据不做**:任何"看起来更快"的改动,要么有基准点,要么承认在噪声内(例:某次优化 `core` 259 vs 261 ms 属噪声,保留它的理由只是"构造上更少分配")。
+- 官方差分门只做**语义比较**(官方从不逐字节对齐)。
+
+## 依据
+
+- `docs/rounds/22-nemo-decompile-performance.md` §1–§4(现象/根因/实测 A-B)、§7(复现)。
+- `docs/rounds/23-convert-performance-plan.md` §1–§3、§5、§7(落地记录)。
+- `docs/rounds/25-convert-entity-parallelism-plan.md` §1(分布)、§9(正向落地)、§10(反向判不做)。
+- `docs/rounds/29-optimization-scan-ledger.md`(P0/P1 台账)。
+- 代码锚点:`src/core/convert/decompile/mod.rs`(`RESOURCE_DOWNLOAD_BUDGET`)、`src/core/convert/mod.rs`(两级预算折算)、`tests/convert_bench.rs`(自有 SHA256 基线)。

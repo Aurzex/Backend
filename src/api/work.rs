@@ -755,7 +755,7 @@ pub struct CreateWoodProjectArgs<'a> {
 }
 
 /// 海龟编辑器作品管理接口
-/// 创建 NEMO 作品的入参(字段与抓包一致,见 `docs/24` §12)
+/// 创建 NEMO 作品的入参(字段与抓包一致,见 `docs/rounds/24` §12)
 #[derive(Debug, Clone)]
 pub struct CreateNemoWorkArgs<'a> {
     /// 作品名
@@ -799,8 +799,8 @@ fn create_nemo_work_payload(args: &CreateNemoWorkArgs<'_>) -> Value {
 
 /// NEMO 作品管理
 ///
-/// 目前只有"建作品"这一步 —— 它是 `docs/24` 里路线 B/B′ 的关键(**作品 id 由本接口返回**),
-/// 端点取自第三份抓包(`docs/24` §12),不是推断。
+/// 目前只有"建作品"这一步 —— 它是 `docs/rounds/24` 里路线 B/B′ 的关键(**作品 id 由本接口返回**),
+/// 端点取自第三份抓包(`docs/rounds/24` §12),不是推断。
 pub struct NemoWorkManager {
     client: CodeMaoClient,
     pub operations: BaseWorkOperations,
@@ -822,7 +822,7 @@ impl NemoWorkManager {
 
     /// 创建 NEMO 作品,返回响应 JSON(其中 `id` 就是新作品 id)
     ///
-    /// 官方流程(抓包,`docs/24` §11.1/§12):
+    /// 官方流程(抓包,`docs/rounds/24` §11.1/§12):
     /// 1. `GET /cdn/qi-niu/tokens/uploading?projectName=nemo_android_ios&filePaths=<b64>.bcm` 取上传凭证;
     /// 2. 把 `.bcm` 传到七牛(`file_uploader().upload(...)` 已有封装);封面另走 `putb64`;
     /// 3. **本接口**:`POST /nemo/v3/works/upload/<orientation>`,体见 [`CreateNemoWorkArgs`];
@@ -830,7 +830,7 @@ impl NemoWorkManager {
     /// 4. 官方随后 `POST /nemo/qiniu/upload/business/bind` 把封面绑到该 id。
     ///
     /// 性能提示:若只是想让作品"落到自己账号",路线 B 可以直接复用**源作品**的 `work_url`
-    /// (零上传)—— 是否被平台接受需真机验证(见 `docs/24` §6 的风险表)。
+    /// (零上传)—— 是否被平台接受需真机验证(见 `docs/rounds/24` §6 的风险表)。
     pub fn create_nemo_work(&self, args: CreateNemoWorkArgs<'_>) -> MewResult<Value> {
         let orientation = args.orientation.unwrap_or(1);
         debug!(
@@ -863,7 +863,7 @@ impl ClientAccess for NemoWorkManager {
 mod nemo_create_tests {
     use super::*;
 
-    /// 请求体字段集与取值口径**逐项对齐抓包**(`docs/24` §12):
+    /// 请求体字段集与取值口径**逐项对齐抓包**(`docs/rounds/24` §12):
     /// 少键/多键/改名都会让平台报参数错误或被静默忽略,所以这里钉死。
     #[test]
     fn payload_matches_captured_shape() {

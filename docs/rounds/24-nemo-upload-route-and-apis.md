@@ -1,6 +1,6 @@
 # 第二十四轮方案 — NEMO 作品「上传而非下载」与可补充的 API 清单(只出方案)
 
-日期:2026-09-25 · 基线:`5c7df4c` · 上游:`docs/22-nemo-decompile-performance.md`(瓶颈与已落地优化)
+日期:2026-09-25 · 基线:`5c7df4c` · 上游:`docs/rounds/22-nemo-decompile-performance.md`(瓶颈与已落地优化)
 本轮**不写代码**:给出上传方案、API 清单、端点取法与验收口径。
 
 ---
@@ -105,7 +105,7 @@ CreateNemoWorkArgs {
 
 > 抓包能提供的上限就是"**哪些主机、多少连接、多少字节、什么顺序**";URL 路径与参数一律要另找来源(§5)。
 
-## 5. 端点取法(照 `docs/20` 附录 C 的老流程)
+## 5. 端点取法(照 `docs/rounds/20` 附录 C 的老流程)
 
 1. **抓前端 bundle**:`kn.codemao.cn`(KN 编辑器,NEMO/KN 同页有入口)或 NEMO Web 入口的主 bundle + chunk,全文搜
    `works`、`create`、`import`、`bcm_url`、`bcm_version`、`business_id`、`upload`、`fork`;
@@ -134,9 +134,9 @@ CreateNemoWorkArgs {
 | `bcm_version` 不匹配被拒 | 平台可能校验版本与 `bcm` 内容一致 | 直接取源作品的 `bcm_version`;不匹配时回退报错但不重试 |
 | 端点猜错(⚠️ 推断项) | 服务端可能返回 404/参数错误 | 只在 §5 的真机验证通过后才落代码 |
 
-## 7. 与 `docs/22` 的关系
+## 7. 与 `docs/rounds/22` 的关系
 
-- `docs/22` 给出瓶颈(请求数 × RTT)与已落地优化(并发 3.9×、`skip_resources` 53×);
+- `docs/rounds/22` 给出瓶颈(请求数 × RTT)与已落地优化(并发 3.9×、`skip_resources` 53×);
 - 本文补上"**不下载**"的完整路线与 API 缺口:平台侧只要一个 create 端点,就能把"40 MB 下行 + 数分钟"换成"1–2 次请求";
 - 两件都做完后,`convert` 域的 NEMO 相关耗时将从"分钟级"降到"秒级 + 一次小请求"。
 
@@ -334,7 +334,7 @@ TLS-keylog 导出。拿到后优先在这几个族里找:`/nemo/v2/**`、`/nemo/
 - 现在**四步齐全**:token(`nemo_android_ios`)→ 上传 `.bcm` → 上传 `.cover` → `POST /nemo/v3/works/upload/<n>` → `bind`。
 - 但要注意:第 3 步要求 `work_url` 指向一个**合法 NEMO `.bcm`**;我们自己能产出的只有
   KN/Kitten4 文件 ⇒ 走"上传"路线回到 NEMO 还缺 **KN→NEMO** 这个方向(平台**不存在**,
-  见 `docs/27`)。所以方案 B 的现实用法是:**把 NEMO 作品转出来**(NEMO→KN→Kitten4),
+  见 `docs/rounds/27`)。所以方案 B 的现实用法是:**把 NEMO 作品转出来**(NEMO→KN→Kitten4),
   而不是把我们的产物塞回 NEMO。
 
 ---

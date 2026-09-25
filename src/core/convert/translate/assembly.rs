@@ -48,7 +48,7 @@
 //!    本实现按 0 处理或跳过改键,产物更稳。
 //!
 //! 反向(KN `.bcmkn` → Kitten4 `.bcm4`)在文件后半段:官方没有这个方向,是本项目自建的
-//! 逆映射(规则见 `docs/20-kitten-kn-work-conversion-plan.md` §4);两个方向共用
+//! 逆映射(规则见 `docs/rounds/20-kitten-kn-work-conversion-plan.md` §4);两个方向共用
 //! `num` / `project_name_at` / 坐标与主题表,放在同一文件里便于对照防漂移。
 
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -764,7 +764,7 @@ fn dict_at<'a>(obj: &'a Map<String, Value>, key: &str) -> Option<&'a Map<String,
 }
 
 // ---------------------------------------------------------------------------
-// 反向:KN `.bcmkn` → Kitten4 `.bcm4`(本项目自建;官方无此方向,见 docs/20 §4)
+// 反向:KN `.bcmkn` → Kitten4 `.bcm4`(本项目自建;官方无此方向,见 docs/rounds/20 §4)
 // ---------------------------------------------------------------------------
 
 /// Kitten4 编辑版常量(取自真实作品 `download/compile/raw/几何对战-联机.bcm4`,

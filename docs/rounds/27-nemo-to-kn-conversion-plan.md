@@ -1,6 +1,6 @@
 # 第二十七轮方案 — NEMO → KN 转化(并入 convert 域)
 
-日期:2026-09-25 · 基线:`4c87dd2` · 相关:`docs/20`(Kitten↔KN 转化)、`docs/24 §12`(NEMO 建作品端点)、`docs/28`(反向保真缺口)
+日期:2026-09-25 · 基线:`4c87dd2` · 相关:`docs/rounds/20`(Kitten↔KN 转化)、`docs/rounds/24 §12`(NEMO 建作品端点)、`docs/rounds/28`(反向保真缺口)
 
 > **状态:只出方案 + 第一步前置研究已派出。** 按约定"先写文档 → 子代理评审 → 执行",
 > 本文是那份文档;执行前的硬前置是 §4。
@@ -22,7 +22,7 @@
 - **做**:NEMO → KN。做完之后 NEMO → Kitten4 **附带可得**(走已有 KN→Kitten4 反向),
   但那是**自建有损反向**,损失会叠加 ⇒ 需单独做保真评估,不与 NEMO→KN 的验收混谈(评审 §8 #7)。
 - **不做(留置)**:KN → NEMO。平台没有对照实现,自建一套 NEMO 编码器成本高、风险大
-  (还要能过 NEMO App 的校验),而且它唯一的现实用途是"把产物塞回 NEMO"(见 `docs/24 §12.3`)。
+  (还要能过 NEMO App 的校验),而且它唯一的现实用途是"把产物塞回 NEMO"(见 `docs/rounds/24 §12.3`)。
 
 官方调用点(`main.14802dc2.js`)的完整流程,就是我们要复刻的骨架:
 
@@ -53,17 +53,17 @@ NEMO 只需要换**前端**与**映射表**,后端与装配**完全复用**:
 
 **源文档从哪来**:反编译侧 `editors/nemo.rs` 现在产 `DecompileResult::Path`(资源目录 + 编辑版;
 注意:NEMO 编辑版是 fetcher 直接取明文 JSON,**没有解密步骤** —— 评审更正)。需要一条**内存入口**(与 S1 已落地的 `DecompiledArtifact` 同构):把 NEMO 的编辑版
-`Value` 直接给 translate,避免"落盘→读回"——这也是 `docs/23` P0-2 的同一套做法,属**加法**。
+`Value` 直接给 translate,避免"落盘→读回"——这也是 `docs/rounds/23` P0-2 的同一套做法,属**加法**。
 
 ---
 
 ## 3. 与现有不变量的关系
 
-1. **产物对齐**:照 `docs/20 §618` 的口径,不对齐官方字节,只做**语义 diff**(忽略 id/location/uuid);
+1. **产物对齐**:照 `docs/rounds/20 §9` 的口径,不对齐官方字节,只做**语义 diff**(忽略 id/location/uuid);
    官方校验器 `BcmHelpers.validateBcm`(bundle 模块 87123)作为"产物能不能被编辑器加载"的**硬门**。
 2. **确定性**:沿用 `IdSource` + `TranslateOptions::deterministic_ids`;正向并行(方案 25 S3a)的
    "临时 id + 串行兑现"机制**不用改**,因为新前端只产出 `BlockJson` 树,不理解 id 策略。
-3. **不变量**:`docs/28` 记录的往返保真缺口**与本轮正交**(那是 KN→Kitten4 反向的问题);
+3. **不变量**:`docs/rounds/28` 记录的往返保真缺口**与本轮正交**(那是 KN→Kitten4 反向的问题);
    但 NEMO→KN 的产物如果也走一次 KN→Kitten4,得先确认不引入**新的**缺口 —— 验收要覆盖。
 
 ---
@@ -102,8 +102,8 @@ NEMO 只需要换**前端**与**映射表**,后端与装配**完全复用**:
 ## 7. 明确不做
 
 - KN → NEMO(平台无对照,且要先自建 NEMO 编码器);
-- 把产物上传回 NEMO 建作品(`docs/24 §12` 的端点已备好,但同样依赖 KN→NEMO);
-- 不顺手改 `docs/28` 的反向保真缺口(那是独立问题,已在预算断言里守住)。
+- 把产物上传回 NEMO 建作品(`docs/rounds/24 §12` 的端点已备好,但同样依赖 KN→NEMO);
+- 不顺手改 `docs/rounds/28` 的反向保真缺口(那是独立问题,已在预算断言里守住)。
 
 ---
 
@@ -119,7 +119,7 @@ NEMO 只需要换**前端**与**映射表**,后端与装配**完全复用**:
 | 4 | **`validateBcm` 硬门没有落地途径** | §3.1 把它当硬门,但 §4 的 R1 只覆盖 `WN`/`GN` | 新增 **R5**:把 `validateBcm`(bundle 模块 87123)也抽成 Node 可调 harness,**先证明离线能跑**;跑不起来就把它降级为"可选门"并在 §3 说明 |
 | 5 | **语义 diff 的归一化规则未定义**,且"重传资源"与"复用装配"自相矛盾 | §3.1 只说"忽略 id/location",没定义 `createTime`/`Date.now()`/`sortList` 顺序/资源 url/递归深度;而 `assembly::build_styles(assembly.rs:320)` 是**刻意不上传**、保留源 url 的离线近似 | §3.1 补**字段级归一化清单**;资源策略二选一并写死(建议沿用"离线近似保留源 url",与既有 Kitten 路径一致) |
 | 6 | **门面层还有两处必须改** | `convert/mod.rs:95-99` 对 `DecompiledArtifact::Path` 直接报错("NEMO / WOOD 请用反编译接口另行处理");`:107-110` `needs_source_upload` 只覆盖 Kitten2/3/4,而官方 NEMO→KN 也写 `source` | 方案列出这两处改动(接受 NEMO 的内存文档产物;把 Nemo 纳入 `needs_source_upload`) |
-| 7 | **"NEMO→Kitten4 免费获得"是过度陈述** | §1 的说法与 §3.3 自认的"KN→Kitten4 是自建有损反向(`docs/28`)"冲突;损失是**叠加**的 | 降级为"附带可得但需单独保真评估",不与 NEMO→KN 的验收混谈 |
+| 7 | **"NEMO→Kitten4 免费获得"是过度陈述** | §1 的说法与 §3.3 自认的"KN→Kitten4 是自建有损反向(`docs/rounds/28`)"冲突;损失是**叠加**的 | 降级为"附带可得但需单独保真评估",不与 NEMO→KN 的验收混谈 |
 
 **评审补充的必查项(已并入执行前置)**:① 语义 diff 的字段级归一化 + 端到端守恒断言;
 ② **NEMO 块类型总量与可映射比例**(决定整个工作量,含 micro:bit/传感器/AI 等 KN 无对应的降级策略);
@@ -133,7 +133,7 @@ NEMO 只需要换**前端**与**映射表**,后端与装配**完全复用**:
 > **新增一条完整正向路径**:NEMO 前端(解析 + 形状归一化)+ 程序集结构合成(函数/参数/返回 →
 > `procedures_2_*`)+ 映射表 + 与 Kitten 路径并列的装配(或外壳合成)+ 门面层两处改动。
 
-⇒ 这不是"顺手加一个方向",而是一个**独立轮次**(与 `docs/20` 当年做 Kitten→KN 的体量相当)。
+⇒ 这不是"顺手加一个方向",而是一个**独立轮次**(与 `docs/rounds/20` 当年做 Kitten→KN 的体量相当)。
 因此本轮的执行边界调整为:**R1–R5 研究先把"官方产物夹具 + 表 + 结构合成规则 + validateBcm 可行性"备齐**,
 Rust 侧实现留到研究结论到手后再开工(见 §5 的 S1–S4,顺序不变)。
 
@@ -162,7 +162,7 @@ Rust 侧实现留到研究结论到手后再开工(见 §5 的 S1–S4,顺序不
 | 未提版本迁移 | `bcm_version < 0.9.4`(**QC**:角色 rotation 取反、旧音频块 XML 重写、变量坐标按舞台中心平移)与 `< 0.15.0`(**YC**:旧音频块 XML 重写) | 列为显式任务(两份样本只覆盖 YC,QC 未测到) |
 | 资源"重传再改写" | `WN` **只改写 url**:造型 → `https://static.codemao.cn/nemo/22/` 前缀 + `.webp` 追加 `?imageView2/0/format/png`;音频同理且 `ext=mid` 置空。**重传是编辑器外围流程**(`main.js` 调用点)不是 `WN` | 沿用"离线近似保留 url","重传"当可选步骤 |
 | 未提槽位语义 | `<value>` 里 shadow/empty 与覆盖它的 `<block>` 同时存在时:`inputs[key]` = 块节点,`shadows[key]` = **重新序列化**的 shadow XML(`xmlns=xhtml`、**新 uuid**) | 前端按此实现 |
-| 确定性 | 官方 blockJson id 是**随机 uuid**、缺失 `createTime` 用 `Date.now()` ⇒ 官方 diff **必须忽略 id/location/createTime**(`docs/20 §618` 早已如此) | 我们仍走 `deterministic_ids`,但差异门按语义比 |
+| 确定性 | 官方 blockJson id 是**随机 uuid**、缺失 `createTime` 用 `Date.now()` ⇒ 官方 diff **必须忽略 id/location/createTime**(`docs/rounds/20 §9` 早已如此) | 我们仍走 `deterministic_ids`,但差异门按语义比 |
 
 ### 9.3 官方管线的 12 步(移植顺序,`main-vendors` ~6000071 的 `gI`)
 
@@ -253,7 +253,7 @@ Rust 侧实现留到研究结论到手后再开工(见 §5 的 S1–S4,顺序不
 | 源 → 目标 | 状态 |
 | --------- | ---- |
 | Kitten4 → KN | ✅ 已有(过官方校验器 + 实体级并行) |
-| KN → Kitten4 | ✅ 已有(自建有损反向,保真缺口见 `docs/28`,已加预算断言) |
+| KN → Kitten4 | ✅ 已有(自建有损反向,保真缺口见 `docs/rounds/28`,已加预算断言) |
 | **NEMO → KN** | ✅ **本轮落地**(与官方逐数一致) |
 | NEMO → Kitten4 | ✅ 附带可得(= NEMO→KN ∘ KN→Kitten4;损失叠加 ⇒ 需单独保真评估) |
-| KN → NEMO | ⛔ 不做(平台无对照;`docs/24 §12` 的建作品端点已备好,但要先能产出合法 NEMO 文件) |
+| KN → NEMO | ⛔ 不做(平台无对照;`docs/rounds/24 §12` 的建作品端点已备好,但要先能产出合法 NEMO 文件) |

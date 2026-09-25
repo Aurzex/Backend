@@ -18,7 +18,7 @@
 
 | # | 位置 | 问题 | 建议 | 风险/备注 |
 | - | ---- | ---- | ---- | --------- |
-| 1 | `decompile/mod.rs:236-258` | 反编译侧两级并发不折算:batch × `resource_concurrency`(默认 8)无上限 | ✅ **已落地**:`decompile_batch` 把"作品级 × 单作品资源级"的**总线程封顶 16**(常量 `RESOURCE_DOWNLOAD_BUDGET`)。**口径按评审纠正**:下载是 I/O 密集,不能用 `available_parallelism` 折算(docs/22 实测 8=103s / 16=92s / **32=127s 且 CDN 限流丢文件**),否则低核机器折到近串行、高核机器放宽到限流区 | 默认 `batch_concurrency = 1` 时行为完全不变(仍是 8) |
+| 1 | `decompile/mod.rs:236-258` | 反编译侧两级并发不折算:batch × `resource_concurrency`(默认 8)无上限 | ✅ **已落地**:`decompile_batch` 把"作品级 × 单作品资源级"的**总线程封顶 16**(常量 `RESOURCE_DOWNLOAD_BUDGET`)。**口径按评审纠正**:下载是 I/O 密集,不能用 `available_parallelism` 折算(docs/rounds/22 实测 8=103s / 16=92s / **32=127s 且 CDN 限流丢文件**),否则低核机器折到近串行、高核机器放宽到限流区 | 默认 `batch_concurrency = 1` 时行为完全不变(仍是 8) |
 | 2 | `tests/live_features.rs`、`tests/convert_live.rs` | **真机门在 CI 永不真跑且静默放行**:配置缺失时 `eprintln` + `return` ⇒ 显示 pass 却没验任何东西(它们不是 `#[ignore]`) | ✅ **已落地(评审采纳方案 b)**:新增 `BACKEND_REQUIRE_LIVE=1` 严格模式,判据**不止"配置文件不存在"**,还覆盖"解析失败 / accounts 为空 / 没有所需 kind 的作品 / 登录失败"(评审补充要求);默认不设 ⇒ 行为与之前完全一致 | 验证:默认缺配置仍跳过式通过;严格模式 + 完整配置通过;**严格模式 + 缺配置 ⇒ 明确失败**并打印原因(三个方向都实测) |
 | 3 | `converse.rs:846-856` | AI 对话断线后只置 `connected=false` + emit 错误,没有 cloudvar 那样的指数退避重连;断连后 `send_and_wait` 只能等 Timeout,必须手动 `connect()` | 评估加退避重连(session/历史重建语义要想清);至少把可见行为写进文档 | 中:产品语义 |
 
@@ -33,7 +33,7 @@
    - `PathConfig::{fiction_file_path,token_file_path,ensure_directories}`(零调用方)。
    - ⚠️ 这些是**公开面**上的工具函数,删除属破坏性变更 ⇒ 需评审确认后再删(或先标注 `#[deprecated]`)。
 4. `simple.rs:219`:`CocoDecompiler::decompile` 对唯一的 `Arc<Value>` 做 `(*data).clone()`,可 `Arc::try_unwrap` 免拷。
-5. `auth.rs:108-139` 的 `AccountStatus` 与 `requests.rs` 的 `Identity` 是同一"身份"概念的平行枚举(靠 `to_identity()` 转换)—— `docs/19` 之后的新裂缝,易漂移。
+5. `auth.rs:108-139` 的 `AccountStatus` 与 `requests.rs` 的 `Identity` 是同一"身份"概念的平行枚举(靠 `to_identity()` 转换)—— `docs/rounds/19` 之后的新裂缝,易漂移。
 6. `nemo.rs::get_sha` 每次 `clone()` 64 字节 hex;可返回 `&str`。
 7. `cloudvar.rs:2410` flush 用固定 100ms `sleep` 轮询(空闲也醒);可换 `Condvar`/`Notify` 按需唤醒。
 
@@ -50,5 +50,5 @@
 
 ## 5. 与其它轮次的关系
 
-- P1-1(反编译侧并发折算)与 `docs/23` §3 P2-11「两级预算」同源 ⇒ 可并到那一轮;
+- P1-1(反编译侧并发折算)与 `docs/rounds/23` §3 P2-11「两级预算」同源 ⇒ 可并到那一轮;
 - P2-3(死代码)与「删死重量」的仓库约定一致,但涉及公开面 ⇒ 需要评审与版本策略。

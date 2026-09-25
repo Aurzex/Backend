@@ -1,6 +1,6 @@
 //! 中核数据模型:积木节点/树(两种编辑器归一到它)+ id 生成。
 //!
-//! 设计要点(见 `docs/20-kitten-kn-work-conversion-plan.md` §6.2):
+//! 设计要点(见 `docs/rounds/20-kitten-kn-work-conversion-plan.md` §6.2):
 //!
 //! - **不做语义 IR**:节点就是编辑器自己的 JSON 形状(KN 的 `nekoBlockJsonList` 元素),
 //!   只是把"树 vs 邻接表"的差异交给 adapter;

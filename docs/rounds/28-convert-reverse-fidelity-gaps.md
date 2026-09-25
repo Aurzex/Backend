@@ -42,7 +42,7 @@
 
 ## 4. 后续研究路线(建议,不要直接猜着改)
 
-1. 先把官方 JS 跑起来(**harness 方法已在本仓验证过**,见 `docs/20` §618):
+1. 先把官方 JS 跑起来(**harness 方法已在本仓验证过**,见 `docs/rounds/20` §9):
    从 `creation.bcmcdn.com/neko/web/release/static/js/main-vendors.9b801394.js`
    里取模块 41888 的导出,`nemoBcmToNekoBcmUtils` / `kittenBcmToNekoBcmUtils` 都能直接调;
    对同一份 KN,分别跑官方 `KN→K4`(如果有反向)与我们的实现做**逐字段 diff**。

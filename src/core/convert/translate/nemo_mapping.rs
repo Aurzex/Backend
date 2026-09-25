@@ -3,7 +3,7 @@
 //! 官方 bundle:`temp/web/main-vendors.9b801394.js` 模块 41888,类 `hI` 位于偏移
 //! ~5960458–5999640;表(`sI` 类型映射、`getMappedName` 内联槽位表、`specialFieldValueMap`、
 //! `SHADOW_FIELD_NAME_MAP`、`oI` 占位标题)转录在 [`super::tables_gen_nemo`]。
-//! 研究结论见 `docs/27-nemo-to-kn-conversion-plan.md` §9。
+//! 研究结论见 `docs/rounds/27-nemo-to-kn-conversion-plan.md` §9。
 //!
 //! ## 为什么"前端"和"映射"在同一个模块里
 //!
@@ -15,7 +15,7 @@
 //! **已解析、已过前置改写**的积木 XML 节点(解析/序列化在 [`super::nemo_xml`]),输出 KN 的
 //! [`BlockTree`];文档级管线(骨架、版本迁移、资源 url、变量/舞台归一)在 [`super::nemo`]。
 //!
-//! ## 语义要点(对应 docs/27 §9.2/§9.3)
+//! ## 语义要点(对应 docs/rounds/27 §9.2/§9.3)
 //!
 //! - **槽位覆盖语义**:`<value name="A"><shadow …/><block …/></value>` → `inputs["A"]` = 那个块、
 //!   `shadows["A"]` = 影子**重新序列化**的 `<shadow …/>`。`<empty>` 与 `<shadow>` 走不同分支(官方如此):
