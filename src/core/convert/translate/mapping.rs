@@ -364,17 +364,15 @@ fn map_field_value(name: &str, value: &Value) -> Value {
         .as_deref()
         .and_then(|k| mapped_field_text(name, k))
     {
-        Some(mapped) => Value::String(mapped),
+        Some(mapped) => Value::String(mapped.to_string()),
         None => value.clone(),
     }
 }
 
 /// 取值的映射结果(未命中 → `None`);影子 XML 的文本改写也用它
-fn mapped_field_text(name: &str, text: &str) -> Option<String> {
-    SPECIAL_FIELD_VALUES_INDEX
-        .get(name)?
-        .get(text)
-        .map(|v| (*v).to_string())
+/// 特殊字段取值映射(表值本就是 `&'static str`,返回借用**不再每次分配**)
+fn mapped_field_text(name: &str, text: &str) -> Option<&'static str> {
+    SPECIAL_FIELD_VALUES_INDEX.get(name)?.get(text).copied()
 }
 
 /// `getMappedName`(77497):槽位改名(含 `procedures_2_defnoreturn` 的 `PARAMS{n}` 后移)
@@ -508,12 +506,16 @@ fn start_tag_end(xml: &str) -> Option<usize> {
 }
 
 /// `transformShadowXml`(77830):影子 XML 的 `type`、每个 `<field>` 的 `name` 与文本一起过映射表
-fn transform_shadow_xml(block_type: &str, xml: &str) -> String {
+///
+/// 入参 `xml` **按值**收:调用方手里本来就是从节点里搬出来的 `String`,不需要改写时
+/// 直接原样返回(零拷贝);逐字段也直接把原切片 `push_str` 进结果,不再各建一个临时
+/// `String`(旧实现每字段 1–2 次多余分配,方案 23 P1-8)。
+fn transform_shadow_xml(block_type: &str, xml: String) -> String {
     if xml.is_empty() {
-        return String::new();
+        return xml;
     }
-    let Some(root_end) = start_tag_end(xml) else {
-        return xml.to_string();
+    let Some(root_end) = start_tag_end(&xml) else {
+        return xml;
     }; // 不像 XML:原样保留(官方这里会产出 parsererror)
     let root = &xml[..root_end];
     let mut out = match attr_value(root, "type") {
@@ -541,15 +543,16 @@ fn transform_shadow_xml(block_type: &str, xml: &str) -> String {
         match attr_value(tag, "name") {
             Some(name) => {
                 let mapped = map_field_name(block_type, name);
-                out.push_str(&if mapped == name {
-                    tag.to_string()
+                if mapped == name {
+                    out.push_str(tag);
                 } else {
-                    set_attr_value(tag, "name", &mapped)
-                });
+                    out.push_str(&set_attr_value(tag, "name", &mapped));
+                }
                 let old_text = &rest[tag_end..close];
-                out.push_str(
-                    &mapped_field_text(name, old_text).unwrap_or_else(|| old_text.to_string()),
-                );
+                match mapped_field_text(name, old_text) {
+                    Some(text) => out.push_str(text),
+                    None => out.push_str(old_text),
+                }
             }
             None => out.push_str(tag),
         }
@@ -754,10 +757,18 @@ fn parse_node(mut node: BlockJson, ctx: &mut Ctx) -> BlockJson {
     if !orig_fields.is_empty() {
         fields.clear();
         for (name, value) in orig_fields {
-            fields.insert(
-                map_field_name(&orig, &name).into_owned(),
-                map_field_value(&name, &value),
-            );
+            // 先取值再搬键(`map_field_value` 还要借 `name` 查表)
+            let mapped_value = map_field_value(&name, &value);
+            // **未改名就复用原键**:`orig_fields` 是按值消费的,这里能省掉一个 String
+            // (旧实现无条件 `into_owned()`,方案 23 P1-8)。
+            // 注意:`Cow::Borrowed` **不等于**未改名 —— 改到静态表里的名字
+            // (`"variable"`/`"list"`/字段名表)同样是 Borrowed,必须按**值**判定
+            let key = match map_field_name(&orig, &name) {
+                Cow::Borrowed(mapped) if mapped == name => name,
+                Cow::Borrowed(mapped) => mapped.to_string(),
+                Cow::Owned(mapped) => mapped,
+            };
+            fields.insert(key, mapped_value);
         }
         // (5b) 云列表三型:list 字段变成 inputs.list 上的 pure_list_get 影子。
         //
@@ -783,10 +794,13 @@ fn parse_node(mut node: BlockJson, ctx: &mut Ctx) -> BlockJson {
         node.shadows = orig_shadows
             .into_iter()
             .map(|(slot, xml)| {
-                (
-                    get_mapped_name(&orig, &slot).into_owned(),
-                    transform_shadow_xml(&orig, &xml),
-                )
+                // 同上:未改名(按**值**判定)复用原槽名(少一次 String);XML 按值传
+                let name = match get_mapped_name(&orig, &slot) {
+                    Cow::Borrowed(mapped) if mapped == slot => slot,
+                    Cow::Borrowed(mapped) => mapped.to_string(),
+                    Cow::Owned(mapped) => mapped,
+                };
+                (name, transform_shadow_xml(&orig, xml))
             })
             .collect();
     }
@@ -850,7 +864,11 @@ fn route_children(node: &mut BlockJson, ctx: &mut Ctx) {
                 pure_list_get(list, node.id.clone(), shadow_id),
             );
         }
-        let slot = get_mapped_name(kind, &slot).into_owned();
+        let slot = match get_mapped_name(kind, &slot) {
+            Cow::Borrowed(mapped) if mapped == slot => slot,
+            Cow::Borrowed(mapped) => mapped.to_string(),
+            Cow::Owned(mapped) => mapped,
+        };
         if NEXT_ROUTE_TYPES.contains(&kind.as_str()) {
             node.next = Some(Box::new(child));
         } else if (kind.as_str() == "controls_if" || kind.as_str() == "when")
