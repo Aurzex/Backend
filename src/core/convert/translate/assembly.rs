@@ -1799,7 +1799,6 @@ mod tests {
         );
     }
 
-    #[test]
     /// 显式方向换画布尺寸时,坐标按比例重算(不是"只换尺寸不改坐标")
     #[test]
     fn explicit_orientation_rescales_positions() {
@@ -1818,6 +1817,7 @@ mod tests {
         );
     }
 
+    #[test]
     fn styles_and_audio_keep_source_urls_and_report_uploads() {
         let mut report = report();
         let doc = build_document(&sample_source(), vec![], &[], 0, &mut report).expect("装配");
