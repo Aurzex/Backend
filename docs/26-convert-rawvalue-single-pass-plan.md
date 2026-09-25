@@ -84,3 +84,52 @@ RootShell { theatre: TheatreShell, styles: Box<RawValue>, audios: Box<RawValue>,
 3. 1.1 只在预研 A 占比高且口径获批后才做;
 4. 两项目前都**不阻塞** `docs/25`(实体级并行):并行是"同代码多线程",与文档级重构正交,
    先并行收益更大(方案 23 §4 顺序建议一致)。
+
+---
+
+## 6. 子代理评审结论(2026-09-25,ReviewS4RawValue):两项都**判不做**
+
+评审把三项预研真做了,结论推翻了本方案的两个前提,也推翻了 `docs/23` §1 的一处数字:
+
+### 6.1 预研 A(透传占比)≈ **0%** ⇒ `RawValue` 上限 ≈ 0%
+
+| 字段 | 四样本字节占比 | 装配期实际处理 |
+| ---- | -------------- | -------------- |
+| `theatre`(含 `block_data_json`) | **99.2%–99.5%** | 每个实体全部重写并重新编码 |
+| `styles` | 0.05%–0.60% | `build_styles` 改 `center_point`/`rotate_center`→`centerPoint`、`cdn_url`→`url`(assembly.rs:320-359) |
+| `audios` | 0.05%–0.13% | `build_audios` 改 `cdn_url`→`url`(361-389) |
+| `variables` / `cloud_variables` | 0.12%–0.80% | `build_variables` 重算 `position`/`style`/`type`/`createTime`(391-496) |
+| `broadcasts` | ≤0.02% | `build_broadcasts` 包 `broadcastsDict`(536-544) |
+| `size` / `scenes_order` | 0.00% | **只读输入**,不输出 |
+| `stageSize` / `aiImageUrls` / `resourceZip` | — | **输出期计算/硬编码**的字段,不是输入 |
+| 反向唯一真透传 | `toolbox`/`hidden_toolbox` ≤0.01% | build_kitten4_document(1043-1067) |
+
+⇒ 本方案 §2 预研 A 的门槛是 30%,实测 ≈0% ⇒ **不做**(方案自己的规则:无数据不做)。
+
+### 6.2 预研 C:不存在"与官方逐字节对齐"的门,口径变更的对象是**自有基线**
+
+- `serde_json` 未开 `preserve_order`(BTreeMap ⇒ 输出按键排序);
+- 差分门(`translate/mod.rs` `diff_tests`)只做**语义**比较(类型计数、逐 id 的 type/fields、槽名集合),
+  文档里明确写了"为什么不做整段 JSON diff";官方夹具的块键序是**插入序**(`type,id,location,shield,mutation,next`)
+  ⇒ 官方产物**不排序**,我们**从未**与之逐字节对齐;
+- 唯一字节门是 `tests/convert_bench.rs` 对**自有** `convert_bench_baseline.json` 的 SHA256。
+
+因此本方案 §2 预研 C 的二分前提("官方若排序…")不成立;`docs/23` §1 的"90% 字节只透传"与
+"逐字节对齐官方"两处措辞已在 `docs/23` 就地更正。
+
+### 6.3 预研 B:正向是 **2 趟**全遍历,合并收益低于门槛
+
+- `translate_kitten_to_kn`(mapping.rs:187-207)= `parse_node`(内含 `route_children` 内联,803)+ `gc_deep`;
+- `gc_node` 读的是"子树已 **parse**"的状态(`shadow_number` 拆包(1554-1565)、`list_append` 降级(1636-1656)、
+  横屏包装读子节点 `location`(1601-1635)),**不能**与 `parse_node` 同向前序合并;`shadow_number` 还自递归调
+  `gc_node`,改后序会**双重应用**;
+- 反向 `translate_kn_to_kitten` 本已单遍(`reverse_node` 1166 先 `unwrap_arithmetic_wrappers`/`fold_pure_list_get` 再递归);
+- 合并遍历不减少逐块 `kind` 匹配 / `transform_shadow_xml` / `map_field_name` 这些**主要**成本
+  ⇒ 达不到本方案 §2 预研 B 的 15% 门槛 ⇒ **不做**。
+
+### 6.4 结论
+
+`docs/26` 两项(P1-6 / P1-7)**均不执行**;若将来要再评估,必须先有新的证据(例如某类作品
+的装配期确实存在大块透传字段,或遍历占比量测达到门槛)。量测办法(评审给的可行做法,不改产物路径):
+在 `mapping.rs` 用 `#[cfg(test)]` 的 `Instant` 分别包住 `translate_kitten_to_kn` 里 `parse_node` 与 `gc_deep`
+两个调用点(187-207),先量占比再决定。
