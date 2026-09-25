@@ -139,3 +139,78 @@ CreateNemoWorkArgs {
 - `docs/22` 给出瓶颈(请求数 × RTT)与已落地优化(并发 3.9×、`skip_resources` 53×);
 - 本文补上"**不下载**"的完整路线与 API 缺口:平台侧只要一个 create 端点,就能把"40 MB 下行 + 数分钟"换成"1–2 次请求";
 - 两件都做完后,`convert` 域的 NEMO 相关耗时将从"分钟级"降到"秒级 + 一次小请求"。
+
+---
+
+## 8. 本轮实测补充(2026-09-25 续:前端 bundle 反编译 + 抓包解密尝试)
+
+### 8.1 前端 bundle 反编译:Web 端**没有**建 NEMO 作品的接口
+
+| 目标 | 做法 | 结果 |
+| ---- | ---- | ---- |
+| `nemo.codemao.cn`(NEMO 分享/落地页) | 拉入口 + `main.js` + 全部 **23 个懒加载 chunk**(`kn-cdn.codemao.cn/nemoy/`) | 只有**读**接口与活动接口:见 §8.3 的增量清单;`get_upload_data` 是 **native bridge** 调用(上传发生在 App 侧) |
+| `tools-entry.codemao.cn`(创作入口 SDK) | 拉 `tools-sdk.*.js`,抽取编辑器 → URL 映射 | 映射里是 `Roki` / `IntlRoki` / `Neko`(= `kn.codemao.cn/editor/`)等,**没有 NEMO** |
+| 官方 App(APK) | 从平台自己的 `GET /nemo/v2/config/apk` 拿到地址,下载 109 MB APK | **代码被加固**:`classes.dex` 只有壳入口,真实代码在 `assets/classes0.jar` / `assets/classes.dgc`(**加密**,非 zip/dex);assets 里的 H5(workspace/helps bundle)无接口字符串 → **静态挖不动** |
+
+结论:**NEMO 作品的创建/上传只存在于 App 内**,Web 侧不存在该入口;要拿端点只能 (a) 解密抓包,或 (b) 运行时 dump(需 root/frida)。
+
+### 8.2 接口探测:候选路径全部不存在(方法有效,结论为负)
+
+探测法可靠:**已知的 POST-only 路由**(`/neko/works`、`/kitten/r2/work`)用 GET 打 → **405 `40000005 请求方式不支持`**;不存在的路径 → **404**,且 404 响应体暴露服务名(`api-nemo-app`、`creation_tools…`)。
+
+候选(`/nemo/works`、`/nemo/work`、`/nemo/v2/works`、`/nemo/v2/work`、`/nemo/v3/works`、`/nemo/project`、`/nemo/works/create` × `api-creation.codemao.cn` / `api.codemao.cn` / `nemo.codemao.cn`)→ **全部 404**。
+
+### 8.3 增量 API 清单(全部有 bundle/响应证据)
+
+| 端点 | 用途 | 证据 |
+| ---- | ---- | ---- |
+| `POST nemo/v2/user/submit/work` | **活动投稿**(body 为 `{user_phone, work_id}`,不是建作品) | `nemoy` chunk `4.5eec4bb3.js` |
+| `GET nemo/v2/config/apk` | 返回官方 APK 地址(实测:`https://static.codemao.cn/nemo/apk/编程猫Nemo_4.5.0_…apk`) | 实测 + `nemoy/main.js` |
+| `GET nemo/v2/activity/work/{total}` | 活动作品列表/总数 | `nemoy/main.js` |
+| `GET nemo/v2/works/web/` | 作品推荐/详情(Web) | 同上 |
+| `GET api/work/info/`、`api/work/praise/` | 作品信息 / 点赞 | 同上 |
+| `GET tiger/user`、`POST oauth/{wechat,qq}/login`、`tiger/wechat/config/js_sdk` | 用户信息 / 第三方登录 / 微信 JS-SDK | 同上 |
+
+### 8.4 抓包解密:已排除到"只剩 keylog 与记录不匹配"
+
+准备工作与已排除项(**都有量化证据**):
+
+| 步骤 | 结果 |
+| ---- | ---- |
+| keylog ↔ pcap 配对 | ✅ **`PCAPdroid_25_9月_13_59_21` 388 个 ClientHello 中 386 个能在 keylog 里找到密钥**(339 个 TLS1.2 `CLIENT_RANDOM` + 47 个 TLS1.3);另一个 pcap 0 命中(与文件名相符) |
+| 协商套件 | TLS1.2 `0xc02f`(AES128-GCM)339 条,`0x1302`(TLS1.3 AES256-GCM)47 条;ServerHello.random 末 8 字节为 `DOWNGRD\x01`(TLS1.3 降级哨兵,属正常) |
+| 记录切分 | 客户端序:`22:174`(ClientHello)→ `22:37`(ClientKeyExchange)→ `20:1`(CCS)→ `22:40`(**加密 Finished**)→ `23:1123`(app data)→ `21:26`(加密 alert) |
+| 我的实现 | 自造测试向量(同 PRF/AAD/nonce 路径)加密→解密 **通过**;TLS1.2 按 CCS 划分加密 epoch、序号从 0 起、AAD=`seq‖type‖ver‖ptLen`、nonce=`fixed_iv‖explicit` 均为 RFC 写法 |
+| 穷举尝试 | 对"加密 Finished"与首条 app data 共 **约 12 万组参数组合**(密钥/IV 交换、seed 顺序、AAD 版本 {记录, 0x0303, 0x0301}、AAD 长度 {16,24,40}、nonce 4 种构造、seq {0,1,2})→ **全部认证失败** |
+
+**现状**:未能解密;现象是"client_random 匹配、但 master secret 解不开记录"这一自相矛盾的局面(自测证明实现无误)。需要一个第三方实现来裁决 —— 见 §8.5。
+
+### 8.5 下一步(需要你的一条命令,我这边 sudo 要密码)
+
+```bash
+sudo pacman -S wireshark-cli                      # 提供 tshark
+# 1) 先验证能否解密(能出 h2 帧 = keylog 可用)
+tshark -r temp/PCAPdroid_25_9月_13_59_21.pcap \
+       -o tls.keylog_file:temp/PCAPdroid_25_9月_13_59_21.keylog \
+       -Y http2 -c 5
+# 2) 端点清单(这才是我们要的)
+tshark -r temp/PCAPdroid_25_9月_13_59_21.pcap \
+       -o tls.keylog_file:temp/PCAPdroid_25_9月_13_59_21.keylog \
+       -Y 'http2.headers.path' -T fields -e http2.headers.path | sort -u
+# 3) 找建作品/上传相关(带 SNI 与请求体)
+tshark -r temp/PCAPdroid_25_9月_13_59_21.pcap \
+       -o tls.keylog_file:temp/PCAPdroid_25_9月_13_59_21.keylog \
+       -Y 'http2.headers.method == "POST"' \
+       -T fields -e tls.handshake.extensions_server_name -e http2.headers.path -e http2.data.data
+```
+
+- 若 tshark **能解密**:把 2)/3) 的输出贴给我(或你自己看),我据此把 `create_nemo_work` 的路径与 payload 字段一次写进 §3.1,并落成 API;
+- 若 tshark **也解不开**:即证明这份 keylog 与抓包虽同源(随机数匹配)但不配套,本轮解密路线到此为止 —— 回到 §3 的 A/C 路线(或等一侧新的抓包 + keylog 同批导出)。
+
+### 8.6 我的临时工具(都在 `temp/`,已 gitignore)
+
+| 文件 | 用途 |
+| ---- | ---- |
+| `temp/pcap_v4.py` / `pcap_upload.py` / `pcap_conn3.py` | 纯标准库 pcap 解析:主机/连接/时序/七牛上传链 |
+| `temp/dec/decrypt.js` + `match.js` | TLS 解密尝试(keylog → 记录解密 → HPACK 解 h2);`match.js` 做 keylog↔pcap 配对量化 |
+| `temp/web_dig.py` | 前端入口 bundle 抓取 + 关键词抽取(本轮用它挖了 nemoy 与 tools-entry) |
