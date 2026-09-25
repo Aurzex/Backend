@@ -5,6 +5,7 @@
 //! `docs/20-kitten-kn-work-conversion-plan.md` §4;所有无法回填的字段都进报告。
 
 use super::blockjson::BlockTree;
+use super::finish::{num, project_name_at};
 use super::report::{TranslateReport, TranslateWarning};
 use super::{
     StageOrientation, TranslateError, TranslateOptions, blockjson, ids, kitten, mapping, neko,
@@ -293,7 +294,7 @@ fn build_kitten4_document(
         "application_version".into(),
         json!(KITTEN4_APPLICATION_VERSION),
     );
-    doc.insert("project_name".into(), json!(kitten4_project_name(src)));
+    doc.insert("project_name".into(), json!(project_name_at(src, "projectName")));
     doc.insert(
         "size".into(),
         json!({ "width": num(canvas.0), "height": num(canvas.1) }),
@@ -628,14 +629,6 @@ fn kitten4_broadcasts(
     }
 }
 
-/// `projectName || "空白作品"`(与正向 `finish::project_name` 的兜底一致)
-fn kitten4_project_name(src: &serde_json::Map<String, serde_json::Value>) -> String {
-    match src.get("projectName") {
-        Some(serde_json::Value::String(name)) if !name.is_empty() => name.clone(),
-        _ => String::from("空白作品"),
-    }
-}
-
 /// KN 位置(左上原点像素系)→ Kitten 位置(中心原点):正向 `finish::stage_position` 的逆
 fn kitten4_position(
     position: &serde_json::Value,
@@ -655,11 +648,3 @@ fn kitten4_position(
     (x * w / sw - w / 2.0, h / 2.0 - y * h / sh)
 }
 
-/// JS 数字 → JSON:整数值出整数,与官方产物逐字节对齐
-fn num(value: f64) -> serde_json::Value {
-    if value.is_finite() && value.fract() == 0.0 && value.abs() < 9.007_199_254_740_992e15 {
-        serde_json::json!(value as i64)
-    } else {
-        serde_json::json!(value)
-    }
-}

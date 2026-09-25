@@ -67,7 +67,7 @@ const LANDSCAPE_WRAP_TYPES: &[&str] = &["self_go_forward", "self_move_to", "self
 
 const SHADOW_TEXT_MUTATION: &str =
     "<mutation xmlns=\"http://www.w3.org/1999/xhtml\" items=\"1\"></mutation>";
-const XHTML: &str = "http://www.w3.org/1999/xhtml";
+pub(crate) const XHTML: &str = "http://www.w3.org/1999/xhtml";
 
 /// 官方 `createMutationForBlockType` 有专门 `handle*` 的 31 型(标题由字段拼词,我们只近似)
 #[rustfmt::skip]
@@ -252,14 +252,17 @@ fn value_key(value: &Value) -> Option<Cow<'_, str>> {
     }
 }
 
-/// JS 真值判断(只用在确实照抄了 `if (x)` 的地方)
-fn truthy(value: &Value) -> bool {
+/// JS 真值判断(只用在确实照抄了 `if (x)` 的地方)。
+///
+/// 两个装配方向共用:`None` 等价 `undefined`;`serde_json` 表示不了 `NaN`
+/// (`Number::from_f64(NaN)` 返回 `None`),所以无需再单独判 `NaN`。
+pub(crate) fn truthy(value: Option<&Value>) -> bool {
     match value {
-        Value::Null => false,
-        Value::Bool(b) => *b,
-        Value::Number(n) => n.as_f64().map(|f| f != 0.0).unwrap_or(true),
-        Value::String(s) => !s.is_empty(),
-        _ => true,
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => *b,
+        Some(Value::Number(n)) => n.as_f64().map(|f| f != 0.0).unwrap_or(false),
+        Some(Value::String(s)) => !s.is_empty(),
+        Some(Value::Array(_) | Value::Object(_)) => true,
     }
 }
 
@@ -520,7 +523,7 @@ pub(crate) fn math_number_shadow(id: &str, num: &str) -> String {
 }
 
 /// `math_number` 子积木
-fn math_number_node(id: String, num: &str, parent_id: String) -> BlockJson {
+pub(crate) fn math_number_node(id: String, num: &str, parent_id: Option<String>) -> BlockJson {
     BlockJson {
         kind: "math_number".to_string(),
         id: Some(id),
@@ -530,7 +533,7 @@ fn math_number_node(id: String, num: &str, parent_id: String) -> BlockJson {
             json!({"NUM": {"min": null, "max": null, "precision": 0, "mod": null}}),
         ),
         is_output: true,
-        parent_id: Some(parent_id),
+        parent_id,
         ..Default::default()
     }
 }
@@ -552,10 +555,10 @@ fn wrap_arithmetic(
     original.parent_id = Some(wrap_id.clone()); // 官方给原节点重铸 id 并改挂到包装块
     let (input_a, input_b) = if original_first {
         original.id = Some(a_id);
-        (original, math_number_node(b_id, constant, wrap_id.clone()))
+        (original, math_number_node(b_id, constant, Some(wrap_id.clone())))
     } else {
         original.id = Some(b_id);
-        (math_number_node(a_id, constant, wrap_id.clone()), original)
+        (math_number_node(a_id, constant, Some(wrap_id.clone())), original)
     };
     BlockJson {
         kind: "math_arithmetic".to_string(),
@@ -612,7 +615,7 @@ fn parse_node(mut node: BlockJson, ctx: &mut Ctx) -> BlockJson {
     let coordinary = orig_fields.get("coordinary").and_then(value_key);
     let attribute = orig_fields
         .get("attribute")
-        .filter(|v| truthy(v))
+        .filter(|v| truthy(Some(v)))
         .and_then(value_key);
     let kind = if matches!(
         orig.as_str(),
@@ -1502,7 +1505,7 @@ fn gc_node(mut node: BlockJson, ctx: &mut Ctx) -> BlockJson {
         let attribute = node
             .fields
             .get("attribute")
-            .filter(|v| truthy(v))
+            .filter(|v| truthy(Some(v)))
             .and_then(value_key)
             .filter(|a| is_uuid(a));
         if let Some(attribute) = attribute {

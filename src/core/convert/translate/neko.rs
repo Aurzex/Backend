@@ -67,11 +67,9 @@ use crate::core::convert::shared::{DecompilerError, Result};
 
 use super::blockjson::{BlockJson, BlockTree};
 use super::ids::IdSource;
-use super::mapping::{math_number_shadow, xml_attr_value};
+use super::mapping::{XHTML, math_number_node, math_number_shadow, xml_attr_value};
 use super::report::{TranslateReport, TranslateWarning};
 
-/// 官方 mutation 的命名空间(xhtml)
-const XHTML: &str = "http://www.w3.org/1999/xhtml";
 /// 程序集定义根积木(`HC` 拆出来的那一类)
 const DEF_ROOT: &str = "procedures_2_defnoreturn";
 /// 源侧形参声明积木(定义里 `inputs.PARAMS<n>`)
@@ -358,19 +356,7 @@ fn strip_return_values(node: &mut BlockJson) {
 fn inject_return_values(node: &mut BlockJson, ids: &mut IdSource) {
     if node.kind == RETURN_VALUE && !node.inputs.contains_key("VALUE") {
         // 官方 `VC` 的字面量(没有 location;`shield: false` 由编码端补)
-        let child = BlockJson {
-            kind: "math_number".into(),
-            id: Some(ids.uuid()),
-            is_shadow: true,
-            fields: BTreeMap::from([("NUM".to_string(), Value::String("0".into()))]),
-            field_constraints: Some(
-                json!({ "NUM": { "min": null, "max": null, "precision": 0, "mod": null } }),
-            ),
-            is_output: true,
-            parent_id: node.id.clone(),
-            shield: false,
-            ..Default::default()
-        };
+        let child = math_number_node(ids.uuid(), "0", node.id.clone());
         node.inputs.insert("VALUE".into(), child);
         node.shadows
             .insert("VALUE".into(), VALUE_SHADOW_XML.to_string());

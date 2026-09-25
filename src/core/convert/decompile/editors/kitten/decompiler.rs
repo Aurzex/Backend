@@ -1,5 +1,5 @@
 use crate::core::convert::decompile::{
-    blocks::{BlockContext, create_block_decompiler},
+    blocks::{BlockContext, create_block_decompiler, referenced_ids},
     shadow::ShadowBuilder,
 };
 use crate::core::convert::shared::{
@@ -43,60 +43,12 @@ impl KittenDecompiler {
         })
     }
 
-    /// 收集被 next_block/child_block/conditions/params 引用的块 ID(角色/场景共享)
-    fn collect_referenced_ids(blocks: &serde_json::Map<String, Value>) -> HashSet<String> {
-        let mut referenced_ids: HashSet<String> = HashSet::new();
-        for (_, block) in blocks {
-            if let Some(next) = block.get("next_block") {
-                if let Some(id) = next.as_str() {
-                    referenced_ids.insert(id.to_string());
-                } else if let Some(obj) = next.as_object()
-                    && let Some(id) = obj.get("id").and_then(|v| v.as_str())
-                {
-                    referenced_ids.insert(id.to_string());
-                }
-            }
-            if let Some(children) = block.get("child_block").and_then(|v| v.as_array()) {
-                for child in children {
-                    if let Some(id) = child.as_str() {
-                        referenced_ids.insert(id.to_string());
-                    } else if let Some(obj) = child.as_object()
-                        && let Some(id) = obj.get("id").and_then(|v| v.as_str())
-                    {
-                        referenced_ids.insert(id.to_string());
-                    }
-                }
-            }
-            if let Some(conditions) = block.get("conditions").and_then(|v| v.as_array()) {
-                for cond in conditions {
-                    if let Some(id) = cond.as_str() {
-                        referenced_ids.insert(id.to_string());
-                    } else if let Some(obj) = cond.as_object()
-                        && let Some(id) = obj.get("id").and_then(|v| v.as_str())
-                    {
-                        referenced_ids.insert(id.to_string());
-                    }
-                }
-            }
-            if let Some(params) = block.get("params").and_then(|v| v.as_object()) {
-                for (_, param_value) in params {
-                    if let Some(obj) = param_value.as_object()
-                        && let Some(id) = obj.get("id").and_then(|v| v.as_str())
-                    {
-                        referenced_ids.insert(id.to_string());
-                    }
-                }
-            }
-        }
-        referenced_ids
-    }
-
     /// 反编译根块(未被引用的块)并插入 context(角色/场景共享)
     fn decompile_root_blocks(
         blocks: &serde_json::Map<String, Value>,
         context: &mut BlockContext,
     ) -> Result<()> {
-        let referenced_ids = Self::collect_referenced_ids(blocks);
+        let referenced_ids = referenced_ids(blocks)?;
         for (id, block_data) in blocks {
             if !referenced_ids.contains(id) {
                 // 根块之间增加垂直间距,避免自动布局后挤在一起

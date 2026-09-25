@@ -54,6 +54,7 @@ use serde_json::{Map, Value, json};
 use crate::core::convert::shared::{DecompilerError, Result};
 
 use super::blockjson::type_name;
+use super::mapping::truthy;
 use super::neko::{ProcedureEntry, procedures_to_json};
 use super::report::{TranslateReport, TranslateWarning};
 use super::tables_gen::{BCM_VERSION, STAGE_LANDSCAPE, STAGE_PORTRAIT};
@@ -511,12 +512,17 @@ fn stage_size(landscape: bool) -> Value {
     json!({ "width": num(w), "height": num(h) })
 }
 
-/// 官方 `project_name || "空白作品"`
-fn project_name(src: &Map<String, Value>) -> String {
-    match src.get("project_name") {
+/// 官方 `projectName || "空白作品"`:键名随方向不同(正向 `project_name`,反向 `projectName`)
+pub(crate) fn project_name_at(src: &Map<String, Value>, key: &str) -> String {
+    match src.get(key) {
         Some(Value::String(name)) if !name.is_empty() => name.clone(),
         _ => DEFAULT_PROJECT_NAME.to_string(),
     }
+}
+
+/// 正向:`project_name` 字段
+fn project_name(src: &Map<String, Value>) -> String {
+    project_name_at(src, "project_name")
 }
 
 /// `broadcasts`:源是裸字典时包一层 `{broadcastsDict: …}`,已包好则透传(官方阶段 1 包过一次)
@@ -712,23 +718,12 @@ fn increment_digits(digits: &str) -> String {
     out.into_iter().collect()
 }
 
-/// JS 数字 → JSON:整数值出整数(`45` 而不是 `45.0`),与官方产物逐字节对齐
-fn num(value: f64) -> Value {
+/// JS 数字 → JSON:整数值出整数(`45` 而不是 `45.0`),与官方产物逐字节对齐(两个装配方向共用)
+pub(crate) fn num(value: f64) -> Value {
     if value.is_finite() && value.fract() == 0.0 && value.abs() < 9.007_199_254_740_992e15 {
         json!(value as i64)
     } else {
         json!(value)
-    }
-}
-
-/// JS 真值语义
-fn truthy(value: Option<&Value>) -> bool {
-    match value {
-        Some(Value::Null) | None => false,
-        Some(Value::Bool(b)) => *b,
-        Some(Value::Number(n)) => n.as_f64().map(|v| v != 0.0 && !v.is_nan()).unwrap_or(false),
-        Some(Value::String(s)) => !s.is_empty(),
-        Some(Value::Array(_)) | Some(Value::Object(_)) => true,
     }
 }
 

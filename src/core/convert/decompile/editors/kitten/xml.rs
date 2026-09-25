@@ -1,4 +1,4 @@
-use crate::core::convert::decompile::blocks::child_input_name;
+use crate::core::convert::decompile::blocks::{child_input_name, referenced_ids};
 use crate::core::convert::shared::{DecompilerConfig, Result, ValueExt};
 use serde_json::Value;
 use std::collections::HashSet;
@@ -24,36 +24,8 @@ impl<'a> XmlBlockWriter<'a> {
             .get("compiled_block_map")
             .and_then(|v| v.as_object());
         if let Some(blocks) = compiled_blocks {
-            // 收集被引用的块 id,只将顶层根块作为独立 XML 块输出
-            let mut referenced_ids: HashSet<String> = HashSet::new();
-            for (_, block) in blocks {
-                if let Some(next) = block.get("next_block")
-                    && let Some(id) = next.get("id").and_then(|v| v.as_str())
-                {
-                    referenced_ids.insert(id.to_string());
-                }
-                if let Some(children) = block.get("child_block").and_then(|v| v.as_array()) {
-                    for child in children {
-                        if let Some(id) = child.get("id").and_then(|v| v.as_str()) {
-                            referenced_ids.insert(id.to_string());
-                        }
-                    }
-                }
-                if let Some(conds) = block.get("conditions").and_then(|v| v.as_array()) {
-                    for c in conds {
-                        if let Some(id) = c.get("id").and_then(|v| v.as_str()) {
-                            referenced_ids.insert(id.to_string());
-                        }
-                    }
-                }
-                if let Some(params) = block.get("params").and_then(|v| v.as_object()) {
-                    for (_, pv) in params {
-                        if let Some(id) = pv.get("id").and_then(|v| v.as_str()) {
-                            referenced_ids.insert(id.to_string());
-                        }
-                    }
-                }
-            }
+            // 收集被引用的块 id,只将顶层根块作为独立 XML 块输出(与反编译重建同一实现)
+            let referenced_ids = referenced_ids(blocks)?;
             let mut y = 0.0;
             for (id, block) in blocks {
                 if !referenced_ids.contains(id) {
