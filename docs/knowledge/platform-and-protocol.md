@@ -49,7 +49,7 @@
 | 族 | 端点 | 备注 |
 | -- | ---- | ---- |
 | 作品详情(编辑器类型判定) | work API 的 `ide_type` / `work_type`(KN=15) | 决定 WS 连接参数与云变量参数 |
-| NEMO 建作品 | `POST /nemo/v2/works`(**form**,`orientation`) | **不需要资源字节**(决定性证据),返回作品 id/previewUrl;本库 `create_nemo_work` 已真机验证 |
+| NEMO 建作品 | `POST /nemo/v3/works/upload/<orientation>`(JSON;**作品 id 由它返回**) | **不需要资源字节**;但要有一个**合法 NEMO `.bcm` 的 `work_url`**(上传或复用源作品 URL)。接口已实现(`create_nemo_work`),**尚未真机验证**(NEMO 侧删除接口未知,避免留草稿) |
 | KN 建作品 | KN 编辑器的 create 族 | 本库 `create_kn_work` 已真机验证(建出草稿并过官方校验器) |
 | 资源上传 | Qiniu(`upload.qiniup.com` / `up.qiniup.com`) | 抓包实测 288 KB 上行,全是小文件 |
 | 时间校准 | `/coconut/clouddb/currentTime` | **返回形态/单位未实测**(毫秒则会误当秒 ⇒ 见目标库) |

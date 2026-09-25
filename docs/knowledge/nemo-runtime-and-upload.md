@@ -9,6 +9,18 @@
 - 本库对 NEMO 的反编译是**明文 JSON 直取**(fetcher),**没有解密步骤**;慢的原因是**资源要逐个下载**(见 `convert-performance.md` §2)。
 - 平台侧 `work_type` 判别:Kitten 系 = 1、Nemo = 3、CodeGame = 5、KN = 15(创作侧)。
 
+**官方的完整"保存/新建"链路是四步**(第三份抓包逐字段解出):
+
+```text
+1. GET  /cdn/qi-niu/tokens/uploading?projectName=nemo_android_ios&cdnName=qiniu&filePaths=<b64 文件名>   → 上传凭证
+2. POST <七牛 upload_url>(.bcm 字节) → work_url;封面另走 upload.qiniup.com/putb64/-1/key/<b64>.cover
+3. POST /nemo/v3/works/upload/<1|2>  {name, work_url, preview, bcm_version, …}   → **返回新作品 id**
+4. POST /nemo/qiniu/upload/business/bind  {business_id: <新 id>, url_list: [cover]}  → 绑封面
+```
+
+⇒ **作品 id 由第 3 步返回**(第 4 步只是绑封面)。本库已实现第 3 步(`NemoWorkManager::create_nemo_work`)与第 4 步;
+第 1/2 步**没有 NEMO 渠道**(`UploadChannel` 只有 `Pgaot|Codegame|Codemao`,且 `Codemao` 的凭证写死 `projectName=community_frontend`)。
+
 ## 2. 决定性证据:**建作品不需要资源字节**
 
 第三份抓包(nemo App + KN 编辑器混合)里找到了 **NEMO 建作品**调用:`POST /nemo/v2/works` 是**表单**提交(`orientation` 等),**不含资源字节**,返回作品 id / previewUrl。
