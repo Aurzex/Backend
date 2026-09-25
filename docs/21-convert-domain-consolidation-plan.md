@@ -401,9 +401,20 @@
 | N1 | **约 9 MB 作品的 CDN 上传在全局 30s 超时下必失败**,源文件与产物上传同样超时 | 探针:`上传失败 31.2s → Http(Timeout(Global))` / `35.5s`;`requests.rs:272` 全局 30s | `translate_work(upload=true)` 在慢网+大作品下不可用;`keep_source` 的源文件上传也受影响(失败降级为日志,不影响产物)。建议另开一轮:上传走独立超时或分片 |
 | N2 | `keep_source` 上传的是**反编译重建的编辑版**,官方上传原始文件字节 | `docs/20:156`;`convert/mod.rs::attach_source_reference` 注释 | 平台的「保留原件」若要能回打开原件,需拿到作品原始文件字节(当前管线不保留) |
 
-### 8.5 剩余
+### 8.5 S3 行为修复 + S4 文档同步(已完成)
 
-- **S3.2** `StageOrientation` 语义与文档对齐(C6:`kitten4_position` 实际按画布缩放坐标、`kitten4_variables` 的 `let _ = landscape`);
-- **S3.3** 补覆盖缺口:正向 `strict`、显式 `StageOrientation`、`translate_works` 并发、NEMO/WOOD 自定义输出目录(最后一条已随 S3.1 真机覆盖);
-- **S4** README/docs/20 的路径锚点同步(本轮改了文件结构:README 未涉及 convert 文件路径,`docs/20` 的目录树段落已过时);
-- N1/N2 建议单开一轮。
+| 提交 | 内容 | 验证 |
+| ---- | ---- | ---- |
+| `c7b6d07` S3.1 | NEMO/WOOD 不再忽略 `DecompileOptions::output_dir`:上下文增加 `output_dir`(builder 注入、与 `save_result` 同落点) | **真机 NEMO**(work 194684070):产物落在调用方目录,修复前写默认目录 |
+| S3.2 | `StageOrientation` 文档与行为对齐(显式方向会按 `canvas/stageSize` 重算坐标);删掉 `kitten4_variables` 全程未用的 `landscape` 形参 | 新增单测:同一点在画布=源 vs 显式竖屏下坐标不同 |
+| S4 | README 目录树/输出目录说明、`docs/20` 目录段加"以 docs/21 §8.2 为准"注记 | — |
+
+### 8.6 明确遗留(不在本轮)
+
+| # | 遗留 | 原因 |
+| - | ---- | ---- |
+| L1 | `translate_works` 并发的端到端真机测试 | 需上传大文件,受 N1(30s 超时)阻塞;并发竞态本身已由 `staging_dir` 唯一性单测覆盖根因 |
+| L2 | N1 上传超时(约 9 MB / 30s) | 建议单开一轮:上传走独立超时或分片;当前 `upload(true)` 在慢网+大作品下不可用 |
+| L3 | N2 `keep_source` 上传的是反编译重建的编辑版(官方传原始字节) | 需要在管线里保留作品原始文件字节(当前 `decompile` 只落重建产物) |
+| L4 | `DecompilerError` 改名 `ConvertError`(C2 彻底版) | 动公开路径,收益中等,留待单独评审 |
+| L5 | 测试抽取(S2.3 原计划) | 被抽测试大量访问私有项,搬出文件必须放宽可见性(与 C7 冲突);改为"测试模块放文件末尾"规则 |
