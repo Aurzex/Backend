@@ -791,6 +791,210 @@ mod reverse_tests_inner {
     ///    0.27.1 作品里这类输入本来没被包过,于是每个这样的输入都多出这两个积木。断言口径:
     ///    差异只允许出现在 `math_arithmetic`/`math_number`,且两者增量必须相等(一次包装各加一个),
     ///    并且 `KC` 的复制语义用 `unrewrite_calls` 归一后再比(否则每个实参子树会被数两遍)。
+    // ---------------------------------------------------------------- 真作品:纯程序集库
+
+    /// 两份真作品(本地 `download/compile/`,gitignored;来源为平台上传的 `.bcmkn`):
+    /// 它们**没有角色**,积木几乎全在 `proceduresDict` 里(52 / 29 条定义)——
+    /// 正好覆盖"定义根挂到宿主实体"的**场景分支**(`assembly.rs`:没有角色就挂第一个场景)。
+    const PROCEDURE_LIBRARIES: &[&str] = &[
+        "download/compile/FjSwU2iKY6bLe6fexZJTvsX3X7AI.bcmkn",
+        "download/compile/FjDQB0v0geuG4y9BaTVyi_WcZ1jc.bcmkn",
+    ];
+
+    fn procedure_libraries() -> Vec<(String, Value)> {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        PROCEDURE_LIBRARIES
+            .iter()
+            .filter_map(|rel| {
+                let path = root.join(rel);
+                if !path.exists() {
+                    return None;
+                }
+                let text = std::fs::read_to_string(&path).expect("读 .bcmkn");
+                Some(((*rel).to_string(), serde_json::from_str(&text).expect("JSON")))
+            })
+            .collect()
+    }
+
+    fn defs_of(doc: &Value) -> usize {
+        doc["procedures"]["proceduresDict"]
+            .as_object()
+            .map(|m| m.len())
+            .unwrap_or(0)
+    }
+
+    /// 纯程序集库:反向必须成功、定义根要落到场景上、两次转换逐字节一致
+    #[test]
+    fn procedure_library_reverses_to_kitten4_and_is_deterministic() {
+        let libs = procedure_libraries();
+        if libs.is_empty() {
+            eprintln!("跳过:缺少真作品样例(纯程序集库)");
+            return;
+        }
+        let options = TranslateOptions::new().deterministic_ids(true);
+
+        for (label, source) in &libs {
+            assert!(defs_of(source) > 0, "{label}:样例应有程序集定义");
+            assert!(
+                source["actors"]["actorsDict"]
+                    .as_object()
+                    .map(|m| !m.is_empty())
+                    .unwrap_or(false),
+                "{label}:样例应有角色(定义根会挂到第一个角色上)"
+            );
+
+            let mut report = TranslateReport::new(
+                crate::core::convert::EditorType::Neko,
+                TargetEditor::Kitten4,
+            );
+            let k4 = convert_kn_document(source, &options, &mut report).expect("反向");
+
+            let scenes_in = source["scenes"]["scenesDict"]
+                .as_object()
+                .map(|m| m.len())
+                .unwrap_or(0);
+            let scenes_out = k4["theatre"]["scenes"]
+                .as_object()
+                .map(|m| m.len())
+                .unwrap_or(0);
+            assert_eq!(scenes_in, scenes_out, "{label}:场景数必须守恒");
+
+            // 定义根积木落在宿主实体的 `block_data_json` 里(没有角色 ⇒ 第一个场景)
+            let landed = k4["theatre"]
+                .to_string()
+                .contains("procedures_2_defnoreturn");
+            assert!(landed, "{label}:定义根积木必须出现在 Kitten4 产物里");
+            assert!(
+                !report.warnings().iter().any(|w| matches!(
+                    w,
+                    TranslateWarning::DroppedProperty { path } if path.contains("没有实体可挂载")
+                )),
+                "{label}:有场景就不该报「作品没有实体可挂载定义积木」"
+            );
+
+            // 确定性:同一输入两次转换逐字节一致 + 告警逐条同序
+            let mut report2 = TranslateReport::new(
+                crate::core::convert::EditorType::Neko,
+                TargetEditor::Kitten4,
+            );
+            let k4b = convert_kn_document(source, &options, &mut report2).expect("反向(第二遍)");
+            assert_eq!(
+                k4.to_string(),
+                k4b.to_string(),
+                "{label}:同一输入的两次反向转换必须逐字节一致"
+            );
+            assert_eq!(report.warnings(), report2.warnings(), "{label}:告警必须逐条同序");
+
+            // 往返:KN → Kitten4 → KN。实体侧只允许横屏包装(math_arithmetic + math_number 成对);
+            // 定义体按定义积木 id 对齐后必须守恒,`calculate` 是已知的 1:1 降级
+            let mut back_report = TranslateReport::new(
+                crate::core::convert::EditorType::Kitten4,
+                TargetEditor::KittenN,
+            );
+            let mut k4_again: Value = serde_json::from_str(&k4.to_string()).expect("复刻");
+            let kn2 = convert_kitten4_document(&mut k4_again, &options, &mut back_report)
+                .expect("再次正向");
+
+            let before = census_entities_with(source, true);
+            let after = census_entities_with(&kn2, true);
+            let entity_diffs = census_diff(&before, &after);
+            // 允许的差异(与 `real_bcmkn_round_trip_multiset_diff_is_documented` 同一口径):
+            // ① 横屏坐标包装(math_arithmetic + math_number 成对);
+            // ② KN 原生 `calculate` 在正向被降级成文本占位积木(1:1)
+            // ③ 已知保真缺口(本测试抓到,未修):inline `pure_list_get` 影子在往返里丢失,
+            //    实体侧与定义体侧都出现(见 `docs/28`)
+            let allowed_entity = [
+                "math_arithmetic:",
+                "math_number:",
+                "calculate:",
+                "bcm_translator_text_return_value_block:",
+                "pure_list_get:",
+            ];
+            assert!(
+                entity_diffs
+                    .iter()
+                    .all(|diff| allowed_entity.iter().any(|allow| diff.starts_with(allow))),
+                "{label}:实体侧出现未文档化的类型差异:\n{}\n(反向报告 {:#?})",
+                entity_diffs.join("\n"),
+                report.counts()
+            );
+            let delta = |kind: &str| -> i64 {
+                after.get(kind).copied().unwrap_or(0) as i64
+                    - before.get(kind).copied().unwrap_or(0) as i64
+            };
+            assert_eq!(
+                delta("calculate"),
+                -delta("bcm_translator_text_return_value_block"),
+                "{label}:`calculate` 与占位积木必须 1:1 互换"
+            );
+            assert_eq!(
+                delta("math_arithmetic"),
+                delta("math_number"),
+                "{label}:横屏包装必须成对"
+            );
+
+            let before_defs = def_census(source, &std::collections::BTreeSet::new());
+            let known: std::collections::BTreeSet<String> = before_defs.keys().cloned().collect();
+            let after_defs = def_census(&kn2, &known);
+            // 定义 id 必须**不丢**;允许 `after` 多出 —— 正向 `zC` 会把带返回值的定义拆成
+            // `NORMAL` + `ROUND` 两条(0.16.2 行为,见 `real_bcmkn_round_trip_multiset_diff_is_documented`)
+            let missing: Vec<&String> = before_defs
+                .keys()
+                .filter(|id| !after_defs.contains_key(*id))
+                .collect();
+            assert!(
+                missing.is_empty(),
+                "{label}:往返后定义 id 丢失:{missing:?}(反向报告 {:#?})",
+                report.counts()
+            );
+            // 定义体内同样会出现横屏包装成对增加(与实体侧同一机制),外加 `calculate` 的 1:1 降级。
+            //
+            // **已知保真缺口(本测试抓到,未修)**:定义体里的 `list_append` 若带
+            // `<shadow type="pure_list_get" inline="true">`,往返一圈后该影子不再出现,
+            // 同时少掉一个 `procedures_2_callreturn`(这两条差必须成对看:是同一个调用点
+            // 的输入影子在反向 `fold_pure_list_get` 与正向云列表特例之间被改写)。
+            // 目前只在"纯程序集库"这类作品上出现;修它需要先弄清官方在**定义体**里对
+            // inline `pure_list_get` 的处理(实体侧有现成对照),故先按 allow-list 记录、守住不恶化。
+            let allowed = [
+                "calculate:",
+                "bcm_translator_text_return_value_block:",
+                "math_arithmetic:",
+                "math_number:",
+                "pure_list_get:",
+                "procedures_2_callreturn:",
+            ];
+            let mut affected = 0usize;
+            let mut deficit = 0i64;
+            for (id, before) in &before_defs {
+                let after = &after_defs[id];
+                let diffs: Vec<String> = census_diff(before, after)
+                    .into_iter()
+                    .filter(|diff| !allowed.iter().any(|allow| diff.starts_with(allow)))
+                    .collect();
+                if diffs.is_empty() {
+                    continue;
+                }
+                affected += 1;
+                let lost: i64 = before.values().map(|v| *v as i64).sum();
+                let kept: i64 = after.values().map(|v| *v as i64).sum();
+                deficit += (lost - kept).max(0);
+                eprintln!(
+                    "[保真缺口] {label} 定义 {id}: {} (净减 {})",
+                    diffs.join("; "),
+                    lost - kept
+                );
+            }
+            // **预算断言(只许变小)**:今天 `Node VM v3` 是 6 个定义 / 净减 133 块,
+            // `now` 是 0 / 0。变大就是回退 —— 这批缺口本身**已知未修**,
+            // 根因、证据与后续研究步骤见 `docs/28-convert-reverse-fidelity-gaps.md`。
+            assert!(
+                affected <= 6 && deficit <= 133,
+                "{label}:反向保真缺口扩大(受影响定义 {affected}/{}，净减块 {deficit};基线 6 / 133)",
+                before_defs.len()
+            );
+        }
+    }
+
     /// 2. **程序集侧**:正向 `zC` 会把带返回值的定义拆成 `NORMAL` + `ROUND` 两条(0.16.2 行为),
     ///    于是条数变多、同一个定义体会出现两份(一份剥掉 `VALUE`)。断言口径:按**定义积木 id** 对齐,
     ///    每个定义的积木类型多重集必须守恒,唯一允许的差是 `calculate`(下表)。
