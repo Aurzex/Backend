@@ -155,12 +155,12 @@
 
 - **错**:### P2-1 `CryptoService::sha256` 十六进制化(compiler.rs:762)
   - **为何错**:路径已失效:`src/core/compiler.rs` 现已不存在(被拆分为 `src/core/convert/`),CryptoService 也随之迁移,原行号无意义。
-  - **正确**:CryptoService::sha256 现位于 `src/core/convert/shared/infra.rs:36-45`。
-  - 出处:docs/rounds/12 §P2-1 vs src/core/convert/shared/infra.rs:36(glob src/core 无 compiler.rs)
+  - **正确**:CryptoService::sha256 现位于 `src/core/convert/shared.rs`(第三十一轮 `shared/` 六文件合并后)。
+  - 出处:docs/rounds/12 §P2-1 vs **当时的** `src/core/convert/shared/infra.rs:36`(该文件第三十一轮已并入 `shared.rs`)
 - **错**:P3-3 | `base64_to_bytes` / `reverse_string` 拿 `&self` 不读 `self` | compiler.rs:769/775 | 改关联函数(去 `&self`),唯一调用点 `decrypt_bcmkn` 同步改 `Self::`
   - **为何错**:compiler.rs 路径已不存在;两个函数已迁至 convert 模块,文档锚点全部失效。
-  - **正确**:现位于 `src/core/convert/shared/infra.rs:48/54`(已为无 self 的关联函数)。
-  - 出处:docs/rounds/12 §P3-3 vs src/core/convert/shared/infra.rs:48/54
+  - **正确**:现位于 `src/core/convert/shared.rs`(已为无 self 的关联函数;路径经第三十一轮合并)。
+  - 出处:docs/rounds/12 §P3-3 vs **当时的** `src/core/convert/shared/infra.rs:48/54`(同上)
 - **错**:| P3-1 | `(limit + 1) / 2` 溢出 | retrieve.rs:679 |
   - **为何错**:行号漂移(改动已在 699 落地),文档指认的行已非该语句。
   - **正确**:src/core/retrieve.rs:698-699。
@@ -284,3 +284,28 @@ pub struct LocalClientProvider {
   - **为何错**:上下文信息存疑:15/16 文档审阅日期为 2026-08-29(基线 fe2c9e6、9d7b4d9),17 为 2026-08-29(5d76687),18 为 2026-08-30(4a62bb3),19 同为 2026-08-30 但称「第十轮已落地」——同一天内 18(方案)与 19(第十轮已落地)并存,时间线在文档层面无法自洽。
   - **正确**:19 的审阅日期应晚于 18 的落地时间(或日期字段有误)。
   - 出处:19-...md 头部 vs 18-...md 头部
+---
+
+## 第三十一轮的文件合并(2026-09-26)
+
+`src/core/convert/` 由 **27 个文件并为 13 个**(纯搬迁 + 少量仪式层删除,见 `docs/rounds/31`)。
+**读历史轮次时按此对照旧路径**:
+
+| 旧路径 | 现在 |
+| ------ | ---- |
+| `shared/{mod,error,model,config,infra,upload}.rs` | `shared.rs` |
+| `decompile/blocks.rs` | `decompile/mod.rs` |
+| `decompile/editors/{mod,kitten,nemo,simple}.rs` | `decompile/editors.rs` |
+| `translate/{kitten,neko}.rs` | `translate/model.rs` |
+| `translate/remint.rs` | `translate/assembly.rs` |
+| `translate/nemo_xml.rs` | `translate/nemo.rs` |
+| `translate/tables_gen_nemo.rs` | `translate/nemo_mapping.rs` |
+| `core/compiler.rs`、`utils/acquire.rs`、`utils/data.rs`(更早的迁移) | `core/convert/**`、`utils/requests.rs`、`utils/filedata.rs` |
+
+同一轮还删掉/收敛了这些**名字**,早期文档若提到,以 `docs/rounds/31` §3 为准:
+
+- `WorkProcessorRegistry` + `FetcherFactory`/`DecompilerFactory`(换成 `match EditorType` 静态分派);
+- `DecompilerContextBuilder`(改为直接构造 `DecompilerContext`);
+- `XHTML` 常量(唯一化到 `shared.rs`;原先 mapping / nemo_mapping 各一份);
+- nemo_mapping 手抄的 `TEXT_PLACEHOLDERS` 与 `is_text_placeholder`(复用 `tables_gen` / `mapping` 的定义);
+- 两处同构批处理(`translate_works` / `decompile_batch_outcomes` 内的 chunk + `thread::scope`)合并为 `shared::batch_map`。

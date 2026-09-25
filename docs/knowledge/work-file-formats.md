@@ -27,7 +27,7 @@
 - `shadows` 的值仍是 **XML 字符串**(Kitten4 沿用 XML shadow,KN 亦然 ⇒ 双向搬运可直接复用)。
 - 实测:188 个积木 ↔ 188 个 `connections` 条目(86 个非空),叶子节点是空对象 `{}`。
 - 反向写 `.bcm4` 时 `blocks`/`connections`/`parent_id`/`location` **都要重建**。
-- **编译版**(`compiled_block_map`)与编辑版不同:编译版引用**恒为内联对象**,字符串 id 只出现在编辑版的 `connections`(实测 2236 处采样,字符串 0 处)。见 `src/core/convert/decompile/blocks.rs`。
+- **编译版**(`compiled_block_map`)与编辑版不同:编译版引用**恒为内联对象**,字符串 id 只出现在编辑版的 `connections`(实测 2236 处采样,字符串 0 处)。见 `src/core/convert/decompile/mod.rs`(编译版积木层,原 `blocks.rs`)。
 
 ## 3. KN 的积木节点模型(`nekoBlockJsonList` 元素)
 
@@ -85,4 +85,4 @@
 
 - `docs/rounds/20-kitten-kn-work-conversion-plan.md` §2(结构表、`block_data_json`、节点模型、加密矩阵)、§8(陷阱)、§11(实测)。
 - 样例:`download/compile/raw/春风得意-编辑版.bcm`(Kitten3)、`几何对战-联机.bcm4`(Kitten4)、`download/compile/HEX Editor_317683843.bcmkn`、`https://creation.codemao.cn/neko/bcm/kn-default-v-0.13.1.bcmkn`。
-- 代码锚点:`src/core/convert/decompile/blocks.rs`(编译版引用校验)、`unpacker.rs`(bcmkn 解密)、`translate/model.rs`(节点模型)。
+- 代码锚点:`src/core/convert/decompile/mod.rs`(编译版引用校验)、`src/core/convert/shared.rs`(bcmkn 解密)、`src/core/convert/translate/model.rs`(节点模型)。

@@ -21,8 +21,8 @@ Rust 写的同步 HTTP / WebSocket 客户端库,专门和编程猫(codemao)社�
 | 统一认证        | 普通用户 / 教育 / 评审三种身份登录(密码 v0/v1/v2、Token、管理员令牌/密码、验证码票据),小鱼干(令牌)写进全局身份槽,之后的请求自动携带 |
 | 业务 API 全覆盖 | 13 个业务域:账号、认证、人机验证、云数据库、代码岛、社区、教育、论坛、小说、工作室、用户、举报、作品                                |
 | 云变量实时同步  | WebSocket 客户端:断线自动重连、命令批量合并、变量 / 列表 / 排行榜 / 在线人数事件回调                                                |
-| 作品反编译      | Kitten2/3/4、Coco、Neko、Nemo、Wood 七种编辑器,含 `.bcm` / `.bcm4` / `.bcmkn` 解密与 Blockly XML 输出
-| 作品文件互相转化 | Kitten4 `.bcm4` ⇄ KittenN `.bcmkn`(双向);官方算法逐块对齐 + 反向自建,降级/丢弃逐类报告,可选上传并建草稿 |                               |
+| 作品反编译      | Kitten2/3/4、Coco、Neko、Nemo、Wood 七种编辑器,含 `.bcm` / `.bcm4` / `.bcmkn` 解密与 Blockly XML 输出;产物可**另行上传到当前账号**(建一份标「可删」的草稿) |
+| 作品文件互相转化 | Kitten4 `.bcm4` ⇄ KittenN `.bcmkn`(双向)、NEMO → KittenN;官方算法逐块对齐 + 反向自建,降级/丢弃逐类报告,产物过官方 `validateBcm` 硬门 |
 | AI 对话         | 流式回复客户端(Start / Text / End / Error 事件),同步等完整回复                                                                      |
 | 举报治理引擎    | 分块拉取、批量分组、逐条 / 一键决策、多账号自动举报、违规检查、处理统计                                                             |
 
@@ -255,13 +255,25 @@ for group in session.leftover_groups() {
 │   ├── utils.rs               # utils 模块声明
 │   ├── prelude.rs             # 常用类型与 trait 预导入
 │   ├── main.rs                # 演示二进制:举报处理控制台(登录 → 举报审核)
+│   ├── bin/
+│   │   └── gen_translate_tables.rs  # 生成 translate/tables_gen.rs(整文件覆盖,勿与手写表混放)
 │   ├── api/                   # 业务域(见「模块一览」)
 │   ├── core/
-│   │   ├── convert/           # 作品文件转换域(读写作品文件的唯一边界)
-│   │   │   ├── mod.rs         #   域门面:子域声明 + 跨子域类型 + 单作品/批量编排
-│   │   │   ├── shared/        #   共用地基:错误 / 模型(含抓取契约、id) / 配置(含影子) / 基础设施(加密·HTTP·文件·JSON)
-│   │   │   ├── decompile/     #   反编译:门面(含上下文与契约)+ 积木反编译 + 各编辑器
-│   │   │   └── translate/     #   互相转化:模型 / 语义映射 / 两个方向的前后端与装配
+│   │   ├── convert/           # 作品文件转换域(读写作品文件的唯一边界,13 个文件)
+│   │   │   ├── mod.rs         #   域门面:子域声明 + 跨子域类型 + 单作品/批量编排 + 上传建草稿编排
+│   │   │   ├── shared.rs      #   共用地基:错误 / 领域模型 / 配置(含影子模板表)/ 加密·HTTP·文件·JSON / 上传到账号 / 批量执行
+│   │   │   ├── decompile/
+│   │   │   │   ├── mod.rs     #   反编译门面:选项 + 上下文 + 契约 + 编译版积木层
+│   │   │   │   └── editors.rs #   七种编辑器的抓取与重建(Kitten / Neko / Nemo / Coco / Wood)
+│   │   │   └── translate/
+│   │   │       ├── mod.rs     #   转化门面:公开类型 + 双向管线 + 报告
+│   │   │       ├── model.rs   #   节点/树模型 + Kitten/KN 适配器 + id 策略
+│   │   │       ├── mapping.rs #   语义映射(双向)
+│   │   │       ├── assembly.rs#   文档装配(双向)+ id 重铸
+│   │   │       ├── nemo.rs    #   NEMO → KN(NEMO XML 解析 + 引擎)
+│   │   │       ├── nemo_mapping.rs # NEMO 映射表(含人工转录的官方表)
+│   │   │       ├── tables_gen.rs   # 生成物,勿手改(生成器见下)
+│   │   │       └── {reverse,nemo}_tests.rs
 │   │   ├── cloudvar.rs        # 云变量 WS 客户端:连接状态机/断线重连/命令批量合并/变量列表排行榜回调
 │   │   ├── converse.rs        # AI 对话 WS 客户端:流式回复/历史记录/超时断连检测
 │   │   ├── pipeline.rs        # 举报引擎:动作注册表/多账号轮流/违规检查/分块拉取
@@ -277,7 +289,7 @@ for group in session.leftover_groups() {
 │   ├── live_features.rs       # 真机集成测试(登录 + AI 对话 + 云变量 + 反编译)
 │   ├── compile_live.rs        # 反编译真机集成测试(NEMO 用例 #[ignore])
 │   └── fixtures/test-config.example.json
-└── docs/                      # 评审与整改记录
+└── docs/                      # 文档:知识库 / 目标库 / 轮次记录(入口 docs/README.md)
 ```
 
 ## 测试
@@ -286,9 +298,13 @@ for group in session.leftover_groups() {
 cargo test                        # 库单测 + 集成测试(没配置会自动跳过)
 cargo test --test live_features   # 真机:登录 + AI 对话 + 云变量 + 反编译
 cargo test --test compile_live -- --ignored   # 含 NEMO 反编译(约 5 分钟)
+cargo test --test convert_live               # 转化真机(离线用例)
+cargo test --test convert_live -- --ignored  # 含上传建草稿(会写平台,用例自清理)
+BACKEND_REQUIRE_LIVE=1 cargo test            # 严格模式:缺配置 / 登录失败一律失败,不再静默跳过
 ```
 
 - 库单测覆盖:`AdminInfo::from_details` 固定字段提取(正常 / 缺失字段)、`manager_new_with_client_uses_injected_client`(客户端注入契约)、`header_override_is_case_insensitive`(请求头大小写覆盖)、分块迭代器终止性(数据量超过 chunk 大小不重复、不丢失)。
+- 转化/反编译的**产物级门**:官方 `validateBcm` 校验器(产物能否被编辑器加载)、KN→Kitten4→KN 往返积木类型多重集守恒、`deterministic_ids` 下并发 1 与并发 N 产物**逐字节一致**、与官方产物/串行参考的语义 diff。
 - 集成测试配置和代码分离:把 `tests/fixtures/test-config.example.json` 复制成 `data/test-config.json` 再填好;`data/` 已被 `.gitignore` 忽略,账号密码不会入库。没配置时测试打印提示并跳过,不会导致失败;也可以用 `BACKEND_TEST_CONFIG` 环境变量覆盖配置文件路径。
 
 ## CI
@@ -301,4 +317,4 @@ GitHub Actions(`.github/workflows/CI.yml`):main/master 推送、tag、PR 和手�
 - `docs/README.md` — 文档总入口(知识库 / 目标库 / 轮次记录)
 - `docs/knowledge/` — **知识库**:平台接口与实时协议、作品文件格式、转换语义、性能基线、仓库约定、历史勘误
 - `docs/goals/` — **目标库**:待决策、待实现、待核验、已决不做
-- `docs/rounds/` — 历史轮次记录(29 篇:方案/评审/真机实测证据;读前先看 `docs/knowledge/errata.md`)
+- `docs/rounds/` — 历史轮次记录(31 篇:方案/评审/真机实测证据;读前先看 `docs/knowledge/errata.md`)

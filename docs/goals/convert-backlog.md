@@ -30,6 +30,19 @@
    要让新作品自带资源,需"逐资源上传 + 文档内 URL 改写"(官方 App 保存时上传 ~1390 个文件)。
    KN 侧无此问题(积木引用的是造型 id,资源在作品文件内/平台侧)。见 `docs/rounds/30` §4。
 
+8. **根块纵向布局的 0 vs 80 疑似漂移(可能是个真 bug)**——反编译侧 `XmlBlockWriter` 根块从 `y=0.0` 起、步长 220;
+   `translate/model.rs` 另定义 `ROOT_LAYOUT_Y=80 / STEP=220` 并注释自称"与 `XmlBlockWriter` 的约定一致",
+   但起点不一致。**先核实 0 与 80 哪个是对的**(对官方产物取样),再决定共享常量或修一边。
+   出处:第三十一轮只读审计(`docs/rounds/31` §3.6 N4)。
+9. **生成物里的零消费者常量**:`translate/tables_gen.rs` 的 `TOP_BLOCKS` / `KN_TYPES` 全仓无使用点。
+   注意它们是 `src/bin/gen_translate_tables.rs` **整文件生成**的 ⇒ 要删得改**生成器**再重新生成,
+   否则下次生成又回来(顺带核对生成器与手工表的分工)。
+10. **6 条零调用私有项**(审计 §3.6「零调用点私有项」):`BlockJson::count_types` / `BlockTree::count_types`(仅测试用)、
+    `nemo::parse`(仅测试用)、`DecompilerContextBuilder`(已随骨架瘦身删除)、`TOP_BLOCKS` / `KN_TYPES`。
+    处理口径:仅测试用 ⇒ 标 `#[cfg(test)]` 或保留并注明;完全不用的 ⇒ 删(删除前按仓库约定确证零调用)。
+11. **剩余重复项的定性结论已归档**(`docs/rounds/31` §3.6):`D2` 族 JS 值强转、`N3` Fetcher/ResourceManager 样板、
+    `N4` 布局常量属**不可合并或需先核实**;`D3`/`N1` 已合并。今后不要重新提"把这些也合一"。
+
 ## 3. 已在案、不做的(别再重开)
 
 - `RawValue` 顶层只透传、单遍遍历合并(`docs/rounds/26` §6):透传占比 ≈0%、正向本已 2 趟。
