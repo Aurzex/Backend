@@ -922,6 +922,10 @@ mod reverse_tests_inner {
             // ② KN 原生 `calculate` 在正向被降级成文本占位积木(1:1)
             // ③ 已知保真缺口(本测试抓到,未修):inline `pure_list_get` 影子在往返里丢失,
             //    实体侧与定义体侧都出现(见 `docs/rounds/28`)
+            if !entity_diffs.is_empty() {
+                // 实体侧差异逐条打印(allow-list 之外才是问题;打印有助于判断"是丢失还是形态差异")
+                eprintln!("[实体侧差异] {label}: {}", entity_diffs.join("; "));
+            }
             let allowed_entity = [
                 "math_arithmetic:",
                 "math_number:",
@@ -1023,6 +1027,9 @@ mod reverse_tests_inner {
                     .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
                     .collect();
                 let _ = std::fs::write(format!("/tmp/k4-dump-{tag}.json"), k4.to_string());
+                // 同时落盘源 KN 与往返后的 KN,便于比对"影子是节点还是 XML 串"(形态差异 vs 真丢失)
+                let _ = std::fs::write(format!("/tmp/kn-src-{tag}.json"), source.to_string());
+                let _ = std::fs::write(format!("/tmp/kn-back-{tag}.json"), kn2.to_string());
             }
             if std::env::var("DUMP_K4").as_deref() == Ok("full") {
                 // 调试:一个 K4 定义块长什么样(名字字段在哪)
