@@ -216,7 +216,7 @@ for group in session.leftover_groups() {
 | `data/token.txt`    | 小鱼干(令牌)持久化                                                                        |
 | `cache/captcha.jpg` | 登录验证码图片(登录流程自动写入)                                                          |
 | `download/compile/` | 作品反编译输出目录                                                                        |
-| `download/convert/` | 作品互相转化的输出目录(含 `.staging` 中间产物) |
+| `download/convert/` | 作品互相转化的输出目录(`staging/<作品 id>-<随机>`,每个作品一次调用一个独立中间目录) |
 | `download/fiction/` | 小说文件下载目录                                                                          |
 | `cache/`            | 运行时缓存                                                                                |
 
@@ -258,10 +258,10 @@ for group in session.leftover_groups() {
 │   ├── api/                   # 业务域(见「模块一览」)
 │   ├── core/
 │   │   ├── convert/           # 作品文件转换域(读写作品文件的唯一边界)
-│   │   │   ├── mod.rs         #   域门面:子域声明 + 跨子域类型
-│   │   │   ├── shared/        #   共用地基:错误/模型/配置/加密/文件/HTTP/抓取
-│   │   │   ├── decompile/     #   反编译:门面 + 引擎 + 各编辑器实现
-│   │   │   └── translate/     #   互相转化:Kitten ⇄ KittenN 等
+│   │   │   ├── mod.rs         #   域门面:子域声明 + 跨子域类型 + 单作品/批量编排
+│   │   │   ├── shared/        #   共用地基:错误 / 模型(含抓取契约、id) / 配置(含影子) / 基础设施(加密·HTTP·文件·JSON)
+│   │   │   ├── decompile/     #   反编译:门面(含上下文与契约)+ 积木反编译 + 各编辑器
+│   │   │   └── translate/     #   互相转化:模型 / 语义映射 / 两个方向的前后端与装配
 │   │   ├── cloudvar.rs        # 云变量 WS 客户端:连接状态机/断线重连/命令批量合并/变量列表排行榜回调
 │   │   ├── converse.rs        # AI 对话 WS 客户端:流式回复/历史记录/超时断连检测
 │   │   ├── pipeline.rs        # 举报引擎:动作注册表/多账号轮流/违规检查/分块拉取

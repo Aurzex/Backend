@@ -293,6 +293,13 @@ GN(kittenBcm)
 ### 6.1 域结构:把反编译栈与转化能力一起收进 `convert`(先做的重构)
 
 > 本节是**结构重构方案**:允许大规模搬迁,但要求**零行为变更**(只搬文件与改可见性,不改签名、不改逻辑)。它先于功能实现落地;功能方案从 §6.2 起。
+> **2026-09-25 更新(第二十一轮收敛后,见 `docs/21-convert-domain-consolidation-plan.md` §8.2)**:
+> 本节的目录树是第二轮重构(域化)时的布局,此后文件已合并 —— `shared/` 9 → 5(`infra/model/config/error/mod`)、
+> `decompile/{context,contract}` 并入 `decompile/mod.rs`、`blocks/` 三文件 → `blocks.rs`、
+> `editors/kitten/` 三文件 → `kitten.rs`、`editors/{coco,neko,wood}` → `simple.rs`、
+> `translate/{report}` 并入 `mod.rs`、`{blockjson,ids}` → `model.rs`、`{finish,kitten4_finish}` → `assembly.rs`。
+> 生产文件 34 → 18。**当前布局以 docs/21 §8.2 为准**,下表的"重构前/重构后"对应关系仍然有效。
+
 > 重构后 `convert/` 成为**作品文件转换域**的唯一边界:读(反编译)与写(互相转化)共用一套地基,域外不再有平铺的 `compiler.rs` / `unpacker.rs` / `decoders.rs`。
 
 #### 现状与判定标准
