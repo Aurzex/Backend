@@ -57,24 +57,43 @@ fn default_prompt() -> String {
     "你好,请用一句话介绍你自己".to_string()
 }
 
+/// 严格模式:设 `BACKEND_REQUIRE_LIVE=1` 时,"配置缺失 / 账号或作品为空 / 登录失败"一律视为失败,
+/// 而不是静默 pass。默认不设 —— 保持仓库既有约定(缺配置即跳过,便于本地不配也能 `cargo test`)。
+///
+/// 为什么要有它:真机门曾经"看起来在跑,其实什么都没验"(配置缺失时 `eprintln` + `return`,
+/// 测试仍算 pass);CI 里应设这个变量,让"没配置"变成红。
+fn require_live() -> bool {
+    matches!(
+        std::env::var("BACKEND_REQUIRE_LIVE").as_deref(),
+        Ok("1") | Ok("true") | Ok("yes")
+    )
+}
+
+/// 统一的"跳过或失败"出口:返回 `true` 表示调用方应 `return`(非严格模式下就是跳过)
+fn skip_or_fail(what: &str) -> bool {
+    if require_live() {
+        panic!("[live] {what};BACKEND_REQUIRE_LIVE=1 时不允许静默跳过");
+    }
+    eprintln!("[live] 跳过:{what}");
+    true
+}
+
 /// 加载测试配置;缺失时返回 None(测试跳过)
 fn load_config() -> Option<TestConfig> {
     let path = std::env::var("BACKEND_TEST_CONFIG")
         .ok()
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("data/test-config.json"));
-    if !path.exists() {
-        eprintln!(
-            "[live_features] 未找到测试配置 {path:?},跳过(可复制 \
-             tests/fixtures/test-config.example.json 为 data/test-config.json 后填写)"
-        );
+    if !path.exists() && skip_or_fail(&format!(
+        "未找到测试配置 {path:?}(可复制 tests/fixtures/test-config.example.json 为 data/test-config.json 后填写)"
+    )) {
         return None;
     }
     let text = std::fs::read_to_string(&path).expect("读取测试配置失败");
     match serde_json::from_str(&text) {
         Ok(cfg) => Some(cfg),
         Err(e) => {
-            eprintln!("[live_features] 解析测试配置失败: {e}");
+            let _ = skip_or_fail(&format!("解析测试配置失败: {e}"));
             None
         }
     }
@@ -89,13 +108,16 @@ fn login(account: &str, password: &str) -> Option<String> {
     {
         Ok(result) if result.success => Some(result.token),
         Ok(result) => {
-            eprintln!(
-                "[live_features] 账号 {account} 登录失败: {}",
-                result.message
-            );
+            if require_live() {
+                panic!("[live] 账号 {account} 登录失败: {};BACKEND_REQUIRE_LIVE=1 时视为失败", result.message);
+            }
+            eprintln!("[live_features] 账号 {account} 登录失败: {}", result.message);
             None
         }
         Err(e) => {
+            if require_live() {
+                panic!("[live] 账号 {account} 登录请求失败: {e}");
+            }
             eprintln!("[live_features] 账号 {account} 登录请求失败: {e}");
             None
         }
@@ -109,7 +131,7 @@ fn login_and_ai_chat() {
         return;
     };
     if cfg.accounts.is_empty() {
-        eprintln!("[live_features] 未配置 accounts,跳过 AI 对话测试");
+        let _ = skip_or_fail("配置里没有 accounts,无法验证 AI 对话");
         return;
     }
     for entry in &cfg.accounts {
@@ -158,7 +180,7 @@ fn cloud_variables() {
         return;
     };
     if cfg.cloud_works.is_empty() {
-        eprintln!("[live_features] 配置未提供 cloud_works,跳过云变量测试");
+        let _ = skip_or_fail("配置里没有 cloud_works,无法验证云变量");
         return;
     }
     // 用第一个账号的 token(可选;匿名也可连公开作品)

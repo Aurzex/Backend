@@ -19,7 +19,7 @@
 | # | 位置 | 问题 | 建议 | 风险/备注 |
 | - | ---- | ---- | ---- | --------- |
 | 1 | `decompile/mod.rs:236-258` | 反编译侧两级并发不折算:batch × `resource_concurrency`(默认 8)无上限。`translate_works` 已有 `fold_entity_concurrency` 折算(`convert/mod.rs:93-100`),反编译侧缺 | 仿照 translate 侧折算并封顶 `available_parallelism` | 低;下载是 I/O 密集,线程数不受控更值得修 |
-| 2 | `tests/live_features.rs:66-73`、`tests/convert_live.rs` | **真机门在 CI 永不真跑且静默放行**:配置缺失时 `eprintln` + `return` ⇒ 显示 pass 却没验任何东西(它们不是 `#[ignore]`);真正能抓东西的用例反而都是 `#[ignore]` | 二选一:(a) 真机门改 `#[ignore]` + CI 显式 provision 配置;(b) 加 `BACKEND_REQUIRE_LIVE=1` 之类的**严格模式**,在该模式下配置缺失即失败(默认行为不变) | 中:涉及测试语义,要你拍板;(b) 对默认零影响,推荐 |
+| 2 | `tests/live_features.rs`、`tests/convert_live.rs` | **真机门在 CI 永不真跑且静默放行**:配置缺失时 `eprintln` + `return` ⇒ 显示 pass 却没验任何东西(它们不是 `#[ignore]`) | ✅ **已落地(评审采纳方案 b)**:新增 `BACKEND_REQUIRE_LIVE=1` 严格模式,判据**不止"配置文件不存在"**,还覆盖"解析失败 / accounts 为空 / 没有所需 kind 的作品 / 登录失败"(评审补充要求);默认不设 ⇒ 行为与之前完全一致 | 验证:默认缺配置仍跳过式通过;严格模式 + 完整配置通过;**严格模式 + 缺配置 ⇒ 明确失败**并打印原因(三个方向都实测) |
 | 3 | `converse.rs:846-856` | AI 对话断线后只置 `connected=false` + emit 错误,没有 cloudvar 那样的指数退避重连;断连后 `send_and_wait` 只能等 Timeout,必须手动 `connect()` | 评估加退避重连(session/历史重建语义要想清);至少把可见行为写进文档 | 中:产品语义 |
 
 ## 3. P2(可选,建议择机清)

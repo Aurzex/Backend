@@ -50,21 +50,48 @@ struct TestConfig {
     accounts: Vec<AccountEntry>,
 }
 
+/// 严格模式:设 `BACKEND_REQUIRE_LIVE=1` 时,"配置缺失 / 作品缺失 / 登录失败"一律失败,
+/// 而不是静默 pass(默认不设 = 仓库既有约定:缺配置即跳过)
+fn require_live() -> bool {
+    matches!(
+        std::env::var("BACKEND_REQUIRE_LIVE").as_deref(),
+        Ok("1") | Ok("true") | Ok("yes")
+    )
+}
+
+/// 统一的"跳过或失败"出口:返回 `true` 表示调用方应 `return`
+fn skip_or_fail(what: &str) -> bool {
+    if require_live() {
+        panic!("[live] {what};BACKEND_REQUIRE_LIVE=1 时不允许静默跳过");
+    }
+    eprintln!("[live] 跳过:{what}");
+    true
+}
+
 fn load_config() -> Option<TestConfig> {
     let path = std::env::var("BACKEND_TEST_CONFIG")
         .ok()
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("data/test-config.json"));
     if !path.exists() {
-        eprintln!("[convert_live] 未找到测试配置 {path:?},跳过");
+        let _ = skip_or_fail(&format!("未找到测试配置 {path:?}"));
         return None;
     }
     let text = std::fs::read_to_string(&path).expect("读配置");
-    serde_json::from_str(&text).ok()
+    match serde_json::from_str(&text) {
+        Ok(cfg) => Some(cfg),
+        Err(e) => {
+            let _ = skip_or_fail(&format!("解析测试配置失败: {e}"));
+            None
+        }
+    }
 }
 
 fn login(cfg: &TestConfig) -> Option<String> {
-    let entry = cfg.accounts.first()?;
+    let Some(entry) = cfg.accounts.first() else {
+        let _ = skip_or_fail("配置里没有 accounts");
+        return None;
+    };
     match LoginBuilder::new()
         .identity(&entry.account)
         .password(&entry.password)
@@ -72,10 +99,16 @@ fn login(cfg: &TestConfig) -> Option<String> {
     {
         Ok(r) if r.success => Some(r.token),
         Ok(r) => {
+            if require_live() {
+                panic!("[live] 登录失败:{};BACKEND_REQUIRE_LIVE=1 时视为失败", r.message);
+            }
             eprintln!("[convert_live] 登录失败:{}", r.message);
             None
         }
         Err(e) => {
+            if require_live() {
+                panic!("[live] 登录请求失败:{e}");
+            }
             eprintln!("[convert_live] 登录请求失败:{e}");
             None
         }
@@ -90,10 +123,15 @@ fn work_dir(tag: &str) -> PathBuf {
 }
 
 fn first_work(cfg: &TestConfig, kind: &str) -> Option<i64> {
-    cfg.works
+    let found = cfg
+        .works
         .iter()
         .find(|w| w.kind.eq_ignore_ascii_case(kind))
-        .map(|w| w.id)
+        .map(|w| w.id);
+    if found.is_none() {
+        let _ = skip_or_fail(&format!("配置里没有 kind={kind} 的作品"));
+    }
+    found
 }
 
 /// 反编译 → 转成 KN 文件(离线,不写平台)
