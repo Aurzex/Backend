@@ -597,16 +597,17 @@ fn stage_position(pos: Option<&Value>, src_w: f64, src_h: f64, landscape: bool) 
     })
 }
 
-/// `theme` → 变量样式图标(官方 395-411 `switch (e.theme)`)
+/// `theme` → 变量样式图标(官方 395-411 `switch (e.theme)`;见 [`VAR_STYLE_TABLE`])
 fn theme_style(theme: Option<&Value>) -> &'static str {
-    match theme.and_then(Value::as_str) {
-        Some("score") => VAR_STYLE_MEDAL,
-        Some("HP") => VAR_STYLE_HEART,
-        Some("clock") => VAR_STYLE_HOURGLASS,
-        Some("coin") => VAR_STYLE_COIN,
-        Some("pure") => VAR_STYLE_TEXT,
-        _ => VAR_STYLE_DEFAULT,
-    }
+    theme
+        .and_then(Value::as_str)
+        .and_then(|theme| {
+            VAR_STYLE_TABLE
+                .iter()
+                .find(|(name, _)| *name == theme)
+                .map(|(_, style)| *style)
+        })
+        .unwrap_or(VAR_STYLE_DEFAULT)
 }
 
 /// `create_time || Date.now()`;`now_ms` 由门面传入(确定性模式下传 0,保证两次转换逐字节一致)
@@ -774,16 +775,24 @@ const KITTEN4_APPLICATION_VERSION: &str = "4.11.20";
 const KITTEN4_SCENE_NAME: &str = "Background";
 /// 正向横屏把角色坐标乘 `10/13`(finish.rs `LANDSCAPE_POSITION_SCALE`),反向除回去
 const LANDSCAPE_POSITION_BACK_SCALE: f64 = 13.0 / 10.0;
-/// KN 变量样式图标 → Kitten 主题(finish.rs `theme_style` 的逆;`default` → `common`)
+/// 变量样式图标 ↔ Kitten 主题:唯一的双向来源(正向官方 `switch (e.theme)` 395-411,反向是它的逆)
+///
+/// 正向没命中 → `VAR_STYLE_DEFAULT`(`default`);反向没命中(含 `default`)→ `common`。
+const VAR_STYLE_TABLE: &[(&str, &str)] = &[
+    ("score", VAR_STYLE_MEDAL),
+    ("HP", VAR_STYLE_HEART),
+    ("clock", VAR_STYLE_HOURGLASS),
+    ("coin", VAR_STYLE_COIN),
+    ("pure", VAR_STYLE_TEXT),
+];
+
+/// KN 变量样式图标 → Kitten 主题(见 [`VAR_STYLE_TABLE`])
 fn theme_of_style(style: &str) -> &'static str {
-    match style {
-        "icon_medal" => "score",
-        "icon_heart" => "HP",
-        "icon_hourglass" => "clock",
-        "icon_coin" => "coin",
-        "text" => "pure",
-        _ => "common",
-    }
+    VAR_STYLE_TABLE
+        .iter()
+        .find(|(_, mapped)| *mapped == style)
+        .map(|(theme, _)| *theme)
+        .unwrap_or("common")
 }
 
 /// KittenN 编辑版 → Kitten4 编辑版(自建反向管线)
@@ -1377,7 +1386,12 @@ fn kitten4_broadcasts(
     }
 }
 
-/// KN 位置(左上原点像素系)→ Kitten 位置(中心原点):正向 `finish::stage_position` 的逆
+/// KN 位置(左上原点像素系)→ Kitten 位置(中心原点)。
+///
+/// **与正向 [`stage_position`] 严格互逆**(同一文件内相邻,便于对照;公式本身不合并 —— 两者
+/// 的参数形态与 `num()` 取整口径不同,强行抽象只会掩盖差异):
+/// 正向 `x' = (x + src_w/2) * target_w / src_w`、`y' = (src_h/2 - y) * target_h / src_h`,
+/// 这里 `x = x' * canvas_w / kn_w - canvas_w/2`、`y = canvas_h/2 - y' * canvas_h / kn_h`。
 fn kitten4_position(
     position: &serde_json::Value,
     canvas: (f64, f64),
