@@ -973,6 +973,75 @@ mod reverse_tests_inner {
                 "pure_list_get:",
                 "procedures_2_callreturn:",
             ];
+            // 中间态(K4)的定义体 census:用于三分定性
+            if std::env::var("DUMP_K4").is_ok() {
+                // 调试:中间态里到底把定义放在哪、长什么样(受环境变量控制,平时不打印)
+                let theatre = k4.get("theatre").unwrap_or(&Value::Null);
+                for container in ["actors", "scenes"] {
+                    let Some(entities) = theatre.get(container).and_then(Value::as_object) else {
+                        continue;
+                    };
+                    for (eid, entity) in entities {
+                        let keys: Vec<&String> = entity
+                            .as_object()
+                            .map(|o| o.keys().collect())
+                            .unwrap_or_default();
+                        let bdj = entity.get("block_data_json");
+                        let blocks = bdj.and_then(|b| b.get("blocks")).and_then(Value::as_object);
+                        let mut types: std::collections::BTreeMap<String, usize> =
+                            std::collections::BTreeMap::new();
+                        if let Some(b) = blocks {
+                            for blk in b.values() {
+                                let t = blk.get("type").and_then(Value::as_str).unwrap_or("");
+                                if t.starts_with("procedures") {
+                                    *types.entry(t.to_string()).or_default() += 1;
+                                }
+                            }
+                        }
+                        eprintln!(
+                            "[DUMP_K4] {container}/{eid} 键={:?} blocks={} procedures 类块={:?}",
+                            keys,
+                            blocks.map(|b| b.len()).unwrap_or(0),
+                            types
+                        );
+                    }
+                }
+            }
+            if std::env::var("DUMP_K4").is_ok() {
+                // 把中间态落盘,便于用外部工具精查(平时不写)
+                let _ = std::fs::write(
+                    format!("/tmp/k4-dump-{}.json", std::process::id()),
+                    k4.to_string(),
+                );
+            }
+            if std::env::var("DUMP_K4").as_deref() == Ok("full") {
+                // 调试:一个 K4 定义块长什么样(名字字段在哪)
+                let theatre = k4.get("theatre").unwrap_or(&Value::Null);
+                'outer: for container in ["actors", "scenes"] {
+                    let Some(entities) = theatre.get(container).and_then(Value::as_object) else {
+                        continue;
+                    };
+                    for entity in entities.values() {
+                        let Some(blocks) = entity
+                            .get("block_data_json")
+                            .and_then(|b| b.get("blocks"))
+                            .and_then(Value::as_object)
+                        else {
+                            continue;
+                        };
+                        for blk in blocks.values() {
+                            if blk.get("type").and_then(Value::as_str)
+                                == Some("procedures_2_defnoreturn")
+                            {
+                                let c = serde_json::to_string(blk).unwrap_or_default();
+                                eprintln!("[DUMP_K4 块样例] {}", &c[..c.len().min(800)]);
+                                break 'outer;
+                            }
+                        }
+                    }
+                }
+            }
+            let mid_defs = k4_def_census(&k4);
             let mut affected = 0usize;
             let mut deficit = 0i64;
             for (id, before) in &before_defs {
@@ -993,6 +1062,10 @@ mod reverse_tests_inner {
                     diffs.join("; "),
                     lost - kept
                 );
+                if lost - kept >= 3 {
+                    // 定性:KN 前 → K4 中 → KN 后。中间态若已经缺块 ⇒ 反向丢的;中间态有、后态缺 ⇒ 正向丢的。
+                    report_three_way(id, before, mid_defs.get(id), after);
+                }
             }
             // **预算断言(只许变小)**:今天 `Node VM v3` 是 6 个定义 / 净减 133 块,
             // `now` 是 0 / 0。变大就是回退 —— 这批缺口本身**已知未修**,
@@ -1003,7 +1076,16 @@ mod reverse_tests_inner {
                     .counts()
                     .into_iter()
                     .map(|(cat, subjects)| {
-                        format!("{cat}×{} ({})", subjects.values().sum::<usize>(), subjects.keys().take(4).cloned().collect::<Vec<_>>().join(","))
+                        format!(
+                            "{cat}×{} ({})",
+                            subjects.values().sum::<usize>(),
+                            subjects
+                                .keys()
+                                .take(4)
+                                .cloned()
+                                .collect::<Vec<_>>()
+                                .join(",")
+                        )
                     })
                     .collect();
                 eprintln!("[反向报告] {label}: {}", top.join(" | "));
@@ -1014,6 +1096,109 @@ mod reverse_tests_inner {
                 before_defs.len()
             );
         }
+    }
+
+    /// K4 侧定义体 census:**邻接表 walk**。
+    ///
+    /// 反向把定义根挂进宿主实体的 `block_data_json`(`def_root_from_entry`),所以这里按
+    /// `theatre.{actors,scenes}.*.block_data_json` 找 `procedures_2_def*` 块,按 `fields.NAME`
+    /// 聚键,再顺着 `connections` 递归数可达块的类型。
+    ///
+    /// 与 KN 侧 `def_census` 的**口径差异**:影子在 K4 侧是 XML 串(不是块),这里不计;
+    /// 因此两边只做"同类目对比 + 缺失类型判定",不要求总数逐字相等。
+    fn k4_def_census(doc: &Value) -> BTreeMap<String, BTreeMap<String, usize>> {
+        let mut out: BTreeMap<String, BTreeMap<String, usize>> = BTreeMap::new();
+        let mut sizes: BTreeMap<String, usize> = BTreeMap::new();
+        let theatre = doc.get("theatre").unwrap_or(&Value::Null);
+        for container in ["actors", "scenes"] {
+            let Some(entities) = theatre.get(container).and_then(Value::as_object) else {
+                continue;
+            };
+            for entity in entities.values() {
+                let Some(bdj) = entity.get("block_data_json") else {
+                    continue;
+                };
+                let (Some(blocks), Some(connections)) = (
+                    bdj.get("blocks").and_then(Value::as_object),
+                    bdj.get("connections").and_then(Value::as_object),
+                ) else {
+                    continue;
+                };
+                for (id, block) in blocks {
+                    let ty = block.get("type").and_then(Value::as_str).unwrap_or("");
+                    if !ty.starts_with("procedures_2_def") {
+                        continue;
+                    }
+                    let name = block
+                        .get("fields")
+                        .and_then(|f| f.get("NAME"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+                    if name.is_empty() {
+                        continue;
+                    }
+                    // 顺 connections 数可达块
+                    let mut census: BTreeMap<String, usize> = BTreeMap::new();
+                    let mut stack = vec![id.clone()];
+                    let mut seen = std::collections::HashSet::new();
+                    while let Some(current) = stack.pop() {
+                        if !seen.insert(current.clone()) {
+                            continue;
+                        }
+                        if let Some(b) = blocks.get(&current) {
+                            let t = b.get("type").and_then(Value::as_str).unwrap_or("");
+                            if !t.is_empty() {
+                                *census.entry(t.to_string()).or_default() += 1;
+                            }
+                        }
+                        if let Some(children) = connections.get(&current).and_then(Value::as_object)
+                        {
+                            for child in children.keys() {
+                                stack.push(child.clone());
+                            }
+                        }
+                    }
+                    let total: usize = census.values().sum();
+                    if sizes.get(&name).is_some_and(|s| *s >= total) {
+                        continue;
+                    }
+                    sizes.insert(name.clone(), total);
+                    out.insert(name, census);
+                }
+            }
+        }
+        out
+    }
+
+    /// 三分对比:KN(前)→ K4(中)→ KN(后)。用于回答"是反向丢的还是正向丢的"。
+    fn report_three_way(
+        key: &str,
+        before: &BTreeMap<String, usize>,
+        mid: Option<&BTreeMap<String, usize>>,
+        after: &BTreeMap<String, usize>,
+    ) {
+        let fmt = |c: &BTreeMap<String, usize>| -> String {
+            let total: usize = c.values().sum();
+            let mut items: Vec<(&String, &usize)> = c.iter().collect();
+            items.sort_by(|a, b| b.1.cmp(a.1));
+            format!(
+                "{total} 块 [{}]",
+                items
+                    .iter()
+                    .take(8)
+                    .map(|(k, n)| format!("{k}={n}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            )
+        };
+        eprintln!("[三分] {key}");
+        eprintln!("       KN 前: {}", fmt(before));
+        match mid {
+            Some(m) => eprintln!("       K4 中: {}", fmt(m)),
+            None => eprintln!("       K4 中: (在中间态里找不到这个定义体的 def 块)"),
+        }
+        eprintln!("       KN 后: {}", fmt(after));
     }
 
     /// 2. **程序集侧**:正向 `zC` 会把带返回值的定义拆成 `NORMAL` + `ROUND` 两条(0.16.2 行为),
