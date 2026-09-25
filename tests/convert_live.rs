@@ -258,6 +258,40 @@ fn kn_work_to_kitten4_file() {
             *unmapped.entry(kind.as_str()).or_default() += 1;
         }
     }
+    // 丢弃属性按"归一化路径"聚合:实体键会按实体重复上千次,必须先把 id/uuid 抹掉
+    fn norm_property(path: &str) -> String {
+        if let Some(rest) = path.split("[*].").nth(1) {
+            return format!("实体键 {}", rest.split('(').next().unwrap_or(rest));
+        }
+        if let Some(rest) = path.strip_prefix("KN 顶层键 `") {
+            return format!("顶层键 {}", rest.split('`').next().unwrap_or(rest));
+        }
+        path.split('(').next().unwrap_or(path).to_string()
+    }
+    let mut dropped: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    for w in out.report.warnings() {
+        match w {
+            backend::core::convert::translate::TranslateWarning::DroppedProperty { path } => {
+                *dropped.entry(norm_property(path)).or_default() += 1
+            }
+            backend::core::convert::translate::TranslateWarning::DroppedField { path } => {
+                *dropped.entry(format!("[字段] {path}")).or_default() += 1
+            }
+            _ => {}
+        }
+    }
+    let mut dtop: Vec<_> = dropped.iter().collect();
+    dtop.sort_by(|a, b| b.1.cmp(a.1));
+    eprintln!(
+        "[convert_live] 丢弃属性/字段 {} 种 / {} 条,Top20:{}",
+        dropped.len(),
+        dropped.values().sum::<usize>(),
+        dtop.iter()
+            .take(20)
+            .map(|(k, n)| format!("{k}={n}"))
+            .collect::<Vec<_>>()
+            .join(" | ")
+    );
     let mut top: Vec<_> = unmapped.iter().collect();
     top.sort_by(|a, b| b.1.cmp(a.1));
     eprintln!(

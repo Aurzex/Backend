@@ -55,8 +55,16 @@ NEMO → KN 是另一条前端(`hI.parseBlocksXML`),官方管线共 12 步(`main
     构成:脚本变量族 281(44%)、文字效果族 170(26%)、遍历循环族 93(14%),其余为排行榜 / 临时列表 /
     画笔图层 / 打印 / 带参数广播 / 键盘值等;其中约 1/3 是这些功能的**内部子块与影子类型**
     (`*_value` / `*_param` / `color_size_slider` / `procedure_boolean`,无中文名)。
-  - 因此反向**真正**值得评估的是 **3 301 条实体属性丢弃**(≈实体数 × 每实体 KN 专有属性)与
-    `docs/rounds/28` 的定义体积木类型差(6 / 133)。
+  - 丢弃类告警 3 313 条(39 种)同样需要拆开看:**≈2 950 条其实是"类型歧义"报告**
+    (KN 一个类型 ← Kitten 多个原类型,保留 KN 名,如 `math_arithmetic` 1083 · `variables_get` 668 ·
+    `controls_if` 291 · `variables_set` 253 · `on_running_group_activated` 215),
+    **不是属性丢失**;真正的实体键丢弃只有 ≈333 条(`comments` 113 · `editable` 112 · `deletable` 104 ——
+    KN 实体的渲染标志,Kitten4 无此键;`rotation` 4)外加 5 条程序集形参类型。
+  - 因此**反向的产物丢失实际很小**;剩下可评估的是 round 28 的定义体积木类型差(6 / 133)与
+    "类型歧义"这类**单向**信息损失(Kitten 原类型名不可恢复,但语义等价)。
+  - ⚠️ 另记一条**告警分类问题**:类型歧义目前借用 `DroppedProperty` 上报(路径形如
+    `math_arithmetic(Kitten 原类型有 2 个:…,已保留 KN 名)`),导致类别标签「丢弃实体属性」与事实不符 ——
+    是否拆出独立变体见目标库。
 - 运行时实测:KN→Kitten4 产物有 `theatre`/`size`/`block_data_json`,可被平台接受。
 
 ## 6. 硬门与不变量(实现任何新方向都必须满足)
