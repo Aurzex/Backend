@@ -803,7 +803,9 @@ fn theme_of_style(style: &str) -> &'static str {
 ///
 /// 画布:`StageOrientation::Auto`(默认)把源 `stageSize` 原样当 Kitten4 的 `size`,于是
 /// `landscape = width > height` 两侧一致(清屏/坐标换算自洽);显式指定 `Portrait`/`Landscape`
-/// 会换掉画布尺寸但**不**改坐标与横屏壳的判定,只在你确实要把作品搬到另一种画布时才用。
+/// 会换掉画布尺寸,坐标也随之按 `canvas / stageSize` 的比例**重新换算**
+///(`kitten4_position`,与正向 `stage_position` 互逆),所以搬到另一种画布时位置仍然对应;
+/// 只有**横屏壳的判定**(`mapping` 里的 `landscape`)仍按源 `stageSize`,不受本选项影响。
 pub(crate) fn convert_kn_document(
     source: &serde_json::Value,
     options: &TranslateOptions,
@@ -1040,7 +1042,7 @@ fn build_kitten4_document(
     theatre.insert("groups".into(), json!({}));
     theatre.insert("timer".into(), json!({}));
 
-    let (variables, variable_order) = kitten4_variables(src, landscape, canvas, kn_stage, report);
+    let (variables, variable_order) = kitten4_variables(src, canvas, kn_stage, report);
     let (audio, audio_order) = kitten4_audio(src);
 
     let mut doc = Map::new();
@@ -1274,7 +1276,6 @@ fn kitten4_styles(
 /// KN 变量表 → Kitten4 `variables` + `variable_order`(云变量/本地变量在 KN 里已合并,无法还原)
 fn kitten4_variables(
     src: &serde_json::Map<String, serde_json::Value>,
-    landscape: bool,
     canvas: (f64, f64),
     kn_stage: (f64, f64),
     report: &mut TranslateReport,
@@ -1324,7 +1325,6 @@ fn kitten4_variables(
         out.insert(id.clone(), Value::Object(entry));
         order.push(json!(id));
     }
-    let _ = landscape;
     if !out.is_empty() {
         report.warn(TranslateWarning::DroppedProperty {
             path: "variables(云变量与本地变量在 KN 里已合并,反向一律写入 `variables`)".into(),
@@ -1800,6 +1800,24 @@ mod tests {
     }
 
     #[test]
+    /// 显式方向换画布尺寸时,坐标按比例重算(不是"只换尺寸不改坐标")
+    #[test]
+    fn explicit_orientation_rescales_positions() {
+        // 源(像素系左上角)→ Kitten4(中心原点):x 减半宽、y 加半高
+        let position = json!({ "x": 0, "y": 0 });
+        let (x, y) = kitten4_position(&position, (900.0, 562.0), (900.0, 562.0));
+        assert_eq!((x, y), (-450.0, 281.0));
+
+        // 换成竖屏画布(562×900):同一个像素点被按 `canvas / stageSize` 比例重新换算
+        let (x2, y2) = kitten4_position(&position, (562.0, 900.0), (900.0, 562.0));
+        assert_eq!((x2, y2), (-281.0, 450.0));
+        assert_ne!(
+            (x, y),
+            (x2, y2),
+            "显式 StageOrientation 必须让坐标跟着换算,而不是只改画布尺寸"
+        );
+    }
+
     fn styles_and_audio_keep_source_urls_and_report_uploads() {
         let mut report = report();
         let doc = build_document(&sample_source(), vec![], &[], 0, &mut report).expect("装配");
