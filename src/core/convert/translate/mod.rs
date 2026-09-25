@@ -1,4 +1,5 @@
-//! 编辑器间互相转化(读写双向):Kitten4 `.bcm4` ⇄ KittenN `.bcmkn`。
+//! 编辑器间互相转化:Kitten4 `.bcm4` ⇄ KittenN `.bcmkn`,以及 **NEMO → KittenN**(单向,
+//! 方案见 `docs/27-nemo-to-kn-conversion-plan.md`)。
 //!
 //! 管线(正向与官方编辑器一致,见 `docs/20-kitten-kn-work-conversion-plan.md` §3.2/§3.3/§6.2;
 //! 反向是本项目自建,见同一文档 §4):
@@ -15,6 +16,11 @@
 //! | --- | --- | --- | --- | --- |
 //! | Kitten4 → KN | [`kitten::parse_block_data_json`] | [`mapping::translate_kitten_to_kn`] | [`neko::split_procedures`]/[`neko::rewrite_calls`]/[`neko::tree_to_json`] | [`assembly::build_document`] |
 //! | KN → Kitten4 | [`neko::parse_kn_entity`]/[`neko::parse_kn_procedures`] | [`mapping::translate_kn_to_kitten`] | [`neko::unrewrite_calls`]/[`neko::def_root_from_entry`]/[`kitten::build_block_data_json`] | [`build_kitten4_document`] |
+//! | NEMO → KN | [`nemo::prepare_blocks_xml`](`nemo_xml` 解析 + 版本迁移 + 9 个前置改写) | [`nemo_mapping::translate_nemo_to_kn`](官方把映射折进解析,见该模块文档) | 不需要(程序集在解析器内就位) | [`nemo::convert_nemo_document`] |
+//!
+//! 三条路的**不变量**相同:产物是能过官方 `validateBcm` 的 `.bcmkn`;有损之处一律进
+//! [`TranslateReport`]。NEMO 侧只有 `bcm_version` 这个额外输入(老作品要迁移,`docs/27` §9.3),
+//! 走 [`TranslateOptions::source_version`]。
 //!
 //! 分层纪律:
 //!
@@ -44,10 +50,16 @@ pub(crate) mod kitten;
 pub(crate) mod mapping;
 pub(crate) mod model;
 pub(crate) mod neko;
+pub(crate) mod nemo;
+pub(crate) mod nemo_mapping;
+pub(crate) mod nemo_xml;
 pub(crate) mod remint;
+#[cfg(test)]
+mod nemo_tests;
 #[cfg(test)]
 mod reverse_tests;
 pub(crate) mod tables_gen;
+pub(crate) mod tables_gen_nemo;
 
 
 /// 目标编辑器
@@ -81,6 +93,8 @@ pub struct TranslateOptions {
     deterministic_ids: bool,
     batch_concurrency: usize,
     entity_concurrency: usize,
+    /// 源文档的 `bcm_version`(只 NEMO 方向用:版本迁移 `< 0.9.4` QC / `< 0.15.0` YC)
+    source_version: Option<String>,
 }
 
 impl TranslateOptions {
@@ -94,6 +108,7 @@ impl TranslateOptions {
             deterministic_ids: false,
             batch_concurrency: 1,
             entity_concurrency: 1,
+            source_version: None,
         }
     }
 
@@ -131,6 +146,20 @@ impl TranslateOptions {
     pub fn deterministic_ids(mut self, on: bool) -> Self {
         self.deterministic_ids = on;
         self
+    }
+
+    /// 源作品文件的 `bcm_version`(NEMO 版本迁移用;`None` = 不迁移,与官方"没传版本"一致)
+    ///
+    /// NEMO 的编辑版文档里**没有** `bcm_version`(只有 `app_version`),版本来自作品元信息
+    /// (`source_info.bcm_version`);域门面会把反编译产物里的版本自动带上。
+    pub fn source_version(mut self, version: impl Into<String>) -> Self {
+        let version = version.into();
+        self.source_version = Some(version);
+        self
+    }
+
+    pub(crate) fn source_version_ref(&self) -> Option<&str> {
+        self.source_version.as_deref()
     }
 
     pub(crate) fn output_dir_ref(&self) -> Option<&std::path::Path> {
@@ -237,7 +266,7 @@ pub enum TranslateError {
     Mew(#[from] crate::utils::requests::MewError),
     #[error("作品文件解析失败: {0}")]
     Decompiler(#[from] crate::core::convert::DecompilerError),
-    #[error("不支持的方向:{from:?} → {to:?}(本库当前只做 Kitten4 ⇄ KittenN)")]
+    #[error("不支持的方向:{from:?} → {to:?}(本库当前做 Kitten4 ⇄ KittenN 与 NEMO → KittenN)")]
     Unsupported {
         from: crate::core::convert::EditorType,
         to: TargetEditor,
@@ -614,6 +643,14 @@ pub fn translate_value(
             let document = convert_kitten4_document(&mut source, options, &mut report)?;
             (document, report)
         }
+        (Some(crate::core::convert::EditorType::Nemo), TargetEditor::KittenN) => {
+            let mut report = TranslateReport::new(
+                crate::core::convert::EditorType::Nemo,
+                TargetEditor::KittenN,
+            );
+            let document = nemo::convert_nemo_document(&source, options, &mut report)?;
+            (document, report)
+        }
         (Some(crate::core::convert::EditorType::Neko), TargetEditor::Kitten4) => {
             let mut report = TranslateReport::new(
                 crate::core::convert::EditorType::Neko,
@@ -625,7 +662,7 @@ pub fn translate_value(
         (Some(from), to) => return Err(TranslateError::Unsupported { from, to }),
         (None, to) => {
             return Err(TranslateError::InvalidArgument(format!(
-                "无法识别源作品格式(目标 {to:?});本库当前支持 Kitten4(.bcm4 编辑版)与 KittenN(.bcmkn)"
+                "无法识别源作品格式(目标 {to:?});本库当前支持 Kitten4(.bcm4 编辑版)、KittenN(.bcmkn)与 NEMO(.bcm 编辑版)"
             )));
         }
     };

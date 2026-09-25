@@ -87,26 +87,36 @@ fn translate_work_in(
     let artifact = CodemaoDecompiler::global()
         .decompile_artifact_with(work_id, DecompileOptions::new().output_dir(staging))
         .map_err(TranslateError::Decompiler)?;
-    let (source_document, source_file_name) = match artifact {
+    let (source_document, source_file_name, source_version) = match artifact {
         DecompiledArtifact::Document {
             document,
             file_name,
-        } => (document, file_name),
+            source_version,
+        } => (document, file_name, source_version),
         DecompiledArtifact::Path(path) => {
             return Err(TranslateError::InvalidArgument(format!(
                 "作品 {work_id} 的产物是资源形态({}):互相转化只支持编辑版文档 \
-                 (Kitten4 ⇄ KittenN);NEMO / WOOD 请用反编译接口另行处理",
+                 (Kitten4 ⇄ KittenN、NEMO → KittenN);WOOD 请用反编译接口另行处理",
                 path.display()
             )));
         }
     };
+    // NEMO 老作品要按源版本做迁移(`docs/27` §9.3);调用方显式给过版本就尊重调用方
+    let options = if options.source_version_ref().is_none() && !source_version.is_empty() {
+        options.source_version(source_version)
+    } else {
+        options
+    };
 
     // 2. 需要上传源文件时,先把源文档落一次盘(上传接口吃文件路径)
+    // 官方在 Kitten → KN 与 NEMO → KN 两条路上都写产物的 `source`(保留原件)
     let needs_source_upload = options.keeps_source()
         && target == TargetEditor::KittenN
         && matches!(
             detect_editor(&source_document),
-            Some(EditorType::Kitten2 | EditorType::Kitten3 | EditorType::Kitten4)
+            Some(
+                EditorType::Kitten2 | EditorType::Kitten3 | EditorType::Kitten4 | EditorType::Nemo
+            )
         );
     let source_path = if needs_source_upload {
         let path = staging.join(&source_file_name);

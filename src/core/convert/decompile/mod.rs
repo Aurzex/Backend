@@ -302,13 +302,42 @@ impl CodemaoDecompiler {
     ///
     /// - Kitten / NEKO:直接返回内存文档 —— 旧路径是"写 JSON → `translate` 再读回",
     ///   10 MB 级作品白付一次 serialize + 一次 parse;
-    /// - NEMO / WOOD:只有落盘形态,退回旧路径(落盘并返回路径),调用方按文件处理。
+    /// - NEMO:走 [`WorkDecompiler::editable_document`] 直接给明文编辑版(仍然不落盘、不下资源);
+    /// - WOOD:只有落盘形态,退回旧路径(落盘并返回路径),调用方按文件处理。
     pub fn decompile_artifact_with(
         &self,
         work_id: WorkId,
         options: DecompileOptions,
     ) -> Result<DecompiledArtifact> {
-        let (decompiler, result, context) = self.decompile_core(work_id, &options)?;
+        let (decompiler, raw, context) = self.prepare_decompile(work_id, &options)?;
+        // 内存形态优先(NEMO):只要文档,不落盘、不下资源
+        if let Some(editable) = decompiler.editable_document(&raw, &context)? {
+            // NEMO 在配置里**没有**扩展名(它的产物是资源目录),但编辑版文档本体就是
+            // `<work_id>.bcm`(见 `NemoResourceManager::save_core_files`);产出文件名沿用同一口径.
+            let extension = match context.work_info.work_type {
+                EditorType::Nemo => "bcm".to_string(),
+                _ => context
+                    .work_info
+                    .file_extension(&context.config)
+                    .trim_start_matches('.')
+                    .to_owned(),
+            };
+            let file_name = FileService::safe_filename(
+                &context.work_info.name,
+                context.work_info.id.get(),
+                &extension,
+            );
+            info!(
+                "作品 [work_id={}] 反编译完成(内存编辑版,未落盘;将命名为 {file_name})",
+                work_id
+            );
+            return Ok(DecompiledArtifact::Document {
+                document: editable.document,
+                file_name,
+                source_version: editable.source_version,
+            });
+        }
+        let result = decompiler.decompile(raw, &context)?;
         match result {
             DecompileResult::Json(document) => {
                 let extension = context
@@ -330,6 +359,9 @@ impl CodemaoDecompiler {
                 Ok(DecompiledArtifact::Document {
                     document,
                     file_name,
+                    // 只有走"内存形态编辑版"的反编译器(NEMO)能给出源版本;
+                    // Kitten/NEKO 方向不做版本迁移,这里留空。
+                    source_version: String::new(),
                 })
             }
             result @ DecompileResult::Path(_) => {
@@ -373,6 +405,20 @@ impl CodemaoDecompiler {
         work_id: WorkId,
         options: &DecompileOptions,
     ) -> Result<(Box<dyn WorkDecompiler>, DecompileResult, DecompilerContext)> {
+        let (decompiler, raw, context) = self.prepare_decompile(work_id, options)?;
+        let result = decompiler.decompile(raw, &context)?;
+        Ok((decompiler, result, context))
+    }
+
+    /// 反编译的前半段(取信息 → 建上下文 → 取原始数据 → 可选存原始数据),**不**调 `decompile`
+    ///
+    /// 拆出来是为了让 [`Self::decompile_artifact_with`] 能在"真反编译"之前先问一句
+    /// [`WorkDecompiler::editable_document`](NEMO:只要文档、不要资源目录)。
+    fn prepare_decompile(
+        &self,
+        work_id: WorkId,
+        options: &DecompileOptions,
+    ) -> Result<(Box<dyn WorkDecompiler>, RawWorkData, DecompilerContext)> {
         info!("开始反编译作品 [work_id={}]", work_id);
         let http_client = Box::new(CodeMaoHttpClient::new(self.client.clone()));
         let work_info = self
@@ -416,8 +462,7 @@ impl CodemaoDecompiler {
             .id_generator(self.id_generator.clone())
             .build()?;
 
-        let result = decompiler.decompile(raw, &context)?;
-        Ok((decompiler, result, context))
+        Ok((decompiler, raw, context))
     }
 
     /// 将获取到的未编译原始数据保存到 `output_dir/raw/` 目录下
@@ -730,15 +775,29 @@ pub(crate) enum DecompileResult {
 /// 不再"先落盘再读回"),`DecompiledArtifact::Path` 用于只有落盘形态的 NEMO/WOOD。
 #[derive(Debug)]
 pub enum DecompiledArtifact {
-    /// 编辑版文档(Kitten/NEKO 族):内容在内存里,**未落盘**
+    /// 编辑版文档(Kitten/NEKO/NEMO):内容在内存里,**未落盘**
     Document {
         /// 编辑版文档
         document: Value,
         /// 该文档落盘时应当使用的文件名(含扩展名,与 `save_result` 一致)
         file_name: String,
+        /// 源作品的 `bcm_version`(作品元信息里的;取不到时为空串)。
+        ///
+        /// 只有 NEMO 方向用得到:老作品的转化要做版本迁移(见 `docs/27` §9.3),
+        /// 而编辑版文档里**没有**版本号,只能靠元信息带过来。
+        source_version: String,
     },
     /// 只有落盘形态的产物(NEMO/WOOD):文件或资源目录
     Path(PathBuf),
+}
+
+/// 反编译器的**内存形态编辑版**(只有需要的反编译器实现;见 [`WorkDecompiler::editable_document`])
+#[derive(Debug)]
+pub(crate) struct EditableDocument {
+    /// 编辑版文档(NEMO 是明文 JSON,无解密步骤)
+    pub(crate) document: Value,
+    /// 源作品的 `bcm_version`(作品元信息里的;取不到时为空串)
+    pub(crate) source_version: String,
 }
 
 pub(crate) trait WorkDecompiler: Send + Sync {
@@ -749,6 +808,19 @@ pub(crate) trait WorkDecompiler: Send + Sync {
         output_dir: Option<&Path>,
         context: &DecompilerContext,
     ) -> Result<PathBuf>;
+
+    /// 内存形态的编辑版(**默认没有**):给"只要文档、不要资源目录"的调用方(如 `translate`)用。
+    ///
+    /// NEMO 的产物本来是"资源目录"(`.bcm` + `.userimg` + `.meta` + 下载的素材),
+    /// 但互相转化只需要那份明文编辑版 JSON —— 这条入口让 `translate_work` 全程内存直通
+    /// (方案 23 P0-2 的同一思路),顺带省掉一次资源下载。
+    fn editable_document(
+        &self,
+        _raw: &RawWorkData,
+        _context: &DecompilerContext,
+    ) -> Result<Option<EditableDocument>> {
+        Ok(None)
+    }
 }
 
 /// 将 JSON 反编译结果写入输出目录,返回文件路径(供各反编译器共用)

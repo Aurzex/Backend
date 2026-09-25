@@ -1,6 +1,6 @@
 use crate::core::convert::decompile::{
-    DecompileResult, DecompilerContext, ResourceTask, WorkDecompiler, download_resources_parallel,
-    save_path_result,
+    DecompileResult, DecompilerContext, EditableDocument, ResourceTask, WorkDecompiler,
+    download_resources_parallel, save_path_result,
 };
 use crate::core::convert::shared::{
     CryptoService, DecompilerConfig, DecompilerError, FileService, HttpClient, RawWorkData, Result,
@@ -116,6 +116,26 @@ impl WorkDecompiler for NemoDecompiler {
         _context: &DecompilerContext,
     ) -> Result<PathBuf> {
         save_path_result(result, "NEMO")
+    }
+
+    /// 内存形态的编辑版:NEMO 的 `.bcm` 就是明文 JSON(**没有解密步骤**,评审 §8 更正),
+    /// 所以直接把取到的文档给出去即可 —— 不落盘、不下资源(`translate` 只需要这份文档)。
+    ///
+    /// 源版本的唯一来源是作品元信息(`source_info.bcm_version`),编辑版文档里只有 `app_version`。
+    fn editable_document(
+        &self,
+        raw: &RawWorkData,
+        _context: &DecompilerContext,
+    ) -> Result<Option<EditableDocument>> {
+        match raw {
+            RawWorkData::Nemo(bcm, source_info) => Ok(Some(EditableDocument {
+                document: (**bcm).clone(),
+                source_version: source_info.get_str_or("bcm_version", "").to_string(),
+            })),
+            _ => Err(DecompilerError::Decompile(
+                "NemoDecompiler 需要 Nemo 数据".into(),
+            )),
+        }
     }
 }
 
