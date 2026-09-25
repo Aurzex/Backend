@@ -1,6 +1,8 @@
+//! 领域模型:编辑器判别与扩展名表、作品信息、抓取契约、id 生成器。
+
 use super::config::DecompilerConfig;
 use super::error::Result;
-use super::json::ValueExt;
+use super::infra::ValueExt;
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -124,5 +126,51 @@ impl WorkInfo {
             .get(self.work_type.as_str())
             .cloned()
             .unwrap_or(".json".to_string())
+    }
+}
+
+// ===== 抓取契约(原 fetch.rs)=====
+
+pub(crate) enum RawWorkData {
+    Kitten(Arc<Value>),
+    NekoEncrypted(String),
+    Nemo(Arc<Value>, Arc<Value>),
+    Wood(Arc<Value>),
+    Coco(Arc<Value>),
+}
+
+pub(crate) trait WorkFetcher: Send + Sync {
+    fn fetch(&self, work_info: &WorkInfo) -> Result<RawWorkData>;
+}
+
+// ===== id 生成器(原 files.rs 的 IdGenerator)=====
+
+// 新 ID 生成器(方案一风格)
+#[derive(Clone)]
+pub(crate) struct IdGenerator {
+    chars: Vec<char>,
+}
+
+impl IdGenerator {
+    pub(crate) fn new() -> Self {
+        let chars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            .chars()
+            .collect();
+        Self { chars }
+    }
+
+    pub(crate) fn generate(&self, length: usize) -> String {
+        (0..length)
+            .map(|_| {
+                let idx = fastrand::usize(0..self.chars.len());
+                self.chars[idx]
+            })
+            .collect()
+    }
+}
+
+impl Default for IdGenerator {
+    fn default() -> Self {
+        Self::new()
     }
 }

@@ -9,10 +9,10 @@
 use crate::core::convert::decompile::{
     DecompileResult, DecompilerContext, WorkDecompiler,
     blocks::{BlockContext, child_input_name, create_block_decompiler, referenced_ids},
-    shadow::ShadowBuilder, save_json_result,
+    save_json_result,
 };
 use crate::core::convert::shared::{
-    DecompilerConfig, DecompilerError, EditorType, HttpClient, IdGenerator, RawWorkData, Result,
+    DecompilerConfig, ShadowBuilder, DecompilerError, EditorType, HttpClient, IdGenerator, RawWorkData, Result,
     ResultExt, ValueExt, WorkFetcher, WorkInfo,
 };
 use log::warn;

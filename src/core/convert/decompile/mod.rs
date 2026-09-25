@@ -1,6 +1,5 @@
 pub(crate) mod blocks;
 pub(crate) mod editors;
-pub(crate) mod shadow;
 
 use crate::core::convert::decompile::editors::{
     CocoDecompiler, CocoFetcher, KittenDecompiler, KittenFetcher, NekoDecompiler, NekoFetcher,

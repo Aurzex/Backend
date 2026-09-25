@@ -4,30 +4,18 @@
 //! 子域通过本文件的汇总再导出取用(`crate::core::convert::shared::{…}`),不直接引用子模块路径。
 
 pub(crate) mod config;
-pub(crate) mod crypto;
 pub(crate) mod error;
-pub(crate) mod fetch;
-pub(crate) mod files;
-pub(crate) mod http;
-pub(crate) mod json;
+pub(crate) mod infra;
 pub(crate) mod model;
 
 // 错误与错误上下文
 pub(crate) use error::{Result, ResultExt};
-// JSON 访问扩展
-pub(crate) use json::ValueExt;
-// 配置与影子模板
-pub(crate) use config::{DecompilerConfig, ShadowTemplate};
-// 作品模型(编辑器判别、扩展名表)
-pub(crate) use model::WorkInfo;
-// 文件与 ID
-pub(crate) use files::{FileService, IdGenerator};
-// 加密
-pub(crate) use crypto::CryptoService;
-// HTTP
-pub(crate) use http::{CodeMaoHttpClient, HttpClient};
-// 抓取契约
-pub(crate) use fetch::{RawWorkData, WorkFetcher};
+// 配置 + 影子模板 + 影子构建器
+pub(crate) use config::{DecompilerConfig, ShadowBuilder, ShadowTemplate};
+// 基础设施:加密 / HTTP / 文件 / JSON 取值
+pub(crate) use infra::{CodeMaoHttpClient, CryptoService, FileService, HttpClient, ValueExt};
+// 模型:编辑器判别、作品信息、抓取契约、id 生成
+pub(crate) use model::{IdGenerator, RawWorkData, WorkFetcher, WorkInfo};
 
 // 门面项(`convert/mod.rs` 对外再导出,保持 `pub` 可见性)
 pub use error::DecompilerError;

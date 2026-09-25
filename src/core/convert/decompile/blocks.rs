@@ -9,7 +9,7 @@
 //! - **专用反编译器**(`If`/`FunctionDef`/`FunctionCall`/`TextJoin`/`Mutation` 等)与
 //!   按编译版 `type` 分派的 `create_block_decompiler`。
 
-use super::shadow::ShadowBuilder;
+use crate::core::convert::shared::ShadowBuilder;
 use crate::core::convert::shared::{DecompilerError, Result, ValueExt};
 use log::error;
 use serde_json::{Value, json};
