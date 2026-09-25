@@ -1,15 +1,21 @@
 # 真机冒烟测试 — AI 对话与作品云变量(2026-08-12)
 
 > 目的:验证 `core/converse.rs`(AI 对话)与 `core/cloudvar.rs`(作品云变量)在真实环境下的可用性,顺带核验刚完成的「云变量编辑器类型自动识别」。
-> 基线:HEAD `70a6b44`。方法:临时示例 `examples/smoke_test.rs`(保留,可复用)。
+> 基线:HEAD `70a6b44`。方法:当时的临时示例 `examples/smoke_test.rs`。
+> **该示例从未入库**(`examples/` 目录当前不存在,`git log` 里也没有它的痕迹),当时只在本机跑;
+> 不要把它连同凭据提交进来。当前可复用的真机入口:`tests/live_features.rs`(登录/AI 对话/云变量)
+> 与 `tests/convert_live.rs`(作品转化),凭据统一从 `data/test-config.json` 读。
 
-## 测试账号
+## 测试账号(脱敏)
 
-| 账号        | 密码              | 角色     | AI 对话结果     |
-| ----------- | ----------------- | -------- | --------------- |
-| Aurzex      | CODExhr1106.mao   | 普通用户 | ✅ 完整流式回复 |
-| 15271420410 | AumiaoBlack114514 | 普通用户 | ✅ 完整流式回复 |
-| 18142842125 | miao520mitao      | 普通用户 | ✅ 完整流式回复 |
+> **凭据不入库**:真实账号与密码只放在 `data/test-config.json`(`data/` 已被 `.gitignore` 忽略,
+> 集成测试从这里读取);本文档只记录脱敏后的账号别名与测试结论。
+
+| 账号(脱敏) | 角色     | AI 对话结果     |
+| ----------- | -------- | --------------- |
+| 账号 A      | 普通用户 | ✅ 完整流式回复 |
+| 账号 B      | 普通用户 | ✅ 完整流式回复 |
+| 账号 C      | 普通用户 | ✅ 完整流式回复 |
 
 三个账号均以 `PasswordV2` 登录成功。登录接口偶发 `HTTP error: timeout: global`(网络抖动),重试即成功,非代码问题。
 
@@ -31,7 +37,7 @@
 
 ### 现象
 
-首次测试,Aurzex 账号 `send_and_wait` 稳定报 `Timeout("AI 未开始回复")`,三个账号无一幸免。
+首次测试,账号 A 的 `send_and_wait` 稳定报 `Timeout("AI 未开始回复")`,三个账号无一幸免。
 
 ### 根因(日志铁证)
 
@@ -75,13 +81,16 @@
 3. **时序问题优先看日志顺序**:chat 帧在握手前发出,靠日志里 `聊天消息已发送` 与 `握手成功` 的先后即可定位,无需抓包。
 4. **NEMO/KN 作品的云变量必须用对应编辑器参数**,否则 401;现在库内自动识别,调用方无需感知。
 5. **登录接口偶发全局超时**:重试即可,非代码缺陷;批量测试账号时逐个跑比一次性并发更稳。
-6. **测试工具设计**:`examples/smoke_test.rs` 支持多账号 + 自动识别作品类型,`cargo run --example smoke_test -- 账号:密码 -- 作品ID...` 一键复跑,适合作为回归入口。
+6. **测试工具设计**:当时的 `examples/smoke_test.rs` 支持多账号 + 自动识别作品类型,一键复跑。
+   **注意**:它把账号密码当命令行参数传,这类工具不要入库(本仓库里它从未入库);
+   现在的回归入口是 `tests/live_features.rs` / `tests/convert_live.rs`,凭据只从
+   `data/test-config.json`(gitignored)读。
 
 ## 变更文件
 
 - `src/core/converse.rs` — AI 对话连接时序修复(io_ready/joined 标志)
 - `src/core/cloudvar.rs` — 云变量编辑器类型自动识别
-- `examples/smoke_test.rs` — 冒烟测试示例(新增)
+- `examples/smoke_test.rs`(本机临时示例,**从未入库**;含凭据,不要再提交)
 - `README.md` — 云变量示例补充自动识别说明
 - `.gitignore` — 忽略 `/examples`
 
