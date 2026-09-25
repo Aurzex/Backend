@@ -723,6 +723,15 @@ mod reverse_tests_inner {
             let Some(root) = entry.tree.roots.first() else {
                 continue;
             };
+            // 只把"首块是定义块(`procedures_2_def*`)"的条目算作定义体。
+            //
+            // 第三十二轮实测:`proceduresDict` 里同名条目可能**不是**定义 —— 例如 `Node VM v3` 里
+            // 名字 `bfa2f83c` 同时对应两条 ROUND 条目:一条首块是 `procedures_2_defnoreturn`(16 块,真定义体),
+            // 另一条首块是 `procedures_2_callreturn`(**128 块的调用树**)。旧口径按名字聚合取较大者,
+            // 于是把调用树当成定义体比较,凭空造出 118 块的"缺口"。
+            if !root.kind.starts_with("procedures_2_def") {
+                continue;
+            }
             let body_name = root
                 .fields
                 .get("NAME")
@@ -1091,9 +1100,12 @@ mod reverse_tests_inner {
                     .collect();
                 eprintln!("[反向报告] {label}: {}", top.join(" | "));
             }
+            // **预算(只许变小)**:第三十二轮修正 census 口径(只把"首块是定义块"的条目算定义体,
+            // 见 `def_census` 注释)后重测:6 条定义 / 净减 **21** 块(旧口径 6 / 133 中约 118 块是
+            // "把调用树当定义体比"造成的假缺口)。修口径前的真实现象、证据与后续见 `docs/rounds/32`。
             assert!(
-                affected <= 6 && deficit <= 133,
-                "{label}:反向保真缺口扩大(受影响定义 {affected}/{}，净减块 {deficit};基线 6 / 133)",
+                affected <= 6 && deficit <= 21,
+                "{label}:反向保真缺口扩大(受影响定义 {affected}/{}，净减块 {deficit};基线 6 / 21)",
                 before_defs.len()
             );
         }
