@@ -65,7 +65,7 @@ pub(crate) type Result<T, E = SocketError> = std::result::Result<T, E>;
 
 /// 编辑器类型,决定 WebSocket 查询参数
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum EditorType {
+pub enum CloudEditorType {
     #[default]
     Kitten,
     Nemo,
@@ -73,13 +73,13 @@ pub enum EditorType {
     Coco,
 }
 
-impl EditorType {
+impl CloudEditorType {
     /// 返回 `(authorization_type, stag)` 查询参数
     pub(crate) fn query_params(self) -> (&'static str, &'static str) {
         match self {
-            EditorType::Nemo => ("5", "2"),
-            EditorType::Kitten | EditorType::Coco => ("1", "1"),
-            EditorType::KittenN => ("5", "3"),
+            CloudEditorType::Nemo => ("5", "2"),
+            CloudEditorType::Kitten | CloudEditorType::Coco => ("1", "1"),
+            CloudEditorType::KittenN => ("5", "3"),
         }
     }
 }
@@ -522,7 +522,7 @@ impl std::fmt::Debug for Events {
 struct CloudInner {
     work_id: i64,
     /// 显式指定的编辑器类型;None 表示连接时按作品详情自动识别
-    editor: Mutex<Option<EditorType>>,
+    editor: Mutex<Option<CloudEditorType>>,
     token: Option<String>,
     auto_reconnect: AtomicBool,
     max_reconnect_attempts: usize,
@@ -587,7 +587,7 @@ impl std::fmt::Debug for CloudConnection {
 #[derive(Debug, Clone)]
 pub struct CloudBuilder {
     work_id: i64,
-    editor: Option<EditorType>,
+    editor: Option<CloudEditorType>,
     authorization_token: Option<String>,
     auto_reconnect: bool,
     max_reconnect_attempts: usize,
@@ -615,7 +615,7 @@ impl CloudBuilder {
 
     /// 显式指定编辑器类型;缺省时连接阶段按作品详情自动识别
     /// (KITTEN2/3/4→Kitten,NEMO→Nemo,NEKO→KittenN,COCO→Coco)
-    pub fn editor(mut self, editor: EditorType) -> Self {
+    pub fn editor(mut self, editor: CloudEditorType) -> Self {
         self.editor = Some(editor);
         self
     }
@@ -2204,18 +2204,18 @@ fn emit_connection_event(inner: &Arc<CloudInner>, event: ConnectionEvent) {
 /// 按作品详情自动识别编辑器类型(查询 `/creation-tools/v1/works/{id}` 的 `type` 字段)
 /// 映射:KITTEN2/3/4/KITTEN→Kitten,NEMO→Nemo,NEKO→KittenN,COCO→Coco
 /// 查询失败或类型未知时回退 Kitten(与历史默认一致)
-fn detect_editor(work_id: i64) -> EditorType {
+fn detect_editor(work_id: i64) -> CloudEditorType {
     use crate::api::work::WorkDataFetcher;
     match WorkDataFetcher::new().fetch_work_details(work_id as i32) {
         Ok(v) => match v.get("type").and_then(Value::as_str) {
-            Some("NEMO") => EditorType::Nemo,
-            Some("NEKO") => EditorType::KittenN,
-            Some("COCO") => EditorType::Coco,
-            _ => EditorType::Kitten,
+            Some("NEMO") => CloudEditorType::Nemo,
+            Some("NEKO") => CloudEditorType::KittenN,
+            Some("COCO") => CloudEditorType::Coco,
+            _ => CloudEditorType::Kitten,
         },
         Err(e) => {
             warn!("自动识别作品 {work_id} 编辑器类型失败: {e},回退 Kitten");
-            EditorType::Kitten
+            CloudEditorType::Kitten
         }
     }
 }

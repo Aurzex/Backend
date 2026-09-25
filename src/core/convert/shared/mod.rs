@@ -23,7 +23,7 @@ pub(crate) use model::WorkInfo;
 // 文件与 ID
 pub(crate) use files::{FileService, IdGenerator};
 // 加密
-pub(crate) use crypto::{BCMKNDecryptor, CryptoService};
+pub(crate) use crypto::CryptoService;
 // HTTP
 pub(crate) use http::{CodeMaoHttpClient, HttpClient};
 // 抓取契约

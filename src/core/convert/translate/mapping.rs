@@ -824,7 +824,8 @@ fn parse_node(mut node: BlockJson, ctx: &mut Ctx) -> BlockJson {
 
 /// 官方 `parseBlock` 末尾的连接路由(9/10 步):值输入 → 语句槽 / `next` / 留在 `inputs`
 fn route_children(node: &mut BlockJson, ctx: &mut Ctx) {
-    let kind = node.kind.clone();
+    // 借用而非克隆:`kind` 全程只读,而下面动的都是别的字段(disjoint field borrow)
+    let kind = &node.kind;
     if PLACEHOLDERS_OUTPUT.contains(&kind.as_str()) {
         return; // 官方对返值/返布尔占位积木不接任何输入连接(子积木随之消失);本实现留在原地不丢数据
     }
@@ -849,11 +850,11 @@ fn route_children(node: &mut BlockJson, ctx: &mut Ctx) {
                 pure_list_get(list, node.id.clone(), shadow_id),
             );
         }
-        let slot = get_mapped_name(&kind, &slot).into_owned();
+        let slot = get_mapped_name(kind, &slot).into_owned();
         if NEXT_ROUTE_TYPES.contains(&kind.as_str()) {
             node.next = Some(Box::new(child));
-        } else if (kind == "controls_if" || kind == "when")
-            && (slot.contains("DO") || (kind == "controls_if" && slot.contains("ELSE")))
+        } else if (kind.as_str() == "controls_if" || kind.as_str() == "when")
+            && (slot.contains("DO") || (kind.as_str() == "controls_if" && slot.contains("ELSE")))
         {
             node.statements.insert(slot, child);
         } else if LOOP_DO_TYPES.contains(&kind.as_str()) && slot == "DO" {

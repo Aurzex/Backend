@@ -476,18 +476,20 @@ fn rewrite_call(
 
 /// KN 的 `nekoBlockJsonList`(数组)→ 中核树。空/缺失 → 空树(实体可以没有积木)。
 pub(crate) fn parse_kn_entity(list: &Value) -> Result<BlockTree> {
-    let values = match list {
-        Value::Array(items) => items.clone(),
+    // 数组形态(绝大多数)直接借用,**不再整表克隆**;只有字符串形态才需要持有一份解析结果
+    let owned: Vec<Value>;
+    let values: &[Value] = match list {
+        Value::Array(items) => items,
         // 少数链路把该字段存成 JSON 字符串(与 Kitten 侧 `block_data_json` 的容错一致)
-        Value::String(text) if !text.trim().is_empty() => serde_json::from_str::<Value>(text)
-            .map_err(DecompilerError::from)?
-            .as_array()
-            .cloned()
-            .unwrap_or_default(),
-        _ => Vec::new(),
+        Value::String(text) if !text.trim().is_empty() => {
+            let parsed: Value = serde_json::from_str(text).map_err(DecompilerError::from)?;
+            owned = parsed.as_array().cloned().unwrap_or_default();
+            &owned
+        }
+        _ => &[],
     };
     let mut roots = Vec::new();
-    for value in &values {
+    for value in values {
         let node = BlockJson::from_value(value)?;
         // 官方 `HC` 过滤掉 `type === ""` 的垃圾节点
         if node.kind.is_empty() {

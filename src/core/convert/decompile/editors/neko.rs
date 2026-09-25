@@ -4,8 +4,8 @@ use crate::core::convert::decompile::{
     contract::{DecompileResult, WorkDecompiler, save_json_result},
 };
 use crate::core::convert::shared::{
-    BCMKNDecryptor, CryptoService, DecompilerConfig, DecompilerError, HttpClient, RawWorkData,
-    Result, WorkFetcher, WorkInfo,
+    CryptoService, DecompilerConfig, DecompilerError, HttpClient, RawWorkData, Result, WorkFetcher,
+    WorkInfo,
 };
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -79,8 +79,8 @@ impl WorkDecompiler for NekoDecompiler {
     fn decompile(&self, raw: RawWorkData, _context: &DecompilerContext) -> Result<DecompileResult> {
         match raw {
             RawWorkData::NekoEncrypted(encrypted) => {
-                let decryptor = BCMKNDecryptor::new(self.crypto_service.clone());
-                let decrypted_json = decryptor.decrypt(&encrypted)?;
+                // `CryptoService` 内部只有 `Arc<[u8]>` salt,直接借用即可,无需克隆
+                let decrypted_json = self.crypto_service.decrypt_bcmkn_json(&encrypted)?;
                 Ok(DecompileResult::Json(decrypted_json))
             }
             _ => Err(DecompilerError::Decompile(
@@ -95,6 +95,12 @@ impl WorkDecompiler for NekoDecompiler {
         output_dir: Option<&Path>,
         context: &DecompilerContext,
     ) -> Result<PathBuf> {
-        save_json_result(result, output_dir, context, "bcmkn", "NEKO")
+        // 扩展名与其它编辑器同一来源(与 coco/kitten 一致,不再硬编码)
+        let extension = context
+            .work_info
+            .file_extension(&context.config)
+            .trim_start_matches('.')
+            .to_owned();
+        save_json_result(result, output_dir, context, &extension, "NEKO")
     }
 }

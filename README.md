@@ -101,13 +101,13 @@ let rule = CaptchaManager::new().fetch_captcha_rule()?; // MewResult<Value>
 **3. 云变量 WebSocket**(回调订阅 + 同步等待):
 
 ```rust
-use backend::core::cloudvar::{CloudBuilder, EditorType, RankingOrder};
+use backend::core::cloudvar::{CloudBuilder, CloudEditorType, RankingOrder};
 use std::time::Duration;
 
 // 不传 .editor() 时,连接阶段按作品详情自动识别编辑器类型
 // (KITTEN2/3/4→Kitten,NEMO→Nemo,NEKO→KittenN,COCO→Coco);也可以显式指定
 let conn = CloudBuilder::new(12345)
-    .editor(EditorType::Kitten)
+    .editor(CloudEditorType::Kitten)
     .connect_timeout(Duration::from_secs(5))
     .sync_timeout(Duration::from_secs(10))
     .build();

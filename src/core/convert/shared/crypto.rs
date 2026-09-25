@@ -8,11 +8,12 @@ use aes_gcm::{
 use base64::{Engine as _, engine::general_purpose};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use std::sync::Arc;
 
 // 加密服务
 #[derive(Clone)]
 pub(crate) struct CryptoService {
-    salt: Vec<u8>,
+    salt: Arc<[u8]>,
 }
 
 const NONCE_SIZE: usize = 12;
@@ -20,7 +21,7 @@ const NONCE_SIZE: usize = 12;
 impl CryptoService {
     pub(crate) fn new(salt: &[u8]) -> Self {
         Self {
-            salt: salt.to_vec(),
+            salt: Arc::from(salt),
         }
     }
 
@@ -86,22 +87,13 @@ impl CryptoService {
             .ok_or_else(|| DecompilerError::Crypto("IV 长度不足".into()))?;
         self.decrypt_aes_gcm(ciphertext, iv)
     }
-}
 
-pub(crate) struct BCMKNDecryptor {
-    crypto_service: CryptoService,
-}
-
-impl BCMKNDecryptor {
-    pub(crate) fn new(crypto_service: CryptoService) -> Self {
-        Self { crypto_service }
-    }
-
-    pub(crate) fn decrypt(&self, encrypted_content: &str) -> Result<Value> {
-        let decrypted_bytes = self.crypto_service.decrypt_bcmkn(encrypted_content)?;
+    /// NEKO 播放器下发的密文 → KN 文档 JSON:
+    /// `base64(reverse(content))` → AES-GCM(前 12 字节为 IV)→ UTF-8 → JSON
+    pub(crate) fn decrypt_bcmkn_json(&self, encrypted_content: &str) -> Result<Value> {
+        let decrypted_bytes = self.decrypt_bcmkn(encrypted_content)?;
         let decrypted_str = String::from_utf8(decrypted_bytes)
             .map_err(|e| DecompilerError::Crypto(format!("UTF-8转换失败: {}", e)))?;
-        let json_value: Value = serde_json::from_str(&decrypted_str)?;
-        Ok(json_value)
+        Ok(serde_json::from_str(&decrypted_str)?)
     }
 }

@@ -1057,8 +1057,9 @@ mod reverse_tests_inner {
             eprintln!("跳过:缺少真作品样例");
             return;
         };
-        // 写系统临时目录:不往仓库里落盘(仓库 temp/ 是要清理干净的工作区)
-        let dir = std::env::temp_dir().join("backend-convert-test");
+        // 写系统临时目录:不往仓库里落盘(仓库 temp/ 是要清理干净的工作区);
+        // 目录每次运行唯一,避免并行/重跑时互相看到对方的产物
+        let dir = super::unique_test_dir("reverse");
         std::fs::create_dir_all(&dir).expect("建目录");
         let options = TranslateOptions::new()
             .deterministic_ids(true)

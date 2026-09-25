@@ -463,6 +463,16 @@ pub(crate) fn detect_editor(
     None
 }
 
+/// 测试用临时目录:**每次调用唯一**(进程 + 随机后缀),避免并行测试/跨运行互相覆盖
+#[cfg(test)]
+pub(crate) fn unique_test_dir(tag: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!(
+        "backend-convert-{tag}-{}-{:08x}",
+        std::process::id(),
+        fastrand::u32(..)
+    ))
+}
+
 #[cfg(test)]
 mod diff_tests {
     //! 与官方产物对齐的差分门(docs/20 §7 Phase 2 验收)。
@@ -852,7 +862,7 @@ mod diff_tests {
         );
         let options = TranslateOptions::new().deterministic_ids(true);
         let doc = convert_kitten4_document(&source, &options, &mut report).expect("转换");
-        let dir = std::env::temp_dir().join("backend-convert-test");
+        let dir = unique_test_dir("forward");
         std::fs::create_dir_all(&dir).expect("建目录");
         let out = dir.join("geoduel.kn.bcmkn");
         std::fs::write(&out, serde_json::to_string(&doc).expect("序列化")).expect("写产物");
@@ -900,7 +910,7 @@ mod diff_tests {
         );
         let options = TranslateOptions::new().deterministic_ids(true);
         let doc = convert_kitten4_document(&source, &options, &mut report).unwrap();
-        let dir = std::env::temp_dir().join("backend-convert-test");
+        let dir = unique_test_dir("forward2");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("geoduel.kn.bcmkn"),
