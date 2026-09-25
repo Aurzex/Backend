@@ -235,11 +235,21 @@ fn kn_work_to_kitten4_file() {
         actors.values().any(|a| a.get("block_data_json").is_some()),
         "至少一个实体应带 block_data_json"
     );
+    // 告警总数没有意义(大量是 id 重铸,不是损失)⇒ 按类型统计,让人一眼看到真实缺口
+    let mut kinds: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for w in out.report.warnings() {
+        *kinds.entry(w.kind_label()).or_default() += 1;
+    }
     eprintln!(
-        "[convert_live] {work_id} → Kitten4 完成:{:?}(有损:{};告警 {} 条)",
+        "[convert_live] {work_id} → Kitten4 完成:{:?}(有损:{};告警 {} 条:{} )",
         out.output,
         out.report.is_lossy(),
-        out.report.warnings().len()
+        out.report.warnings().len(),
+        kinds
+            .iter()
+            .map(|(k, n)| format!("{k}={n}"))
+            .collect::<Vec<_>>()
+            .join(" ")
     );
 }
 

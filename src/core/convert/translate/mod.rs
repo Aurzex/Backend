@@ -888,6 +888,17 @@ impl TranslateWarning {
             TranslateWarning::ReuploadedOnImport { path } => path,
         }
     }
+    /// 告警类型的中文标签(日志/真机用例按类型统计用)
+    pub fn kind_label(&self) -> &'static str {
+        match self {
+            TranslateWarning::UnmappedBlock { .. } => "未映射积木",
+            TranslateWarning::DegradedToText { .. } => "降级为文本",
+            TranslateWarning::DroppedField { .. } => "丢弃字段",
+            TranslateWarning::DroppedProperty { .. } => "丢弃属性",
+            TranslateWarning::RemintedId { .. } => "id 重铸",
+            TranslateWarning::ReuploadedOnImport { .. } => "官方会重传资源",
+        }
+    }
 }
 
 /// 转换结果报告
