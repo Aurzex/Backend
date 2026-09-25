@@ -759,39 +759,69 @@ mod reverse_tests_inner {
         out
     }
 
-    /// Kitten4 侧的类型频次。
+    /// Kitten4 侧**积木**的类型频次:只数角色 / 场景 `block_data_json` 里的块。
     ///
-    /// Kitten4 把积木树塞在角色 / 场景的 `block_data_json` **字符串**里,所以遇到"像 JSON 的字符串"
-    /// 就再往里走一层(限深,避免和正文里的 JSON 字面量纠缠)。
-    fn census_kitten4(doc: &Value) -> BTreeMap<String, usize> {
-        fn walk(node: &Value, out: &mut BTreeMap<String, usize>, depth: usize) {
+    /// 为什么不能"数文档里所有 `type`":体积清单、素材、音频对象都带 `type`,会把数字吹到天上
+    /// (第 33 轮实测:某作品"654 块",其实绝大多数是资源对象)。编辑格式里 `block_data_json` 是
+    /// **JSON 字符串**,反编译/装配产物里是 **map**,两种都解析。
+    fn census_kitten4_blocks(doc: &Value) -> BTreeMap<String, usize> {
+        fn count_inside(node: &Value, out: &mut BTreeMap<String, usize>, depth: usize) {
             match node {
                 Value::Object(map) => {
                     if let Some(kind) = map.get("type").and_then(Value::as_str) {
                         *out.entry(kind.to_string()).or_default() += 1;
                     }
                     for value in map.values() {
-                        walk(value, out, depth);
+                        count_inside(value, out, depth);
                     }
                 }
                 Value::Array(items) => {
                     for item in items {
-                        walk(item, out, depth);
+                        count_inside(item, out, depth);
                     }
                 }
-                Value::String(text)
-                    if depth < 4 && (text.starts_with('{') || text.starts_with('[')) =>
-                {
+                Value::String(text) if depth < 4 => {
                     if let Ok(inner) = serde_json::from_str::<Value>(text) {
-                        walk(&inner, out, depth + 1);
+                        count_inside(&inner, out, depth + 1);
                     }
                 }
                 _ => {}
             }
         }
         let mut out = BTreeMap::new();
-        walk(doc, &mut out, 0);
+        let theatre = doc.get("theatre").unwrap_or(&Value::Null);
+        for container in ["actors", "scenes"] {
+            let Some(entries) = theatre.get(container).and_then(Value::as_object) else {
+                continue;
+            };
+            for entity in entries.values() {
+                if let Some(blocks) = entity.get("block_data_json") {
+                    count_inside(blocks, &mut out, 0);
+                }
+            }
+        }
         out
+    }
+
+    /// 这份 Kitten4 文档是不是**编辑格式**(正向转换 `convert_kitten4_document` 的输入形态)。
+    ///
+    /// 判定:至少有一个角色 / 场景带 `block_data_json`。
+    ///
+    /// 为什么必须判:`/kitten/r2/work/player/load/{id}` 给的是**编译态**(积木不在 `actors[*].block_data_json`
+    /// 里,而是零散在别处),反编译器吃它没问题,但**正向转换吃不了** —— 喂进去会静默产出空 KN
+    /// (第 33 轮实测 654 → 13 / 61 → 0)。拿它当正向语料会得出"转换器把程序全丢了"的错误结论。
+    fn is_editor_format_kitten4(doc: &Value) -> bool {
+        let theatre = doc.get("theatre").unwrap_or(&Value::Null);
+        ["actors", "scenes"].iter().any(|container| {
+            theatre
+                .get(*container)
+                .and_then(Value::as_object)
+                .is_some_and(|entries| {
+                    entries
+                        .values()
+                        .any(|entity| entity.get("block_data_json").is_some())
+                })
+        })
     }
 
     /// 通用语料往返扫描(**正向**方向):`download/compile/*.bcm4` 里每一件真 Kitten4 作品都跑
@@ -856,6 +886,37 @@ mod reverse_tests_inner {
                 convert_kn_document(&kn, &options, &mut back).expect("反向 KN→Kitten4")
             };
 
+            // 三腿各自的块总量:用来区分"真丢"与"我的 census 看不见"(第 33 轮踩过一次)
+            if !is_editor_format_kitten4(&source) {
+                eprintln!(
+                    "[跳过] {label}:不是编辑格式(角色/场景没有 block_data_json)⇒ 正向转换的输入形态不是它"
+                );
+                continue;
+            }
+            let mut k4_mid: Value = serde_json::from_str(&source.to_string()).expect("复刻");
+            let mut f_report = TranslateReport::new(
+                crate::core::convert::EditorType::Kitten4,
+                TargetEditor::KittenN,
+            );
+            let kn_mid = convert_kitten4_document(&mut k4_mid, &options, &mut f_report)
+                .unwrap_or_else(|e| panic!("{label}:正向失败: {e}"));
+            let src_total: usize = census_kitten4_blocks(&source).values().sum();
+            eprintln!(
+                "[扫描·正向·腿] {label}: 源积木={src_total} (KN 顶层键 {:?})",
+                kn_mid
+                    .as_object()
+                    .map(|m| m.keys().take(6).cloned().collect::<Vec<_>>())
+                    .unwrap_or_default()
+            );
+            if std::env::var("DUMP_FWD").is_ok() {
+                let tag: String = label
+                    .chars()
+                    .filter(|c| c.is_ascii_alphanumeric())
+                    .collect();
+                let _ = std::fs::write(format!("/tmp/fwd-src-{tag}.json"), source.to_string());
+                let _ = std::fs::write(format!("/tmp/fwd-kn-{tag}.json"), kn_mid.to_string());
+            }
+
             let back1 = round_trip(&source);
             let back2 = round_trip(&source);
             assert_eq!(
@@ -864,7 +925,7 @@ mod reverse_tests_inner {
                 "{label}:往返必须确定性(两遍逐字节一致)"
             );
 
-            let diffs = census_diff(&census_kitten4(&source), &census_kitten4(&back1));
+            let diffs = census_diff(&census_kitten4_blocks(&source), &census_kitten4_blocks(&back1));
             if !diffs.is_empty() {
                 with_diffs += 1;
                 eprintln!("[扫描·正向] {label}: {}", diffs.join("; "));

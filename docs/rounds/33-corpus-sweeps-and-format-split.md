@@ -16,35 +16,53 @@
 5. **新增正向往返扫描器** `k4_corpus_round_trip_sweep`(Kitten4 → KN → Kitten4),语料目录
    `download/compile/k4raw/`(见 §3,当前为空 ⇒ 自动跳过)。
 
-## 2. 两个形态陷阱(本轮最值钱的结论)
+## 2. Kitten 文档的**三种**形态(本轮最值钱的结论)
 
-Kitten4 文档在库里有**两种形态**,名字像、内容不一样:
+同一个"Kitten 作品文档",库内外至少三种样子,名字像、内容不一样,**喂错的后果还各不相同**:
 
-| 形态 | 谁产出 | `block_data_json` | 谁吃 |
-| --- | --- | --- | --- |
-| `download/compile/*.bcm4` | 反编译器 | **map**(`{"blocks":{…}}`) | 上传路线(交回平台) |
-| Kitten4 **编辑格式** | 平台"作品源码"接口 | **JSON 字符串** | 正向转换 `convert_kitten4_document` |
+| # | 形态 | 谁产出 | 积木在哪 | 谁吃 | 喂错会怎样 |
+| --- | --- | --- | --- | --- | --- |
+| ① | **上传格式**(`download/compile/*.bcm4`) | 反编译器 | `block_data_json` 是 **map** | 上传路线(交回平台) | 正向报错:`invalid type: map, expected a string` |
+| ② | **编译态 / 播放器载荷**(`player/load/{id}`) | 平台 | **不在** `actors[*].block_data_json` 里,零散在别处 | 反编译器(它自己就是取这个) | 正向**静默产出空 KN** —— 实测 654 块 → 13、61 块 → 0,不报错 |
+| ③ | **编辑格式** | Kitten4 编辑器存盘 | `theatre.actors[*].block_data_json` 是 **JSON 字符串** | 正向转换 `convert_kitten4_document` | —— |
 
-**踩坑记录**:第一版正向扫描器直接吃 `*.bcm4`,当场复现
-`作品文件解析失败: 外部错误: JSON error: invalid type: map, expected a string`(夹具 `A28社区-开幕_174408420.bcm4` 就能复现)。
-⇒ 不是产品 bug,但**是个真坑**:两个半场对同一编辑器的文档形态假设不同,而这条边界没有任何注释写着。
+**踩坑记录(两次,都记在这)**:
+1. 第一版正向扫描器直接吃 ①`*.bcm4`,当场复现
+   `作品文件解析失败: 外部错误: JSON error: invalid type: map, expected a string`(夹具 `A28社区-开幕_174408420.bcm4` 就能复现)。
+2. 改用采集器抓到的 `player/load` 载荷(②)后**不报错**,但扫描出"所有块归零"——一度以为正向转换器把程序全丢了。
+   逐个打印才发现:那些文档的 `theatre.actors[*]` **根本没有 `block_data_json`**,而我的"块数"口径又在数
+   文档里**所有** `type` 字段(把素材/音频对象也算进去了)。⇒ **两次都是语料/口径错,不是产品错**。
 
-**第二个坑**:`GET /creation-tools/v1/works/{id}/source/public` 用**普通 API 客户端**(`WorkDataFetcher`)
-去取会返回 `422 40101001 作品不存在` —— 报错还带误导性;而反编译器内部用**同一个 URL** 却成功
-⇒ 差别在**端侧请求头**,由 `CodeMaoHttpClient`(反编译器自己的客户端)带上。
-它目前是 `pub(crate)` ⇒ 集成测试里的采集器拿不到,所以编辑格式语料现在还抓不下来。
+⇒ 现在正向扫描器有**形态守卫**:文档里没有任何角色/场景带 `block_data_json` 就直接跳过并说明原因;
+块数口径也改成**只数 `block_data_json` 里的块**。
+
+### 2.1 ③ 编辑格式目前**取不到**(端点探测,2026-09-26)
+
+正向转换真正的输入是 ③,而平台能给的只有 ②:
+
+| 端点 | 结果 |
+| --- | --- |
+| `GET /kitten/r2/work/player/load/{id}` | 200,但给的是 ② 编译态 |
+| `GET /kitten/r2/work/edit/load/{id}` | **404** |
+| `GET /kitten/work/ide/load/{id}` | **404** |
+| `GET /creation-tools/v1/works/{id}/source/public` | **422** `40101001 作品不存在`(缺端侧头;`WorkDataFetcher` 取不到,
+编译器自己的 `CodeMaoHttpClient` 头齐,但 Kitten 系走的是 player/load) |
+
+⇒ ③ 只存在于**编辑器自己发出去的保存载荷**里。要拿它当语料,只能从浏览器会话里抓(或找到平台对应端点)。
+本轮已经不猜了 —— 猜错的代价就是上面那两次误判。
 
 ## 3. 下一轮的第一步(明确、可做)
 
-给库加一个**公开的"取作品源码"入口**(复用 `CodeMaoHttpClient` 的头),或在 `DecompileOptions` 上加一个
-`keep_source_doc` 之类的开关,把**编辑格式**文档一并落盘。之后:
+**A. 拿 ③(编辑格式)语料**:在浏览器里打开 Kitten4 编辑器、保存一个作品,抓那条保存请求的 body
+(或逆向出编辑器加载作品时用的端点)。落盘到 `download/compile/k4raw/` 后,
+`k4_corpus_round_trip_sweep` 会**自动**纳入它(目录名就是为了这个留的)。
+在这之前,正向方向的覆盖面只有官方基线夹具(`diff_tests`)。
 
-- 采集器把 Kitten4 作品的编辑格式文档写进 `download/compile/k4raw/`;
-- `k4_corpus_round_trip_sweep` 自动纳入(它已经按这个目录找语料);
-- 正向方向就有了真语料 —— 现在它的覆盖面只有官方基线夹具(`diff_tests`),
-  而**平台上的 Kitten4 作品是官方编辑器产出的**,写法比夹具杂得多。
+**B. 反向侧剩余项**(rounds/32 §4.3):定义体里 `script_variables` / `break` / `repeat_n_times` /
+`logic_compare` / `temporary_list` 的减少,随新语料一起复查:先分清哪些是"同一个调用点塌陷"的连带计数。
 
-> **不做**:不把"map → 字符串"自己拼一遍当语料 —— 那是拿自造的输入验自家转换,结论不可信。
+> **不做**:① 不把"map → 字符串"或"编译态 → 编辑态"自己拼一遍当语料(拿自造输入验自家转换,结论不可信);
+> ② 不在没拿到 ③ 之前对正向转换器下"丢程序"的结论(本轮已经证明那是语料错)。
 
 ## 4. 已就位的检查手段(留给后面)
 

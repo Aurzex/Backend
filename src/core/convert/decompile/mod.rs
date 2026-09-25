@@ -542,6 +542,31 @@ impl CodemaoDecompiler {
         let data = http_client.get_json(&url, None)?;
         WorkInfo::from_api_response(&data)
     }
+
+    /// 取 **Kitten 系(2/3/4)** 作品的**编辑格式**文档 —— 也就是 `convert_kitten4_document` 吃的那一种
+    /// (`theatre.*.block_data_json` 是 JSON 字符串)。
+    ///
+    /// 与反编译产物**不是一回事**:产物是**上传格式**(`block_data_json` 是 map,交回平台用),
+    /// 两者互换会得到 `invalid type: map, expected a string`。想拿真作品验证「Kitten4 → KN」这条腿,
+    /// 必须用编辑格式(官方编辑器存盘的样子)。
+    ///
+    /// 端点与请求头都与反编译内部一致(`/kitten/r2/work/player/load/{id}` → `source_urls[0]`),
+    /// 所以普通 API 客户端取不到的(422「作品不存在」)这里能取到。
+    pub fn fetch_kitten_source_document(&self, work_id: WorkId) -> Result<Value> {
+        let http_client = CodeMaoHttpClient::new(self.client.clone());
+        let url = format!(
+            "{}/kitten/r2/work/player/load/{}",
+            self.config.creation_base_url, work_id
+        );
+        let data = http_client.get_json(&url, None)?;
+        let compiled_url = data
+            .get("source_urls")
+            .and_then(|v| v.as_array())
+            .and_then(|arr| arr.first())
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| DecompilerError::InvalidResponse("无法获取source_urls".to_string()))?;
+        http_client.get_json(compiled_url, None)
+    }
 }
 
 /// 便捷反编译函数:使用全局单例门面(复用 HTTP 客户端),功能与之前一致

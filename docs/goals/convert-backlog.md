@@ -48,11 +48,10 @@
    **第三十三轮新增两台仪器**:反向 `kn_corpus_round_trip_sweep`(任意 `download/compile/*.bcmkn`)、
    正向 `k4_corpus_round_trip_sweep`(吃 `download/compile/k4raw/*.json`);采集器
    `tests/convert_corpus_harvest.rs`(`#[ignore]`,公开发现流抓作品 + 反编译落盘)。
-   **卡住的一步(下一步)**:Kitten4 的**编辑格式**语料抓不下来 —— `source/public` 用普通 API 客户端取
-   会 422「作品不存在」(缺端侧头),而反编译器用的 `CodeMaoHttpClient` 是 `pub(crate)` ⇒ 需要库侧加一个
-   公开入口(或 `DecompileOptions` 开关)。两个形态的区别见 `docs/rounds/33` §2:反编译产物 `.bcm4` 是
-   上传格式(`block_data_json` 为 map),正向转换吃编辑格式(`block_data_json` 为字符串)。
-   两条铁律,差异只打印不断言);扩语料只需把反编译产物丢进 `download/compile/`。
+   **卡住的一步(下一步)**:正向要的**编辑格式**平台给不了 —— `player/load` 是编译态(喂给正向会
+   静默产出空 KN,实测 654→13),`kitten/r2/work/edit/load/*` 与 `kitten/work/ide/load/*` 都是 404,
+   `source/public` 对 Kitten 报 422;编辑格式只存在于编辑器保存时的载荷里 ⇒ 需要浏览器会话抓包。
+   三种形态与两次误判的完整记录见 `docs/rounds/33` §2;正向扫描器已加形态守卫(缺 `block_data_json` 即跳过)。
 2. **NEMO 侧内存入口**:按 `docs/rounds/27` §2,应像 KN 侧一样把编辑版 `Value` 直接交给 translate,避免"落盘→读回"。落地情况 **[待核验]**。
 3. **P3 结构化失败记录**:`decompile/mod.rs` 的资源下载失败重试用 `line.split(": ").next()` 从错误串反解 URL(URL 或文本含 `": "` 会截断)⇒ 改成结构化 `(url, error)` 记录,直接消掉反解(`docs/rounds/29` §4)。
 4. **重连放弃的文档化**:云变量重连 5 次后仅 warn 并永久放弃,且**不再发事件**(仅初始 `Closed`)⇒ 调用方可能无限等待,需在 rustdoc 写清(`docs/rounds/29` §4)。

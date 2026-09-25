@@ -27,7 +27,9 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use backend::api::work::WorkDataFetcher;
-use backend::core::convert::decompile::{DecompileOptions, decompile_work_with};
+use backend::core::convert::decompile::{
+    CodemaoDecompiler, DecompileOptions, decompile_work_with,
+};
 use serde_json::Value;
 
 /// 递归收集所有 `work_id` / `id`(数字或数字字符串)。
@@ -134,12 +136,17 @@ fn harvest_corpus() {
 
     // 3. 逐件反编译落盘(关掉资源下载:语料只需要文档本身,1390 次请求 → 0 次)
     //
-    // 另外把 Kitten4 作品的**编辑格式**源码单独存一份到 `download/compile/k4raw/`:
-    // 反编译产物(`.bcm4`)是**上传格式**(`block_data_json` 是 map),而正向转换
-    // (`convert_kitten4_document`)吃的是**编辑格式**(`block_data_json` 是字符串)——
-    // 两者不是一回事,拿错了会得到 `invalid type: map, expected a string`。
-    let k4raw_dir = out_dir.join("k4raw");
-    let _ = std::fs::create_dir_all(&k4raw_dir);
+    // 另外把 Kitten 作品的**播放器载荷**存一份到 `download/compile/player-load/`。
+    //
+    // 注意这不是正向转换的输入!三种形态别混(第 33 轮实测):
+    //   ① `*.bcm4`(反编译产物)= **上传格式**,`block_data_json` 是 map;
+    //   ② `player-load/*.json`(本函数保存的)= **编译态**,积木**不在** `actors[*].block_data_json` 里
+    //      —— 反编译器吃它没问题,喂给 `convert_kitten4_document` 会**静默产出空 KN**(654 块 → 13);
+    //   ③ **编辑格式**(正向转换真正的输入)= `theatre.actors[*].block_data_json` 是 JSON 字符串。
+    //      平台目前没有可达端点提供它(`player/load` 是编译态;`source/public` 对 Kitten 报 422;
+    //      `kitten/r2/work/edit/load/*` 404)⇒ 只能从编辑器保存时发的载荷里取。
+    let player_load_dir = out_dir.join("player-load");
+    let _ = std::fs::create_dir_all(&player_load_dir);
     let mut ok = 0usize;
     for (id, kind) in &targets {
         let options = DecompileOptions::new()
@@ -151,15 +158,16 @@ fn harvest_corpus() {
                 ok += 1;
                 println!("[采集] {id} ({kind}) → {}", path.display());
                 if kind == "KITTEN4" {
-                    match fetcher.fetch_work_source_code(*id as i32) {
+                    // 编辑格式要走上端侧头的客户端(普通 API 客户端会 422「作品不存在」)
+                    match CodemaoDecompiler::global().fetch_kitten_source_document((*id).into()) {
                         Ok(source) => {
                             let keys: Vec<String> = source
                                 .as_object()
                                 .map(|m| m.keys().take(8).cloned().collect())
                                 .unwrap_or_default();
-                            let dest = k4raw_dir.join(format!("k4-{id}.json"));
+                            let dest = player_load_dir.join(format!("player-load-{id}.json"));
                             let _ = std::fs::write(&dest, source.to_string());
-                            println!("[采集]   ↳ 编辑格式源码 → {} (顶层键 {keys:?})", dest.display());
+                            println!("[采集]   ↳ 播放器载荷(编译态)→ {} (顶层键 {keys:?})", dest.display());
                         }
                         Err(e) => println!("[采集]   ↳ 源码拉取失败: {e}"),
                     }
