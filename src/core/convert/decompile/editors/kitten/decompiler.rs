@@ -1,5 +1,5 @@
 use crate::core::convert::decompile::{
-    blocks::{BlockContext, BlockDecompilerFactory},
+    blocks::{BlockContext, create_block_decompiler},
     shadow::ShadowBuilder,
 };
 use crate::core::convert::shared::{
@@ -94,7 +94,6 @@ impl KittenDecompiler {
     /// 反编译根块(未被引用的块)并插入 context(角色/场景共享)
     fn decompile_root_blocks(
         blocks: &serde_json::Map<String, Value>,
-        factory: &BlockDecompilerFactory,
         context: &mut BlockContext,
     ) -> Result<()> {
         let referenced_ids = Self::collect_referenced_ids(blocks);
@@ -102,7 +101,7 @@ impl KittenDecompiler {
             if !referenced_ids.contains(id) {
                 // 根块之间增加垂直间距,避免自动布局后挤在一起
                 context.layout_row += 50.0;
-                let mut decompiler = factory.create(block_data);
+                let mut decompiler = create_block_decompiler(block_data);
                 // 重新插入补充后的块(If/FunctionDef 等会修改 block_value)
                 let block_value = decompiler.decompile(context)?;
                 if let Some(bid) = block_value.get("id").and_then(|v| v.as_str()) {
@@ -116,7 +115,6 @@ impl KittenDecompiler {
     /// 反编译函数定义块(procedures_2_defnoreturn)并插入 context(角色/场景共享)
     fn decompile_procedures(
         actor_compiled: &Value,
-        factory: &BlockDecompilerFactory,
         context: &mut BlockContext,
     ) -> Result<()> {
         // 函数可能定义在角色/场景(屏幕角色)中,被其它场景/角色调用;
@@ -124,7 +122,7 @@ impl KittenDecompiler {
         if let Some(procedures) = actor_compiled.get("procedures").and_then(|v| v.as_object()) {
             for (_, func_data) in procedures {
                 context.layout_row += 50.0;
-                let mut decompiler = factory.create(func_data);
+                let mut decompiler = create_block_decompiler(func_data);
                 // 重新插入:FunctionDefDecompiler 补充的 shadows/mutation/NAME 需覆盖 core 版本
                 let block_value = decompiler.decompile(context)?;
                 if let Some(bid) = block_value.get("id").and_then(|v| v.as_str()) {
@@ -164,16 +162,14 @@ impl KittenDecompiler {
             estimated_blocks * 2,
         );
 
-        let factory = BlockDecompilerFactory::new(config.as_ref(), id_generator);
-
         if let Some(blocks) = compiled_blocks {
-            Self::decompile_root_blocks(blocks, &factory, &mut context)?;
+            Self::decompile_root_blocks(blocks, &mut context)?;
         }
 
         // 生成函数定义块(procedures_2_defnoreturn),否则调用块会因找不到
         // 定义而被 FunctionCallDecompiler 置为 disabled,函数功能丢失
         // 独立于 compiled_block_map,避免其缺失时连带丢失函数定义
-        Self::decompile_procedures(actor_compiled, &factory, &mut context)?;
+        Self::decompile_procedures(actor_compiled, &mut context)?;
 
         // 优先使用 compile_result 中的注释;若数据源未提供,则保留 actor_info
         // 中已有的注释,避免反编译覆盖掉输入中已有的注释数据
@@ -226,16 +222,14 @@ impl KittenDecompiler {
             estimated_blocks * 2,
         );
 
-        let factory = BlockDecompilerFactory::new(config.as_ref(), id_generator);
-
         if let Some(blocks) = compiled_blocks {
-            Self::decompile_root_blocks(blocks, &factory, &mut context)?;
+            Self::decompile_root_blocks(blocks, &mut context)?;
         }
 
         // 生成函数定义块(procedures_2_defnoreturn).函数可能定义在场景
         // (屏幕角色)中(如"总移动设置4"定义在背景(3)),与角色分支一致,
         // 否则场景中定义的函数缺失,调用块会被 FunctionCallDecompiler 禁用
-        Self::decompile_procedures(actor_compiled, &factory, &mut context)?;
+        Self::decompile_procedures(actor_compiled, &mut context)?;
 
         // 优先使用 compile_result 中的注释;若数据源未提供,则保留 scene_info
         // 中已有的注释,避免反编译覆盖掉输入中已有的注释数据

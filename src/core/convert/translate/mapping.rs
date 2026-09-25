@@ -814,10 +814,9 @@ fn route_children(node: &mut BlockJson, ctx: &mut Ctx) {
 // 3. **保留即无损**:凡是我们"看不懂"的类型都**原样保留类型名**(不丢弃积木),这样
 //    KN→Kitten4→KN 的类型多重集不被悄悄改写(见 `mod.rs` 的往返测试)。
 
-/// 反向上下文(只有横屏与报告;`ids` 与正向签名对称,反向映射本身不现铸 id)
+/// 反向上下文(只有横屏与报告:反向映射不现铸 id)
 struct RevCtx<'a> {
     landscape: bool,
-    _ids: &'a mut IdSource,
     report: &'a mut TranslateReport,
 }
 
@@ -825,14 +824,9 @@ struct RevCtx<'a> {
 pub(crate) fn translate_kn_to_kitten(
     tree: &mut BlockTree,
     landscape: bool,
-    ids: &mut IdSource,
     report: &mut TranslateReport,
 ) {
-    let mut ctx = RevCtx {
-        landscape,
-        _ids: ids,
-        report,
-    };
+    let mut ctx = RevCtx { landscape, report };
     let roots = std::mem::take(&mut tree.roots);
     tree.roots = roots
         .into_iter()

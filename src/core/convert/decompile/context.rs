@@ -16,7 +16,6 @@ pub(crate) struct DecompilerContextBuilder {
     work_info: Option<WorkInfo>,
     http_client: Option<Box<dyn HttpClient>>,
     config: Option<Arc<DecompilerConfig>>,
-    file_service: Option<FileService>,
     id_generator: Option<IdGenerator>,
 }
 
@@ -32,7 +31,6 @@ impl DecompilerContextBuilder {
             work_info: None,
             http_client: None,
             config: None,
-            file_service: None,
             id_generator: None,
         }
     }
@@ -52,11 +50,6 @@ impl DecompilerContextBuilder {
         self
     }
 
-    pub(crate) fn file_service(mut self, service: FileService) -> Self {
-        self.file_service = Some(service);
-        self
-    }
-
     pub(crate) fn id_generator(mut self, generator: IdGenerator) -> Self {
         self.id_generator = Some(generator);
         self
@@ -73,9 +66,7 @@ impl DecompilerContextBuilder {
                 msg: "缺少http_client".into(),
                 source: None,
             })?,
-            file_service: self
-                .file_service
-                .unwrap_or_else(|| FileService::new(config.clone())),
+            file_service: FileService::new(config.clone()),
             id_generator: self.id_generator.unwrap_or_default(),
             config,
         })

@@ -30,8 +30,6 @@ use super::ids::IdSource;
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ParsedEntity {
     pub tree: BlockTree,
-    /// 注释表(`comments` 原样保留,Phase 2 透传给 KN 作品)
-    pub comments: Map<String, Value>,
 }
 
 /// 解析 Kitten4 编辑版的 `block_data_json`
@@ -45,7 +43,7 @@ pub(crate) fn parse_block_data_json(block_data_json: &Value) -> Result<ParsedEnt
 
     // 旧作品可能把 block_data_json 存成 JSON 字符串(编辑器容错),这里也接受
     if let Some(blocks) = bdj.get("blocks").and_then(Value::as_object) {
-        return parse_parts(blocks, bdj.get("connections"), bdj.get("comments"));
+        return parse_parts(blocks, bdj.get("connections"));
     }
     if let Some(text) = bdj.get("blocks").and_then(Value::as_str) {
         let inner: Value = serde_json::from_str(text).map_err(DecompilerError::from)?;
@@ -61,11 +59,7 @@ pub(crate) fn parse_block_data_json(block_data_json: &Value) -> Result<ParsedEnt
             .ok_or_else(|| DecompilerError::MissingField {
                 field: "block_data_json.blocks.blocks".into(),
             })?;
-        return parse_parts(
-            inner_blocks,
-            inner_obj.get("connections"),
-            inner_obj.get("comments"),
-        );
+        return parse_parts(inner_blocks, inner_obj.get("connections"));
     }
 
     Err(DecompilerError::MissingField {
@@ -76,17 +70,11 @@ pub(crate) fn parse_block_data_json(block_data_json: &Value) -> Result<ParsedEnt
 fn parse_parts(
     blocks: &Map<String, Value>,
     connections: Option<&Value>,
-    comments: Option<&Value>,
 ) -> Result<ParsedEntity> {
     let connections = connections
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default();
-    let comments = comments
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_default();
-
     // 子键集合(判定根):出现的 id 一律不是根
     let mut child_ids: HashSet<&str> = HashSet::new();
     for entry in connections.values() {
@@ -116,7 +104,6 @@ fn parse_parts(
 
     Ok(ParsedEntity {
         tree: BlockTree::new(roots),
-        comments,
     })
 }
 

@@ -12,7 +12,7 @@
 use crate::core::convert::shared::{DecompilerError, Result};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 
 /// 一个积木节点(树形)
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -128,16 +128,9 @@ impl BlockJson {
                 expected: "object(block json)".into(),
                 actual: type_name(value).into(),
             })?;
-        let mut node: BlockJson =
+        // `kind` 走 `de_string` 容错解析:缺失/显式 null 都折成空串(无需再兜底)
+        let node: BlockJson =
             serde_json::from_value(Value::Object(obj.clone())).map_err(DecompilerError::from)?;
-        // serde 的 flatten 已把未知键收进 extra;这里只做类型名兜底
-        if node.kind.is_empty() {
-            node.kind = obj
-                .get("type")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string();
-        }
         Ok(node)
     }
 
@@ -160,20 +153,6 @@ impl BlockJson {
         }
     }
 
-    /// 可变深度优先遍历
-    pub(crate) fn walk_mut<F: FnMut(&mut BlockJson)>(&mut self, f: &mut F) {
-        f(self);
-        for child in self.inputs.values_mut() {
-            child.walk_mut(f);
-        }
-        for child in self.statements.values_mut() {
-            child.walk_mut(f);
-        }
-        if let Some(next) = &mut self.next {
-            next.walk_mut(f);
-        }
-    }
-
     /// 节点总数(含自身)
     pub(crate) fn count(&self) -> usize {
         let mut n = 0;
@@ -184,34 +163,6 @@ impl BlockJson {
     /// 类型频次统计
     pub(crate) fn count_types(&self, out: &mut BTreeMap<String, usize>) {
         self.walk(&mut |b| *out.entry(b.kind.clone()).or_default() += 1);
-    }
-
-    /// 收集所有 id
-    pub(crate) fn collect_ids(&self, out: &mut HashSet<String>) {
-        self.walk(&mut |b| {
-            if let Some(id) = &b.id {
-                out.insert(id.clone());
-            }
-        });
-    }
-
-    /// 按槽名取输入(只读)
-    pub(crate) fn input(&self, slot: &str) -> Option<&BlockJson> {
-        self.inputs.get(slot).or_else(|| self.statements.get(slot))
-    }
-
-    /// 按槽名取输入(可写)
-    pub(crate) fn input_mut(&mut self, slot: &str) -> Option<&mut BlockJson> {
-        if self.inputs.contains_key(slot) {
-            self.inputs.get_mut(slot)
-        } else {
-            self.statements.get_mut(slot)
-        }
-    }
-
-    /// 是否"空节点"(没有任何内容)
-    pub(crate) fn is_empty_node(&self) -> bool {
-        self.kind.is_empty()
     }
 }
 
@@ -225,11 +176,6 @@ pub(crate) struct BlockTree {
 impl BlockTree {
     pub(crate) fn new(roots: Vec<BlockJson>) -> Self {
         BlockTree { roots }
-    }
-
-    /// 按 `type` 找根
-    pub(crate) fn find_root(&self, kind: &str) -> Option<&BlockJson> {
-        self.roots.iter().find(|b| b.kind == kind)
     }
 
     pub(crate) fn count(&self) -> usize {
@@ -247,12 +193,6 @@ impl BlockTree {
     pub(crate) fn walk<F: FnMut(&BlockJson)>(&self, f: &mut F) {
         for r in &self.roots {
             r.walk(f);
-        }
-    }
-
-    pub(crate) fn walk_mut<F: FnMut(&mut BlockJson)>(&mut self, mut f: F) {
-        for r in &mut self.roots {
-            r.walk_mut(&mut f);
         }
     }
 }

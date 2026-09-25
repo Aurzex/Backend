@@ -21,7 +21,7 @@ mod reverse_tests_inner {
             crate::core::convert::EditorType::Neko,
             TargetEditor::Kitten4,
         );
-        mapping::translate_kn_to_kitten(&mut tree, landscape, &mut ids, &mut report);
+        mapping::translate_kn_to_kitten(&mut tree, landscape, &mut report);
         (tree.roots.remove(0), report)
     }
 
@@ -385,7 +385,7 @@ mod reverse_tests_inner {
             TargetEditor::Kitten4,
         );
         for entry in &mut procedures {
-            mapping::translate_kn_to_kitten(&mut entry.tree, false, &mut ids, &mut report);
+            mapping::translate_kn_to_kitten(&mut entry.tree, false, &mut report);
         }
         let root =
             neko::def_root_from_entry(&procedures[0], &mut ids, &mut report).expect("定义根");

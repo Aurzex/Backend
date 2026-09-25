@@ -1,3 +1,4 @@
+use crate::core::convert::decompile::blocks::child_input_name;
 use crate::core::convert::shared::{DecompilerConfig, Result, ValueExt};
 use serde_json::Value;
 use std::collections::HashSet;
@@ -124,17 +125,8 @@ impl<'a> XmlBlockWriter<'a> {
                 if !c.is_object() {
                     continue;
                 }
-                let name = match bt {
-                    "controls_if" | "controls_if_no_else" => {
-                        if i < conditions_len {
-                            format!("DO{}", i)
-                        } else {
-                            "ELSE".to_string()
-                        }
-                    }
-                    "procedures_2_defnoreturn" => "STACK".to_string(),
-                    _ => "DO".to_string(),
-                };
+                // 与反编译重建共用同一套插槽命名规则(blocks::child_input_name)
+                let name = child_input_name(bt, i, conditions_len);
                 let _ = write!(s, r#"<statement name="{}">"#, name);
                 s.push_str(&self.block_xml(c, false, 0.0));
                 s.push_str("</statement>");

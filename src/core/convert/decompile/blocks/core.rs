@@ -1,4 +1,4 @@
-use super::{BlockBehavior, BlockContext, BlockDecompilerBehavior, create_block_decompiler};
+use super::{BlockContext, child_input_name, create_block_decompiler};
 use crate::core::convert::shared::{DecompilerError, Result, ValueExt};
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -7,12 +7,11 @@ use std::collections::HashMap;
 
 pub(crate) struct BlockDecompilerCore<'a> {
     compiled: &'a Value,
-    behavior: BlockBehavior,
 }
 
 impl<'a> BlockDecompilerCore<'a> {
-    pub(crate) fn new(compiled: &'a Value, behavior: BlockBehavior) -> Self {
-        Self { compiled, behavior }
+    pub(crate) fn new(compiled: &'a Value) -> Self {
+        Self { compiled }
     }
 
     pub(crate) fn decompile(&mut self, context: &mut BlockContext) -> Result<Value> {
@@ -136,7 +135,11 @@ impl<'a> BlockDecompilerCore<'a> {
                             DecompilerError::InvalidResponse("child_block缺少id".to_string())
                         })?
                         .to_string();
-                    let input_name = self.behavior.get_child_input_name(i, conditions_count);
+                    let input_name = child_input_name(
+                        self.compiled.get_str_or("type", ""),
+                        i,
+                        conditions_count,
+                    );
                     context.blocks.insert(child_id.clone(), child_block);
                     if let Some(b) = context.blocks.get_mut(&child_id)
                         && let Some(o) = b.as_object_mut()

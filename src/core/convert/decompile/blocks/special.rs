@@ -1,7 +1,5 @@
-use super::{BlockBehavior, BlockContext, BlockDecompilerCore};
-use crate::core::convert::shared::{
-    DecompilerConfig, DecompilerError, IdGenerator, Result, ValueExt,
-};
+use super::{BlockContext, core::BlockDecompilerCore};
+use crate::core::convert::shared::{DecompilerError, Result, ValueExt};
 use log::error;
 use serde_json::{Value, json};
 use std::fmt::Write as _;
@@ -21,7 +19,7 @@ pub(crate) struct DefaultBlockDecompiler<'a> {
 impl<'a> DefaultBlockDecompiler<'a> {
     pub(crate) fn new(compiled: &'a Value) -> Self {
         Self {
-            core: BlockDecompilerCore::new(compiled, BlockBehavior::Default),
+            core: BlockDecompilerCore::new(compiled),
         }
     }
 }
@@ -43,8 +41,7 @@ impl<'a> IfBlockDecompiler<'a> {
             .get("conditions")
             .and_then(|v| v.as_array())
             .map_or(0, std::vec::Vec::len);
-        let behavior = BlockBehavior::If { conditions_count };
-        let core = BlockDecompilerCore::new(compiled, behavior);
+        let core = BlockDecompilerCore::new(compiled);
         Self { core, compiled }
     }
 }
@@ -98,7 +95,7 @@ pub(crate) struct TextJoinDecompiler<'a> {
 impl<'a> TextJoinDecompiler<'a> {
     pub(crate) fn new(compiled: &'a Value) -> Self {
         Self {
-            core: BlockDecompilerCore::new(compiled, BlockBehavior::Default),
+            core: BlockDecompilerCore::new(compiled),
             compiled,
         }
     }
@@ -128,7 +125,7 @@ pub(crate) struct AskAndChooseDecompiler<'a> {
 impl<'a> AskAndChooseDecompiler<'a> {
     pub(crate) fn new(compiled: &'a Value) -> Self {
         Self {
-            core: BlockDecompilerCore::new(compiled, BlockBehavior::Default),
+            core: BlockDecompilerCore::new(compiled),
             compiled,
         }
     }
@@ -158,7 +155,7 @@ pub(crate) struct SetEntityShowHideDecompiler<'a> {
 impl<'a> SetEntityShowHideDecompiler<'a> {
     pub(crate) fn new(compiled: &'a Value) -> Self {
         Self {
-            core: BlockDecompilerCore::new(compiled, BlockBehavior::Default),
+            core: BlockDecompilerCore::new(compiled),
             compiled,
         }
     }
@@ -196,7 +193,7 @@ pub(crate) struct TextSelectChangeableDecompiler<'a> {
 impl<'a> TextSelectChangeableDecompiler<'a> {
     pub(crate) fn new(compiled: &'a Value) -> Self {
         Self {
-            core: BlockDecompilerCore::new(compiled, BlockBehavior::Default),
+            core: BlockDecompilerCore::new(compiled),
             compiled,
         }
     }
@@ -227,7 +224,7 @@ impl<'a> FunctionDefDecompiler<'a> {
     pub(crate) fn new(compiled: &'a Value) -> Self {
         Self {
             // 函数体 child_block 使用 STACK 插槽
-            core: BlockDecompilerCore::new(compiled, BlockBehavior::FunctionBody),
+            core: BlockDecompilerCore::new(compiled),
             compiled,
         }
     }
@@ -335,7 +332,7 @@ pub(crate) struct FunctionCallDecompiler<'a> {
 impl<'a> FunctionCallDecompiler<'a> {
     pub(crate) fn new(compiled: &'a Value) -> Self {
         Self {
-            core: BlockDecompilerCore::new(compiled, BlockBehavior::Default),
+            core: BlockDecompilerCore::new(compiled),
             compiled,
         }
     }
@@ -395,7 +392,7 @@ impl<'a> BlockDecompiler<'a> for FunctionCallDecompiler<'a> {
             let input_name = format!("ARG{}", param_index);
             if param_value.is_object() {
                 let mut param_decompiler =
-                    BlockDecompilerCore::new(param_value, BlockBehavior::Default);
+                    BlockDecompilerCore::new(param_value);
                 let param_block = param_decompiler.decompile(context)?;
                 let param_id = param_block
                     .get("id")
@@ -503,23 +500,5 @@ pub(crate) fn create_block_decompiler<'a>(
             Box::new(DefaultBlockDecompiler::new(compiled))
         }
         _ => Box::new(DefaultBlockDecompiler::new(compiled)),
-    }
-}
-
-pub(crate) struct BlockDecompilerFactory<'a> {
-    config: &'a DecompilerConfig,
-    id_generator: &'a IdGenerator,
-}
-
-impl<'a> BlockDecompilerFactory<'a> {
-    pub(crate) fn new(config: &'a DecompilerConfig, id_generator: &'a IdGenerator) -> Self {
-        Self {
-            config,
-            id_generator,
-        }
-    }
-
-    pub(crate) fn create(&self, compiled: &'a Value) -> Box<dyn BlockDecompiler<'a> + 'a> {
-        create_block_decompiler(compiled)
     }
 }

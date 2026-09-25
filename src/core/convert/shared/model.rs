@@ -48,24 +48,6 @@ impl EditorType {
         }
     }
 
-    pub(crate) fn is_kitten(&self) -> bool {
-        matches!(
-            self,
-            EditorType::Kitten2 | EditorType::Kitten3 | EditorType::Kitten4
-        )
-    }
-    pub(crate) fn is_nemo(&self) -> bool {
-        matches!(self, EditorType::Nemo)
-    }
-    pub(crate) fn is_neko(&self) -> bool {
-        matches!(self, EditorType::Neko)
-    }
-    pub(crate) fn is_coco(&self) -> bool {
-        matches!(self, EditorType::Coco)
-    }
-    pub(crate) fn is_wood(&self) -> bool {
-        matches!(self, EditorType::Wood)
-    }
     pub(crate) fn use_xml_shadow(&self) -> bool {
         // Kitten2/3/4 编辑版(.bcm/.bcm4)的 shadows 均为 XML 字符串
         matches!(
@@ -113,10 +95,7 @@ pub(crate) struct WorkInfo {
     pub(crate) id: WorkId,
     pub(crate) name: String,
     pub(crate) work_type: EditorType,
-    pub(crate) version: String,
     pub(crate) user_id: i64,
-    pub(crate) preview_url: String,
-    pub(crate) application_version: String,
 }
 
 impl WorkInfo {
@@ -135,10 +114,7 @@ impl WorkInfo {
             id: WorkId::new(data.get_i64_or_default("id", 0)),
             name,
             work_type,
-            version: data.get_string_or("bcm_version", "0.16.2"),
             user_id: data.get_i64_or_default("user_id", 0),
-            preview_url: data.get_string_or("preview", ""),
-            application_version: data.get_string_or("application_version", "0.0.0"),
         })
     }
 

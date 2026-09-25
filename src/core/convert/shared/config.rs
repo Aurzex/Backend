@@ -32,7 +32,6 @@ impl Default for ShadowTemplate {
 pub(crate) struct DecompilerConfig {
     pub(crate) base_url: String,
     pub(crate) creation_base_url: String,
-    pub(crate) client_secret: String,
     pub(crate) crypto_salt: Vec<u8>,
     pub(crate) default_output_dir: PathBuf,
     pub(crate) toolbox_categories: Vec<String>,
@@ -368,7 +367,6 @@ impl Default for DecompilerConfig {
         Self {
             base_url: "https://api.codemao.cn".to_string(),
             creation_base_url: "https://api-creation.codemao.cn".to_string(),
-            client_secret: "pBlYqXbJDu".to_string(),
             crypto_salt: (0..31).collect(),
             default_output_dir: PathConfig::global().compile_file_path(),
             toolbox_categories: vec![

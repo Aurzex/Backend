@@ -84,7 +84,7 @@ pub(crate) fn convert_kn_document(
             let mut tree =
                 neko::parse_kn_entity(entity.get("nekoBlockJsonList").unwrap_or(&Value::Null))?;
             report.blocks_total += tree.count();
-            mapping::translate_kn_to_kitten(&mut tree, landscape, &mut ids, report);
+            mapping::translate_kn_to_kitten(&mut tree, landscape, report);
             entities.push(KnEntity {
                 source_id: id.clone(),
                 is_scene,
@@ -98,7 +98,7 @@ pub(crate) fn convert_kn_document(
     let mut procedures = neko::parse_kn_procedures(src.get("procedures").unwrap_or(&Value::Null))?;
     for entry in &mut procedures {
         report.blocks_total += entry.tree.count();
-        mapping::translate_kn_to_kitten(&mut entry.tree, landscape, &mut ids, report);
+        mapping::translate_kn_to_kitten(&mut entry.tree, landscape, report);
     }
     let call_targets = neko::call_targets(&procedures);
     for entity in &mut entities {
@@ -141,7 +141,7 @@ pub(crate) fn convert_kn_document(
     report.blocks_converted = converted;
     report.elapsed_ms = started.elapsed().as_millis();
 
-    build_kitten4_document(
+    Ok(build_kitten4_document(
         src,
         &entities,
         &blocks_by_entity,
@@ -149,7 +149,7 @@ pub(crate) fn convert_kn_document(
         (canvas_w, canvas_h),
         (kn_w, kn_h),
         report,
-    )
+    ))
 }
 
 /// 树里出现两次以上的 id(每个重复值报一次)
@@ -193,7 +193,6 @@ fn kn_stage_size(src: &serde_json::Map<String, serde_json::Value>) -> (f64, f64)
 }
 
 /// 装配 Kitten4 编辑版文档
-#[allow(clippy::too_many_arguments)]
 fn build_kitten4_document(
     src: &serde_json::Map<String, serde_json::Value>,
     entities: &[KnEntity],
@@ -202,7 +201,7 @@ fn build_kitten4_document(
     canvas: (f64, f64),
     kn_stage: (f64, f64),
     report: &mut TranslateReport,
-) -> std::result::Result<serde_json::Value, TranslateError> {
+) -> serde_json::Value {
     use serde_json::{Map, Value, json};
 
     let mut block_of: std::collections::BTreeMap<&str, &Value> = std::collections::BTreeMap::new();
@@ -334,7 +333,7 @@ fn build_kitten4_document(
             });
         }
     }
-    Ok(Value::Object(doc))
+    Value::Object(doc)
 }
 
 /// 一个 KN 实体的公共字段(角色/场景共用):名字、造型、工作区滚动、可见性

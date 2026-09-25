@@ -6,37 +6,27 @@ use std::sync::Arc;
 pub(crate) mod core;
 pub(crate) mod special;
 
-pub(crate) use core::BlockDecompilerCore;
-pub(crate) use special::{BlockDecompiler, BlockDecompilerFactory, create_block_decompiler};
+pub(crate) use special::{BlockDecompiler, create_block_decompiler};
 
-// 积木行为
-pub(crate) trait BlockDecompilerBehavior: Send + Sync {
-    fn get_child_input_name(&self, index: usize, conditions_count: usize) -> String;
-}
-
-#[derive(Clone)]
-pub(crate) enum BlockBehavior {
-    Default,
-    If { conditions_count: usize },
-    FunctionBody,
-}
-
-impl BlockDecompilerBehavior for BlockBehavior {
-    fn get_child_input_name(&self, index: usize, _conditions_count: usize) -> String {
-        match self {
-            BlockBehavior::Default => "DO".to_string(),
-            BlockBehavior::If { conditions_count } => {
-                if index < *conditions_count {
-                    // 编辑版插槽名为 DO0/DO1/...(无空格)
-                    format!("DO{}", index)
-                } else {
-                    // 编辑版 else 分支插槽名为 ELSE(无编号)
-                    "ELSE".to_string()
-                }
+/// 编译版 `child_block` → 编辑版语句插槽名。
+///
+/// 唯一的规则来源:反编译重建(本模块)与 Kitten2/3 的 blocksXML 序列化
+/// ([`crate::core::convert::decompile::editors::kitten::XmlBlockWriter`])共用,
+/// 避免两处各写一份后漂移。
+pub(crate) fn child_input_name(block_type: &str, index: usize, conditions_count: usize) -> String {
+    match block_type {
+        "controls_if" | "controls_if_no_else" => {
+            if index < conditions_count {
+                // 编辑版插槽名为 DO0/DO1/...(无空格)
+                format!("DO{}", index)
+            } else {
+                // 编辑版 else 分支插槽名为 ELSE(无编号)
+                "ELSE".to_string()
             }
-            // 函数定义块的函数体插槽名为 STACK
-            BlockBehavior::FunctionBody => "STACK".to_string(),
         }
+        // 函数定义块的函数体插槽名为 STACK
+        "procedures_2_defnoreturn" => "STACK".to_string(),
+        _ => "DO".to_string(),
     }
 }
 
