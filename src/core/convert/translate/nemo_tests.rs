@@ -6,9 +6,7 @@
 use serde_json::{Value, json};
 
 use crate::core::convert::EditorType;
-use crate::core::convert::translate::{
-    TargetEditor, TranslateOptions, translate_value,
-};
+use crate::core::convert::translate::{TargetEditor, TranslateOptions, translate_value};
 
 /// 造一份最小 NEMO 编辑版:一个演员、一个场景、一个造型、一个全局变量
 fn nemo_document(actor_xml: &str, scene_xml: &str) -> Value {
@@ -136,7 +134,8 @@ fn value_slot_keeps_shadow_xml_and_override_block() {
     // shadows.time = 影子的 XML 重序列化(影子 id 被重铸 ⇒ 只断言结构)
     let shadow = wait["shadows"]["time"].as_str().expect("影子 XML");
     assert!(
-        shadow.starts_with(r#"<shadow xmlns="http://www.w3.org/1999/xhtml" type="math_number" id=""#),
+        shadow
+            .starts_with(r#"<shadow xmlns="http://www.w3.org/1999/xhtml" type="math_number" id=""#),
         "{shadow}"
     );
     assert!(
@@ -187,7 +186,10 @@ fn document_keeps_source_fields_and_adds_camel_case() {
     assert_eq!(variable["style"], "default");
     assert_eq!(variable["position"], json!({ "x": 181, "y": 430 }));
     // 顶层骨架
-    assert_eq!(document["stageSize"], json!({ "width": 562, "height": 900 }));
+    assert_eq!(
+        document["stageSize"],
+        json!({ "width": 562, "height": 900 })
+    );
     assert_eq!(document["projectName"], "测试作品");
     assert_eq!(document["version"], "");
     assert_eq!(document["previewUrl"], "");
@@ -239,8 +241,7 @@ fn version_migration_rewrites_legacy_documents() {
         plain_blocks(&plain)[0]
     );
     assert_eq!(
-        plain["actors"]["actorsDict"]["actor-1"]["blocksXML"],
-        yc_xml,
+        plain["actors"]["actorsDict"]["actor-1"]["blocksXML"], yc_xml,
         "无迁移时 blocksXML 逐字节原样"
     );
 
@@ -340,7 +341,11 @@ fn nemo_real_samples_match_official_products() {
     for (input, fixture, version) in REAL_SAMPLES {
         let input_path = root.join(input);
         let fixture_path = root.join(fixture);
-        assert!(input_path.exists(), "缺少 NEMO 输入:{}", input_path.display());
+        assert!(
+            input_path.exists(),
+            "缺少 NEMO 输入:{}",
+            input_path.display()
+        );
         assert!(
             fixture_path.exists(),
             "缺少官方产物夹具:{}",
@@ -360,8 +365,11 @@ fn nemo_real_samples_match_official_products() {
                 .trim_start_matches("temp/harness/out-")
                 .trim_end_matches(".json")
         ));
-        std::fs::write(&ours, serde_json::to_string(&outcome.document).expect("序列化"))
-            .expect("写产物");
+        std::fs::write(
+            &ours,
+            serde_json::to_string(&outcome.document).expect("序列化"),
+        )
+        .expect("写产物");
 
         // ① 官方 validateBcm
         let stdout = run_node(

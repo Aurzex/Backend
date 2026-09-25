@@ -133,7 +133,8 @@ impl BlockJson {
                 actual: type_name(value).into(),
             });
         }
-        let node: BlockJson = serde::Deserialize::deserialize(value).map_err(DecompilerError::from)?;
+        let node: BlockJson =
+            serde::Deserialize::deserialize(value).map_err(DecompilerError::from)?;
         Ok(node)
     }
 
@@ -317,7 +318,6 @@ mod null_tolerance_tests {
 // **不会**逐字节相同(实测:同一输入两次运行有 28 个 id 不同)。为了能跟官方产物做
 // 逐字节对齐与往返测试,`IdSource::new(true)`(确定性模式)改用递增计数器生成固定形态的 id。
 // ===========================================================================
-
 
 /// 铸造种类(`uuid` / `short`)。
 ///
@@ -515,11 +515,7 @@ mod id_tests {
     #[test]
     fn recording_mode_logs_mints_and_replays_identically() {
         let mut recorded = IdSource::recording(7);
-        let temps: Vec<String> = vec![
-            recorded.uuid(),
-            recorded.short(),
-            recorded.uuid(),
-        ];
+        let temps: Vec<String> = vec![recorded.uuid(), recorded.short(), recorded.uuid()];
         assert!(
             temps.iter().all(|id| id.starts_with(TEMP_ID_PREFIX)),
             "记录模式必须产出临时 id:{temps:?}"

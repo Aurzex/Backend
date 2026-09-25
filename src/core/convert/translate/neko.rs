@@ -65,10 +65,10 @@ use serde_json::{Map, Value, json};
 
 use crate::core::convert::shared::{DecompilerError, Result};
 
-use super::model::{BlockJson, BlockTree};
-use super::model::IdSource;
 use super::mapping::{XHTML, math_number_node, math_number_shadow, xml_attr_value};
-use super::{ TranslateReport, TranslateWarning};
+use super::model::IdSource;
+use super::model::{BlockJson, BlockTree};
+use super::{TranslateReport, TranslateWarning};
 
 /// 程序集定义根积木(`HC` 拆出来的那一类)
 const DEF_ROOT: &str = "procedures_2_defnoreturn";

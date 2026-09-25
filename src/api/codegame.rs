@@ -1,5 +1,5 @@
 use crate::utils::requests::{
-    BaseKey, ClientAccess, CodeMaoClient, StatusCode, HttpMethod, MewResult,
+    BaseKey, ClientAccess, CodeMaoClient, HttpMethod, MewResult, StatusCode,
 };
 use log::debug;
 use serde_json::{Value, json};

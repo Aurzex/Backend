@@ -113,7 +113,10 @@ impl XmlNode {
     }
 
     /// 所有直接子元素中 tag 匹配的那些(文档顺序)
-    pub(crate) fn children_of<'a>(&'a self, tag: &'a str) -> impl Iterator<Item = &'a XmlNode> + 'a {
+    pub(crate) fn children_of<'a>(
+        &'a self,
+        tag: &'a str,
+    ) -> impl Iterator<Item = &'a XmlNode> + 'a {
         self.children.iter().filter(move |c| c.tag.as_str() == tag)
     }
 
@@ -275,7 +278,10 @@ fn is_name_char(c: char) -> bool {
 /// 解码数字实体(`&#39;` 十进制 / `&#x27;` 十六进制);非法或越界返回 `None`
 fn decode_numeric_entity(body: &str) -> Option<char> {
     let digits = body.strip_prefix('#')?;
-    let code = match digits.strip_prefix('x').or_else(|| digits.strip_prefix('X')) {
+    let code = match digits
+        .strip_prefix('x')
+        .or_else(|| digits.strip_prefix('X'))
+    {
         // 十六进制:至少一位,且全是十六进制数字
         Some(hex) => {
             if hex.is_empty() || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
@@ -602,10 +608,9 @@ impl<'a> Parser<'a> {
         loop {
             match self.peek() {
                 None => {
-                    return Err(self.err_at(
-                        quote_pos,
-                        format!("属性 {name} 的值缺少结束引号 {quote}"),
-                    ));
+                    return Err(
+                        self.err_at(quote_pos, format!("属性 {name} 的值缺少结束引号 {quote}"))
+                    );
                 }
                 // 结束引号
                 Some(c) if c == quote => {
@@ -620,10 +625,7 @@ impl<'a> Parser<'a> {
                 }
                 // 属性值里的裸 '<' 在 XML 里非法(必须写 &lt;),DOMParser 同样报错
                 Some('<') => {
-                    return Err(self.err_at(
-                        self.pos,
-                        format!("属性 {name} 的值里不允许出现裸 <"),
-                    ));
+                    return Err(self.err_at(self.pos, format!("属性 {name} 的值里不允许出现裸 <")));
                 }
                 Some(c) => {
                     self.pos += c.len_utf8();
@@ -833,7 +835,10 @@ mod tests {
             2,
             "block 下应有 TEXT/AMP 两个 field"
         );
-        assert!(doc.child("procedures_definition").is_none(), "不存在的子元素应返回 None");
+        assert!(
+            doc.child("procedures_definition").is_none(),
+            "不存在的子元素应返回 None"
+        );
         let text_field = doc.child("field").expect("TEXT 是第一个 field 子元素");
         assert_eq!(text_field.attr("name"), Some("TEXT"));
         assert_eq!(text_field.text, "a < b & c", "CDATA 内容按原文保留");
@@ -860,12 +865,17 @@ mod tests {
             r#"<field name="AMP">' / ' &amp;#39;</field>"#,
             r#"<block type="data_setvariableto" id="b2"/>"#,
         ] {
-            assert!(xml_text.contains(needle), "序列化结果应包含 {needle},实际:{xml_text}");
+            assert!(
+                xml_text.contains(needle),
+                "序列化结果应包含 {needle},实际:{xml_text}"
+            );
         }
 
         // 不动点:序列化 → 再解析 → 再序列化,结果必须逐字节一致
         // (元素之间的空白作为父节点文本,统一排在子元素之后,位置有变但稳定)
-        let again = parse(&xml_text).expect("自家序列化的结果必须能再解析").serialize();
+        let again = parse(&xml_text)
+            .expect("自家序列化的结果必须能再解析")
+            .serialize();
         assert_eq!(xml_text, again, "parse∘serialize 应稳定(不动点)");
 
         // 规范形状(子元素在前、子元素之间无文本)可以逐字节往返
@@ -883,7 +893,11 @@ mod tests {
     #[test]
     fn attr_read_write() {
         let mut node = XmlNode::new("block");
-        assert_eq!(node.attr("type"), None, "未声明的属性应返回 None,而不是空串");
+        assert_eq!(
+            node.attr("type"),
+            None,
+            "未声明的属性应返回 None,而不是空串"
+        );
 
         node.set_attr("type", "math_number");
         node.set_attr("id", "b1");
@@ -906,7 +920,10 @@ mod tests {
         // 异名追加:排到末尾
         node.set_attr("inline", "true");
         assert_eq!(
-            node.attrs.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(),
+            node.attrs
+                .iter()
+                .map(|(k, _)| k.as_str())
+                .collect::<Vec<_>>(),
             vec!["type", "id", "visible", "inline"],
             "新属性应追加到末尾"
         );
@@ -914,7 +931,10 @@ mod tests {
         node.remove_attr("id");
         assert_eq!(node.attr("id"), None, "删除后应返回 None");
         assert_eq!(
-            node.attrs.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(),
+            node.attrs
+                .iter()
+                .map(|(k, _)| k.as_str())
+                .collect::<Vec<_>>(),
             vec!["type", "visible", "inline"],
             "删除只影响同名属性"
         );
@@ -962,7 +982,8 @@ mod tests {
         );
 
         // 包装根的空白文本不聚合进子元素
-        let padded = parse_fragment("<root>\n  <block/>\n  <block/>\n</root>").expect("带空白的包装");
+        let padded =
+            parse_fragment("<root>\n  <block/>\n  <block/>\n</root>").expect("带空白的包装");
         assert_eq!(padded.len(), 2, "包装根的直接子元素仍是 2 个");
         assert_eq!(padded[0].text, "", "空白归包装根,不归子元素");
 
@@ -986,11 +1007,7 @@ mod tests {
         )
         .expect("value 解析");
         assert_eq!(value.text, "", "value 自己没有直接文本");
-        assert_eq!(
-            value.text_content(),
-            "42",
-            "没有直接文本时聚合后代文本"
-        );
+        assert_eq!(value.text_content(), "42", "没有直接文本时聚合后代文本");
 
         // 前后空格必须原样保留(field 值可能带空格)
         let spaced = parse(concat!(
@@ -1021,17 +1038,32 @@ mod tests {
         let msg = parse_err("<block>&nbsp;</block>");
         assert!(msg.contains("未知实体"), "应说明未知实体,实际:{msg}");
         // 属性值里的未知实体
-        assert!(parse(r#"<block type="a&nbsp;b"/>"#).is_err(), "属性值里的未知实体也要报错");
+        assert!(
+            parse(r#"<block type="a&nbsp;b"/>"#).is_err(),
+            "属性值里的未知实体也要报错"
+        );
         // 非法数字实体(代理区取不到字符)
-        assert!(parse("<block>&#xD800;</block>").is_err(), "代理区码点应报错");
+        assert!(
+            parse("<block>&#xD800;</block>").is_err(),
+            "代理区码点应报错"
+        );
         assert!(parse("<block>&#x;</block>").is_err(), "空十六进制应报错");
         assert!(parse("<block>&#;</block>").is_err(), "空十进制应报错");
         // 裸 '&'
         assert!(parse("<block>a & b</block>").is_err(), "裸 & 应报错");
         // 属性值缺引号 / 缺结束引号 / 裸 '<'
-        assert!(parse("<block type=math_number/>").is_err(), "属性值缺引号应报错");
-        assert!(parse(r#"<block type="math_number/>"#).is_err(), "属性值缺结束引号应报错");
-        assert!(parse(r#"<block type="a<b"/>"#).is_err(), "属性值里的裸 < 应报错");
+        assert!(
+            parse("<block type=math_number/>").is_err(),
+            "属性值缺引号应报错"
+        );
+        assert!(
+            parse(r#"<block type="math_number/>"#).is_err(),
+            "属性值缺结束引号应报错"
+        );
+        assert!(
+            parse(r#"<block type="a<b"/>"#).is_err(),
+            "属性值里的裸 < 应报错"
+        );
         // 属性区中途结束
         assert!(parse("<block type").is_err(), "属性区未结束应报错");
         assert!(parse("<block type=").is_err(), "缺属性值应报错");
@@ -1044,10 +1076,17 @@ mod tests {
         assert!(parse("</block>").is_err(), "无匹配的结束标签应报错");
         assert!(parse("<block/>tail").is_err(), "根元素之后的裸文本应报错");
         // 注释 / PI / CDATA 未闭合
-        assert!(parse("<block><!-- oops </block>").is_err(), "未闭合注释应报错");
-        assert!(parse("<block><![CDATA[oops</block>").is_err(), "未闭合 CDATA 应报错");
+        assert!(
+            parse("<block><!-- oops </block>").is_err(),
+            "未闭合注释应报错"
+        );
+        assert!(
+            parse("<block><![CDATA[oops</block>").is_err(),
+            "未闭合 CDATA 应报错"
+        );
         // 顶层多根对 parse 合法(编辑器把 <variables> 与积木并排存),parse 取第一个
-        let multi = parse("<variables></variables><block type=\"a\"/>").expect("多顶层元素应可解析");
+        let multi =
+            parse("<variables></variables><block type=\"a\"/>").expect("多顶层元素应可解析");
         assert_eq!(multi.tag, "variables");
     }
 

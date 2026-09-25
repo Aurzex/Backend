@@ -1,6 +1,6 @@
 use crate::utils::requests::{
-    BaseKey, ClientAccess, CodeMaoClient, StatusCode, HttpMethod, MewError, MewResult,
-    PaginatedIter, PaginationMethod, current_timestamp_13,
+    BaseKey, ClientAccess, CodeMaoClient, HttpMethod, MewError, MewResult, PaginatedIter,
+    PaginationMethod, StatusCode, current_timestamp_13,
 };
 use log::debug;
 use serde_json::json;

@@ -12,8 +12,8 @@ use crate::core::convert::decompile::{
     save_json_result,
 };
 use crate::core::convert::shared::{
-    DecompilerConfig, ShadowBuilder, DecompilerError, EditorType, HttpClient, IdGenerator, RawWorkData, Result,
-    ResultExt, ValueExt, WorkFetcher, WorkInfo,
+    DecompilerConfig, DecompilerError, EditorType, HttpClient, IdGenerator, RawWorkData, Result,
+    ResultExt, ShadowBuilder, ValueExt, WorkFetcher, WorkInfo,
 };
 use log::warn;
 use serde_json::{Value, json};
@@ -21,7 +21,6 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-
 
 // KITTEN
 pub(crate) struct KittenFetcher {
@@ -315,10 +314,7 @@ impl KittenDecompiler {
     }
 
     /// 反编译函数定义块(procedures_2_defnoreturn)并插入 context(角色/场景共享)
-    fn decompile_procedures(
-        actor_compiled: &Value,
-        context: &mut BlockContext,
-    ) -> Result<()> {
+    fn decompile_procedures(actor_compiled: &Value, context: &mut BlockContext) -> Result<()> {
         // 函数可能定义在角色/场景(屏幕角色)中,被其它场景/角色调用;
         // 独立于 compiled_block_map,避免其缺失时连带丢失函数定义
         if let Some(procedures) = actor_compiled.get("procedures").and_then(|v| v.as_object()) {

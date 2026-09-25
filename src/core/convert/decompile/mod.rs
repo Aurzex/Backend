@@ -6,8 +6,8 @@ use crate::core::convert::decompile::editors::{
     NemoDecompiler, NemoFetcher, WoodDecompiler, WoodFetcher,
 };
 use crate::core::convert::shared::{
-    CodeMaoHttpClient, DecompilerConfig, EditorType, FileService, HttpClient, IdGenerator,
-    RawWorkData, Result, ResultExt, WorkFetcher, WorkInfo, DraftUpload, create_draft,
+    CodeMaoHttpClient, DecompilerConfig, DraftUpload, EditorType, FileService, HttpClient,
+    IdGenerator, RawWorkData, Result, ResultExt, WorkFetcher, WorkInfo, create_draft,
     supports_account_upload,
 };
 use crate::core::convert::shared::{DecompilerError, WorkId};
@@ -632,7 +632,6 @@ pub fn decompile_works(work_ids: &[WorkId], options: DecompileOptions) -> Vec<Re
     CodemaoDecompiler::global().decompile_batch(work_ids, options)
 }
 
-
 // ===========================================================================
 // 资源并发下载(原串行逐文件下载是 NEMO 反编译的瓶颈)
 // ===========================================================================
@@ -687,9 +686,7 @@ pub(crate) fn download_resources_parallel(
         .collect();
     let skipped = total - pending.len();
     if !pending.is_empty() {
-        info!(
-            "资源下载:共 {total} 个(跳过已存在 {skipped}),并发 {concurrency}"
-        );
+        info!("资源下载:共 {total} 个(跳过已存在 {skipped}),并发 {concurrency}");
     }
 
     let cursor = AtomicUsize::new(0);
@@ -707,11 +704,17 @@ pub(crate) fn download_resources_parallel(
                     match client.get_binary(&task.url) {
                         Ok(data) => {
                             if let Err(error) = FileService::write_binary(&task.dest, &data) {
-                                failures.lock().unwrap().push(format!("{}: {}", task.url, error));
+                                failures
+                                    .lock()
+                                    .unwrap()
+                                    .push(format!("{}: {}", task.url, error));
                             }
                         }
                         Err(error) => {
-                            failures.lock().unwrap().push(format!("{}: {}", task.url, error));
+                            failures
+                                .lock()
+                                .unwrap()
+                                .push(format!("{}: {}", task.url, error));
                         }
                     }
                     let finished = done.fetch_add(1, Ordering::Relaxed) + 1;

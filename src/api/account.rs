@@ -1,5 +1,5 @@
 use crate::utils::requests::{
-    ClientAccess, CodeMaoClient, DEFAULT_PID, StatusCode, HttpMethod, MewResult, ResponseMode,
+    ClientAccess, CodeMaoClient, DEFAULT_PID, HttpMethod, MewResult, ResponseMode, StatusCode,
 };
 use log::debug;
 use serde_json::{Value, json};
@@ -842,7 +842,7 @@ impl ClientAccess for AccountManager {
 #[cfg(test)]
 mod tests {
     use super::AccountManager;
-    use crate::utils::requests::{Identity, ClientAccess, CodeMaoClient, ClientConfig};
+    use crate::utils::requests::{ClientAccess, ClientConfig, CodeMaoClient, Identity};
 
     #[test]
     fn manager_new_with_client_uses_injected_client() {

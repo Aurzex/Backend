@@ -811,7 +811,10 @@ mod reverse_tests_inner {
                     return None;
                 }
                 let text = std::fs::read_to_string(&path).expect("读 .bcmkn");
-                Some(((*rel).to_string(), serde_json::from_str(&text).expect("JSON")))
+                Some((
+                    (*rel).to_string(),
+                    serde_json::from_str(&text).expect("JSON"),
+                ))
             })
             .collect()
     }
@@ -883,7 +886,11 @@ mod reverse_tests_inner {
                 k4b.to_string(),
                 "{label}:同一输入的两次反向转换必须逐字节一致"
             );
-            assert_eq!(report.warnings(), report2.warnings(), "{label}:告警必须逐条同序");
+            assert_eq!(
+                report.warnings(),
+                report2.warnings(),
+                "{label}:告警必须逐条同序"
+            );
 
             // 往返:KN → Kitten4 → KN。实体侧只允许横屏包装(math_arithmetic + math_number 成对);
             // 定义体按定义积木 id 对齐后必须守恒,`calculate` 是已知的 1:1 降级
@@ -1112,7 +1119,8 @@ mod reverse_tests_inner {
             crate::core::convert::EditorType::Kitten4,
             TargetEditor::KittenN,
         );
-        let kn = convert_kitten4_document(&mut source, &options, &mut forward_report).expect("正向");
+        let kn =
+            convert_kitten4_document(&mut source, &options, &mut forward_report).expect("正向");
         let before = census_of_kn(&kn);
         assert!(before.values().sum::<usize>() > 300, "样例应含数百个积木");
 

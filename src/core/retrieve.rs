@@ -16,7 +16,7 @@ use crate::api::whale::{
 };
 use crate::api::work::{NemoWorkType, WorkDataFetcher};
 use crate::utils::requests::{
-    BaseKey, Identity, CodeMaoClient, DEFAULT_PAGE_SIZE, MewError, PaginatedIter, PaginationMethod,
+    BaseKey, CodeMaoClient, DEFAULT_PAGE_SIZE, Identity, MewError, PaginatedIter, PaginationMethod,
 };
 
 // 评论流默认值与上限(各语义独立:用户上限/每作品抽样/分页元数据)

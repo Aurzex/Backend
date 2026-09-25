@@ -107,7 +107,10 @@ pub(crate) fn convert_nemo_document(
 
     // ── 解析上下文(广播字典:官方 `getBroadcastMessage` 用)
     let mut ctx = NemoParseContext::default();
-    if let Some(dict) = source.pointer("/broadcast/broadcast_dict").and_then(Value::as_object) {
+    if let Some(dict) = source
+        .pointer("/broadcast/broadcast_dict")
+        .and_then(Value::as_object)
+    {
         ctx.has_broadcasts = !dict.is_empty();
         for (id, entry) in dict {
             let name = entry
@@ -176,7 +179,10 @@ pub(crate) fn convert_nemo_document(
     // ── 演员(官方第 4 步;先演员后场景)
     let scenes_order = scenes_order(source);
     let mut actors = Map::new();
-    if let Some(dict) = source.pointer("/actors/actors_dict").and_then(Value::as_object) {
+    if let Some(dict) = source
+        .pointer("/actors/actors_dict")
+        .and_then(Value::as_object)
+    {
         for (id, actor) in dict {
             let Some(actor) = actor.as_object() else {
                 continue;
@@ -228,11 +234,17 @@ pub(crate) fn convert_nemo_document(
             actors.insert(id.clone(), Value::Object(entry));
         }
     }
-    document.insert("actors".to_string(), json!({ "actorsDict": Value::Object(actors) }));
+    document.insert(
+        "actors".to_string(),
+        json!({ "actorsDict": Value::Object(actors) }),
+    );
 
     // ── 场景
     let mut scenes = Map::new();
-    if let Some(dict) = source.pointer("/scenes/scenes_dict").and_then(Value::as_object) {
+    if let Some(dict) = source
+        .pointer("/scenes/scenes_dict")
+        .and_then(Value::as_object)
+    {
         for (id, scene) in dict {
             let Some(scene) = scene.as_object() else {
                 continue;
@@ -278,7 +290,9 @@ pub(crate) fn convert_nemo_document(
                 reversed.reverse();
                 entry.insert("actorIds".to_string(), Value::Array(reversed));
             }
-            if let Some(style) = scene.get("current_style_id").filter(|value| truthy_value(value))
+            if let Some(style) = scene
+                .get("current_style_id")
+                .filter(|value| truthy_value(value))
             {
                 entry.insert("currentStyleId".to_string(), style.clone());
             }
@@ -339,7 +353,10 @@ pub(crate) fn convert_nemo_document(
             audios.insert(id.clone(), Value::Object(item));
         }
     }
-    let current_audio = audio_ids.first().cloned().unwrap_or(Value::String(String::new()));
+    let current_audio = audio_ids
+        .first()
+        .cloned()
+        .unwrap_or(Value::String(String::new()));
     document.insert(
         "audios".to_string(),
         json!({
@@ -367,13 +384,13 @@ pub(crate) fn convert_nemo_document(
                 );
             }
             if let Some(url) = item.get("url").and_then(Value::as_str) {
-                let fixed = if !url.ends_with(".webp?imageView2/0/format/png") && url.ends_with(".webp")
-                {
-                    let trimmed = url.strip_suffix(".webp").unwrap_or(url);
-                    format!("{trimmed}.webp?imageView2/0/format/png")
-                } else {
-                    url.to_string()
-                };
+                let fixed =
+                    if !url.ends_with(".webp?imageView2/0/format/png") && url.ends_with(".webp") {
+                        let trimmed = url.strip_suffix(".webp").unwrap_or(url);
+                        format!("{trimmed}.webp?imageView2/0/format/png")
+                    } else {
+                        url.to_string()
+                    };
                 item.insert("url".to_string(), Value::String(fixed));
             }
             if let Some(center) = item.remove("center_point") {
@@ -382,7 +399,10 @@ pub(crate) fn convert_nemo_document(
             styles.insert(id.clone(), Value::Object(item));
         }
     }
-    document.insert("styles".to_string(), json!({ "stylesDict": Value::Object(styles) }));
+    document.insert(
+        "styles".to_string(),
+        json!({ "stylesDict": Value::Object(styles) }),
+    );
 
     // ── 广播按场景重组(官方第 8 步)
     let mut broadcasts: Map<String, Value> = Map::new();
@@ -414,12 +434,8 @@ pub(crate) fn convert_nemo_document(
     );
 
     // ── 变量(官方第 9 步)
-    let stage_width = source
-        .pointer("/stage_size/width")
-        .and_then(Value::as_f64);
-    let stage_height = source
-        .pointer("/stage_size/height")
-        .and_then(Value::as_f64);
+    let stage_width = source.pointer("/stage_size/width").and_then(Value::as_f64);
+    let stage_height = source.pointer("/stage_size/height").and_then(Value::as_f64);
     let mut variables = Map::new();
     let mut variable_names: Vec<String> = Vec::new();
     let mut list_names: Vec<String> = Vec::new();
@@ -452,7 +468,10 @@ pub(crate) fn convert_nemo_document(
                 "x": x + stage_width.unwrap_or(PORTRAIT_WIDTH) / 2.0,
                 "y": stage_height.unwrap_or(PORTRAIT_HEIGHT) / 2.0 - y,
             });
-            let raw_type = entry.get("type").and_then(Value::as_str).unwrap_or_default();
+            let raw_type = entry
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
             let mut name = entry
                 .get("name")
                 .and_then(Value::as_str)
@@ -620,8 +639,7 @@ fn prepare_blocks_xml(
     // 官方 `QC`/`YC` 是**字符串级**改写:它们把整份实体 XML 重新序列化(`innerHTML`)后写回
     // `blocksXML`,所以有迁移的作品里 `blocksXML` 不再是原文(而是迁移后的序列化形态)。
     // 这里在迁移步之后同步产出该字符串(后续前置改写不改它,官方也不改)。
-    let migrated_xml =
-        (qc || yc).then(|| roots.iter().map(XmlNode::serialize).collect::<String>());
+    let migrated_xml = (qc || yc).then(|| roots.iter().map(XmlNode::serialize).collect::<String>());
     transform_servo_shadow_type(&mut roots);
     transform_midi_on_play_note_blocks(&mut roots);
     transform_dial_shadow_type(&mut roots);
@@ -762,9 +780,7 @@ fn qc_audio_blocks(nodes: &mut [XmlNode], ids: &mut IdSource) {
                 let field = node
                     .children
                     .iter()
-                    .position(|child| {
-                        child.tag == "field" && child.attr("name") == Some("audio")
-                    })
+                    .position(|child| child.tag == "field" && child.attr("name") == Some("audio"))
                     .map(|index| node.children.remove(index));
                 if field.is_some() || raw == "audio__stop_all_audios" {
                     let text = field
@@ -799,17 +815,19 @@ fn qc_audio_blocks(nodes: &mut [XmlNode], ids: &mut IdSource) {
 /// 约束 `-135,135,1,`、数值夹到 `[-135, 135]`
 fn transform_servo_shadow_type(nodes: &mut [XmlNode]) {
     for node in nodes.iter_mut() {
-        if node.tag == "block" && node.attr("type") == Some("microbit_servo_set_angle_360")
+        if node.tag == "block"
+            && node.attr("type") == Some("microbit_servo_set_angle_360")
             && let Some(shadow) = descendant_value_shadow_mut(node, "angle")
-                && shadow.attr("type") == Some("math_number") {
-                    shadow.set_attr("type", "math_number_with_servo");
-                    if let Some(field) = find_named_mut(shadow, "field", "NUM") {
-                        field.set_attr("constraints", "-135,135,1,");
-                        let value = parse_int_prefix(&field.text_content()).unwrap_or(0);
-                        let clamped = value.clamp(-135, 135);
-                        field.text = clamped.to_string();
-                    }
-                }
+            && shadow.attr("type") == Some("math_number")
+        {
+            shadow.set_attr("type", "math_number_with_servo");
+            if let Some(field) = find_named_mut(shadow, "field", "NUM") {
+                field.set_attr("constraints", "-135,135,1,");
+                let value = parse_int_prefix(&field.text_content()).unwrap_or(0);
+                let clamped = value.clamp(-135, 135);
+                field.text = clamped.to_string();
+            }
+        }
         transform_servo_shadow_type(&mut node.children);
     }
 }
@@ -823,14 +841,16 @@ fn transform_midi_on_play_note_blocks(nodes: &mut [XmlNode]) {
                 node.attr("type"),
                 Some("midi__on_play_note") | Some("midi__on_play_section")
             )
-            && let Some(index) = node.children.iter().position(|child| {
-                child.tag == "statement" && child.attr("name") == Some("DO")
-            }) {
-                let statement = node.children.remove(index);
-                let mut next = XmlNode::new("next");
-                next.children = statement.children;
-                node.children.insert(index, next);
-            }
+            && let Some(index) = node
+                .children
+                .iter()
+                .position(|child| child.tag == "statement" && child.attr("name") == Some("DO"))
+        {
+            let statement = node.children.remove(index);
+            let mut next = XmlNode::new("next");
+            next.children = statement.children;
+            node.children.insert(index, next);
+        }
         transform_midi_on_play_note_blocks(&mut node.children);
     }
 }
@@ -838,11 +858,13 @@ fn transform_midi_on_play_note_blocks(nodes: &mut [XmlNode]) {
 /// `self_point_towards` 的 `degrees` 影子换 `math_number_with_dial`
 fn transform_dial_shadow_type(nodes: &mut [XmlNode]) {
     for node in nodes.iter_mut() {
-        if node.tag == "block" && node.attr("type") == Some("self_point_towards")
+        if node.tag == "block"
+            && node.attr("type") == Some("self_point_towards")
             && let Some(shadow) = descendant_value_shadow_mut(node, "degrees")
-                && shadow.attr("type") == Some("math_number") {
-                    shadow.set_attr("type", "math_number_with_dial");
-                }
+            && shadow.attr("type") == Some("math_number")
+        {
+            shadow.set_attr("type", "math_number_with_dial");
+        }
         transform_dial_shadow_type(&mut node.children);
     }
 }
@@ -887,7 +909,11 @@ fn add_align_field_to_stamp(nodes: &mut [XmlNode]) {
                     None => node.children.insert(0, field),
                 }
             }
-            match node.children.iter_mut().find(|child| child.tag == "mutation") {
+            match node
+                .children
+                .iter_mut()
+                .find(|child| child.tag == "mutation")
+            {
                 Some(mutation) => mutation.set_attr("items", "1"),
                 None => {
                     let mut mutation = XmlNode::new("mutation");
@@ -904,9 +930,10 @@ fn add_align_field_to_stamp(nodes: &mut [XmlNode]) {
 fn add_mutation_to_controls_if(nodes: &mut [XmlNode]) {
     for node in nodes.iter_mut() {
         if node.tag == "block" && node.attr("type") == Some("controls_if") {
-            let has_else = node.children.iter().any(|child| {
-                child.tag == "statement" && child.attr("name") == Some("ELSE")
-            });
+            let has_else = node
+                .children
+                .iter()
+                .any(|child| child.tag == "statement" && child.attr("name") == Some("ELSE"));
             let has_mutation = node.children.iter().any(|child| child.tag == "mutation");
             if has_else && !has_mutation {
                 let mut mutation = XmlNode::new("mutation");
@@ -940,9 +967,10 @@ fn transform_legacy_audio_block(nodes: &mut [XmlNode], ids: &mut IdSource) {
                 Some("audio__play_audio") | Some("audio__play_audio_and_wait")
             )
         {
-            let field = node.children.iter().position(|child| {
-                child.tag == "field" && child.attr("name") == Some("audio")
-            });
+            let field = node
+                .children
+                .iter()
+                .position(|child| child.tag == "field" && child.attr("name") == Some("audio"));
             if let Some(index) = field {
                 let text = node.children[index].text_content();
                 let saved_next = node
@@ -1000,13 +1028,7 @@ fn transform_self_set_effect_2_blocks(nodes: &mut [XmlNode]) {
             )
         {
             let scope = find_named(node, "field", "scope")
-                .map(|field| {
-                    field
-                        .text_content()
-                        .parse::<f64>()
-                        .unwrap_or(0.0)
-                        .trunc()
-                })
+                .map(|field| field.text_content().parse::<f64>().unwrap_or(0.0).trunc())
                 .unwrap_or(0.0);
             let range = RANGES
                 .get(usize::try_from(scope as i64).unwrap_or(0))
@@ -1014,10 +1036,11 @@ fn transform_self_set_effect_2_blocks(nodes: &mut [XmlNode]) {
                 .unwrap_or(RANGES[0]);
             if let Some(shadow) = descendant_value_shadow_mut(node, "val")
                 && shadow.attr("type") == Some("math_number")
-                    && let Some(field) = find_named_mut(shadow, "field", "NUM")
-                        && let Ok(value) = field.text_content().trim().parse::<f64>() {
-                            field.text = clamp_effect(value, range).to_string();
-                        }
+                && let Some(field) = find_named_mut(shadow, "field", "NUM")
+                && let Ok(value) = field.text_content().trim().parse::<f64>()
+            {
+                field.text = clamp_effect(value, range).to_string();
+            }
         }
         transform_self_set_effect_2_blocks(&mut node.children);
     }
@@ -1029,31 +1052,34 @@ fn clamp_effect(value: f64, range: (i64, Option<i64>, bool)) -> f64 {
     if wrap && max == Some(360) && (0.0..=360.0).contains(&value) {
         return value;
     }
-    if wrap
-        && let Some(max) = max {
-            if value < 0.0 {
-                let mut value = value;
-                let step = max as f64;
-                while value < 0.0 {
-                    value += step;
-                }
-                return value;
+    if wrap && let Some(max) = max {
+        if value < 0.0 {
+            let mut value = value;
+            let step = max as f64;
+            while value < 0.0 {
+                value += step;
             }
-            return value % max as f64;
+            return value;
         }
+        return value % max as f64;
+    }
     if value < min as f64 {
         return min as f64;
     }
     if let Some(max) = max
-        && value > max as f64 {
-            return max as f64;
-        }
+        && value > max as f64
+    {
+        return max as f64;
+    }
     value
 }
 
 /// 官方 `replaceIdsWithUUID`:`block`/`shadow`/`statement`/`value` 换新 uuid(`empty` 不动)
 fn replace_ids_with_uuid(node: &mut XmlNode, ids: &mut IdSource) {
-    if matches!(node.tag.as_str(), "block" | "shadow" | "statement" | "value") {
+    if matches!(
+        node.tag.as_str(),
+        "block" | "shadow" | "statement" | "value"
+    ) {
         let id = ids.uuid();
         node.set_attr("id", &id);
     }
@@ -1078,10 +1104,15 @@ fn replace_split_options(node: &mut XmlNode, split_options: &Map<String, Value>)
                     .map(str::to_string)
             });
         if let Some(name) = resolved
-            && let Some(field) = find_named_mut(node, "field", "option") {
-                field.set_attr("name", "TEXT");
-                field.text = if name == "空格" { " ".to_string() } else { name };
-            }
+            && let Some(field) = find_named_mut(node, "field", "option")
+        {
+            field.set_attr("name", "TEXT");
+            field.text = if name == "空格" {
+                " ".to_string()
+            } else {
+                name
+            };
+        }
     }
     for child in &mut node.children {
         replace_split_options(child, split_options);
@@ -1097,14 +1128,16 @@ fn replace_scene_index(node: &mut XmlNode, scenes_order: &[String]) {
             .map(XmlNode::text_content)
             .filter(|text| !text.is_empty());
         if let Some(text) = field_value
-            && let Some(index) = parse_int_prefix(&text) {
-                let index = index - 1;
-                if index >= 0
-                    && let Some(scene) = scenes_order.get(index as usize)
-                        && let Some(field) = find_named_mut(node, "field", "index") {
-                            field.text = scene.clone();
-                        }
+            && let Some(index) = parse_int_prefix(&text)
+        {
+            let index = index - 1;
+            if index >= 0
+                && let Some(scene) = scenes_order.get(index as usize)
+                && let Some(field) = find_named_mut(node, "field", "index")
+            {
+                field.text = scene.clone();
             }
+        }
     }
     for child in &mut node.children {
         replace_scene_index(child, scenes_order);
@@ -1186,10 +1219,12 @@ fn has_descendant(node: &XmlNode, tag: &str) -> bool {
 /// 该 `value` 没有直接 `shadow` 时继续找下一个同名 `value`)
 fn find_value_shadow<'a>(node: &'a XmlNode, name: &str) -> Option<&'a XmlNode> {
     for child in &node.children {
-        if child.tag == "value" && child.attr("name") == Some(name)
-            && let Some(shadow) = child.child("shadow") {
-                return Some(shadow);
-            }
+        if child.tag == "value"
+            && child.attr("name") == Some(name)
+            && let Some(shadow) = child.child("shadow")
+        {
+            return Some(shadow);
+        }
         if let Some(found) = find_value_shadow(child, name) {
             return Some(found);
         }
@@ -1216,7 +1251,9 @@ fn find_value_shadow_mut<'a>(node: &'a mut XmlNode, name: &str) -> Option<&'a mu
 /// 子树里有没有 `value[name=…] > shadow`
 fn has_value_shadow(node: &XmlNode, name: &str) -> bool {
     node.children.iter().any(|child| {
-        (child.tag == "value" && child.attr("name") == Some(name) && child.child("shadow").is_some())
+        (child.tag == "value"
+            && child.attr("name") == Some(name)
+            && child.child("shadow").is_some())
             || has_value_shadow(child, name)
     })
 }
@@ -1290,9 +1327,11 @@ pub(crate) fn normalize_integral_numbers(value: &mut Value) {
     match value {
         Value::Number(number) => {
             if let Some(float) = number.as_f64()
-                && float.fract() == 0.0 && float.abs() < 9.007_199_254_740_992e15 {
-                    *value = Value::from(float as i64);
-                }
+                && float.fract() == 0.0
+                && float.abs() < 9.007_199_254_740_992e15
+            {
+                *value = Value::from(float as i64);
+            }
         }
         Value::Array(items) => {
             for item in items {

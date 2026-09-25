@@ -52,15 +52,14 @@ pub(crate) mod model;
 pub(crate) mod neko;
 pub(crate) mod nemo;
 pub(crate) mod nemo_mapping;
-pub(crate) mod nemo_xml;
-pub(crate) mod remint;
 #[cfg(test)]
 mod nemo_tests;
+pub(crate) mod nemo_xml;
+pub(crate) mod remint;
 #[cfg(test)]
 mod reverse_tests;
 pub(crate) mod tables_gen;
 pub(crate) mod tables_gen_nemo;
-
 
 /// 目标编辑器
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -395,8 +394,10 @@ fn parse_forward_item(
     landscape: bool,
 ) -> std::result::Result<ForwardParsed, TranslateError> {
     let mut ids = model::IdSource::recording(index);
-    let mut local =
-        TranslateReport::new(crate::core::convert::EditorType::Kitten4, TargetEditor::KittenN);
+    let mut local = TranslateReport::new(
+        crate::core::convert::EditorType::Kitten4,
+        TargetEditor::KittenN,
+    );
     let mut tree = match block_data_json {
         Some(block_data_json) => kitten::parse_block_data_json(block_data_json)?.tree,
         None => model::BlockTree::default(),
@@ -514,7 +515,8 @@ pub(crate) fn convert_kitten4_document(
             }
         });
         let mut trees: Vec<model::BlockTree> = Vec::with_capacity(rewritten.len());
-        let mut logs_second: Vec<Vec<(String, model::MintKind)>> = Vec::with_capacity(rewritten.len());
+        let mut logs_second: Vec<Vec<(String, model::MintKind)>> =
+            Vec::with_capacity(rewritten.len());
         let mut reports_second: Vec<TranslateReport> = Vec::with_capacity(rewritten.len());
         for item in rewritten {
             trees.push(item.tree);
@@ -747,7 +749,10 @@ pub fn set_source_reference_in(
     let Some(object) = document.as_object_mut() else {
         return Err(TranslateError::InvalidArgument("产物不是 JSON 对象".into()));
     };
-    object.insert("source".to_string(), serde_json::Value::String(url.to_string()));
+    object.insert(
+        "source".to_string(),
+        serde_json::Value::String(url.to_string()),
+    );
     Ok(())
 }
 
@@ -1026,8 +1031,15 @@ mod diff_tests {
         set_source_reference(&path, "https://creation.codemao.cn/src.bcm4").expect("写引用");
         let doc: Value =
             serde_json::from_str(&std::fs::read_to_string(&path).expect("读文件")).expect("JSON");
-        assert_eq!(doc["source"], serde_json::json!("https://creation.codemao.cn/src.bcm4"));
-        assert_eq!(doc["projectName"], serde_json::json!("样例"), "其余键原样保留");
+        assert_eq!(
+            doc["source"],
+            serde_json::json!("https://creation.codemao.cn/src.bcm4")
+        );
+        assert_eq!(
+            doc["projectName"],
+            serde_json::json!("样例"),
+            "其余键原样保留"
+        );
 
         // 非对象产物:显式报错,不静默写出半成品
         let bad = dir.join("bad.json");
@@ -1418,7 +1430,8 @@ mod diff_tests {
         if !path.exists() {
             return;
         }
-        let mut source: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let mut source: Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         let mut report = TranslateReport::new(
             crate::core::convert::EditorType::Kitten4,
             TargetEditor::KittenN,
@@ -1578,13 +1591,14 @@ mod forward_parallel_tests {
 
     /// 走**新**管线(实体级并行),返回产物与报告
     fn convert(source: &mut Value, entity_concurrency: usize) -> (Value, TranslateReport) {
-        let mut report =
-            TranslateReport::new(crate::core::convert::EditorType::Kitten4, TargetEditor::KittenN);
+        let mut report = TranslateReport::new(
+            crate::core::convert::EditorType::Kitten4,
+            TargetEditor::KittenN,
+        );
         let options = TranslateOptions::new()
             .deterministic_ids(true)
             .entity_concurrency(entity_concurrency);
-        let document =
-            convert_kitten4_document(source, &options, &mut report).expect("正向转换");
+        let document = convert_kitten4_document(source, &options, &mut report).expect("正向转换");
         (document, report)
     }
 
@@ -1593,8 +1607,10 @@ mod forward_parallel_tests {
     ///
     /// 放在测试里当差分门:并行实现若把铸造顺序、告警顺序或改写范围做错,产物/告警立刻对不上。
     fn reference_serial_document(source: &Value) -> (Value, TranslateReport) {
-        let mut report =
-            TranslateReport::new(crate::core::convert::EditorType::Kitten4, TargetEditor::KittenN);
+        let mut report = TranslateReport::new(
+            crate::core::convert::EditorType::Kitten4,
+            TargetEditor::KittenN,
+        );
         let mut ids = IdSource::new(true);
         let landscape = source["size"]["width"].as_f64().unwrap_or(0.0)
             > source["size"]["height"].as_f64().unwrap_or(0.0);
@@ -1714,8 +1730,14 @@ mod forward_parallel_tests {
             "真作品:与串行参考实现的告警不一致"
         );
         assert_eq!(serial_report.blocks_total, reference_report.blocks_total);
-        assert_eq!(serial_report.blocks_converted, reference_report.blocks_converted);
-        assert!(!serial_text.contains('\u{1}'), "真作品产物里残留了临时 id 哨兵");
+        assert_eq!(
+            serial_report.blocks_converted,
+            reference_report.blocks_converted
+        );
+        assert!(
+            !serial_text.contains('\u{1}'),
+            "真作品产物里残留了临时 id 哨兵"
+        );
     }
 
     #[test]
@@ -1723,7 +1745,10 @@ mod forward_parallel_tests {
         let mut source = multi_entity_document();
         let pristine = source.clone();
         let (serial_doc, serial_report) = convert(&mut source, 1);
-        assert_eq!(source, pristine, "转换不得改动源文档(block_data_json 必须原样放回)");
+        assert_eq!(
+            source, pristine,
+            "转换不得改动源文档(block_data_json 必须原样放回)"
+        );
 
         let (parallel_doc, parallel_report) = convert(&mut pristine.clone(), 8);
         let serial_text = serde_json::to_string(&serial_doc).expect("序列化");
@@ -1746,14 +1771,20 @@ mod forward_parallel_tests {
         );
 
         // ① 并发 1 vs 8:产物逐字节相同、告警逐条同序
-        assert_eq!(serial_text, parallel_text, "并发 1 与 8 的产物必须逐字节相同");
+        assert_eq!(
+            serial_text, parallel_text,
+            "并发 1 与 8 的产物必须逐字节相同"
+        );
         assert_eq!(
             serial_report.warnings(),
             parallel_report.warnings(),
             "告警必须逐条同序同内容"
         );
         assert_eq!(serial_report.blocks_total, parallel_report.blocks_total);
-        assert_eq!(serial_report.blocks_converted, parallel_report.blocks_converted);
+        assert_eq!(
+            serial_report.blocks_converted,
+            parallel_report.blocks_converted
+        );
         assert!(serial_report.blocks_total > 0, "自造样本应产生积木");
         assert!(
             serial_report.warnings().iter().any(|warning| matches!(
@@ -1785,7 +1816,10 @@ mod forward_parallel_tests {
             "与串行参考实现的告警顺序不一致"
         );
         assert_eq!(reference_report.blocks_total, serial_report.blocks_total);
-        assert_eq!(reference_report.blocks_converted, serial_report.blocks_converted);
+        assert_eq!(
+            reference_report.blocks_converted,
+            serial_report.blocks_converted
+        );
 
         // ③ 无哨兵残留;uuid 计数值无空洞(临时 id 的账本一个不漏地兑现了)
         assert!(!serial_text.contains('\u{1}'), "产物里残留了临时 id 哨兵");
@@ -1798,8 +1832,12 @@ mod forward_parallel_tests {
         );
 
         // ④ 跨实体调用点确实按**最终** id 重写:值 / 键 / mutation 三处都换过
-        let actors = serial_doc["actors"]["actorsDict"].as_object().expect("actorsDict");
-        let a2_blocks = actors["a2"]["nekoBlockJsonList"].as_array().expect("a2 积木");
+        let actors = serial_doc["actors"]["actorsDict"]
+            .as_object()
+            .expect("actorsDict");
+        let a2_blocks = actors["a2"]["nekoBlockJsonList"]
+            .as_array()
+            .expect("a2 积木");
         let call = &a2_blocks[0]["next"];
         assert_eq!(call["type"], json!("procedures_2_callnoreturn"));
         assert_eq!(
@@ -1812,7 +1850,10 @@ mod forward_parallel_tests {
         assert!(mutation.contains("type=\"NORMAL\">"), "{mutation}");
         assert!(mutation.contains("content=\"X\""), "{mutation}");
         assert!(
-            call["inputs"].as_object().expect("inputs").contains_key("p0"),
+            call["inputs"]
+                .as_object()
+                .expect("inputs")
+                .contains_key("p0"),
             "String 形参 id 应成为 inputs 的键:{:?}",
             call["inputs"]
         );
@@ -1864,11 +1905,15 @@ mod forward_parallel_tests {
         source["theatre"]["actors"]["a2"]["block_data_json"]["connections"]["hatB"] =
             json!({ "不存在的积木": { "type": "next" } });
         let pristine = source.clone();
-        let mut report =
-            TranslateReport::new(crate::core::convert::EditorType::Kitten4, TargetEditor::KittenN);
+        let mut report = TranslateReport::new(
+            crate::core::convert::EditorType::Kitten4,
+            TargetEditor::KittenN,
+        );
         let error = convert_kitten4_document(
             &mut source,
-            &TranslateOptions::new().deterministic_ids(true).entity_concurrency(4),
+            &TranslateOptions::new()
+                .deterministic_ids(true)
+                .entity_concurrency(4),
             &mut report,
         )
         .expect_err("坏积木图必须报错");
@@ -1888,7 +1933,10 @@ mod forward_parallel_tests {
     fn entity_concurrency_is_folded_by_work_and_core_budget() {
         let requested = TranslateOptions::new().entity_concurrency(8);
         assert_eq!(
-            requested.clone().fold_entity_concurrency(1, 4).entity_workers(),
+            requested
+                .clone()
+                .fold_entity_concurrency(1, 4)
+                .entity_workers(),
             4,
             "单作品:可用核数就是实体级上限"
         );
@@ -1975,10 +2023,7 @@ mod forward_parallel_tests {
                 vec![8, 4, 4, 4, 12],
                 "id 段长不是 uuid v4:{token}"
             );
-            assert!(
-                parts[2].starts_with('4'),
-                "id 版本位不是 4:{token}"
-            );
+            assert!(parts[2].starts_with('4'), "id 版本位不是 4:{token}");
             assert!(
                 matches!(parts[3].as_bytes().first(), Some(b'8' | b'9' | b'a' | b'b')),
                 "id 变体位不对:{token}"
@@ -1993,8 +2038,10 @@ mod forward_parallel_tests {
     #[test]
     fn parallel_run_keeps_ids_legal_and_unique_without_deterministic_mode() {
         let mut source = multi_entity_document();
-        let mut report =
-            TranslateReport::new(crate::core::convert::EditorType::Kitten4, TargetEditor::KittenN);
+        let mut report = TranslateReport::new(
+            crate::core::convert::EditorType::Kitten4,
+            TargetEditor::KittenN,
+        );
         let options = TranslateOptions::new().entity_concurrency(4);
         let document =
             convert_kitten4_document(&mut source, &options, &mut report).expect("正向转换");
@@ -2007,7 +2054,10 @@ mod forward_parallel_tests {
         assert!(!text.contains('\u{1}'), "非确定性模式同样不得残留临时 id");
 
         let random_ids = count_and_check_uuid_shapes(&document);
-        assert!(random_ids >= 10, "样本应铸出足够多的 uuid(实际 {random_ids})");
+        assert!(
+            random_ids >= 10,
+            "样本应铸出足够多的 uuid(实际 {random_ids})"
+        );
 
         // 与确定性模式对照:铸造**次数**(= 产物里 uuid 形态 id 的出现次数)必须一致
         // (确定性模式下的 uuid 计数连续性由 `parallel_and_serial_products_are_identical` 守)

@@ -48,7 +48,12 @@ pub(crate) fn workers(requested: usize, items: usize) -> usize {
 /// - 返回的 `Vec` 与 `items` 等长同序:调用方按序号拼装,结果与串行逐项跑一致
 ///   (包括"首个错误按序号冒泡" —— `Result` 收集在调用方按序号做);
 /// - 工作线程 panic 会在此处重新抛出(`thread::scope` 的默认语义)。
-pub(crate) fn run_items<I, T, F>(items: Vec<I>, weights: &[usize], workers: usize, task: F) -> Vec<T>
+pub(crate) fn run_items<I, T, F>(
+    items: Vec<I>,
+    weights: &[usize],
+    workers: usize,
+    task: F,
+) -> Vec<T>
 where
     I: Send,
     T: Send,
@@ -321,7 +326,10 @@ fn remap_value_map(map: &IdRemap, fields: &mut BTreeMap<String, Value>) -> usize
         }
         unmatched
     } else {
-        fields.values_mut().map(|value| remap_json(map, value)).sum()
+        fields
+            .values_mut()
+            .map(|value| remap_json(map, value))
+            .sum()
     }
 }
 

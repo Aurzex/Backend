@@ -1,6 +1,6 @@
 use crate::utils::requests::{
-    BaseKey, ClientAccess, CodeMaoClient, DEFAULT_LIMIT, DEFAULT_PAGE_SIZE, StatusCode, HttpMethod,
-    MewResult, PaginatedIter, PaginationMethod, ResponseMode, ToggleAction, current_timestamp_13,
+    BaseKey, ClientAccess, CodeMaoClient, DEFAULT_LIMIT, DEFAULT_PAGE_SIZE, HttpMethod, MewResult,
+    PaginatedIter, PaginationMethod, ResponseMode, StatusCode, ToggleAction, current_timestamp_13,
 };
 
 /// 萌新盒子套餐列表接口的单页上限
@@ -880,7 +880,12 @@ mod nemo_create_tests {
             template_type: None,
         };
         let payload = create_nemo_work_payload(&args);
-        let mut keys: Vec<&str> = payload.as_object().expect("对象").keys().map(String::as_str).collect();
+        let mut keys: Vec<&str> = payload
+            .as_object()
+            .expect("对象")
+            .keys()
+            .map(String::as_str)
+            .collect();
         keys.sort_unstable();
         assert_eq!(
             keys,
@@ -909,7 +914,6 @@ mod nemo_create_tests {
         assert_eq!(payload["bcm_version"], "0.16.2");
         assert_eq!(payload["n_roles"], 1);
     }
-
 }
 
 pub struct WoodWorkManager {

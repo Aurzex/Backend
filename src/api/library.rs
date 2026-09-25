@@ -1,5 +1,5 @@
 use crate::utils::requests::{
-    ClientAccess, CodeMaoClient, DEFAULT_LIMIT, StatusCode, HttpMethod, MewResult, ResponseMode,
+    ClientAccess, CodeMaoClient, DEFAULT_LIMIT, HttpMethod, MewResult, ResponseMode, StatusCode,
     ToggleAction,
 };
 use log::debug;

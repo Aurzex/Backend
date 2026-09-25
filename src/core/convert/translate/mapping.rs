@@ -42,13 +42,13 @@ use std::ops::Range;
 
 use serde_json::{Value, json};
 
-use super::model::{BlockJson, BlockTree};
 use super::model::IdSource;
-use super::{ TranslateReport, TranslateWarning};
+use super::model::{BlockJson, BlockTree};
 use super::tables_gen::{
     KITTEN_MUTATION_TEXT, KITTEN_MUTATION_TEXT_SELECT, KITTEN_TO_KN, SHADOW_XML,
     TEXT_PLACEHOLDER_BLOCKS, ZH_NAME_BY_TYPE,
 };
+use super::{TranslateReport, TranslateWarning};
 
 #[rustfmt::skip]
 const PLACEHOLDERS_STATEMENT: &[&str] = &["bcm_translator_text_execution_block", "bcm_translator_text_event_block"];
@@ -383,7 +383,10 @@ fn get_mapped_name<'a>(block_type: &str, input_name: &'a str) -> Cow<'a, str> {
             Err(_) => Cow::Borrowed(input_name),
         };
     }
-    match INPUT_NAME_MAP_INDEX.get(block_type).and_then(|slots| slots.get(input_name)) {
+    match INPUT_NAME_MAP_INDEX
+        .get(block_type)
+        .and_then(|slots| slots.get(input_name))
+    {
         Some(mapped) => Cow::Borrowed(*mapped),
         None => Cow::Borrowed(input_name),
     }
@@ -617,10 +620,16 @@ fn wrap_arithmetic(
     original.parent_id = Some(wrap_id.clone()); // 官方给原节点重铸 id 并改挂到包装块
     let (input_a, input_b) = if original_first {
         original.id = Some(a_id);
-        (original, math_number_node(b_id, constant, Some(wrap_id.clone())))
+        (
+            original,
+            math_number_node(b_id, constant, Some(wrap_id.clone())),
+        )
     } else {
         original.id = Some(b_id);
-        (math_number_node(a_id, constant, Some(wrap_id.clone())), original)
+        (
+            math_number_node(a_id, constant, Some(wrap_id.clone())),
+            original,
+        )
     };
     BlockJson {
         kind: "math_arithmetic".to_string(),

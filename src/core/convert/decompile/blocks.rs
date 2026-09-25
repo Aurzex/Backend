@@ -291,11 +291,8 @@ impl<'a> BlockDecompilerCore<'a> {
                             DecompilerError::InvalidResponse("child_block缺少id".to_string())
                         })?
                         .to_string();
-                    let input_name = child_input_name(
-                        self.compiled.get_str_or("type", ""),
-                        i,
-                        conditions_count,
-                    );
+                    let input_name =
+                        child_input_name(self.compiled.get_str_or("type", ""), i, conditions_count);
                     context.blocks.insert(child_id.clone(), child_block);
                     if let Some(b) = context.blocks.get_mut(&child_id)
                         && let Some(o) = b.as_object_mut()
@@ -906,8 +903,7 @@ impl<'a> BlockDecompiler<'a> for FunctionCallDecompiler<'a> {
             // 编辑版插槽名为 ARG0/ARG1/...(无空格)
             let input_name = format!("ARG{}", param_index);
             if param_value.is_object() {
-                let mut param_decompiler =
-                    BlockDecompilerCore::new(param_value);
+                let mut param_decompiler = BlockDecompilerCore::new(param_value);
                 let param_block = param_decompiler.decompile(context)?;
                 let param_id = param_block
                     .get("id")

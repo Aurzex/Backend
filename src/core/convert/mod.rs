@@ -20,13 +20,11 @@ pub mod translate;
 // 跨子域类型:域内两处都要用,只在这里留一条公开路径
 pub use crate::core::convert::shared::{DecompilerError, EditorType, WorkId};
 
-use crate::core::convert::decompile::{
-    CodemaoDecompiler, DecompileOptions, DecompiledArtifact,
-};
+use crate::core::convert::decompile::{CodemaoDecompiler, DecompileOptions, DecompiledArtifact};
 use crate::core::convert::shared::{DraftUpload, FileService};
 use crate::core::convert::translate::{
-    TargetEditor, TranslateError, TranslateOptions, TranslateOutcome, detect_editor,
-    product_path, set_source_reference_in, translate_value,
+    TargetEditor, TranslateError, TranslateOptions, TranslateOutcome, detect_editor, product_path,
+    set_source_reference_in, translate_value,
 };
 use crate::utils::filedata::PathConfig;
 use crate::utils::requests::UploadChannel;

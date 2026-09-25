@@ -23,8 +23,8 @@ use crate::core::convert::shared::{DecompilerError, Result};
 use serde_json::{Map, Value, json};
 use std::collections::HashSet;
 
-use super::model::{BlockJson, BlockTree, type_name};
 use super::model::IdSource;
+use super::model::{BlockJson, BlockTree, type_name};
 
 /// 一个实体的解析结果
 #[derive(Debug, Clone, Default)]
@@ -67,10 +67,7 @@ pub(crate) fn parse_block_data_json(block_data_json: &Value) -> Result<ParsedEnt
     })
 }
 
-fn parse_parts(
-    blocks: &Map<String, Value>,
-    connections: Option<&Value>,
-) -> Result<ParsedEntity> {
+fn parse_parts(blocks: &Map<String, Value>, connections: Option<&Value>) -> Result<ParsedEntity> {
     let connections = connections
         .and_then(Value::as_object)
         .cloned()

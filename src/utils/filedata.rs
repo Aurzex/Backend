@@ -73,7 +73,6 @@ impl PathConfig {
     pub fn password_file_path(&self) -> PathBuf {
         self.data_dir().join("password.txt")
     }
-
 }
 
 pub struct CodeMaoFile;
@@ -88,7 +87,6 @@ impl CodeMaoFile {
         fs::write(path, data)?;
         Ok(())
     }
-
 }
 
 /// 将 JSON 值转为 i64(数字直接取,字符串尝试解析)

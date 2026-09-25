@@ -17,7 +17,7 @@ use crate::api::whale::{ReportHandler, Resolution};
 use crate::api::work::{BaseWorkOperations, CommentOperations};
 use crate::core::retrieve::{CommentSource, DataQuery, JsonObject};
 use crate::utils::filedata::PathConfig;
-use crate::utils::requests::{Identity, CodeMaoClient, ResponseMode};
+use crate::utils::requests::{CodeMaoClient, Identity, ResponseMode};
 
 // 配置结构体(依赖注入)
 #[derive(Clone)]

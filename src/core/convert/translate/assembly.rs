@@ -1047,7 +1047,10 @@ fn build_kitten4_document(
         "application_version".into(),
         json!(KITTEN4_APPLICATION_VERSION),
     );
-    doc.insert("project_name".into(), json!(project_name_at(src, "projectName")));
+    doc.insert(
+        "project_name".into(),
+        json!(project_name_at(src, "projectName")),
+    );
     doc.insert(
         "size".into(),
         json!({ "width": num(canvas.0), "height": num(canvas.1) }),

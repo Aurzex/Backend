@@ -169,13 +169,14 @@ static SPECIAL_FIELD_VALUES_INDEX: LazyLock<
     map
 });
 
-static SHADOW_FIELD_NAMES_INDEX: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
-    let mut map = HashMap::with_capacity(NEMO_SHADOW_FIELD_NAMES.len());
-    for (kind, field) in NEMO_SHADOW_FIELD_NAMES {
-        map.entry(*kind).or_insert(*field);
-    }
-    map
-});
+static SHADOW_FIELD_NAMES_INDEX: LazyLock<HashMap<&'static str, &'static str>> =
+    LazyLock::new(|| {
+        let mut map = HashMap::with_capacity(NEMO_SHADOW_FIELD_NAMES.len());
+        for (kind, field) in NEMO_SHADOW_FIELD_NAMES {
+            map.entry(*kind).or_insert(*field);
+        }
+        map
+    });
 
 static MUTATION_TEXT_INDEX: LazyLock<HashMap<&'static str, &'static NemoMutationText>> =
     LazyLock::new(|| {
@@ -589,11 +590,7 @@ pub(crate) fn translate_nemo_to_kn(
     ids: &mut IdSource,
     report: &mut TranslateReport,
 ) -> BlockTree {
-    let mut mapper = Mapper {
-        ctx,
-        ids,
-        report,
-    };
+    let mut mapper = Mapper { ctx, ids, report };
     mapper.select_subject(subject);
     let mut out = Vec::with_capacity(roots.len());
     for root in roots {
@@ -818,9 +815,10 @@ fn update_neko_block_json_list(tree: &mut BlockTree, params: &[NemoParam], proce
             .and_then(Value::as_str)
             .map(str::to_string);
         if let Some(name) = name
-            && params.iter().any(|param| param.name == name) {
-                update_block_with_param(root, params, procedure_id);
-            }
+            && params.iter().any(|param| param.name == name)
+        {
+            update_block_with_param(root, params, procedure_id);
+        }
         root.id = Some(procedure_id.to_string());
     }
 }
@@ -842,10 +840,7 @@ fn update_block_with_param(block: &mut BlockJson, params: &[NemoParam], procedur
                 ),
             );
             let mut fields: BTreeMap<String, Value> = BTreeMap::new();
-            fields.insert(
-                "param_name".to_string(),
-                Value::String(param.name.clone()),
-            );
+            fields.insert("param_name".to_string(), Value::String(param.name.clone()));
             fields.insert(
                 "param_default_value".to_string(),
                 Value::String(String::new()),
@@ -896,11 +891,9 @@ impl Mapper<'_> {
                 self.ctx.current_actor = Some(entity.clone());
             }
             NemoSubject::Params(params) => {
-                let first_ok = params
-                    .first()
-                    .is_some_and(|param| {
-                        param.parent_type == PROCEDURE_NORMAL || param.parent_type == PROCEDURE_ROUND
-                    });
+                let first_ok = params.first().is_some_and(|param| {
+                    param.parent_type == PROCEDURE_NORMAL || param.parent_type == PROCEDURE_ROUND
+                });
                 if first_ok {
                     self.ctx.current_params = Some(params.to_vec());
                 } else {
@@ -944,8 +937,9 @@ impl Mapper<'_> {
             self.note_degraded(&raw_type);
         }
         if node.kind == "procedures_2_return_value" {
-            node.mutation =
-                Some(format!("<mutation xmlns=\"{XHTML}\" items=\"1\" type=\"ROUND\"></mutation>"));
+            node.mutation = Some(format!(
+                "<mutation xmlns=\"{XHTML}\" items=\"1\" type=\"ROUND\"></mutation>"
+            ));
             let parent_type = self
                 .ctx
                 .current_params
@@ -1047,8 +1041,10 @@ impl Mapper<'_> {
             | "self_glide_coordinate_x"
             | "self_glide_coordinate_y"
             | "self_change_scale" => {
-                node.fields
-                    .insert("increase".to_string(), Value::String("increase".to_string()));
+                node.fields.insert(
+                    "increase".to_string(),
+                    Value::String("increase".to_string()),
+                );
             }
             _ => {}
         }
@@ -1129,7 +1125,9 @@ impl Mapper<'_> {
                     parent.statements.insert(name, child);
                     if parent.kind == "when" && parent.shadows.is_empty() {
                         parent.shadows.insert("DO".to_string(), String::new());
-                        parent.shadows.insert("condition".to_string(), String::new());
+                        parent
+                            .shadows
+                            .insert("condition".to_string(), String::new());
                     }
                 }
             }
@@ -1172,7 +1170,9 @@ impl Mapper<'_> {
             let next = el.children.get(index + 1);
             match child.tag.as_str() {
                 "empty" => return self.handle_empty_element(child, next, parent, name),
-                "shadow" => return self.handle_shadow_element(child, next, parent_el, parent, name),
+                "shadow" => {
+                    return self.handle_shadow_element(child, next, parent_el, parent, name);
+                }
                 _ => {}
             }
         }
@@ -1414,9 +1414,10 @@ impl Mapper<'_> {
         };
         self.adjust_input_type(&mut node);
         let mut result = ValueResult::default();
-        result
-            .shadows
-            .insert(slot.to_string(), render_empty_xml(mapped_empty, &id, &fields));
+        result.shadows.insert(
+            slot.to_string(),
+            render_empty_xml(mapped_empty, &id, &fields),
+        );
         result.inputs.insert(slot.to_string(), node);
         result
     }
@@ -1455,16 +1456,14 @@ impl Mapper<'_> {
             let block = value.child("block");
             let slot = mapped_slot_name(&kind, &name.to_lowercase());
             if let Some(empty) = empty
-                && shadow.is_none() && block.is_none() {
-                    let result = self.handle_empty_element(
-                        empty,
-                        value.children.get(index + 1),
-                        parent,
-                        &slot,
-                    );
-                    inputs.extend(result.inputs);
-                    shadows.extend(result.shadows);
-                }
+                && shadow.is_none()
+                && block.is_none()
+            {
+                let result =
+                    self.handle_empty_element(empty, value.children.get(index + 1), parent, &slot);
+                inputs.extend(result.inputs);
+                shadows.extend(result.shadows);
+            }
             if let Some(shadow) = shadow {
                 self.handle_shadow_in_logic_compare(
                     shadow,
@@ -1475,21 +1474,22 @@ impl Mapper<'_> {
                 );
             }
             if let Some(block) = block
-                && !slot.is_empty() {
-                    let node = self.parse_block(block);
-                    let node_id = node.id.clone().unwrap_or_default();
-                    inputs.insert(slot.clone(), node);
-                    let outer = map_type(el.attr("type").unwrap_or_default());
-                    // 官方:逻辑运算/取反的槽位被覆盖块占住时,影子槽补一个 `logic_empty`
-                    if (outer == "logic_operation" || outer == "logic_negate")
-                        && !shadows.contains_key(&slot)
-                    {
-                        shadows.insert(
-                            slot.clone(),
-                            render_empty_xml("logic_empty", &node_id, &BTreeMap::new()),
-                        );
-                    }
+                && !slot.is_empty()
+            {
+                let node = self.parse_block(block);
+                let node_id = node.id.clone().unwrap_or_default();
+                inputs.insert(slot.clone(), node);
+                let outer = map_type(el.attr("type").unwrap_or_default());
+                // 官方:逻辑运算/取反的槽位被覆盖块占住时,影子槽补一个 `logic_empty`
+                if (outer == "logic_operation" || outer == "logic_negate")
+                    && !shadows.contains_key(&slot)
+                {
+                    shadows.insert(
+                        slot.clone(),
+                        render_empty_xml("logic_empty", &node_id, &BTreeMap::new()),
+                    );
                 }
+            }
         }
         (fields, inputs, shadows)
     }
@@ -1614,7 +1614,8 @@ impl Mapper<'_> {
         } else {
             String::new()
         };
-        let id = el.attr("id")
+        let id = el
+            .attr("id")
             .map(str::to_string)
             .unwrap_or_else(|| self.uuid());
         let xml = if kind.is_empty() {
@@ -1678,7 +1679,10 @@ impl Mapper<'_> {
                     out.insert("sprite".to_string(), Value::String("--screen".to_string()));
                 }
                 "add_width_height_scale" | "self_change_effect" => {
-                    out.insert("increase".to_string(), Value::String("increase".to_string()));
+                    out.insert(
+                        "increase".to_string(),
+                        Value::String("increase".to_string()),
+                    );
                 }
                 _ => {}
             }
@@ -1718,7 +1722,12 @@ impl Mapper<'_> {
             return Some("type".to_string());
         }
         if kind == "get_styles" && field == "style_id" {
-            return match self.ctx.current_actor.as_ref().and_then(|actor| actor.styles.as_ref()) {
+            return match self
+                .ctx
+                .current_actor
+                .as_ref()
+                .and_then(|actor| actor.styles.as_ref())
+            {
                 Some(styles) => style_at(styles, value),
                 None => Some(value.to_string()),
             };
@@ -1853,7 +1862,11 @@ impl Mapper<'_> {
     }
 
     /// 官方 `handleProcedureFields`
-    fn handle_procedure_fields(&mut self, parent: &mut BlockJson, fields: &BTreeMap<String, Value>) {
+    fn handle_procedure_fields(
+        &mut self,
+        parent: &mut BlockJson,
+        fields: &BTreeMap<String, Value>,
+    ) {
         if parent.kind == "procedures_2_callnoreturn" || parent.kind == "procedures_2_callreturn" {
             let kind = if parent.kind == "procedures_2_callreturn" {
                 PROCEDURE_ROUND
@@ -1872,7 +1885,8 @@ impl Mapper<'_> {
                 parent.fields.insert("NAME".to_string(), Value::String(id));
             }
         }
-        if parent.kind == "procedures_2_parameter" || parent.kind == "procedures_2_parameter_shadow" {
+        if parent.kind == "procedures_2_parameter" || parent.kind == "procedures_2_parameter_shadow"
+        {
             let procedure_name = self
                 .ctx
                 .current_params
@@ -1901,11 +1915,10 @@ impl Mapper<'_> {
         else {
             return;
         };
-        let Some(procedure) = self
-            .ctx
-            .procedures
-            .values()
-            .find(|procedure| procedure.name == procedure_name && procedure.kind == parent_type)
+        let Some(procedure) =
+            self.ctx.procedures.values().find(|procedure| {
+                procedure.name == procedure_name && procedure.kind == parent_type
+            })
         else {
             return;
         };

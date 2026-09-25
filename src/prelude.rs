@@ -6,6 +6,6 @@
 //! `KittenVersion` 同名导致的歧义),按域自行 `use backend::api::…` 即可。
 
 pub use crate::utils::requests::{
-    Identity, ClientAccess, CodeMaoClient, HttpMethod, MewRequestBuilder, MewError, MewResult,
+    ClientAccess, CodeMaoClient, HttpMethod, Identity, MewError, MewRequestBuilder, MewResult,
     PaginatedIter,
 };
