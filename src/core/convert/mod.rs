@@ -152,6 +152,12 @@ fn translate_work_in(
 
 /// 批量转化(顺序与输入一致;并发模型与 `CodemaoDecompiler::decompile_batch` 一致:
 /// 按并发数分块、块内 `thread::scope` 并发、块间顺序收集 —— 不引入锁)
+///
+/// 并发是**两级**的:作品级(本函数的 `batch_concurrency`)× 实体级
+/// ([`TranslateOptions::entity_concurrency`],单文档内按实体并行,见 `docs/25`)。
+/// 两级直接相乘会把 CPU 超订 `batch × entity` 倍,所以在入口把实体级按作品级与
+/// **可用核数**折算一次(方案 25 §7 阻塞 #6):每作品分到的核数
+/// `可用核数 / 有效作品并发`(取整、至少 1)就是实体级上限。折算只改并行度,不改产物。
 pub fn translate_works(
     work_ids: &[WorkId],
     target: TargetEditor,
@@ -160,6 +166,8 @@ pub fn translate_works(
     if work_ids.is_empty() {
         return Vec::new();
     }
+    let available = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let options = options.fold_entity_concurrency(work_ids.len(), available);
     let concurrency = options.concurrency().max(1);
     if concurrency == 1 || work_ids.len() <= 1 {
         return work_ids

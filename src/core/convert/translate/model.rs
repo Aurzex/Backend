@@ -319,12 +319,65 @@ mod null_tolerance_tests {
 // ===========================================================================
 
 
-/// id 来源(确定性 / 随机)
+/// 铸造种类(`uuid` / `short`)。
+///
+/// 记录模式(见 [`IdSource::recording`])只记"这一项的第几次铸造是什么形态",
+/// 最终 id 由串行阶段按**全局铸造序号**兑现 —— 形态是兑现时唯一需要的输入。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MintKind {
+    /// [`IdSource::uuid`]
+    Uuid,
+    /// [`IdSource::short`]
+    Short,
+}
+
+impl MintKind {
+    /// 临时 id 里的形态标记(单字符,见 [`TEMP_ID_PREFIX`])
+    fn tag(self) -> char {
+        match self {
+            MintKind::Uuid => 'u',
+            MintKind::Short => 's',
+        }
+    }
+
+    /// 用**串行** id 源兑现这次铸造(确定性模式下 = 第 counter 次铸造的纯函数)
+    pub(crate) fn mint(self, ids: &mut IdSource) -> String {
+        match self {
+            MintKind::Uuid => ids.uuid(),
+            MintKind::Short => ids.short(),
+        }
+    }
+}
+
+/// 临时 id 的哨兵前缀。
+///
+/// 真实 id 是 UUID / 十六进制短串,**不含控制字符**,因此带哨兵的串只可能来自
+/// [`IdSource::recording`],可以在改写时按前缀无歧义地定位(方案 25 §3 阶段 C)。
+pub(crate) const TEMP_ID_PREFIX: char = '\u{1}';
+
+/// 临时 id 体允许的字符(用于单遍改写时确定 token 的右边界)
+pub(crate) fn is_temp_id_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, ':' | '-' | '_' | '.')
+}
+
+/// id 来源(确定性 / 随机 / 记录)
 #[derive(Clone)]
 pub(crate) struct IdSource {
     deterministic: bool,
     counter: u64,
     chars: IdGenerator,
+    /// 记录模式(实体级并行):`Some` 时 [`IdSource::uuid`]/[`IdSource::short`]
+    /// 不推进全局计数器,而是产出**临时 id** 并记账
+    record: Option<IdRecord>,
+}
+
+/// 记录模式的账本
+#[derive(Clone)]
+struct IdRecord {
+    /// 记账槽位(工作项序号,**同一份文档里必须两两不同**)—— 临时 id 靠它保证全局唯一
+    slot: usize,
+    /// 本槽位的铸造账本:按铸造顺序攒 `(临时 id, 形态)`
+    log: Vec<(String, MintKind)>,
 }
 
 impl IdSource {
@@ -333,11 +386,55 @@ impl IdSource {
             deterministic,
             counter: 0,
             chars: IdGenerator::new(),
+            record: None,
         }
+    }
+
+    /// 记录模式:产出临时 id(不带全局计数),铸造顺序记进账本
+    ///
+    /// `slot` 是**记账槽位**,`同一份文档里必须两两不同` —— 临时 id 的全局唯一性完全靠它:
+    /// 同一实体在阶段 1(解析/映射/抽程序集)与阶段 2(调用点重写)各要一个记录源,
+    /// 两阶段必须用**不同的**槽位(否则同 `slot` + 同 `seq` 会撞成同一个临时 id)。
+    ///
+    /// 确定性标志在这里无用武之地:临时 id 只是占位符,最终值由串行阶段按账本顺序兑现
+    /// (确定性模式下与"今天串行实现"逐字节相同)。
+    pub(crate) fn recording(slot: usize) -> Self {
+        IdSource {
+            deterministic: false,
+            counter: 0,
+            chars: IdGenerator::new(),
+            record: Some(IdRecord {
+                slot,
+                log: Vec::new(),
+            }),
+        }
+    }
+
+    /// 取出铸造账本(`(临时 id, 形态)`,顺序 = 铸造顺序);非记录模式返回空
+    pub(crate) fn into_log(self) -> Vec<(String, MintKind)> {
+        self.record.map(|record| record.log).unwrap_or_default()
+    }
+
+    /// 记录模式:产出临时 id `"\u{1}prov:{slot}:{seq}:{tag}"` 并记账
+    ///
+    /// `slot` 必须**同一份文档内唯一**(见 [`IdSource::recording`])。
+    fn temp(&mut self, kind: MintKind) -> String {
+        let record = self.record.as_mut().expect("临时 id 只在记录模式下铸造");
+        let id = format!(
+            "{TEMP_ID_PREFIX}prov:{}:{}:{}",
+            record.slot,
+            record.log.len(),
+            kind.tag()
+        );
+        record.log.push((id.clone(), kind));
+        id
     }
 
     /// UUID v4 形态(实体 / 程序集 / KN 影子块)
     pub(crate) fn uuid(&mut self) -> String {
+        if self.record.is_some() {
+            return self.temp(MintKind::Uuid);
+        }
         self.counter += 1;
         if self.deterministic {
             return format!("00000000-0000-4000-8000-{:012x}", self.counter);
@@ -361,6 +458,9 @@ impl IdSource {
 
     /// 22 字符短 id(与反编译侧 `IdGenerator` 同风格;KN 里两种形态都见得到)
     pub(crate) fn short(&mut self) -> String {
+        if self.record.is_some() {
+            return self.temp(MintKind::Short);
+        }
         self.counter += 1;
         if self.deterministic {
             return format!("{:0>22}", format!("{:x}", self.counter));
@@ -408,5 +508,42 @@ mod id_tests {
         assert_eq!(src.short().len(), 22);
         let mut det = IdSource::new(true);
         assert_eq!(det.short().len(), 22);
+    }
+
+    /// 记录模式(实体级并行):产出带哨兵的临时 id、按铸造顺序记账、不推进全局计数;
+    /// 账本按顺序交给串行源兑现后,结果与"同一序列直接在串行源上铸造"逐个相同。
+    #[test]
+    fn recording_mode_logs_mints_and_replays_identically() {
+        let mut recorded = IdSource::recording(7);
+        let temps: Vec<String> = vec![
+            recorded.uuid(),
+            recorded.short(),
+            recorded.uuid(),
+        ];
+        assert!(
+            temps.iter().all(|id| id.starts_with(TEMP_ID_PREFIX)),
+            "记录模式必须产出临时 id:{temps:?}"
+        );
+        assert_eq!(
+            temps,
+            vec![
+                format!("{TEMP_ID_PREFIX}prov:7:0:u"),
+                format!("{TEMP_ID_PREFIX}prov:7:1:s"),
+                format!("{TEMP_ID_PREFIX}prov:7:2:u"),
+            ]
+        );
+        let log = recorded.into_log();
+        assert_eq!(log.len(), 3);
+        assert_eq!(
+            log.iter().map(|(_, kind)| *kind).collect::<Vec<_>>(),
+            vec![MintKind::Uuid, MintKind::Short, MintKind::Uuid]
+        );
+
+        // 兑现:与"直接串行铸造"逐字节一致(确定性模式下 id 是第几次铸造的纯函数)
+        let mut replay = IdSource::new(true);
+        let finals: Vec<String> = log.iter().map(|(_, kind)| kind.mint(&mut replay)).collect();
+        let mut direct = IdSource::new(true);
+        let expected = vec![direct.uuid(), direct.short(), direct.uuid()];
+        assert_eq!(finals, expected);
     }
 }

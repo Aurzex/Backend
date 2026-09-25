@@ -17,6 +17,9 @@
 //! - **产物不变(第一职责)**:与 `tests/fixtures/translate/convert_bench_baseline.json`
 //!   逐项 SHA256 相同;该文件不存在时**写入它**并提示(首次跑即建立基线)。
 //!   `deterministic_ids(true)` 下重复跑同一份输入,只要产物有半点不确定就会撞上这条。
+//! - **并发不改产物(第二职责)**:每个样本再用 `entity_concurrency = [`PARALLEL_FACTOR`]`
+//!   跑一遍,与并发 1 的 SHA256 必须相同 —— 这是实体级并行(方案 25 S3a)的核心门;
+//!   同时它的 `core`/`e2e` 列就是加速比证据(绑核、5 轮取最小)。
 //!
 //! 性能可以变,产物不能变 —— 所以基准的第一职责是守住 SHA256。
 //!
@@ -34,6 +37,10 @@ use sha2::{Digest, Sha256};
 
 /// 每个样本重复次数(取**最小值**:CPU 基准里最小值≈最少干扰,比中位数稳)
 const RUNS: usize = 5;
+
+/// 实体级并发的对照值(方案 25 S3a):同一输入在 1 与 8 下产物必须逐字节相同。
+/// 实际线程数还会被工作项数与可用核数夹取(见 `remint::workers`)
+const PARALLEL_FACTOR: usize = 8;
 
 /// 样本 = 仓库里的真作品产物(gitignored,缺失即整测试跳过)
 struct Sample {
@@ -109,6 +116,8 @@ fn bench_dir(tag: &str) -> PathBuf {
 
 /// 单个样本的一次量测结果
 struct Measured {
+    /// 本次转换实际使用的实体级工作线程数(反向恒 1)
+    entity_workers: usize,
     read_ms: f64,
     parse_ms: f64,
     core_ms: f64,
@@ -121,16 +130,16 @@ struct Measured {
     sha256: String,
 }
 
-fn measure(sample: &Sample, dir: &Path) -> Measured {
+fn measure(sample: &Sample, dir: &Path, entity_concurrency: usize) -> Measured {
     // 预热一轮(不计入):首个样本会吃冷缓存/调频爬升,不预热的话它最不可信
-    warmup(sample, dir);
+    warmup(sample, dir, entity_concurrency);
 
     let mut read = Vec::new();
     let mut parse = Vec::new();
     let mut core = Vec::new();
     let mut ser = Vec::new();
     let mut e2e = Vec::new();
-    let mut last: Option<(std::path::PathBuf, String, usize, usize, usize, u64)> = None;
+    let mut last: Option<(std::path::PathBuf, String, usize, usize, usize, u64, usize)> = None;
 
     for _ in 0..RUNS {
         let t = Instant::now();
@@ -149,7 +158,8 @@ fn measure(sample: &Sample, dir: &Path) -> Measured {
             TranslateOptions::new()
                 .output_dir(dir)
                 .deterministic_ids(true)
-                .keep_source(false),
+                .keep_source(false)
+                .entity_concurrency(entity_concurrency),
         )
         .expect("转化失败");
         e2e.push(ms(t.elapsed()));
@@ -168,11 +178,14 @@ fn measure(sample: &Sample, dir: &Path) -> Measured {
             outcome.report.blocks_converted,
             outcome.report.warnings().len(),
             output.len() as u64,
+            outcome.report.entity_workers,
         ));
     }
 
-    let (_, sha256, blocks_total, blocks_converted, warnings, out_bytes) = last.unwrap();
+    let (_, sha256, blocks_total, blocks_converted, warnings, out_bytes, entity_workers) =
+        last.unwrap();
     Measured {
+        entity_workers,
         read_ms: best(read),
         parse_ms: best(parse),
         core_ms: best(core),
@@ -187,14 +200,15 @@ fn measure(sample: &Sample, dir: &Path) -> Measured {
 }
 
 /// 不计入统计的一轮(见 `measure` 注释)
-fn warmup(sample: &Sample, dir: &Path) {
+fn warmup(sample: &Sample, dir: &Path, entity_concurrency: usize) {
     let _ = translate_file(
         Path::new(sample.path),
         sample.target,
         TranslateOptions::new()
             .output_dir(dir)
             .deterministic_ids(true)
-            .keep_source(false),
+            .keep_source(false)
+            .entity_concurrency(entity_concurrency),
     );
 }
 
@@ -221,9 +235,15 @@ fn convert_bench() {
     );
     println!("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
 
+    let available = std::thread::available_parallelism().map_or(1, |n| n.get());
+    println!(
+        "\n实体级并发对照(方案 25 S3a):可用核数 {available},请求并发 {PARALLEL_FACTOR}         (实际线程数还会被工作项数与可用核数夹取;反向不支持该选项,应当零差异)"
+    );
+
     let baseline = load_baseline();
     let mut fresh = serde_json::Map::new();
     let mut mismatched = Vec::new();
+    let mut parallel_mismatched = Vec::new();
 
     for sample in SAMPLES {
         if !Path::new(sample.path).exists() {
@@ -231,7 +251,7 @@ fn convert_bench() {
             continue;
         }
         let src_bytes = std::fs::metadata(sample.path).expect("stat 失败").len();
-        let m = measure(sample, &dir);
+        let m = measure(sample, &dir, 1);
         println!(
             "| {} | {:.1} | {:.0} | {:.0} | {:.0} | {:.0} | {:.0} | {:.1} | {}→{} | {} | {} |",
             sample.label,
@@ -248,7 +268,51 @@ fn convert_bench() {
             &m.sha256[..16],
         );
 
+        // ── 第二职责:同一输入在并发 1 与 N 下产物必须逐字节相同(实体级并行的核心门)
+        let p = measure(sample, &dir, PARALLEL_FACTOR);
+        println!(
+            "| {} [实体并发={PARALLEL_FACTOR}] | {:.1} | {:.0} | {:.0} | {:.0} | {:.0} | {:.0} | {:.1} | {}→{} | {} | {} |",
+            sample.label,
+            src_bytes as f64 / 1e6,
+            p.read_ms,
+            p.parse_ms,
+            p.core_ms,
+            p.ser_ms,
+            p.e2e_ms,
+            p.out_bytes as f64 / 1e6,
+            p.blocks_total,
+            p.blocks_converted,
+            p.warnings,
+            &p.sha256[..16],
+        );
+        println!(
+            "└ {} 加速比(并发 1 → {PARALLEL_FACTOR},实际线程 {} → {}):core {:.0} → {:.0} ms({:.2}×),e2e {:.0} → {:.0} ms({:.2}×),产物 SHA256 {}",
+            sample.label,
+            m.entity_workers,
+            p.entity_workers,
+            m.core_ms,
+            p.core_ms,
+            m.core_ms / p.core_ms.max(f64::MIN_POSITIVE),
+            m.e2e_ms,
+            p.e2e_ms,
+            m.e2e_ms / p.e2e_ms.max(f64::MIN_POSITIVE),
+            if p.sha256 == m.sha256 { "相同 ✅" } else { "不同 ❌" },
+        );
+
+        // 空门守卫:若本机可用核数 ≥ 2,则正向样本的"实体并发=8"必须真的开起多线程,
+        // 否则这一行只是"串行 vs 串行",SHA 相同毫无意义(`taskset -c 2` 就会这样:
+        // `available_parallelism` 按亲和掩码算,单核下会被折成 1)。
+        if available >= 2 && sample.target == TargetEditor::KittenN && p.entity_workers <= 1 {
+            panic!(
+                "{}:实体并发={PARALLEL_FACTOR} 实际只开了 {} 个线程(正向样本应并行)——  并发对照成了空门",
+                sample.label, p.entity_workers
+            );
+        }
+
         let key = format!("{}-{}", sample.label, sample.slug);
+        if p.sha256 != m.sha256 {
+            parallel_mismatched.push((key.clone(), m.sha256.clone(), p.sha256.clone()));
+        }
         if let Some(old) = baseline.get(&key).and_then(|v| v.as_str())
             && old != m.sha256
         {
@@ -270,13 +334,25 @@ fn convert_bench() {
         );
     }
 
+    if !parallel_mismatched.is_empty() {
+        eprintln!(
+            "\n[convert_bench] 实体级并发改变了产物(并发 1 与 {PARALLEL_FACTOR} 的 SHA256 不一致 = 失败):"
+        );
+        for (key, serial, parallel) in &parallel_mismatched {
+            eprintln!("  {key}\n    并发 1 {serial}\n    并发 {PARALLEL_FACTOR} {parallel}");
+        }
+        panic!("convert 基准:实体级并发改变了产物");
+    }
+
     if mismatched.is_empty() && !fresh.is_empty() {
         if baseline.is_empty() {
             std::fs::write(BASELINE, serde_json::to_string_pretty(&fresh).unwrap())
                 .expect("写基线失败");
             println!("\n[convert_bench] 首次运行:基线已写入 {BASELINE}");
         } else {
-            println!("\n[convert_bench] 产物 SHA256 与基线一致 ✅");
+            println!(
+                "\n[convert_bench] 产物 SHA256 与基线一致 ✅;实体级并发 1 vs {PARALLEL_FACTOR} 同 SHA256 ✅"
+            );
         }
         return;
     }
