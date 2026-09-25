@@ -42,7 +42,13 @@
 
 - 删除/合并**必须有零调用点证据**(全仓 grep 命中 0 才删);测试模块一律放**文件末尾**。
 - `src/prelude.rs` 只 re-export `utils::requests`;`utils.rs` 现导出 `requests`/`filedata`/`socketio`(`acquire.rs`/`data.rs` 已成历史名)。
-- **`core/convert/` 是"作品文件转换域"的唯一边界**:读(反编译)与写(互转)共用同一地基;域外不再有平铺的 `compiler.rs`/`unpacker.rs`/`decoders.rs`。当前布局以 `docs/rounds/21-*` §8.2 为准。
+- **`core/convert/` 是"作品文件转换域"的唯一边界**:读(反编译)与写(互转)共用同一地基;域外不再有平铺的 `compiler.rs`/`unpacker.rs`/`decoders.rs`。
+- **域内文件组织(以 `docs/rounds/31-convert-layout-consolidation-plan.md` §2.1 为准)**:一个文件一个职责;
+  生成物单独一处(`translate/tables_gen.rs`,**不可与手写表混放**);测试默认内联在被测文件末尾,
+  「本体 + 测试 > 3 000 行」时才独立成 `*_tests.rs`;**单文件上限 ≈ 2 500 行**。
+  当前布局:`mod.rs` + `shared.rs` + `decompile/{mod,editors}.rs` + `translate/{mod,model,mapping,assembly,nemo,nemo_mapping,tables_gen,reverse_tests,nemo_tests}.rs`(13 文件)。
+- 分层纪律:`translate` 子域**不碰网络**;需要网络(上传/建作品)的编排放 `core/convert/mod.rs` 门面
+  (反编译侧的可选「上传到账号」同理,见 `docs/rounds/30`)。
 - 分层纪律:`translate` 子域**不碰网络**;需要网络(上传/建作品)的编排放 `core/convert/mod.rs` 门面。
 - 文档:记录放 `docs/`;**历史轮次不改写**(保真),勘误集中到本库 `errata.md`。
 

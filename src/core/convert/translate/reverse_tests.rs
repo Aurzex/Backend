@@ -10,7 +10,7 @@ mod reverse_tests_inner {
     use super::assembly::*;
     use super::*;
     use crate::core::convert::translate::model::{BlockJson, BlockTree};
-    use crate::core::convert::translate::{kitten, mapping, model, neko};
+    use crate::core::convert::translate::{mapping, model};
     use serde_json::{Value, json};
     use std::collections::BTreeMap;
 
@@ -300,7 +300,7 @@ mod reverse_tests_inner {
             ],
             "nekoBlockJsonList": [{ "type": "procedures_2_defnoreturn", "id": "proc-1", "fields": { "NAME": "proc-1" } }]
         } } });
-        let procedures = neko::parse_kn_procedures(&dict).expect("解析程序集");
+        let procedures = model::parse_kn_procedures(&dict).expect("解析程序集");
         assert_eq!(procedures.len(), 1);
         assert_eq!(procedures[0].params.len(), 3);
 
@@ -321,7 +321,7 @@ mod reverse_tests_inner {
             crate::core::convert::EditorType::Neko,
             TargetEditor::Kitten4,
         );
-        neko::unrewrite_calls(&mut tree, &procedures, &mut ids, &mut report);
+        model::unrewrite_calls(&mut tree, &procedures, &mut ids, &mut report);
 
         let call = &tree.roots[0];
         assert_eq!(
@@ -378,7 +378,7 @@ mod reverse_tests_inner {
                 "statements": { "STACK": { "type": "self_move_to", "id": "move" } }
             }]
         } } });
-        let mut procedures = neko::parse_kn_procedures(&dict).expect("解析程序集");
+        let mut procedures = model::parse_kn_procedures(&dict).expect("解析程序集");
         let mut ids = model::IdSource::new(true);
         let mut report = TranslateReport::new(
             crate::core::convert::EditorType::Neko,
@@ -388,7 +388,7 @@ mod reverse_tests_inner {
             mapping::translate_kn_to_kitten(&mut entry.tree, false, &mut report);
         }
         let root =
-            neko::def_root_from_entry(&procedures[0], &mut ids, &mut report).expect("定义根");
+            model::def_root_from_entry(&procedures[0], &mut ids, &mut report).expect("定义根");
 
         assert_eq!(root.kind, "procedures_2_defnoreturn");
         assert_eq!(field(&root, "NAME"), Some("非线性移动"));
@@ -459,11 +459,11 @@ mod reverse_tests_inner {
         let mut ids = model::IdSource::new(false);
         let mut entities = 0usize;
         for (id, is_scene, entity) in kn_entities(&doc) {
-            let tree = neko::parse_kn_entity(&entity["nekoBlockJsonList"]).expect("解析实体");
+            let tree = model::parse_kn_entity(&entity["nekoBlockJsonList"]).expect("解析实体");
             if tree.roots.is_empty() {
                 continue;
             }
-            let bdj = kitten::build_block_data_json(&tree, &mut ids).expect("编码邻接表");
+            let bdj = model::build_block_data_json(&tree, &mut ids).expect("编码邻接表");
             assert!(bdj["blocks"].is_object() && bdj["connections"].is_object());
             assert_eq!(
                 bdj["blocks"].as_object().map(|m| m.len()),
@@ -471,7 +471,7 @@ mod reverse_tests_inner {
                 "每个积木都要有一条连接表条目(叶子的值是空对象)"
             );
             assert_eq!(bdj["comments"], json!({}));
-            let back = kitten::parse_block_data_json(&bdj).expect("再解析").tree;
+            let back = model::parse_block_data_json(&bdj).expect("再解析").tree;
             // `blocks` 是 id 字典(serde_json 的 Map 按 key 排序),根的顺序会变成 id 序 ——
             // Kitten4 的根块各自带 `location`,顺序不影响语义,故按 id 比较集合。
             let mut left: Vec<_> = tree.roots.clone();
@@ -514,7 +514,7 @@ mod reverse_tests_inner {
             .unwrap(),
         ]);
         let mut ids = model::IdSource::new(true);
-        let bdj = kitten::build_block_data_json(&tree, &mut ids).expect("编码");
+        let bdj = model::build_block_data_json(&tree, &mut ids).expect("编码");
         assert_eq!(bdj["blocks"]["r1"]["location"], json!([0, 80]));
         assert_eq!(bdj["blocks"]["r2"]["location"], json!([0, 300]));
         assert_eq!(
@@ -540,7 +540,7 @@ mod reverse_tests_inner {
             .unwrap(),
         ]);
         let mut ids = model::IdSource::new(true);
-        let bdj = kitten::build_block_data_json(&tree, &mut ids).expect("编码");
+        let bdj = model::build_block_data_json(&tree, &mut ids).expect("编码");
         let blocks = bdj["blocks"].as_object().expect("blocks");
         assert_eq!(
             blocks.len(),
@@ -676,7 +676,7 @@ mod reverse_tests_inner {
         out
     }
 
-    /// 实体侧的类型频次;`normalize_calls` 会先跑 [`neko::unrewrite_calls`] 抵消正向 `KC` 的复制语义
+    /// 实体侧的类型频次;`normalize_calls` 会先跑 [`model::unrewrite_calls`] 抵消正向 `KC` 的复制语义
     fn census_entities_with(doc: &Value, normalize_calls: bool) -> BTreeMap<String, usize> {
         let mut out = BTreeMap::new();
         let mut ids = model::IdSource::new(true);
@@ -685,17 +685,17 @@ mod reverse_tests_inner {
             TargetEditor::Kitten4,
         );
         let targets = if normalize_calls {
-            neko::call_targets(
-                &neko::parse_kn_procedures(doc.get("procedures").unwrap_or(&Value::Null))
+            model::call_targets(
+                &model::parse_kn_procedures(doc.get("procedures").unwrap_or(&Value::Null))
                     .unwrap_or_default(),
             )
         } else {
             Vec::new()
         };
         for (_id, _is_scene, entity) in kn_entities(doc) {
-            let mut tree = neko::parse_kn_entity(&entity["nekoBlockJsonList"]).unwrap_or_default();
+            let mut tree = model::parse_kn_entity(&entity["nekoBlockJsonList"]).unwrap_or_default();
             if normalize_calls {
-                neko::unrewrite_calls(&mut tree, &targets, &mut ids, &mut report);
+                model::unrewrite_calls(&mut tree, &targets, &mut ids, &mut report);
             }
             accumulate(&tree, &mut out);
         }
@@ -714,7 +714,7 @@ mod reverse_tests_inner {
     ) -> BTreeMap<String, BTreeMap<String, usize>> {
         let mut out: BTreeMap<String, BTreeMap<String, usize>> = BTreeMap::new();
         let mut sizes: BTreeMap<String, usize> = BTreeMap::new();
-        for entry in neko::parse_kn_procedures(doc.get("procedures").unwrap_or(&Value::Null))
+        for entry in model::parse_kn_procedures(doc.get("procedures").unwrap_or(&Value::Null))
             .unwrap_or_default()
         {
             let Some(root) = entry.tree.roots.first() else {
@@ -748,7 +748,7 @@ mod reverse_tests_inner {
     }
 
     fn procedure_trees(doc: &Value) -> Vec<BlockTree> {
-        neko::parse_kn_procedures(doc.get("procedures").unwrap_or(&Value::Null))
+        model::parse_kn_procedures(doc.get("procedures").unwrap_or(&Value::Null))
             .unwrap_or_default()
             .into_iter()
             .map(|entry| entry.tree)

@@ -1,63 +1,51 @@
-//! NEMO → KN 的语义映射(官方 `nemoBcmToNekoBcmUtils` 内层类 `hI` 的忠实移植)。
-//!
-//! 官方 bundle:`temp/web/main-vendors.9b801394.js` 模块 41888,类 `hI` 位于偏移
-//! ~5960458–5999640;表(`sI` 类型映射、`getMappedName` 内联槽位表、`specialFieldValueMap`、
-//! `SHADOW_FIELD_NAME_MAP`、`oI` 占位标题)转录在 [`super::tables_gen_nemo`]。
-//! 研究结论见 `docs/rounds/27-nemo-to-kn-conversion-plan.md` §9。
-//!
-//! ## 为什么"前端"和"映射"在同一个模块里
-//!
-//! Kitten 侧是"前端(`kitten::parse_block_data_json` 出纯图)→ 映射(`mapping::translate_kitten_to_kn`
-//! 改语义)"两段;NEMO 侧官方**没有**这段分层:一趟 DOM 遍历里边走边查表改名/改槽/合成默认值/降级占位
-//! —— 槽位名要看子积木的**映射后**类型、影子字段名要用**映射后**类型去查 `SHADOW_FIELD_NAME_MAP`,
-//! 拆成两段就必然把同一个状态机复制一遍。所以本模块就是 NEMO 的"前端 + 映射"一体件,入口是
-//! [`translate_nemo_to_kn`](与 Kitten 侧 `mapping::translate_kitten_to_kn` 同层同义):输入是
-//! **已解析、已过前置改写**的积木 XML 节点(解析/序列化在 [`super::nemo_xml`]),输出 KN 的
-//! [`BlockTree`];文档级管线(骨架、版本迁移、资源 url、变量/舞台归一)在 [`super::nemo`]。
-//!
-//! ## 语义要点(对应 docs/rounds/27 §9.2/§9.3)
-//!
-//! - **槽位覆盖语义**:`<value name="A"><shadow …/><block …/></value>` → `inputs["A"]` = 那个块、
-//!   `shadows["A"]` = 影子**重新序列化**的 `<shadow …/>`。`<empty>` 与 `<shadow>` 走不同分支(官方如此):
-//!   前者 `inputs["A"]` 是 `logic_empty` 节点 + `shadows["A"]` 是 `<empty …/>`;后者 `inputs["A"]` 是影子
-//!   **实体化**出来的输入节点 + `shadows["A"]` 是 `<shadow …/>`。
-//! - **取值驱动的类型**(不能平铺成"类型→类型"表):`appearance_of_sprite`/`coordinate_of_sprite` 按
-//!   `attribute` 取值 0/1/2/3/5 拆成 `coordinate_of_sprite`/`style_of_sprite`/`appearance_of_sprite`;
-//!   `self_stress_animation` 按 `appear` 取值拆出 `self_appear_animation`;解析**程序集**时没有
-//!   `currentActor`,`get_styles` 的字段名退成 `NUM`、影子类型退成 `math_number`。
-//! - **KN 侧合成默认值**:见 [`Mapper::handle_special_block_types`]、`parse_fields` 里的
-//!   `mouse_down.sprite` / `add_width_height_scale.increase` / `self_change_effect.increase`、
-//!   [`Mapper::handle_broadcast_field`]、[`update_block_with_param`]。
-//! - **未映射块 → 占位积木**(与官方一致):手机传感器/硬件/AI 等类型在 `sI` 里就被映射成
-//!   `bcm_translator_text_*`,mutation 里带中文标题([`NEMO_MUTATION_TEXT`]),`disabled = true`;
-//!   同时记一条 [`TranslateWarning::DegradedToText`]。
-//! - **id**:官方 `replaceIdsWithUUID` 先把 `block`/`shadow`/`statement`/`value` 的 id 全重铸成随机
-//!   uuid(`empty` **不**重铸),解析期再按需铸新 id;我们统一走 [`IdSource`]
-//!   (`deterministic_ids` 下产物稳定,便于回归)。
-//!
-//! ## 与官方的已知偏差(逐条:都在报告或注释里可见)
-//!
-//! - 官方 `procedures_2_return_value` 的 `VALUE` 影子把 `cI`(**函数本身**,漏了调用)拼进 `id`,
-//!   产物里会是一段函数源码;这里改铸真 id(官方 bug,不复制)。
-//! - 官方在 `<block type="mobile__text">` 上用**字符串替换**插 `<mutation items="1">`;对自闭合写法
-//!   会插成兄弟节点(随后被空类型过滤丢掉)。这里按"插成第一个子节点"实现,自闭合写法下行为不同
-//!   (真实作品里 `mobile__text` 不会自闭合)。
-//! - `fields` 值在官方是 `undefined` 时,`JSON.stringify` 会丢掉该键(`get_styles` 造型下标越界、
-//!   非数字时就会这样);这里同样**丢弃该键**,不落 `null`。
-
-use std::collections::{BTreeMap, HashMap};
-use std::sync::LazyLock;
-
-use serde_json::{Map, Value, json};
-
 use super::TranslateReport;
 use super::TranslateWarning;
 use super::model::{BlockJson, BlockTree, IdSource};
-use super::nemo_xml::XmlNode;
-use super::tables_gen_nemo::{
-    NEMO_INPUT_NAME_MAP, NEMO_MUTATION_TEXT, NEMO_SHADOW_FIELD_NAMES, NEMO_SPECIAL_FIELD_VALUES,
-    NEMO_TO_KN, NemoMutationText,
-};
+use super::nemo::XmlNode;
+use serde_json::{Map, Value, json};
+use std::collections::{BTreeMap, HashMap};
+use std::sync::LazyLock;
+
+// 来自 src/core/convert/translate/nemo_mapping.rs
+// NEMO → KN 的语义映射(官方 `nemoBcmToNekoBcmUtils` 内层类 `hI` 的忠实移植)。
+// 官方 bundle:`temp/web/main-vendors.9b801394.js` 模块 41888,类 `hI` 位于偏移
+// ~5960458–5999640;表(`sI` 类型映射、`getMappedName` 内联槽位表、`specialFieldValueMap`、
+// `SHADOW_FIELD_NAME_MAP`、`oI` 占位标题)转录在 [`super::tables_gen_nemo`]。
+// 研究结论见 `docs/rounds/27-nemo-to-kn-conversion-plan.md` §9。
+// ## 为什么"前端"和"映射"在同一个模块里
+// Kitten 侧是"前端(`model::parse_block_data_json` 出纯图)→ 映射(`mapping::translate_kitten_to_kn`
+// 改语义)"两段;NEMO 侧官方**没有**这段分层:一趟 DOM 遍历里边走边查表改名/改槽/合成默认值/降级占位
+// —— 槽位名要看子积木的**映射后**类型、影子字段名要用**映射后**类型去查 `SHADOW_FIELD_NAME_MAP`,
+// 拆成两段就必然把同一个状态机复制一遍。所以本模块就是 NEMO 的"前端 + 映射"一体件,入口是
+// [`translate_nemo_to_kn`](与 Kitten 侧 `mapping::translate_kitten_to_kn` 同层同义):输入是
+// **已解析、已过前置改写**的积木 XML 节点(解析/序列化在 [`super::nemo_xml`]),输出 KN 的
+// [`BlockTree`];文档级管线(骨架、版本迁移、资源 url、变量/舞台归一)在 [`super::nemo`]。
+// ## 语义要点(对应 docs/rounds/27 §9.2/§9.3)
+// - **槽位覆盖语义**:`<value name="A"><shadow …/><block …/></value>` → `inputs["A"]` = 那个块、
+// `shadows["A"]` = 影子**重新序列化**的 `<shadow …/>`。`<empty>` 与 `<shadow>` 走不同分支(官方如此):
+// 前者 `inputs["A"]` 是 `logic_empty` 节点 + `shadows["A"]` 是 `<empty …/>`;后者 `inputs["A"]` 是影子
+// **实体化**出来的输入节点 + `shadows["A"]` 是 `<shadow …/>`。
+// - **取值驱动的类型**(不能平铺成"类型→类型"表):`appearance_of_sprite`/`coordinate_of_sprite` 按
+// `attribute` 取值 0/1/2/3/5 拆成 `coordinate_of_sprite`/`style_of_sprite`/`appearance_of_sprite`;
+// `self_stress_animation` 按 `appear` 取值拆出 `self_appear_animation`;解析**程序集**时没有
+// `currentActor`,`get_styles` 的字段名退成 `NUM`、影子类型退成 `math_number`。
+// - **KN 侧合成默认值**:见 [`Mapper::handle_special_block_types`]、`parse_fields` 里的
+// `mouse_down.sprite` / `add_width_height_scale.increase` / `self_change_effect.increase`、
+// [`Mapper::handle_broadcast_field`]、[`update_block_with_param`]。
+// - **未映射块 → 占位积木**(与官方一致):手机传感器/硬件/AI 等类型在 `sI` 里就被映射成
+// `bcm_translator_text_*`,mutation 里带中文标题([`NEMO_MUTATION_TEXT`]),`disabled = true`;
+// 同时记一条 [`TranslateWarning::DegradedToText`]。
+// - **id**:官方 `replaceIdsWithUUID` 先把 `block`/`shadow`/`statement`/`value` 的 id 全重铸成随机
+// uuid(`empty` **不**重铸),解析期再按需铸新 id;我们统一走 [`IdSource`]
+// (`deterministic_ids` 下产物稳定,便于回归)。
+// ## 与官方的已知偏差(逐条:都在报告或注释里可见)
+// - 官方 `procedures_2_return_value` 的 `VALUE` 影子把 `cI`(**函数本身**,漏了调用)拼进 `id`,
+// 产物里会是一段函数源码;这里改铸真 id(官方 bug,不复制)。
+// - 官方在 `<block type="mobile__text">` 上用**字符串替换**插 `<mutation items="1">`;对自闭合写法
+// 会插成兄弟节点(随后被空类型过滤丢掉)。这里按"插成第一个子节点"实现,自闭合写法下行为不同
+// (真实作品里 `mobile__text` 不会自闭合)。
+// - `fields` 值在官方是 `undefined` 时,`JSON.stringify` 会丢掉该键(`get_styles` 造型下标越界、
+// 非数字时就会这样);这里同样**丢弃该键**,不落 `null`。
 
 /// 官方 `lI`:影子 / 变异 XML 的命名空间
 pub(crate) const XHTML: &str = "http://www.w3.org/1999/xhtml";
@@ -581,7 +569,7 @@ fn select_text(map: &[(&str, &str)], key: &str) -> String {
 
 /// 一份积木 XML(已解析 + 已过前置改写)→ KN 的 [`BlockTree`]
 ///
-/// `roots` 来自 [`super::nemo_xml::parse_fragment`](`<root>` 包装的直接子元素);
+/// `roots` 来自 [`super::nemo::parse_fragment`](`<root>` 包装的直接子元素);
 /// `subject` 决定 `currentActor` / `currentProcedure`(官方 `parseBlocksXML` 的第二参)。
 pub(crate) fn translate_nemo_to_kn(
     roots: &[XmlNode],
@@ -726,7 +714,7 @@ pub(crate) fn nemo_parse_procedures(
     let mut out = Vec::with_capacity(plan.len());
     for (entry, params) in plan {
         let mut tree = match &entry.blocks_xml {
-            Some(xml) => match super::nemo_xml::parse_fragment(&format!("<root>{xml}</root>")) {
+            Some(xml) => match super::nemo::parse_fragment(&format!("<root>{xml}</root>")) {
                 Ok(roots) => {
                     report.blocks_total += super::nemo::count_source_elements(&roots);
                     translate_nemo_to_kn(&roots, NemoSubject::Params(&params), ctx, ids, report)
@@ -756,7 +744,7 @@ pub(crate) fn nemo_parse_procedures(
 }
 
 fn has_return_blocks(xml: &str) -> bool {
-    super::nemo_xml::parse_fragment(&format!("<root>{xml}</root>"))
+    super::nemo::parse_fragment(&format!("<root>{xml}</root>"))
         .map(|roots| contains_return_block(&roots))
         .unwrap_or(false)
 }
@@ -2127,3 +2115,563 @@ fn escape_text(text: &str) -> String {
     }
     out
 }
+
+// 来自 src/core/convert/translate/tables_gen_nemo.rs
+// **本文件由人工转录官方 bundle,不要手改格式。**
+// 数据来源:官方编辑器 bundle `main-vendors.9b801394.js`(webpack 模块 41888):
+// NEMO 类型映射 `sI`、字段槽改名表 `getMappedName` 内联表、`specialFieldValueMap`、
+// `SHADOW_FIELD_NAME_MAP`、占位积木标题表 `oI`。
+// 版本迁移目标常量 `qC.bcm_version`。
+// 转录口径:键按 **ASCII 升序** 排列(与仓库 `tables_gen.rs` 一致,便于 diff);值逐字保留原文(含中文与 `{index}` 这类占位符)。
+
+/// 版本迁移的目标版本(官方 `qC.bcm_version`)
+pub(crate) const NEMO_BCM_VERSION: &str = "0.16.2";
+
+/// NEMO → KN 积木类型映射(官方 `sI`)
+pub(crate) const NEMO_TO_KN: &[(&str, &str)] = &[
+    ("add_width_height_scale", "add_width_height_scale"),
+    ("ask_and_choose", "ask_and_choose"),
+    ("audio__play_audio", "play_audio"),
+    ("audio__play_audio_and_wait", "play_audio_and_wait"),
+    ("audio__play_words_audio", "play_words_audio"),
+    ("audio__play_words_audio_wait", "play_word_audio_wait"),
+    ("audio__stop_all_audios", "stop_audio"),
+    ("break", "break"),
+    ("bump", "bump_into"),
+    ("bump_into_color", "bump_into_color"),
+    ("change_cloud_variable", "change_variables"),
+    ("change_variable", "change_variables"),
+    ("check_sence", "bcm_translator_text_return_boolean_block"),
+    ("clear_drawing", "clear_drawing"),
+    ("cloud_variables_get", "variables_get"),
+    ("cloud_variables_set", "variables_set"),
+    (
+        "connected_users_get",
+        "bcm_translator_text_return_value_block",
+    ),
+    ("controls_if", "controls_if"),
+    ("controls_if_no_else", "controls_if"),
+    ("coordinate_of_sprite", "coordinate_of_sprite"),
+    ("dispose", "dispose_clone"),
+    ("divisible_by", "divisible_by"),
+    ("get_answer", "get_answer"),
+    ("get_choice_or_index", "get_choice_and_index"),
+    ("get_clone_index_property", "get_clone_index_property"),
+    ("get_clone_num", "get_clone_num"),
+    ("get_current_clone_index", "get_current_clone_index"),
+    ("get_mouse_info", "get_mouse_info"),
+    ("get_orientation", "get_orientation"),
+    ("get_split_options", "text"),
+    ("get_stage_info", "get_stage_info"),
+    ("get_time", "get_time"),
+    ("hide_ranking", "bcm_translator_text_execution_block"),
+    (
+        "is_ranking_show_hide",
+        "bcm_translator_text_return_boolean_block",
+    ),
+    ("list_get", "list_get"),
+    ("lists_append", "list_append"),
+    ("lists_copy", "list_copy"),
+    ("lists_delete", "delete_list_item"),
+    ("lists_get", "pure_list_get"),
+    ("lists_get_value", "list_item"),
+    ("lists_index_of", "list_index_of"),
+    ("lists_insert_value", "list_insert_value"),
+    ("lists_is_exist", "list_is_exist"),
+    ("lists_length", "list_length"),
+    ("lists_replace", "replace_list_item"),
+    ("logic_boolean", "logic_boolean"),
+    ("logic_compare", "logic_compare"),
+    ("logic_negate", "logic_negate"),
+    ("logic_operation", "logic_operation"),
+    ("math_arithmetic_common", "math_arithmetic"),
+    ("math_arithmetic_power", "math_arithmetic"),
+    ("math_modulo", "math_modulo"),
+    ("math_number_property", "math_number_property"),
+    ("math_round", "math_round"),
+    ("math_single", "math_function"),
+    ("math_trig_arc", "math_trig"),
+    ("math_trig_common", "math_trig"),
+    ("microbit_accelerometer", "microbit_accelerometer"),
+    ("microbit_button_is_pressed", "microbit_button_is_pressed"),
+    ("microbit_button_when", "microbit_button_when"),
+    ("microbit_change_bpm", "microbit_change_bpm"),
+    ("microbit_compass_heading", "microbit_compass_heading"),
+    ("microbit_get_volume", "microbit_get_volume"),
+    ("microbit_is_gesture", "microbit_is_gesture"),
+    ("microbit_led_clear", "microbit_led_clear"),
+    ("microbit_led_is_plot", "microbit_led_is_plot"),
+    ("microbit_led_plot", "microbit_led_plot"),
+    ("microbit_led_plot_graph", "microbit_led_plot_graph"),
+    ("microbit_led_show_custom", "microbit_led_show_custom"),
+    ("microbit_led_show_icon", "microbit_led_show_icon"),
+    ("microbit_led_show_number", "microbit_led_show_number"),
+    ("microbit_led_show_text", "microbit_led_show_text"),
+    ("microbit_led_toggle", "microbit_led_toggle"),
+    ("microbit_led_unplot", "microbit_led_unplot"),
+    ("microbit_light_level", "microbit_light_level"),
+    ("microbit_logo_is_pressed", "microbit_logo_is_pressed"),
+    ("microbit_logo_when", "microbit_logo_when"),
+    ("microbit_magnetometer", "microbit_magnetometer"),
+    ("microbit_math_map", "microbit_math_map"),
+    ("microbit_pause_by_beats", "microbit_pause_by_beats"),
+    ("microbit_pin_analog_read", "microbit_pin_analog_read"),
+    ("microbit_pin_analog_write", "microbit_pin_analog_write"),
+    ("microbit_pin_digital_read", "microbit_pin_digital_read"),
+    ("microbit_pin_digital_write", "microbit_pin_digital_write"),
+    ("microbit_pin_is_pressed", "microbit_pin_is_pressed"),
+    ("microbit_pin_when", "microbit_pin_when"),
+    ("microbit_play_melody", "microbit_play_melody"),
+    ("microbit_play_tone_by_beats", "microbit_play_tone_by_beats"),
+    ("microbit_rotatio", "microbit_rotatio"),
+    (
+        "microbit_servo_set_angle_360",
+        "microbit_servo_set_angle_270",
+    ),
+    ("microbit_servo_set_pulse", "microbit_servo_set_pulse"),
+    ("microbit_set_bpm", "microbit_set_bpm"),
+    ("microbit_set_volume", "microbit_set_volume"),
+    ("microbit_sound_level", "microbit_sound_level"),
+    ("microbit_stop", "microbit_stop"),
+    ("microbit_temperature", "microbit_temperature"),
+    ("midi__get_bpm", "bcm_translator_text_return_value_block"),
+    (
+        "midi__get_playing_column",
+        "bcm_translator_text_return_value_block",
+    ),
+    (
+        "midi__get_section_notes",
+        "bcm_translator_text_return_value_block",
+    ),
+    ("midi__on_play_note", "bcm_translator_text_event_block"),
+    ("midi__on_play_section", "bcm_translator_text_event_block"),
+    ("midi__play_section", "bcm_translator_text_execution_block"),
+    ("midi__set_program", "bcm_translator_text_execution_block"),
+    (
+        "midi__set_speed_rate",
+        "bcm_translator_text_execution_block",
+    ),
+    ("midi_get", "bcm_translator_text_return_value_block"),
+    ("midi_get_all", "bcm_translator_text_execution_block"),
+    ("midi_get_note", "bcm_translator_text_execution_block"),
+    ("mirror", "mirror"),
+    ("mobile__get", "appearance_of_sprite"),
+    ("mobile__get_voice_volume", "get_voice_volume"),
+    ("mobile__set_timer", "set_timer_state"),
+    ("mobile__show_timer", "show_hide_timer"),
+    ("mobile__text", "text_join"),
+    ("mobile__timer_value", "timer"),
+    ("mobile_change_actor_layer", "set_top_bottom_layer"),
+    ("mouse_down", "mouse_down"),
+    ("on_phone_shake", "bcm_translator_text_event_block"),
+    ("on_phone_tilt", "bcm_translator_text_event_block"),
+    ("on_receive_sound", "bcm_translator_text_event_block"),
+    ("on_running_group_activated", "on_running_group_activated"),
+    ("on_swipe", "on_swipe"),
+    ("procedures_2_callnoreturn", "procedures_2_callnoreturn"),
+    ("procedures_2_callreturn", "procedures_2_callreturn"),
+    ("procedures_2_defnoreturn", "procedures_2_defnoreturn"),
+    ("procedures_2_parameter", "procedures_2_parameter"),
+    ("procedures_2_return_value", "procedures_2_return_value"),
+    ("program", "bcm_translator_text_return_value_block"),
+    ("random", "random_num"),
+    ("repeat_forever", "repeat_forever"),
+    ("repeat_forever_until", "repeat_forever_until"),
+    ("repeat_n_times", "repeat_n_times"),
+    ("restart", "restart"),
+    ("scenes_index_get", "get_screens"),
+    ("self_appear", "self_appear"),
+    ("self_ask", "self_ask"),
+    ("self_bounce_off_edge", "self_bounce_off_edge"),
+    ("self_broadcast", "self_broadcast"),
+    ("self_change_effect_2", "self_change_effect"),
+    (
+        "self_change_pen_color_property",
+        "self_change_pen_color_property",
+    ),
+    ("self_change_pen_size", "self_change_pen_size"),
+    ("self_change_position_x", "self_change_coordinate_x"),
+    ("self_change_position_y", "self_change_coordinate_y"),
+    ("self_change_scale", "self_change_scale"),
+    ("self_clear_effects", "clear_all_effects"),
+    ("self_dialog", "self_dialog"),
+    ("self_dialog_wait", "self_dialog_wait"),
+    ("self_disappear", "self_disappear"),
+    ("self_distance_to", "distance_to"),
+    ("self_face_to", "self_face_to"),
+    ("self_face_to_sprite", "self_face_to_sprite"),
+    ("self_flip", "bcm_translator_text_execution_block"),
+    ("self_glide_position_x", "self_glide_coordinate_x"),
+    ("self_glide_position_y", "self_glide_coordinate_y"),
+    ("self_glide_to", "self_glide_to"),
+    ("self_go_forward", "self_go_forward"),
+    ("self_gradually_appear", "self_gradually_appear"),
+    ("self_gradually_disappear", "self_gradually_disappear"),
+    ("self_gradually_show_hide", "self_gradually_show_hide"),
+    ("self_listen", "self_listen"),
+    ("self_move_specify", "self_move_specify"),
+    ("self_move_specify_sprite", "self_move_specify_sprite"),
+    ("self_move_to", "self_move_to"),
+    ("self_next_or_previous_style", "self_prev_next_style"),
+    ("self_on_tap", "sprite_on_tap"),
+    ("self_out_of_boundary", "out_of_boundary"),
+    ("self_pen_down", "self_pen_down"),
+    ("self_pen_up", "self_pen_up"),
+    ("self_point_towards", "self_point_towards"),
+    ("self_rotate", "self_rotate"),
+    ("self_rotate_around", "self_rotate_around"),
+    ("self_set_draggable", "self_set_draggable"),
+    ("self_set_effect_2", "self_set_effect"),
+    ("self_set_pen_color", "self_set_pen_color"),
+    ("self_set_pen_color_property", "self_set_pen_color_property"),
+    ("self_set_pen_size", "self_set_pen_size"),
+    ("self_set_position_x", "self_set_position_x"),
+    ("self_set_position_y", "self_set_position_y"),
+    ("self_set_role_camp", "self_set_role_camp"),
+    ("self_set_rotation_type", "self_set_rotation_type"),
+    ("self_translate_animation", "self_stress_animation"),
+    ("set_costume_by_index", "set_sprite_style"),
+    ("set_fill_path", "bcm_translator_text_execution_block"),
+    ("set_fill_style", "bcm_translator_text_execution_block"),
+    ("set_scale", "set_scale"),
+    ("set_scene_by_index", "switch_to_screen"),
+    ("set_scene_transition", "set_screen_transition"),
+    ("set_width_height_scale", "set_width_height_scale"),
+    ("show_hide_cloud_variable", "show_hide_variables"),
+    ("show_hide_list", "show_hide_list"),
+    ("show_hide_variable", "show_hide_variables"),
+    ("show_ranking", "bcm_translator_text_execution_block"),
+    ("show_stage_dialog", "create_stage_dialog"),
+    ("sound_get", "get_play_audio"),
+    ("sound_get_all", "get_stop_audio"),
+    ("stamp", "stamp"),
+    ("start_as_a_mirror", "start_as_a_mirror"),
+    ("start_on_click", "on_running_group_activated"),
+    ("stop", "stop"),
+    ("style_of_sprite", "style_of_sprite"),
+    ("styles_index_get", "get_styles"),
+    ("text_char_at", "text_select"),
+    ("text_contain", "text_contain"),
+    ("text_join", "text_join"),
+    ("text_length", "text_length"),
+    ("text_split", "text_split"),
+    ("user_id_get", "user_id_get"),
+    ("username_get", "username_get"),
+    ("variables_get", "variables_get"),
+    ("variables_set", "variables_set"),
+    ("wait", "wait"),
+    ("wait_until", "wait_until"),
+    ("when", "when"),
+];
+
+/// 官方 NEMO `getMappedName` 的槽位改名表:(目标 KN 类型) → [(原槽名, 目标槽名)]
+///
+/// 注意:与 Kitten 侧同名表(`mapping.rs` 的 `INPUT_NAME_MAP`)不同 —— NEMO 表的键是小写
+/// (`var`/`index`/`value`/`text`…),Kitten 表是大写(`VAR`/`INDEX`/`VALUE`);两侧是两份独立的表,
+/// 不能互相代用(实测同一份 bundle 里两张表 33 / 69 条,同名键的映射也不一样)。
+pub(crate) const NEMO_INPUT_NAME_MAP: &[(&str, &[(&str, &str)])] = &[
+    (
+        "delete_list_item",
+        &[("index", "list_index"), ("item", "type"), ("var", "list")],
+    ),
+    (
+        "divisible_by",
+        &[("divisor", "B"), ("number_to_check", "A")],
+    ),
+    (
+        "list_append",
+        &[("value", "list_item_value"), ("var", "list")],
+    ),
+    ("list_copy", &[("target", "target_list"), ("value", "list")]),
+    (
+        "list_index_of",
+        &[("value", "list_item_value"), ("var", "list")],
+    ),
+    (
+        "list_insert_value",
+        &[
+            ("index", "list_index"),
+            ("value", "list_item_value"),
+            ("var", "list"),
+        ],
+    ),
+    (
+        "list_is_exist",
+        &[("value", "list_item_value"), ("var", "list")],
+    ),
+    ("list_item", &[("index", "list_index"), ("var", "list")]),
+    ("list_length", &[("var", "list")]),
+    (
+        "lists_get_value",
+        &[("index", "list_index"), ("var", "list")],
+    ),
+    ("lists_length", &[("var", "list")]),
+    ("logic_compare", &[("a", "A"), ("b", "B")]),
+    ("logic_negate", &[("bool", "logic")]),
+    ("logic_operation", &[("a", "A"), ("b", "B")]),
+    ("math_arithmetic", &[("a", "A"), ("b", "B")]),
+    ("math_arithmetic_power", &[("a", "A"), ("b", "B")]),
+    (
+        "math_modulo",
+        &[
+            ("a", "divisor"),
+            ("b", "dividend"),
+            ("dividend", "A"),
+            ("divisor", "B"),
+        ],
+    ),
+    ("math_number_property", &[("number_to_check", "num")]),
+    (
+        "microbit_math_map",
+        &[
+            ("fromend", "fromEnd"),
+            ("fromstart", "fromStart"),
+            ("toend", "toEnd"),
+            ("tostart", "toStart"),
+        ],
+    ),
+    ("play_audio", &[("audio", "audio_id")]),
+    ("play_audio_and_wait", &[("audio", "audio_id")]),
+    ("procedures_2_return_value", &[("value", "VALUE")]),
+    ("random_num", &[("a", "A"), ("b", "B")]),
+    (
+        "replace_list_item",
+        &[
+            ("index", "list_index"),
+            ("item", "type"),
+            ("value", "list_item_value"),
+            ("var", "list"),
+        ],
+    ),
+    ("self_change_effect", &[("steps", "value")]),
+    (
+        "self_set_pen_color_property",
+        &[("val", "val"), ("value", "val")],
+    ),
+    ("set_sprite_style", &[("index", "style_id")]),
+    ("stop_audio", &[("audio", "audio_id")]),
+    ("switch_to_screen", &[("index", "screen_id")]),
+    ("text_contain", &[("text1", "A"), ("text2", "B")]),
+    ("text_join", &[("text", "ADD0")]),
+    ("text_length", &[("value", "text")]),
+    (
+        "text_select",
+        &[("char_index", "start_index"), ("string", "text")],
+    ),
+];
+
+/// 官方 NEMO `specialFieldValueMap`:(字段名) → [(原值, 目标值)]
+pub(crate) const NEMO_SPECIAL_FIELD_VALUES: &[(&str, &[(&str, &str)])] = &[
+    ("BOOL", &[("FALSE", "false"), ("TRUE", "true")]),
+    (
+        "align",
+        &[("CENTER", "center"), ("LEFT", "right"), ("RIGHT", "left")],
+    ),
+    ("audio_id", &[("__all_sounds", "all_audio")]),
+    (
+        "layer",
+        &[
+            ("back", "bottom"),
+            ("backward", "next_layer"),
+            ("forward", "prev_layer"),
+            ("front", "peak"),
+        ],
+    ),
+    (
+        "op",
+        &[
+            ("EQ", "eq"),
+            ("GTE", "gte"),
+            ("LT", "lt"),
+            ("NEQ", "neq"),
+            ("ROUNDDOWN", "round_down"),
+            ("ROUNDUP", "round_up"),
+        ],
+    ),
+    ("prev_next", &[("next", "next"), ("previous", "prev")]),
+    (
+        "screen_id",
+        &[("__next_scene", "next"), ("__previous_scene", "prev")],
+    ),
+    (
+        "sprite",
+        &[
+            ("__mouse", "--mouse"),
+            ("__pointer", "--mouse"),
+            ("__random", "--random"),
+            ("__self", "--self"),
+        ],
+    ),
+    (
+        "sprite1",
+        &[
+            ("__edge", "--edge"),
+            ("__edge_bottom", "--edge_bottom"),
+            ("__edge_left", "--edge_left"),
+            ("__edge_right", "--edge_right"),
+            ("__edge_top", "--edge_top"),
+            ("__mouse", "--mouse"),
+            ("__pointer", "--mouse"),
+            ("__random", "--random"),
+            ("__self", "--self"),
+        ],
+    ),
+    ("target", &[("X", "x"), ("Y", "y"), ("Z", "z")]),
+    ("time", &[("week", "weekday")]),
+    (
+        "type",
+        &[
+            ("ABS", "1"),
+            ("ACOS", "acos"),
+            ("ADD", "add"),
+            ("AND", "and"),
+            ("ASIN", "asin"),
+            ("ATAN", "atan"),
+            ("COS", "cos"),
+            ("DIVIDE", "divide"),
+            ("EXP", "5"),
+            ("LN", "3"),
+            ("LOG10", "4"),
+            ("MINUS", "minus"),
+            ("MULTIPLY", "multiply"),
+            ("NEG", "2"),
+            ("OR", "or"),
+            ("POW10", "6"),
+            ("POWER", "power"),
+            ("ROOT", "0"),
+            ("ROUND", "round"),
+            ("ROUNDDOWN", "round_down"),
+            ("ROUNDUP", "round_up"),
+            ("SIN", "sin"),
+            ("TAN", "tan"),
+            ("fadeInOut", "fade_in_out"),
+            ("say", "talk"),
+            ("select_content", "content"),
+            ("select_index", "index"),
+        ],
+    ),
+];
+
+/// 官方 `SHADOW_FIELD_NAME_MAP`:(影子 KN 类型, 字段名) → 影子里的字段名
+pub(crate) const NEMO_SHADOW_FIELD_NAMES: &[(&str, &str)] = &[
+    ("get_play_audio", "audio_id"),
+    ("get_stop_audio", "audio_id"),
+    ("self_dialog_wait", "text"),
+];
+
+/// 官方 `oI`:需要合成 mutation 的积木,其 mutation 里的中文标题(按原文保留,含 `{...}` 占位符)
+pub(crate) enum NemoMutationText {
+    /// 固定标题
+    Plain(&'static str),
+    /// 按选择器字段取值选标题
+    Select(&'static [(&'static str, &'static str)]),
+    /// 两层选择器(目前只有 `check_sence`:第一层是字段值,第二层是 index 值)
+    SelectNested(&'static [(&'static str, &'static [(&'static str, &'static str)])]),
+}
+
+/// (NEMO 原始类型, 标题)
+pub(crate) const NEMO_MUTATION_TEXT: &[(&str, NemoMutationText)] = &[
+    (
+        "check_sence",
+        NemoMutationText::SelectNested(&[
+            (
+                "false",
+                &[
+                    ("__next_scene", "离开屏幕下一屏"),
+                    ("__previous_scene", "离开屏幕上一屏"),
+                    ("default", "离开屏幕 {index}"),
+                ],
+            ),
+            (
+                "true",
+                &[
+                    ("__next_scene", "留在屏幕下一屏"),
+                    ("__previous_scene", "留在屏幕上一屏"),
+                    ("default", "留在屏幕 {index}"),
+                ],
+            ),
+        ]),
+    ),
+    ("connected_users_get", NemoMutationText::Plain("在线用户数")),
+    ("hide_ranking", NemoMutationText::Plain("隐藏云排行榜")),
+    (
+        "is_ranking_show_hide",
+        NemoMutationText::Plain("云排行榜是否显示"),
+    ),
+    (
+        "logic_boolean",
+        NemoMutationText::Select(&[("FALSE", "不成立"), ("TRUE", "成立")]),
+    ),
+    (
+        "midi__get_bpm",
+        NemoMutationText::Plain("MIDI 音乐{midi_get}节拍"),
+    ),
+    (
+        "midi__get_playing_column",
+        NemoMutationText::Plain("MIDI 音乐{midi_get}当前播放列数"),
+    ),
+    (
+        "midi__get_section_notes",
+        NemoMutationText::Plain("MIDI 音乐{midi_get}第{column}列音符"),
+    ),
+    (
+        "midi__on_play_note",
+        NemoMutationText::Plain("当 MIDI 音乐{midi_get}播放音符{midi_get_note}"),
+    ),
+    (
+        "midi__on_play_section",
+        NemoMutationText::Plain("每当 MIDI 音乐{midi_get}播放{column}列音符"),
+    ),
+    (
+        "midi__play_section",
+        NemoMutationText::Plain("播放 MIDI 音乐{midi_get}第{column}列音符"),
+    ),
+    (
+        "midi__set_program",
+        NemoMutationText::Plain("设置 MIDI 音乐{midi_get}音色{program}"),
+    ),
+    (
+        "midi__set_speed_rate",
+        NemoMutationText::Plain("设置 MIDI 音乐播放速率{rate}倍"),
+    ),
+    ("midi_get", NemoMutationText::Plain("MIDI 音乐")),
+    ("midi_get_all", NemoMutationText::Plain("任意 MIDI 音乐")),
+    ("midi_get_note", NemoMutationText::Plain("音符")),
+    ("on_phone_shake", NemoMutationText::Plain("当手机被摇晃")),
+    (
+        "on_phone_tilt",
+        NemoMutationText::Select(&[
+            ("down", "当手机向下倾斜"),
+            ("left", "当手机向左倾斜"),
+            ("right", "当手机向右倾斜"),
+            ("up", "当手机向上倾斜"),
+        ]),
+    ),
+    (
+        "on_receive_sound",
+        NemoMutationText::Plain("当手机听到声响"),
+    ),
+    ("program", NemoMutationText::Plain("音色")),
+    (
+        "self_flip",
+        NemoMutationText::Select(&[("0", "上下翻转"), ("1", "左右翻转")]),
+    ),
+    (
+        "set_fill_path",
+        NemoMutationText::Select(&[
+            ("base", "设置当前为填充"),
+            ("end", "设置当前为填充终点"),
+            ("start", "设置当前为填充起点"),
+        ]),
+    ),
+    ("set_fill_style", NemoMutationText::Plain("设置填充颜色")),
+    (
+        "show_ranking",
+        NemoMutationText::Select(&[
+            ("positive", "显示正序云排行榜"),
+            ("reverse", "显示倒序云排行榜"),
+        ]),
+    ),
+    ("user_id_get", NemoMutationText::Plain("用户ID")),
+    ("username_get", NemoMutationText::Plain("用户名")),
+];

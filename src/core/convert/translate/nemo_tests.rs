@@ -730,15 +730,14 @@ fn nemo_source_element_census_matches_research_numbers() {
         r#"<statement name="DO0"><block type="self_appear" id="b2" visible="visible" inline="true"/></statement>"#,
         r#"</block></next></block>"#,
     );
-    let parsed = crate::core::convert::translate::nemo_xml::parse_fragment(&format!(
-        "<root>{actor_xml}</root>"
-    ))
-    .expect("解析");
+    let parsed =
+        crate::core::convert::translate::nemo::parse_fragment(&format!("<root>{actor_xml}</root>"))
+            .expect("解析");
     let mut blocks = 0;
     let mut shadows = 0;
     let mut empties = 0;
     fn walk(
-        nodes: &[crate::core::convert::translate::nemo_xml::XmlNode],
+        nodes: &[crate::core::convert::translate::nemo::XmlNode],
         b: &mut usize,
         s: &mut usize,
         e: &mut usize,

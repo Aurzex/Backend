@@ -14,8 +14,8 @@
 //!
 //! | 方向 | 前端 | 语义 | 后端 | 装配 |
 //! | --- | --- | --- | --- | --- |
-//! | Kitten4 → KN | [`kitten::parse_block_data_json`] | [`mapping::translate_kitten_to_kn`] | [`neko::split_procedures`]/[`neko::rewrite_calls`]/[`neko::tree_to_json`] | [`assembly::build_document`] |
-//! | KN → Kitten4 | [`neko::parse_kn_entity`]/[`neko::parse_kn_procedures`] | [`mapping::translate_kn_to_kitten`] | [`neko::unrewrite_calls`]/[`neko::def_root_from_entry`]/[`kitten::build_block_data_json`] | [`build_kitten4_document`] |
+//! | Kitten4 → KN | [`model::parse_block_data_json`] | [`mapping::translate_kitten_to_kn`] | [`model::split_procedures`]/[`model::rewrite_calls`]/[`model::tree_to_json`] | [`assembly::build_document`] |
+//! | KN → Kitten4 | [`model::parse_kn_entity`]/[`model::parse_kn_procedures`] | [`mapping::translate_kn_to_kitten`] | [`model::unrewrite_calls`]/[`model::def_root_from_entry`]/[`model::build_block_data_json`] | [`build_kitten4_document`] |
 //! | NEMO → KN | [`nemo::prepare_blocks_xml`](`nemo_xml` 解析 + 版本迁移 + 9 个前置改写) | [`nemo_mapping::translate_nemo_to_kn`](官方把映射折进解析,见该模块文档) | 不需要(程序集在解析器内就位) | [`nemo::convert_nemo_document`] |
 //!
 //! 三条路的**不变量**相同:产物是能过官方 `validateBcm` 的 `.bcmkn`;有损之处一律进
@@ -46,20 +46,15 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 pub(crate) mod assembly;
-pub(crate) mod kitten;
 pub(crate) mod mapping;
 pub(crate) mod model;
-pub(crate) mod neko;
 pub(crate) mod nemo;
 pub(crate) mod nemo_mapping;
 #[cfg(test)]
 mod nemo_tests;
-pub(crate) mod nemo_xml;
-pub(crate) mod remint;
 #[cfg(test)]
 mod reverse_tests;
 pub(crate) mod tables_gen;
-pub(crate) mod tables_gen_nemo;
 
 /// 目标编辑器
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -226,7 +221,7 @@ impl TranslateOptions {
     /// `e' = clamp(min(e, 可用核数 / b), 1, ∞)`。
     ///
     /// 折算只改并行度,不碰产物。直接调用 [`translate_value`] / [`translate_file`] 的
-    /// 单文档入口不做折算(调用方自己要的并发,由 [`remint::workers`] 兜住"不超核数")。
+    /// 单文档入口不做折算(调用方自己要的并发,由 [`assembly::workers`] 兜住"不超核数")。
     pub(crate) fn fold_entity_concurrency(mut self, works: usize, available: usize) -> Self {
         let batch = self.concurrency().min(works.max(1));
         let share = (available.max(1) / batch).max(1);
@@ -308,7 +303,7 @@ struct ForwardItem {
 /// 阶段 1 的产出:本项的树、抽出的程序集、铸造账本与**局部**报告
 struct ForwardParsed {
     tree: model::BlockTree,
-    procedures: Vec<neko::ProcedureEntry>,
+    procedures: Vec<model::ProcedureEntry>,
     /// 本项铸造账本(`(临时 id, 形态)`,顺序 = 铸造顺序)
     log: Vec<(String, model::MintKind)>,
     report: TranslateReport,
@@ -399,12 +394,12 @@ fn parse_forward_item(
         TargetEditor::KittenN,
     );
     let mut tree = match block_data_json {
-        Some(block_data_json) => kitten::parse_block_data_json(block_data_json)?.tree,
+        Some(block_data_json) => model::parse_block_data_json(block_data_json)?.tree,
         None => model::BlockTree::default(),
     };
     local.blocks_total += tree.count(); // 源文件里的积木数(映射前)
     mapping::translate_kitten_to_kn(&mut tree, landscape, &mut ids, &mut local);
-    let (kept, procedures) = neko::split_procedures(tree, &mut ids, &mut local);
+    let (kept, procedures) = model::split_procedures(tree, &mut ids, &mut local);
     Ok(ForwardParsed {
         tree: kept,
         procedures,
@@ -429,7 +424,7 @@ fn parse_forward_item(
 ///    兑现最终 id(与旧实现"先所有实体 parse/mapping/split,再所有实体 rewrite_calls"
 ///    的铸造序列逐次对应),再把临时 id 的值 / 键 / mutation·shadow XML 一并改写;
 ///    程序集条目与告警串同表改写;
-/// 5. **阶段 4(并行)**:改写完的树按今天同一入口编码(`neko::tree_to_json`)。
+/// 5. **阶段 4(并行)**:改写完的树按今天同一入口编码(`model::tree_to_json`)。
 ///
 /// `entity_concurrency = 1`(默认)时三个阶段都在当前线程按项序跑,但仍然走同一条
 /// 临时 id 路径 —— 因此"默认产物与今天逐字节一致"由基准的 SHA256 基线直接守住
@@ -465,7 +460,7 @@ pub(crate) fn convert_kitten4_document(
 
     let mut items = collect_forward_items(source)?;
     let weights: Vec<usize> = items.iter().map(|item| item.weight).collect();
-    let workers = remint::workers(options.entity_workers(), items.len());
+    let workers = assembly::workers(options.entity_workers(), items.len());
     let deterministic = options.ids_deterministic();
     // 可观测事实:本次转换真的开了几个实体级线程(供基准/单测挡空门,见 `TranslateReport`)
     report.entity_workers = workers;
@@ -479,14 +474,15 @@ pub(crate) fn convert_kitten4_document(
             .iter()
             .map(|item| item.block_data_json.as_ref())
             .collect();
-        let parsed = remint::run_items(block_data, &weights, workers, |index, block_data_json| {
-            parse_forward_item(index, block_data_json, landscape)
-        })
-        .into_iter()
-        .collect::<std::result::Result<Vec<ForwardParsed>, TranslateError>>()?;
+        let parsed =
+            assembly::run_items(block_data, &weights, workers, |index, block_data_json| {
+                parse_forward_item(index, block_data_json, landscape)
+            })
+            .into_iter()
+            .collect::<std::result::Result<Vec<ForwardParsed>, TranslateError>>()?;
 
         let mut trees: Vec<model::BlockTree> = Vec::with_capacity(parsed.len());
-        let mut procedures: Vec<neko::ProcedureEntry> = Vec::new();
+        let mut procedures: Vec<model::ProcedureEntry> = Vec::new();
         let mut logs_first: Vec<Vec<(String, model::MintKind)>> = Vec::with_capacity(parsed.len());
         let mut reports_first: Vec<TranslateReport> = Vec::with_capacity(parsed.len());
         for item in parsed {
@@ -501,13 +497,13 @@ pub(crate) fn convert_kitten4_document(
         // 记账槽位必须与阶段 1 错开(临时 id 的唯一性靠槽位):阶段 1 用 `[0, 项数)`,
         // 阶段 2 用 `[项数, 2·项数)`。
         let phase = items.len();
-        let rewritten = remint::run_items(trees, &weights, workers, |index, mut tree| {
+        let rewritten = assembly::run_items(trees, &weights, workers, |index, mut tree| {
             let mut ids = model::IdSource::recording(phase + index);
             let mut local = TranslateReport::new(
                 crate::core::convert::EditorType::Kitten4,
                 TargetEditor::KittenN,
             );
-            neko::rewrite_calls(&mut tree, &procedures, &mut ids, &mut local);
+            model::rewrite_calls(&mut tree, &procedures, &mut ids, &mut local);
             ForwardRewritten {
                 tree,
                 log: ids.into_log(),
@@ -528,7 +524,7 @@ pub(crate) fn convert_kitten4_document(
         //
         // 全局铸造顺序 = 「阶段 1:按项序」++「阶段 2:按项序」,与旧实现的
         // 「先所有实体 parse/mapping/split_procedures,再所有实体 rewrite_calls」逐次对应。
-        let mut mints = remint::IdRemap::new();
+        let mut mints = assembly::IdRemap::new();
         {
             let mut ids = model::IdSource::new(deterministic);
             for log in logs_first.iter().chain(logs_second.iter()) {
@@ -549,15 +545,15 @@ pub(crate) fn convert_kitten4_document(
         let mut unmatched = 0usize;
         let mut procedures_nodes = 0usize;
         for entry in &mut procedures {
-            let (nodes, missed) = remint::remap_entry(&mints, entry);
+            let (nodes, missed) = assembly::remap_entry(&mints, entry);
             procedures_nodes += nodes;
             unmatched += missed;
         }
 
         // ── 阶段 4(并行):改写实体树 + 编码(编码入口与旧实现同一个)
-        let encoded = remint::run_items(trees, &weights, workers, |_, mut tree| {
-            let (nodes, missed) = remint::remap_tree(&mints, &mut tree);
-            let blocks = neko::tree_to_json(&tree)?;
+        let encoded = assembly::run_items(trees, &weights, workers, |_, mut tree| {
+            let (nodes, missed) = assembly::remap_tree(&mints, &mut tree);
+            let blocks = model::tree_to_json(&tree)?;
             Ok::<_, TranslateError>((blocks, nodes, missed))
         });
 
@@ -582,10 +578,10 @@ pub(crate) fn convert_kitten4_document(
         // 告警/计数:按「阶段 1 全项 → 阶段 2 全项」逐项并入 —— 与串行 push 顺序逐条相同;
         // 告警串里的临时 id(`rewrite_calls` 会写进 `DroppedField.path`)同表换算。
         for local in reports_first {
-            unmatched += remint::merge_report(report, local, &mints);
+            unmatched += assembly::merge_report(report, local, &mints);
         }
         for local in reports_second {
-            unmatched += remint::merge_report(report, local, &mints);
+            unmatched += assembly::merge_report(report, local, &mints);
         }
 
         // 便宜的兜底:改写后产物里不得残留哨兵(真实 id 不含控制字符 ⇒ 哨兵只可能来自
@@ -908,7 +904,7 @@ impl TranslateReport {
         self.warnings.push(w);
     }
 
-    /// 取出全部告警(实体级并行按项收集局部报告后,再按项序并入全局报告;见 [`remint::merge_report`])
+    /// 取出全部告警(实体级并行按项收集局部报告后,再按项序并入全局报告;见 [`assembly::merge_report`])
     pub(crate) fn take_warnings(&mut self) -> Vec<TranslateWarning> {
         std::mem::take(&mut self.warnings)
     }
@@ -1061,18 +1057,18 @@ mod diff_tests {
     fn run_entity(
         bdj: &Value,
         landscape: bool,
-    ) -> (Vec<Value>, Vec<neko::ProcedureEntry>, TranslateReport) {
+    ) -> (Vec<Value>, Vec<model::ProcedureEntry>, TranslateReport) {
         let mut report = TranslateReport::new(
             crate::core::convert::EditorType::Kitten4,
             TargetEditor::KittenN,
         );
         let mut ids = model::IdSource::new(true); // 确定性 id:对齐测试必需
-        let mut tree = kitten::parse_block_data_json(bdj).expect("解析实体").tree;
+        let mut tree = model::parse_block_data_json(bdj).expect("解析实体").tree;
         mapping::translate_kitten_to_kn(&mut tree, landscape, &mut ids, &mut report);
-        let (kept, procs) = neko::split_procedures(tree, &mut ids, &mut report);
+        let (kept, procs) = model::split_procedures(tree, &mut ids, &mut report);
         let mut kept = kept;
-        neko::rewrite_calls(&mut kept, &procs, &mut ids, &mut report);
-        let json = neko::tree_to_json(&kept).expect("编码");
+        model::rewrite_calls(&mut kept, &procs, &mut ids, &mut report);
+        let json = model::tree_to_json(&kept).expect("编码");
         (json, procs, report)
     }
 
@@ -1481,7 +1477,7 @@ mod forward_parallel_tests {
 
     /// 树 → 源文档里的 `block_data_json = {blocks, connections, comments}`
     fn block_data_json(tree: &BlockTree) -> Value {
-        kitten::build_block_data_json(tree, &mut IdSource::new(true)).expect("编码 block_data_json")
+        model::build_block_data_json(tree, &mut IdSource::new(true)).expect("编码 block_data_json")
     }
 
     /// 场景:一条横屏会被 `/1.3` 包装的坐标积木(`mapping` 一次铸 5 个 id)
@@ -1617,7 +1613,7 @@ mod forward_parallel_tests {
         let theatre = source["theatre"].as_object().expect("theatre");
 
         let mut parsed: Vec<(String, bool, model::BlockTree, Map<String, Value>)> = Vec::new();
-        let mut procedures: Vec<neko::ProcedureEntry> = Vec::new();
+        let mut procedures: Vec<model::ProcedureEntry> = Vec::new();
         for (is_scene, container) in [(true, "scenes"), (false, "actors")] {
             let Some(map) = theatre.get(container).and_then(Value::as_object) else {
                 continue;
@@ -1625,12 +1621,12 @@ mod forward_parallel_tests {
             for (id, entity) in map {
                 let entity = entity.as_object().expect("实体");
                 let mut tree = match entity.get("block_data_json") {
-                    Some(bdj) => kitten::parse_block_data_json(bdj).expect("解析实体").tree,
+                    Some(bdj) => model::parse_block_data_json(bdj).expect("解析实体").tree,
                     None => model::BlockTree::default(),
                 };
                 report.blocks_total += tree.count();
                 mapping::translate_kitten_to_kn(&mut tree, landscape, &mut ids, &mut report);
-                let (kept, mut extracted) = neko::split_procedures(tree, &mut ids, &mut report);
+                let (kept, mut extracted) = model::split_procedures(tree, &mut ids, &mut report);
                 procedures.append(&mut extracted);
                 let mut src = entity.clone();
                 src.remove("block_data_json");
@@ -1638,12 +1634,12 @@ mod forward_parallel_tests {
             }
         }
         for (_, _, tree, _) in parsed.iter_mut() {
-            neko::rewrite_calls(tree, &procedures, &mut ids, &mut report);
+            model::rewrite_calls(tree, &procedures, &mut ids, &mut report);
         }
         let mut converted: usize = procedures.iter().map(|p| p.tree.count()).sum();
         let mut entities = Vec::with_capacity(parsed.len());
         for (id, is_scene, tree, src) in parsed {
-            let blocks = neko::tree_to_json(&tree).expect("编码");
+            let blocks = model::tree_to_json(&tree).expect("编码");
             converted += tree.count();
             entities.push(assembly::ConvertedEntity {
                 source_id: id,
