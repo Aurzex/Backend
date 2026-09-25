@@ -920,8 +920,8 @@ mod reverse_tests_inner {
             // 允许的差异(与 `real_bcmkn_round_trip_multiset_diff_is_documented` 同一口径):
             // ① 横屏坐标包装(math_arithmetic + math_number 成对);
             // ② KN 原生 `calculate` 在正向被降级成文本占位积木(1:1)
-            // ③ 已知保真缺口(本测试抓到,未修):inline `pure_list_get` 影子在往返里丢失,
-            //    实体侧与定义体侧都出现(见 `docs/rounds/28`)
+            // ③ inline `pure_list_get` 影子的往返丢失**已修**(第三十二轮 §3.4:正向的列表影子步骤
+            //    原先写在子块循环里,导致"没有已连接子块的块"不转换、不造影子;已提到循环外)
             if !entity_diffs.is_empty() {
                 // 实体侧差异逐条打印(allow-list 之外才是问题;打印有助于判断"是丢失还是形态差异")
                 eprintln!("[实体侧差异] {label}: {}", entity_diffs.join("; "));
@@ -931,7 +931,6 @@ mod reverse_tests_inner {
                 "math_number:",
                 "calculate:",
                 "bcm_translator_text_return_value_block:",
-                "pure_list_get:",
             ];
             assert!(
                 entity_diffs
@@ -983,6 +982,7 @@ mod reverse_tests_inner {
                 "bcm_translator_text_return_value_block:",
                 "math_arithmetic:",
                 "math_number:",
+                // 见上方说明:定义体侧这对是"调用 + 其输入影子"成对减少,结构性待证
                 "pure_list_get:",
                 "procedures_2_callreturn:",
             ];
@@ -1059,6 +1059,12 @@ mod reverse_tests_inner {
                 }
             }
             let mid_defs = k4_def_census(&k4);
+            // 定义体侧仍保留这对豁免(`pure_list_get` ⇄ `procedures_2_callreturn`),理由**与实体侧不同**:
+            // 实体侧那处已于第三十二轮 §3.4 定位并修好(正向的列表影子步骤原先写在子块循环里,
+            // 没有子块连接的块不转换、不造影子),所以实体侧的 `pure_list_get` 豁免已移除;
+            // 而定义体侧露出的这对是**成对**减少(调用点 + 它的输入影子一起少),
+            // 疑似"用函数调用的返回值当列表"这一形态 —— Kitten4 的列表槽只能填列表名,带不走 ⇒
+            // 结构性与否尚未证死,故此处仍按 allow-list 记录、守住不恶化(见 `docs/rounds/32` §3.4)。
             let mut affected = 0usize;
             let mut deficit = 0i64;
             for (id, before) in &before_defs {

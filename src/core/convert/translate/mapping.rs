@@ -859,20 +859,24 @@ fn route_children(node: &mut BlockJson, ctx: &mut Ctx) {
         .into_iter()
         .map(|(slot, child)| (false, slot, child));
 
+    // (9) 列表积木:`fields.list` 变 `inputs.list`(影子节点 + 影子 XML 成对写)。
+    //
+    // **必须放在子块循环之外**:条件只依赖块类型与 `fields.list`,与有没有已连接的子块无关。
+    // 原先写在 `for … inputs.chain(statements)` 里 ⇒ **没有任何子块连接的块永远进不了循环**,
+    // 于是它既不转换字段也不造影子 —— 而反向(自家实现)对所有块都折叠,两者不对称,
+    // 往返一圈就丢掉这 28 个影子节点(第三十二轮定位,见 `docs/rounds/32` §3.4)。
+    if LIST_INPUT_TYPES.contains(&kind.as_str())
+        && let Some(list) = node.fields.remove("list")
+    {
+        let shadow_id = ctx.ids.uuid();
+        node.shadows
+            .insert(String::from("list"), pure_list_shadow(&shadow_id, &list));
+        node.inputs.insert(
+            String::from("list"),
+            pure_list_get(list, node.id.clone(), shadow_id),
+        );
+    }
     for (from_value, slot, child) in inputs.chain(statements) {
-        // (9) 列表积木:`fields.list` 变 `inputs.list`(官方对每条 input 连接都做一次)
-        if from_value
-            && LIST_INPUT_TYPES.contains(&kind.as_str())
-            && let Some(list) = node.fields.remove("list")
-        {
-            let shadow_id = ctx.ids.uuid();
-            node.shadows
-                .insert(String::from("list"), pure_list_shadow(&shadow_id, &list));
-            node.inputs.insert(
-                String::from("list"),
-                pure_list_get(list, node.id.clone(), shadow_id),
-            );
-        }
         let slot = match get_mapped_name(kind, &slot) {
             Cow::Borrowed(mapped) if mapped == slot => slot,
             Cow::Borrowed(mapped) => mapped.to_string(),
