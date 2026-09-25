@@ -136,5 +136,17 @@
    (至少一个角色承接宿主实体);断言同上,并额外逐条比对 `RemintedId`/`DroppedProperty`。
 3. 两条都必须**不依赖 `download/`**,能在 CI 跑。
 
+> **进度(2026-09-25)**:已落地**一条**合并守门测试
+> `reverse_tests::multi_entity_with_procedures_is_deterministic`(自造 KN 文档:2 实体 +
+> `proceduresDict` 定义,不依赖样本)。它断言:① 反向两次转换**逐字节一致** + 告警**逐条同序**;
+> ② 程序集定义根确实挂到宿主实体(`procedures_2_defnoreturn` 出现在角色积木里);
+> ③ 反向产物再走**正向闭环**,正向也逐字节可重复、告警同序,且源里的定义被抽成
+> `procedures.proceduresDict`(⇒ 正向 `split_procedures` 路径被真实走到)。
+>
+> **仍未覆盖**(执行并行前应补):正向的**调用点重写**(`rewrite_calls` 把临时 id 写进
+> `fields.NAME`/`mutation`/`inputs` **键** —— 评审阻塞问题 #3 的正向场景)需要构造带
+> KN 调用积木(引用某条定义)的输入;目前只有单实体层面的
+> `neko::tests::rewrites_call_sites_and_leaves_unknown_calls_untouched` 部分覆盖。
+
 **结论:执行顺序改为** —— ① 先落地 §8 两条测试(今天就能跑,且是并行的守门);② 正向并行(修 #2/#3/#6);
 ③ 反向按 #1 的三段重设计(§7 表);④ 告警顺序按 #4 逐段建模。**未过 §8 之前不合并并行实现。**

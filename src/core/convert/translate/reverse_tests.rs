@@ -1047,6 +1047,112 @@ mod reverse_tests_inner {
     }
 
     /// `translate_file(input, TargetEditor::Kitten4)` 必须真能读 `.bcmkn` 并落盘 `.bcm4`
+    /// **实体级并行的前置守门**(docs/25 §8):多实体 + 程序集定义,不依赖 `download/` 样本。
+    ///
+    /// 覆盖两处跨实体结构:① 反向 `def_root_from_entry` 把程序集定义根**挂到宿主实体**上
+    /// (`assembly.rs:878-886`);② 正向把定义从实体树里 `split_procedures` 抽走、再
+    /// `rewrite_calls` 把调用点写回各实体(`neko.rs`)。
+    ///
+    /// 断言:重复转换**逐字节一致** + 告警**逐条同序** —— 这是"一旦并行就必须保住"的两条不变量。
+    #[test]
+    fn multi_entity_with_procedures_is_deterministic() {
+        let doc = json!({
+            "stageSize": { "width": 562, "height": 900 },
+            "actors": {
+                "actorsDict": {
+                    "host": {
+                        "x": 0,
+                        "y": 0,
+                        "nekoBlockJsonList": [
+                            { "type": "repeat_forever", "id": "r1" },
+                            { "type": "hide", "id": "r2" }
+                        ]
+                    },
+                    "other": {
+                        "x": 10,
+                        "y": 0,
+                        "nekoBlockJsonList": [ { "type": "hide", "id": "h1" } ]
+                    }
+                }
+            },
+            "scenes": { "scenesDict": {} },
+            "procedures": {
+                "proceduresDict": {
+                    "def1": {
+                        "name": "走两步",
+                        "params": [],
+                        "nekoBlockJsonList": [ { "type": "hide", "id": "d1" } ]
+                    }
+                }
+            }
+        });
+
+        let options = TranslateOptions::new().deterministic_ids(true);
+        let mut report_a = TranslateReport::new(
+            crate::core::convert::EditorType::Neko,
+            TargetEditor::Kitten4,
+        );
+        let mut report_b = TranslateReport::new(
+            crate::core::convert::EditorType::Neko,
+            TargetEditor::Kitten4,
+        );
+        let first = convert_kn_document(&doc, &options, &mut report_a).expect("反向转换");
+        let second = convert_kn_document(&doc, &options, &mut report_b).expect("反向转换(第二遍)");
+
+        assert_eq!(
+            first.to_string(),
+            second.to_string(),
+            "同一输入的两次反向转换必须逐字节一致"
+        );
+        assert_eq!(
+            report_a.warnings(),
+            report_b.warnings(),
+            "告警必须逐条同序(顺序是可观察的公开面)"
+        );
+        assert_eq!(report_a.counts(), report_b.counts());
+
+        // 定义根确实挂到了宿主实体上(跨实体结构存在)
+        let actors = first["theatre"]["actors"].to_string();
+        assert!(
+            actors.contains("procedures_2_defnoreturn") || actors.contains("procedures"),
+            "程序集定义根应挂到宿主实体的积木里,实际:{actors}"
+        );
+
+        // 闭环:反向产物再走一次正向(定义被抽走 → 调用点重写 → 装配)
+        let mut k4_again = serde_json::from_str::<Value>(&first.to_string()).expect("复刻源");
+        let mut k4 = first;
+        let mut forward_report = TranslateReport::new(
+            crate::core::convert::EditorType::Kitten4,
+            TargetEditor::KittenN,
+        );
+        let kn = convert_kitten4_document(&mut k4, &options, &mut forward_report)
+            .expect("反向产物再正向");
+        // KN 文档的角色/场景在**顶层**(`actors.actorsDict` / `scenes.scenesDict`),
+        // 与反向产物的 Kitten4 形态(`theatre.*`)不同
+        assert!(
+            kn["actors"]["actorsDict"].is_object(),
+            "正向产物应有角色字典:{kn}"
+        );
+        assert!(
+            kn["scenes"]["scenesDict"].is_object(),
+            "正向产物应有场景字典"
+        );
+        assert!(
+            kn["procedures"]["proceduresDict"].is_object(),
+            "源里的程序集定义应被抽成 proceduresDict"
+        );
+
+        // 正向同样要可重复(定义/调用点改写涉及全局程序集表,最容易被并行打散)
+        let mut forward_again = TranslateReport::new(
+            crate::core::convert::EditorType::Kitten4,
+            TargetEditor::KittenN,
+        );
+        let kn2 =
+            convert_kitten4_document(&mut k4_again, &options, &mut forward_again).expect("再正向");
+        assert_eq!(kn.to_string(), kn2.to_string(), "正向也要逐字节可重复");
+        assert_eq!(forward_report.warnings(), forward_again.warnings());
+    }
+
     #[test]
     fn translate_file_writes_bcm4_from_bcmkn() {
         let Some(path) = ({
