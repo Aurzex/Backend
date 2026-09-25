@@ -759,6 +759,124 @@ mod reverse_tests_inner {
         out
     }
 
+    /// Kitten4 侧的类型频次。
+    ///
+    /// Kitten4 把积木树塞在角色 / 场景的 `block_data_json` **字符串**里,所以遇到"像 JSON 的字符串"
+    /// 就再往里走一层(限深,避免和正文里的 JSON 字面量纠缠)。
+    fn census_kitten4(doc: &Value) -> BTreeMap<String, usize> {
+        fn walk(node: &Value, out: &mut BTreeMap<String, usize>, depth: usize) {
+            match node {
+                Value::Object(map) => {
+                    if let Some(kind) = map.get("type").and_then(Value::as_str) {
+                        *out.entry(kind.to_string()).or_default() += 1;
+                    }
+                    for value in map.values() {
+                        walk(value, out, depth);
+                    }
+                }
+                Value::Array(items) => {
+                    for item in items {
+                        walk(item, out, depth);
+                    }
+                }
+                Value::String(text)
+                    if depth < 4 && (text.starts_with('{') || text.starts_with('[')) =>
+                {
+                    if let Ok(inner) = serde_json::from_str::<Value>(text) {
+                        walk(&inner, out, depth + 1);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut out = BTreeMap::new();
+        walk(doc, &mut out, 0);
+        out
+    }
+
+    /// 通用语料往返扫描(**正向**方向):`download/compile/*.bcm4` 里每一件真 Kitten4 作品都跑
+    /// Kitten4 → KN → Kitten4,逐条打印类型多重集差异。
+    ///
+    /// 为什么两个方向都要扫:反向扫描里"正向"只是回程腿,它的真实输入语料(平台上的 Kitten4 作品,
+    /// 由官方编辑器产出)从没被这样过一遍;官方基线差分门 `diff_tests` 用的是夹具,覆盖面靠人挑。
+    ///
+    /// 口径与反向扫描一致:不设保真断言(差异先分诊),只守"每件都转换得动"+"往返确定性"。
+    #[test]
+    fn k4_corpus_round_trip_sweep() {
+        // 语料是**编辑格式**的 Kitten4 文档(`block_data_json` 是 JSON 字符串),
+        // 由 `tests/convert_corpus_harvest.rs` 从作品源码接口落盘 —— **不是** `download/compile/*.bcm4`
+        // (那是反编译产物的**上传格式**,`block_data_json` 是 map,喂进去会 `invalid type: map, expected a string`)。
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("download/compile/k4raw");
+        let Ok(entries) = std::fs::read_dir(&root) else {
+            eprintln!(
+                "跳过:没有 {}(先跑 `cargo test --test convert_corpus_harvest -- --ignored`)",
+                root.display()
+            );
+            return;
+        };
+        let mut files: Vec<std::path::PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("json"))
+            .collect();
+        files.sort();
+        if files.is_empty() {
+            eprintln!("跳过:{} 下没有 .json", root.display());
+            return;
+        }
+        let options = TranslateOptions::new().deterministic_ids(true);
+        let mut with_diffs = 0usize;
+
+        for path in &files {
+            let label = path
+                .strip_prefix(env!("CARGO_MANIFEST_DIR"))
+                .unwrap_or(path)
+                .display()
+                .to_string();
+            let Ok(source) = serde_json::from_str::<Value>(
+                &std::fs::read_to_string(path).expect("读 .bcm4"),
+            ) else {
+                eprintln!("[跳过] {label}:不是 JSON");
+                continue;
+            };
+
+            let round_trip = |source: &Value| -> Value {
+                let mut k4: Value = serde_json::from_str(&source.to_string()).expect("复刻");
+                let mut forward = TranslateReport::new(
+                    crate::core::convert::EditorType::Kitten4,
+                    TargetEditor::KittenN,
+                );
+                let kn = convert_kitten4_document(&mut k4, &options, &mut forward)
+                    .unwrap_or_else(|e| panic!("{label}:正向 Kitten4→KN 失败: {e}"));
+                let mut kn: Value = serde_json::from_str(&kn.to_string()).expect("复刻");
+                let mut back = TranslateReport::new(
+                    crate::core::convert::EditorType::Neko,
+                    TargetEditor::Kitten4,
+                );
+                convert_kn_document(&kn, &options, &mut back).expect("反向 KN→Kitten4")
+            };
+
+            let back1 = round_trip(&source);
+            let back2 = round_trip(&source);
+            assert_eq!(
+                back1.to_string(),
+                back2.to_string(),
+                "{label}:往返必须确定性(两遍逐字节一致)"
+            );
+
+            let diffs = census_diff(&census_kitten4(&source), &census_kitten4(&back1));
+            if !diffs.is_empty() {
+                with_diffs += 1;
+                eprintln!("[扫描·正向] {label}: {}", diffs.join("; "));
+            }
+        }
+        eprintln!(
+            "[扫描汇总·正向] {}/{} 件作品存在往返差异(逐条见上;差异只作分诊,不作断言)",
+            with_diffs,
+            files.len()
+        );
+    }
+
     fn procedure_trees(doc: &Value) -> Vec<BlockTree> {
         model::parse_kn_procedures(doc.get("procedures").unwrap_or(&Value::Null))
             .unwrap_or_default()

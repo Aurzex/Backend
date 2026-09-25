@@ -45,6 +45,13 @@
    **已修/已定性**:实体侧真缺口在正向 —— 影子步骤写在子块循环体内,已提到循环外;定义体侧
    残留是退化影子 `fields.list="?"` 的归一化)、`script_variables` 子树(假设三,待查)。
    语料面:**扫描器 `kn_corpus_round_trip_sweep` 已就位**(任意 `.bcmkn` 自动纳入,守"能转 + 确定性"
+   **第三十三轮新增两台仪器**:反向 `kn_corpus_round_trip_sweep`(任意 `download/compile/*.bcmkn`)、
+   正向 `k4_corpus_round_trip_sweep`(吃 `download/compile/k4raw/*.json`);采集器
+   `tests/convert_corpus_harvest.rs`(`#[ignore]`,公开发现流抓作品 + 反编译落盘)。
+   **卡住的一步(下一步)**:Kitten4 的**编辑格式**语料抓不下来 —— `source/public` 用普通 API 客户端取
+   会 422「作品不存在」(缺端侧头),而反编译器用的 `CodeMaoHttpClient` 是 `pub(crate)` ⇒ 需要库侧加一个
+   公开入口(或 `DecompileOptions` 开关)。两个形态的区别见 `docs/rounds/33` §2:反编译产物 `.bcm4` 是
+   上传格式(`block_data_json` 为 map),正向转换吃编辑格式(`block_data_json` 为字符串)。
    两条铁律,差异只打印不断言);扩语料只需把反编译产物丢进 `download/compile/`。
 2. **NEMO 侧内存入口**:按 `docs/rounds/27` §2,应像 KN 侧一样把编辑版 `Value` 直接交给 translate,避免"落盘→读回"。落地情况 **[待核验]**。
 3. **P3 结构化失败记录**:`decompile/mod.rs` 的资源下载失败重试用 `line.split(": ").next()` 从错误串反解 URL(URL 或文本含 `": "` 会截断)⇒ 改成结构化 `(url, error)` 记录,直接消掉反解(`docs/rounds/29` §4)。
