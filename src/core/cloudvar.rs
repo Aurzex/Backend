@@ -246,45 +246,105 @@ pub(crate) fn list_update_command(cvid: &str, ops: Vec<Value>) -> CloudCommand {
 }
 
 /// 批量合并后的上传载荷
-#[derive(Debug, Default)]
-pub(crate) struct BatchedUploads {
-    pub(crate) private_updates: Vec<Value>,
-    pub(crate) public_updates: Vec<Value>,
-    pub(crate) list_updates: Vec<(String, Vec<Value>)>,
+/// 一次 flush 的**借用式**上传分组:只记"哪些命令进哪一帧",不搬 payload。
+///
+/// 旧实现是 `merge_commands(batch.clone())`:把整批命令的 `Value` 深拷贝一份再消费掉,
+/// 只为失败回退时还能用原来的 `batch`。云变量高频写时,每个 flush 周期(默认 100ms)
+/// 都要付一次全量 JSON 深拷贝。分组只借用,`batch` 所有权留在 `flush_loop`,
+/// 失败回退照旧,帧内容与旧实现逐字节一致。
+#[derive(Default)]
+pub(crate) struct UploadPlan<'a> {
+    /// `update_private_vars` 帧里的条目(顺序 = 入队顺序)
+    private: Vec<&'a Value>,
+    /// `update_vars` 帧里的条目
+    public: Vec<&'a Value>,
+    /// `update_lists`:cvid → 拼接后的 ops(同一 cvid 的多次 List 命令合并成一帧)
+    lists: Vec<(&'a str, Vec<&'a Value>)>,
 }
 
-/// 将待上传命令合并为最少次数的网络请求:
-/// 私有/公有变量各合并为一条消息,列表按 cvid 合并操作序列
-/// 合并一批待上传命令为少量 Socket.IO 事件帧
-/// 目的: 把高频的逐条命令(如列表连续 push 多元素)压缩成单个 update 事件,
-/// 减少 WebSocket 帧数量与网络往返
-/// 变量命令按 data 中的 action 分流到公有/私有两个通道,
-/// 列表命令按 cvid 归并,同一列表的连续操作合并进同一帧
-pub(crate) fn merge_commands(commands: Vec<CloudCommand>) -> BatchedUploads {
-    let mut out = BatchedUploads::default();
-    // cvid → list_updates 下标:替代逐命令线性查找,避免批内列表数量多时退化为 O(n²)
-    let mut list_index: HashMap<String, usize> = HashMap::new();
+#[cfg(test)]
+mod plan_uploads_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// 分组口径:公有/私有按 `action == "set"`(与旧实现一致),同一 cvid 的 List 合并、
+    /// 顺序按入队顺序 —— 这三点是帧内容正确性的全部依赖。
+    #[test]
+    fn groups_by_action_and_merges_lists_per_cvid() {
+        let commands = vec![
+            CloudCommand::Variable {
+                private: true,
+                data: json!({"action": "set", "cvid": "pub1", "value": 1}),
+            },
+            CloudCommand::Variable {
+                private: false,
+                data: json!({"action": "update", "cvid": "pri1", "value": 2}),
+            },
+            CloudCommand::List {
+                cvid: "list_a".into(),
+                ops: vec![json!({"op": "1"})],
+            },
+            CloudCommand::List {
+                cvid: "list_b".into(),
+                ops: vec![json!({"op": "2"})],
+            },
+            CloudCommand::List {
+                cvid: "list_a".into(),
+                ops: vec![json!({"op": "3"}), json!({"op": "4"})],
+            },
+        ];
+
+        let plan = plan_uploads(&commands);
+        assert_eq!(plan.public.len(), 1, "`action=set` 记公有");
+        assert_eq!(plan.private.len(), 1, "其余记私有");
+        assert_eq!(
+            plan.public[0]["cvid"], "pub1",
+            "公有帧里的就是原 data(借用而非拷贝)"
+        );
+        assert_eq!(plan.lists.len(), 2, "两个 cvid → 两帧");
+        assert_eq!(plan.lists[0].0, "list_a", "帧顺序按首次出现");
+        assert_eq!(plan.lists[1].0, "list_b");
+        assert_eq!(
+            plan.lists[0].1.len(),
+            3,
+            "同一 cvid 的 ops 必须按入队顺序拼成 3 个"
+        );
+        assert_eq!(plan.lists[0].1[2]["op"], "4");
+
+        // 帧序列化口径:与旧实现(拥有式 `Vec<Value>`)逐字节一致
+        let frame = serde_json::to_string(&("update_lists", json!({ "list_a": plan.lists[0].1 })))
+            .expect("序列化");
+        assert_eq!(
+            frame,
+            r#"["update_lists",{"list_a":[{"op":"1"},{"op":"3"},{"op":"4"}]}]"#
+        );
+    }
+}
+
+/// 按帧类型分组(公有/私有的判定口径与旧实现一致:`data.action == "set"` 记公有,
+/// 不读 `CloudCommand::Variable.private` —— 旧实现就没读,不能在重构里顺手改语义)
+pub(crate) fn plan_uploads(commands: &[CloudCommand]) -> UploadPlan<'_> {
+    let mut out = UploadPlan::default();
+    // cvid → lists 下标:替代逐命令线性查找,避免批内列表数量多时退化为 O(n²)
+    let mut list_index: HashMap<&str, usize> = HashMap::new();
     for cmd in commands {
         match cmd {
             CloudCommand::Variable { data, .. } => {
-                // 通过 data 是否含 "action":"set" 区分公有/私有
-                // 公有变量走 update_vars 事件,私有变量走 update_private_vars 事件,
-                // 两者是服务端不同的同步通道,不可混帧
                 let is_public = data.get("action").and_then(Value::as_str) == Some("set");
                 if is_public {
-                    out.public_updates.push(data);
+                    out.public.push(data);
                 } else {
-                    out.private_updates.push(data);
+                    out.private.push(data);
                 }
             }
             CloudCommand::List { cvid, ops } => {
                 // 同一 cvid 的列表操作合并:服务端按顺序执行一个帧内的全部操作,
                 // 合并能显著减少命令队列积压(如批量 append 100 个元素只需 1 帧)
-                if let Some(&idx) = list_index.get(&cvid) {
-                    out.list_updates[idx].1.extend(ops);
+                if let Some(&idx) = list_index.get(cvid.as_str()) {
+                    out.lists[idx].1.extend(ops.iter());
                 } else {
-                    list_index.insert(cvid.clone(), out.list_updates.len());
-                    out.list_updates.push((cvid, ops));
+                    list_index.insert(cvid.as_str(), out.lists.len());
+                    out.lists.push((cvid.as_str(), ops.iter().collect()));
                 }
             }
         }
@@ -2436,7 +2496,8 @@ fn flush_loop(inner: Arc<CloudInner>) {
             }
             continue;
         };
-        let merged = merge_commands(batch.clone());
+        // 借用式分组:`batch` 所有权留在这里,失败回退直接用它(不再深拷贝一份去 merge)
+        let plan = plan_uploads(&batch);
         let send = |payload: String| -> bool {
             match tx.send(Message::text(payload)) {
                 Ok(()) => true,
@@ -2447,27 +2508,28 @@ fn flush_loop(inner: Arc<CloudInner>) {
             }
         };
         let mut failed = false;
-        if !merged.private_updates.is_empty() {
+        if !plan.private.is_empty() {
+            // `Vec<&Value>` 与原来的 `Vec<Value>` 序列化结果逐字节相同(同一个 Serializer)
             let frame = format!(
                 "{EVENT_MESSAGE_PREFIX}{}",
-                serde_json::to_string(&("update_private_vars", &merged.private_updates)).unwrap()
+                serde_json::to_string(&("update_private_vars", &plan.private)).unwrap()
             );
             if !send(frame) {
                 failed = true;
             }
         }
-        if !failed && !merged.public_updates.is_empty() {
+        if !failed && !plan.public.is_empty() {
             let frame = format!(
                 "{EVENT_MESSAGE_PREFIX}{}",
-                serde_json::to_string(&("update_vars", &merged.public_updates)).unwrap()
+                serde_json::to_string(&("update_vars", &plan.public)).unwrap()
             );
             if !send(frame) {
                 failed = true;
             }
         }
-        let list_count = merged.list_updates.len();
+        let list_count = plan.lists.len();
         if !failed {
-            for (cvid, ops) in merged.list_updates {
+            for (cvid, ops) in plan.lists {
                 let frame = format!(
                     "{EVENT_MESSAGE_PREFIX}{}",
                     serde_json::to_string(&("update_lists", json!({ cvid: ops }))).unwrap()
@@ -2488,8 +2550,8 @@ fn flush_loop(inner: Arc<CloudInner>) {
         }
         debug!(
             "批量上传完成: 私有 {} 公有 {} 列表 {list_count}",
-            merged.private_updates.len(),
-            merged.public_updates.len(),
+            plan.private.len(),
+            plan.public.len(),
         );
     }
 }

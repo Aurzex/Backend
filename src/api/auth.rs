@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use std::sync::{Arc, OnceLock};
+use std::time::Instant;
 
 // 枚举定义
 
@@ -1150,6 +1151,64 @@ impl Default for AuthManager {
 
 // 云服务认证器
 
+/// 服务器时差(秒)的**进程级缓存**
+///
+/// 为什么是进程级:时差只取决于"本机钟 vs 服务端钟",与 `CloudAuthenticator` 实例无关;
+/// 而旧实现把它存在实例字段里,调用方每次云变量重连 / 每份 NEKO 作品取件都新建实例
+/// (见 `core/cloudvar.rs` 与 `core/convert/decompile/editors/simple.rs`),
+/// 于是每次都重新发一次 `currentTime` 请求。
+///
+/// 为什么带 TTL:休眠唤醒 / NTP 校正会改变本地钟,时差不是永恒常量,所以设一个保守的
+/// 有效期(10 分钟)兜底;过期后下一次调用重新校准一次。
+mod time_difference_cache {
+    use std::sync::{Mutex, OnceLock};
+    use std::time::{Duration, Instant};
+
+    /// 有效期:时差漂移极慢,10 分钟足够保守
+    const TTL: Duration = Duration::from_secs(600);
+
+    fn cell() -> &'static Mutex<Option<(i64, Instant)>> {
+        static CELL: OnceLock<Mutex<Option<(i64, Instant)>>> = OnceLock::new();
+        CELL.get_or_init(|| Mutex::new(None))
+    }
+
+    /// 命中且未过期时返回缓存的时差
+    pub(super) fn get(now: Instant) -> Option<i64> {
+        let guard = cell().lock().ok()?;
+        let (diff, stamped) = (*guard)?;
+        (now.saturating_duration_since(stamped) < TTL).then_some(diff)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        /// 命中与过期语义。断言用**绝对过期**(`now` 远大于 TTL)以避开并行测试
+        /// 同时读写这个进程级缓存带来的竞态:任何真实时间点的戳记都必然早于 `t0 + TTL*10`。
+        #[test]
+        fn hits_within_ttl_and_expires_after() {
+            let t0 = Instant::now();
+            put(7, t0);
+            assert!(get(t0).is_some(), "刚写入应立即命中");
+            assert!(
+                get(t0 + TTL - Duration::from_secs(1)).is_some(),
+                "有效期内必须命中"
+            );
+            assert!(
+                get(t0 + TTL * 10).is_none(),
+                "远超有效期必须视为过期(重新校准)"
+            );
+        }
+    }
+
+    /// 写入(幂等:并发首校准时后写覆盖先写,值差异可忽略)
+    pub(super) fn put(diff: i64, now: Instant) {
+        if let Ok(mut guard) = cell().lock() {
+            *guard = Some((diff, now));
+        }
+    }
+}
+
 /// 用于生成云端请求所需的 `x-device-auth` 签名头
 /// 自动校准本地时间与服务器时间的差值
 pub struct CloudAuthenticator {
@@ -1184,11 +1243,20 @@ impl CloudAuthenticator {
     }
 
     /// 获取校准后的时间戳(秒),首次调用会计算时差
+    ///
+    /// 时差是**机器级**量(本地钟 vs 服务端钟),校准要付一次串行 HTTP RTT。旧实现把它
+    /// 存在实例里,而调用方每次连接(云变量重连)、每份 NEKO 作品取件都会 `new` 一个新实例
+    /// ⇒ 缓存永不命中,每次都白付一个 RTT。现在先查进程级缓存(见 [`time_difference_cache`])。
     pub fn get_calibrated_timestamp(&mut self) -> MewResult<i64> {
+        if self.time_difference.is_none() {
+            self.time_difference = time_difference_cache::get(Instant::now());
+        }
         if self.time_difference.is_none() {
             let server_time = fetch_current_timestamp_with_provider(&*self.client_provider)?;
             let local_time = current_timestamp_secs();
-            self.time_difference = Some(local_time - server_time);
+            let diff = local_time - server_time;
+            self.time_difference = Some(diff);
+            time_difference_cache::put(diff, Instant::now());
         }
         let now = current_timestamp_secs();
         let diff = self
