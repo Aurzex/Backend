@@ -811,6 +811,11 @@ mod reverse_tests_inner {
     const PROCEDURE_LIBRARIES: &[&str] = &[
         "download/compile/FjSwU2iKY6bLe6fexZJTvsX3X7AI.bcmkn",
         "download/compile/FjDQB0v0geuG4y9BaTVyi_WcZ1jc.bcmkn",
+        // 第三十三轮:语料扩容(真作品,本地 gitignored)。多一件作品就多一组"块形态组合",
+        // 往返扫描是唯一能抓到"某类块某条分支不对称"的手段 —— 上一轮的 `pure_list_get` 就是这样掉的。
+        // 注意:本测试前提是"纯程序集库"(定义多、无角色);普通作品的扫描走
+        // `kn_corpus_round_trip_sweep`。
+        "download/compile/HEX Editor_317683843.bcmkn",
     ];
 
     fn procedure_libraries() -> Vec<(String, Value)> {
@@ -836,6 +841,103 @@ mod reverse_tests_inner {
             .as_object()
             .map(|m| m.len())
             .unwrap_or(0)
+    }
+
+    /// 通用语料往返扫描(第三十三轮):`download/compile/*.bcmkn` 里**每一件**真作品都跑一遍
+    /// KN → Kitten4 → KN,把实体侧、定义体侧的类型多重集差异**逐条打印**出来。
+    ///
+    /// 为什么单独一个测试:专测 `procedure_library_*` 的语料是"纯程序集库"(定义多、无角色),
+    /// 而往返缺陷往往只在**特定块形态组合**下暴露 —— 上一轮的 `pure_list_get` 影子丢失就是
+    /// 只在 `delete_list_item` 且"没有已连接子块"时发生。语料每加一件,就多一组形态组合。
+    ///
+    /// 口径:扫描**不设保真断言**。新语料上的差异必须先读懂语义,再判定"结构性(Kitten4 承载不了)"
+    /// 还是"缺陷",然后才谈修。它只守两条铁律:
+    /// ① 每件作品都转换得动(解码 / 解析 / 两个方向都不 Err、不 panic);
+    /// ② 往返确定性:同一输入跑两遍,最终 KN 产物逐字节一致(两腿任一腿不确定都会被抓住)。
+    #[test]
+    fn kn_corpus_round_trip_sweep() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("download/compile");
+        let Ok(entries) = std::fs::read_dir(&root) else {
+            eprintln!("跳过:没有 {}", root.display());
+            return;
+        };
+        let mut files: Vec<std::path::PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("bcmkn"))
+            .collect();
+        files.sort();
+        if files.is_empty() {
+            eprintln!("跳过:{} 下没有 .bcmkn", root.display());
+            return;
+        }
+        let options = TranslateOptions::new().deterministic_ids(true);
+        let mut with_diffs = 0usize;
+
+        for path in &files {
+            let label = path
+                .strip_prefix(env!("CARGO_MANIFEST_DIR"))
+                .unwrap_or(path)
+                .display()
+                .to_string();
+            let text = std::fs::read_to_string(path).expect("读 .bcmkn");
+            let Ok(source) = serde_json::from_str::<Value>(&text) else {
+                eprintln!("[跳过] {label}:不是 JSON(可能是未解密的 .bcmkn)");
+                continue;
+            };
+
+            let round_trip = |source: &Value| -> Value {
+                let mut report = TranslateReport::new(
+                    crate::core::convert::EditorType::Neko,
+                    TargetEditor::Kitten4,
+                );
+                let k4 = convert_kn_document(source, &options, &mut report).expect("反向 KN→Kitten4");
+                let mut k4: Value = serde_json::from_str(&k4.to_string()).expect("复刻中间态");
+                let mut back = TranslateReport::new(
+                    crate::core::convert::EditorType::Kitten4,
+                    TargetEditor::KittenN,
+                );
+                convert_kitten4_document(&mut k4, &options, &mut back).expect("正向 Kitten4→KN")
+            };
+
+            let kn2 = round_trip(&source);
+            let kn3 = round_trip(&source);
+            assert_eq!(
+                kn2.to_string(),
+                kn3.to_string(),
+                "{label}:往返必须确定性(两遍逐字节一致)"
+            );
+
+            let entity_diffs = census_diff(&census_entities_with(&source, true), &census_entities_with(&kn2, true));
+            let def_diffs: Vec<String> = {
+                let before = def_census(&source, &std::collections::BTreeSet::new());
+                let known: std::collections::BTreeSet<String> = before.keys().cloned().collect();
+                let after = def_census(&kn2, &known);
+                let empty = std::collections::BTreeMap::new();
+                let mut out = Vec::new();
+                for (id, census) in &before {
+                    let diffs = census_diff(census, after.get(id).unwrap_or(&empty));
+                    if !diffs.is_empty() {
+                        out.push(format!("定义 {id}: {}", diffs.join("; ")));
+                    }
+                }
+                out
+            };
+            if !entity_diffs.is_empty() || !def_diffs.is_empty() {
+                with_diffs += 1;
+            }
+            if !entity_diffs.is_empty() {
+                eprintln!("[扫描·实体] {label}: {}", entity_diffs.join("; "));
+            }
+            for line in &def_diffs {
+                eprintln!("[扫描·定义] {label} {line}");
+            }
+        }
+        eprintln!(
+            "[扫描汇总] {}/{} 件作品存在往返差异(逐条见上;差异只作分诊,不作断言)",
+            with_diffs,
+            files.len()
+        );
     }
 
     /// 纯程序集库:反向必须成功、定义根要落到场景上、两次转换逐字节一致
