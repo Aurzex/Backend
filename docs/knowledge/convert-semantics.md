@@ -62,9 +62,10 @@ NEMO → KN 是另一条前端(`hI.parseBlocksXML`),官方管线共 12 步(`main
     KN 实体的渲染标志,Kitten4 无此键;`rotation` 4)外加 5 条程序集形参类型。
   - 因此**反向的产物丢失实际很小**;剩下可评估的是 round 28 的定义体积木类型差(6 / 133)与
     "类型歧义"这类**单向**信息损失(Kitten 原类型名不可恢复,但语义等价)。
-  - ⚠️ 另记一条**告警分类问题**:类型歧义目前借用 `DroppedProperty` 上报(路径形如
-    `math_arithmetic(Kitten 原类型有 2 个:…,已保留 KN 名)`),导致类别标签「丢弃实体属性」与事实不符 ——
-    是否拆出独立变体见目标库。
+  - ✅ **告警分类已修正**(2026-09-26):类型歧义原先借用 `DroppedProperty` 上报,类别标签「丢弃实体属性」与事实不符。
+    现拆出独立变体 [`TranslateWarning::AmbiguousType`](`kind`/`candidates`/`chosen`),
+    报告类别变为:`类型歧义 2959 · 未映射积木 643 · 丢弃实体属性 342 · 丢弃字段 12 · 重铸 id 17`。
+    ⇒ 实体属性**真丢**只有 342 条(其中 329 条是 `comments`/`editable`/`deletable` 这类渲染标志)。
 - 运行时实测:KN→Kitten4 产物有 `theatre`/`size`/`block_data_json`,可被平台接受。
 
 ## 6. 硬门与不变量(实现任何新方向都必须满足)

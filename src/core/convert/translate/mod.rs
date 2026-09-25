@@ -859,6 +859,15 @@ pub enum TranslateWarning {
     DegradedToText { kind: String },
     /// 结构上无法表达的字段被丢弃(`path` 形如 `actors.<id>.rotation_type`)
     DroppedField { path: String },
+    /// **反向的类型歧义**:一个 KN 类型在官方正向表里对应**多个** Kitten 原类型
+    /// (如 `change_variables` ← `change_variables` | `change_cloud_variable`)。
+    /// 语义等价、积木不丢,但 Kitten 原类型名不可恢复 ⇒ 仍计入有损。
+    /// `chosen` 为 `None` 表示保留 KN 名(它本身就是 Kitten 侧用过的名字)。
+    AmbiguousType {
+        kind: String,
+        candidates: Vec<String>,
+        chosen: Option<String>,
+    },
     /// 目标格式带不走的实体级属性(如 KN 的变量样式图标)
     DroppedProperty { path: String },
     /// 新铸了 id(影子/参数),便于对齐时忽略
@@ -874,6 +883,7 @@ impl TranslateWarning {
             TranslateWarning::UnmappedBlock { .. } => "未映射积木(保留原类型名)",
             TranslateWarning::DegradedToText { .. } => "降级为文本占位积木",
             TranslateWarning::DroppedField { .. } => "丢弃字段",
+            TranslateWarning::AmbiguousType { .. } => "类型歧义(原类型有多个)",
             TranslateWarning::DroppedProperty { .. } => "丢弃实体属性",
             TranslateWarning::RemintedId { .. } => "重新生成 id",
             TranslateWarning::ReuploadedOnImport { .. } => "官方重传资源(非损失)",
@@ -883,7 +893,8 @@ impl TranslateWarning {
     fn subject(&self) -> &str {
         match self {
             TranslateWarning::UnmappedBlock { kind }
-            | TranslateWarning::DegradedToText { kind } => kind,
+            | TranslateWarning::DegradedToText { kind }
+            | TranslateWarning::AmbiguousType { kind, .. } => kind,
             TranslateWarning::DroppedField { path }
             | TranslateWarning::DroppedProperty { path } => path,
             TranslateWarning::RemintedId { from } => from,

@@ -2116,6 +2116,18 @@ fn remap_warning(
         TranslateWarning::DroppedProperty { path } => TranslateWarning::DroppedProperty {
             path: remap_owned(map, path, unmatched),
         },
+        TranslateWarning::AmbiguousType {
+            kind,
+            candidates,
+            chosen,
+        } => TranslateWarning::AmbiguousType {
+            kind: remap_owned(map, kind, unmatched),
+            candidates: candidates
+                .into_iter()
+                .map(|c| remap_owned(map, c, unmatched))
+                .collect(),
+            chosen: chosen.map(|c| remap_owned(map, c, unmatched)),
+        },
         TranslateWarning::RemintedId { from } => TranslateWarning::RemintedId {
             from: remap_owned(map, from, unmatched),
         },

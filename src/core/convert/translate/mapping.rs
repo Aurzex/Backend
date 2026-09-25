@@ -1342,13 +1342,13 @@ fn reverse_kind(
         Some([only]) => ((*only).to_string(), None),
         Some(candidates) => {
             // 歧义:能安全保留 KN 名(它本身就是 Kitten 侧的名字)就保留,否则按"非云优先"挑一个
+            // 歧义走**独立类别**(原先借 `DroppedProperty`,会让报告把它读成"丢了属性")
+            let all: Vec<String> = candidates.iter().map(|c| (*c).to_string()).collect();
             if !is_renamed_lc_key(kn_kind) {
-                ctx.report.warn(TranslateWarning::DroppedProperty {
-                    path: format!(
-                        "{kn_kind}(Kitten 原类型有 {} 个:{},已保留 KN 名)",
-                        candidates.len(),
-                        candidates.join("|")
-                    ),
+                ctx.report.warn(TranslateWarning::AmbiguousType {
+                    kind: kn_kind.to_string(),
+                    candidates: all,
+                    chosen: None,
                 });
                 (kn_kind.to_string(), None)
             } else {
@@ -1356,12 +1356,10 @@ fn reverse_kind(
                     .iter()
                     .find(|c| !c.starts_with("cloud_"))
                     .unwrap_or(&candidates[0]);
-                ctx.report.warn(TranslateWarning::DroppedProperty {
-                    path: format!(
-                        "{kn_kind}(Kitten 原类型有 {} 个:{},已取 {chosen})",
-                        candidates.len(),
-                        candidates.join("|")
-                    ),
+                ctx.report.warn(TranslateWarning::AmbiguousType {
+                    kind: kn_kind.to_string(),
+                    candidates: all,
+                    chosen: Some((*chosen).to_string()),
                 });
                 ((*chosen).to_string(), None)
             }

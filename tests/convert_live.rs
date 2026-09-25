@@ -277,13 +277,16 @@ fn kn_work_to_kitten4_file() {
             backend::core::convert::translate::TranslateWarning::DroppedField { path } => {
                 *dropped.entry(format!("[字段] {path}")).or_default() += 1
             }
+            backend::core::convert::translate::TranslateWarning::AmbiguousType { kind, .. } => {
+                *dropped.entry(format!("[歧义] {kind}")).or_default() += 1
+            }
             _ => {}
         }
     }
     let mut dtop: Vec<_> = dropped.iter().collect();
     dtop.sort_by(|a, b| b.1.cmp(a.1));
     eprintln!(
-        "[convert_live] 丢弃属性/字段 {} 种 / {} 条,Top20:{}",
+        "[convert_live] 丢弃/歧义 {} 种 / {} 条,Top20:{}",
         dropped.len(),
         dropped.values().sum::<usize>(),
         dtop.iter()

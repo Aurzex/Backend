@@ -59,7 +59,10 @@ mod reverse_tests_inner {
         let (node, report) = reverse(json!({"type": "change_variables", "id": "c"}), false);
         assert_eq!(node.kind, "change_variables");
         assert!(
-            report.warnings().iter().any(|w| matches!(w, TranslateWarning::DroppedProperty { path } if path.contains("change_variables"))),
+            report.warnings().iter().any(|w| matches!(
+                w,
+                TranslateWarning::AmbiguousType { kind, .. } if kind == "change_variables"
+            )),
             "歧义类型必须报告:{:#?}",
             report.warnings()
         );
