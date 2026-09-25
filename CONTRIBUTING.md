@@ -1,5 +1,24 @@
 # Contributing(喵)
 
+## 凭据不入库(**硬规则**)
+
+真实账号 / 密码 / 令牌只放 `data/`(已被 `.gitignore` 忽略,集成测试从 `data/test-config.json` 读)。
+文档、示例、测试里一律用占位符;`tests/fixtures/test-config.example.json` 是配置模板。
+
+两层护栏(同一个检查,口径一致):
+
+```bash
+# 1) 本地:提交前自动拦下(每个克隆执行一次)
+git config core.hooksPath .githooks
+
+# 2) 手动/CI:仓库卫生检查
+cargo test --test repo_hygiene
+```
+
+命中原因与豁免:`tests/repo_hygiene.rs` 会打印 `文件:行: 规则: 片段`(口令打码)。
+若那行确实是**示例**,在该行加 `hygiene-allow` 标记即可放行;不要在没看清原因时直接
+`git commit --no-verify` —— 凭据一旦推上远端就只能当作已泄漏处理(必须轮换)。
+
 ## 开发环境
 
 - Rust stable(edition 2024),一只即可

@@ -1,0 +1,27 @@
+#!/bin/sh
+# 提交前挡住凭据入库(账号密码、令牌)。
+#
+# 为什么需要:凭据一旦 push 到远端就算泄漏,CI 事后失败也追不回来 —— 只有本地钩子
+# 能在"出门前"拦住。规则不在这里重复实现:直接跑权威检查 `tests/repo_hygiene.rs`
+# (CI 也跑同一个测试,口径一致)。
+#
+# 启用(每个克隆一次):git config core.hooksPath .githooks
+# 临时绕过(确认安全时):git commit --no-verify
+set -eu
+
+# 只有相关文件进了暂存区才检查,避免每次提交都编译
+changed=$(git diff --cached --name-only --diff-filter=ACM -- \
+    docs src tests README.md CONTRIBUTING.md Cargo.toml || true)
+[ -n "$changed" ] || exit 0
+
+if ! command -v cargo >/dev/null 2>&1; then
+    echo "pre-commit: 未找到 cargo,跳过凭据检查(tests/repo_hygiene.rs)" >&2
+    exit 0
+fi
+
+if ! output=$(cargo test --quiet --test repo_hygiene 2>&1); then
+    echo "pre-commit: 仓库卫生检查未通过,提交已拦下。" >&2
+    printf '%s\n' "$output" | sed -n '/疑似凭据/,/^$/p' >&2 || printf '%s\n' "$output" >&2
+    echo "  如确认是示例,在该行加 hygiene-allow 标记;检查细节见 tests/repo_hygiene.rs" >&2
+    exit 1
+fi

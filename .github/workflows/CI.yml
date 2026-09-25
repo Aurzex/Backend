@@ -65,3 +65,13 @@ jobs:
               with:
                   name: ${{ matrix.artifact }}
                   path: target/${{ matrix.target }}/release/${{ matrix.libname }}
+
+    # 凭据入库检查:与本地 pre-commit 钩子跑同一个测试(tests/repo_hygiene.rs)
+    hygiene:
+        name: repo-hygiene
+        runs-on: ubuntu-22.04
+        steps:
+            - uses: actions/checkout@v6
+            - uses: dtolnay/rust-toolchain@stable
+            - name: 凭据不入库检查
+              run: cargo test --test repo_hygiene
