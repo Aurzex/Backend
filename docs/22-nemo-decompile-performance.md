@@ -81,6 +81,26 @@
 | NEMO 作品的本机文件集(`.bcm` / `.userimg` / `.meta` / `.cover`) | ✅ `skip_resources(true)` **7.6 s** 就产出(不再下 48 MB) |
 | 文件上传通道(七牛) | ✅ `CodeMaoClient::file_uploader().upload(path, UploadChannel::Codemao, save_path)`;抓包也确认官方走 `upload.qiniup.com` + `api.qiniu.com` 签名 |
 | 平台侧「用这个文件建一个 NEMO 作品」的 API | ❌ **未知**(`src/api/work.rs` 有 Kitten/Neko/Wood/Coco 的 create,没有 NEMO) |
+| 建作品所需的入参 | ✅ 作品详情里直接给了 **`bcm_url` + `bcm_version`**(只读探查 `WorkDataFetcher::fetch_work_details`,键集含 `bcm_url`/`bcm_version`/`work_name`/`preview`/`fork_enable`…) |
+
+### 5.1 三条可行路线(按"要写平台"的程度排序)
+
+| 路线 | 请求数 | 前置条件 | 现状 |
+| ---- | ------ | -------- | ---- |
+| **A. 再创作(fork)** | **1** | 作品**允许**再创作(`fork_enable=true`) | ✅ 已有 `WorkDataFetcher::fork_work`(`POST /nemo/v2/works/{id}/fork`)。实测:配置里的 Kitten4 `Phigros` = true,而本次的慢样本 NEMO `蛋仔派对2…` = **false**,另两个 = false → 只能对部分作品用 |
+| **B. 建一个指向同一 `bcm_url` 的新 NEMO 作品** | **1–2** | 需要 NEMO 的 create 端点 | ❌ 端点未知;入参已具备(`bcm_url` + `bcm_version` + `work_name` + `preview`)。参数形状可照 `CreateKnWorkArgs`/`CreateKittenWorkArgs`(`api/work.rs:442`/`608`) |
+| **C. 本地只要文档(`skip_resources`)** | 0(资源) | 无 | ✅ 本轮已实现,7.6 s |
+
+**B 是用户那条思路的最短实现**:资源由平台侧自行处理(它们本来就在 CDN 上),我们既不下载 48 MB,也不需要上传 48 MB。缺的只是一个端点。
+
+### 5.2 取端点的具体做法
+
+1. 抓 **NEKO/NEMO 前端 bundle**(与 `docs/20` 附录 C 同法:下载主 bundle + chunk,搜 `works`/`create`/`import`/`bcm_url`/`bcm_version`),
+   定位"新建/导入作品"的请求构造;
+2. 与现有三个 create(`/kitten/r2/work`、`/neko/works`、`/wood/project`)对照猜路径族(都在 `BaseKey::Creation` 下);
+3. 真机验证:用配置里的 NEMO 作品(或先 fork 一个可再创作的)建一次,回读详情确认 `bcm_url`/`n_brick`/资源可加载;
+4. 成功后按现有风格加 `NemoWorkManager::create_nemo_work(CreateNemoWorkArgs { name, bcm_url, bcm_version, preview, save_type, … })`,
+   并把它接到 `convert::translate_work`(与 Kitten/Neko 的 `create_draft_work` 并列)。
 
 也就是说,剩下唯一缺口是那个 create 接口的**路径与参数**。抓包拿不到:PCAPdroid 里全是 TLS,只能看到主机名(`api.codemao.cn`、`api-creation.codemao.cn`、`creation.codemao.cn`、`open-service.codemao.cn`、`*.bcmcdn.com`、`upload.qiniup.com`),看不到 URL 路径。
 
