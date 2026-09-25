@@ -417,6 +417,23 @@ impl CommunityDataFetcher {
     }
 
     /// 获取 Nemo 配置
+    /// 获取 NEMO 官方 APK 下载地址(`GET /nemo/v2/config/apk`)
+    ///
+    /// 实测(2026-09-25,无鉴权):`https://api.codemao.cn/nemo/v2/config/apk` → 200,
+    /// 直接返回一条 `https://static.codemao.cn/nemo/apk/…apk` 字符串
+    /// (注意主机是 **api.codemao.cn**,不是 `nemo.codemao.cn` —— 后者只回 SPA 页面)。
+    pub fn fetch_nemo_apk_url(&self) -> MewResult<String> {
+        debug!("获取Nemo APK 地址");
+        let response = crate::utils::requests::send_checked(self.client.build_request(
+            HttpMethod::Get,
+            "/nemo/v2/config/apk",
+            Some(BaseKey::Default),
+        ))?;
+        self.client
+            .response_to_string(response)
+            .map(|text| text.trim().to_string())
+    }
+
     pub fn fetch_nemo_config(&self) -> MewResult<Value> {
         debug!("获取Nemo配置");
         self.send_and_parse(self.client.build_request(

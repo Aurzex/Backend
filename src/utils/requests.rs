@@ -1914,7 +1914,8 @@ pub trait ClientAccess {
 
 /// 发送请求并统一处理 4xx/5xx:错误时读取服务端错误体并包装为 `MewError`。
 /// builder 已持有客户端,无需额外 client 参数;供 `ClientAccess` 默认方法复用。
-fn send_checked(builder: MewRequestBuilder) -> MewResult<Response<Body>> {
+/// 发送请求并把 4xx/5xx 变成 `MewError::HttpStatus`(带上响应体,便于排错)
+pub(crate) fn send_checked(builder: MewRequestBuilder) -> MewResult<Response<Body>> {
     let response = builder.with_error_body().send()?;
     let status = response.status();
     if status.is_client_error() || status.is_server_error() {

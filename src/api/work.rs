@@ -755,6 +755,163 @@ pub struct CreateWoodProjectArgs<'a> {
 }
 
 /// 海龟编辑器作品管理接口
+/// 创建 NEMO 作品的入参(字段与抓包一致,见 `docs/24` §12)
+#[derive(Debug, Clone)]
+pub struct CreateNemoWorkArgs<'a> {
+    /// 作品名
+    pub name: &'a str,
+    /// 作品文件(`.bcm`)的 URL:要么是刚上传得到的 URL,要么直接复用源作品的 URL(路线 B)
+    pub work_url: &'a str,
+    /// 封面图 URL(抓包里指向七牛 `…cover`);没有就传 `""`
+    pub preview_url: &'a str,
+    /// NEMO 编辑器版本(源作品元信息里的 `bcm_version`,如 `"0.16.2"`)
+    pub bcm_version: &'a str,
+    /// 画布方向:**1 = 竖屏,2 = 横屏**(抓包取值;缺省 1)
+    pub orientation: Option<i32>,
+    /// 积木数(平台只作展示;缺省 0)
+    pub n_blocks: Option<i32>,
+    /// 角色数(缺省 1)
+    pub n_roles: Option<i32>,
+    /// 参与同步的云变量/云列表 id(抓包里是 `[]`)
+    pub cloud_variables: Option<Vec<String>>,
+    /// 顶层根积木 id(抓包里是 `[]`)
+    pub root_ids: Option<Vec<String>>,
+    /// 模板类型(抓包里是 `0`)
+    pub template_type: Option<i32>,
+}
+
+/// 按抓包口径构造建作品请求体(纯函数,便于单测把字段集钉住)
+fn create_nemo_work_payload(args: &CreateNemoWorkArgs<'_>) -> Value {
+    let orientation = args.orientation.unwrap_or(1);
+    json!({
+        "name": args.name,
+        "work_url": args.work_url,
+        "preview": args.preview_url,
+        "bcm_version": args.bcm_version,
+        "orientation": orientation,
+        "n_blocks": args.n_blocks.unwrap_or(0),
+        "n_roles": args.n_roles.unwrap_or(1),
+        "cloud_variables": args.cloud_variables.clone().unwrap_or_default(),
+        "root_ids": args.root_ids.clone().unwrap_or_default(),
+        "template_type": args.template_type.unwrap_or(0),
+    })
+}
+
+/// NEMO 作品管理
+///
+/// 目前只有"建作品"这一步 —— 它是 `docs/24` 里路线 B/B′ 的关键(**作品 id 由本接口返回**),
+/// 端点取自第三份抓包(`docs/24` §12),不是推断。
+pub struct NemoWorkManager {
+    client: CodeMaoClient,
+    pub operations: BaseWorkOperations,
+    pub comments: CommentOperations,
+}
+
+impl NemoWorkManager {
+    pub fn new() -> Self {
+        Self::new_with_client(CodeMaoClient::global().clone())
+    }
+
+    pub fn new_with_client(client: CodeMaoClient) -> Self {
+        Self {
+            client: client.clone(),
+            operations: BaseWorkOperations::new_with_client(client.clone()),
+            comments: CommentOperations::new_with_client(client),
+        }
+    }
+
+    /// 创建 NEMO 作品,返回响应 JSON(其中 `id` 就是新作品 id)
+    ///
+    /// 官方流程(抓包,`docs/24` §11.1/§12):
+    /// 1. `GET /cdn/qi-niu/tokens/uploading?projectName=nemo_android_ios&filePaths=<b64>.bcm` 取上传凭证;
+    /// 2. 把 `.bcm` 传到七牛(`file_uploader().upload(...)` 已有封装);封面另走 `putb64`;
+    /// 3. **本接口**:`POST /nemo/v3/works/upload/<orientation>`,体见 [`CreateNemoWorkArgs`];
+    ///    响应 `{"id":330816585,"work_name":"新的作品","description":""}`;
+    /// 4. 官方随后 `POST /nemo/qiniu/upload/business/bind` 把封面绑到该 id。
+    ///
+    /// 性能提示:若只是想让作品"落到自己账号",路线 B 可以直接复用**源作品**的 `work_url`
+    /// (零上传)—— 是否被平台接受需真机验证(见 `docs/24` §6 的风险表)。
+    pub fn create_nemo_work(&self, args: CreateNemoWorkArgs<'_>) -> MewResult<Value> {
+        let orientation = args.orientation.unwrap_or(1);
+        debug!(
+            "创建NEMO作品: name={}, orientation={}, bcm_version={}",
+            args.name, orientation, args.bcm_version
+        );
+        let endpoint = format!("/nemo/v3/works/upload/{orientation}");
+        let payload = create_nemo_work_payload(&args);
+        let builder = self
+            .client
+            .build_request(HttpMethod::Post, &endpoint, Some(BaseKey::Default))
+            .with_payload(payload);
+        self.send_and_parse(builder)
+    }
+}
+
+impl Default for NemoWorkManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ClientAccess for NemoWorkManager {
+    fn client(&self) -> &CodeMaoClient {
+        &self.client
+    }
+}
+
+#[cfg(test)]
+mod nemo_create_tests {
+    use super::*;
+
+    /// 请求体字段集与取值口径**逐项对齐抓包**(`docs/24` §12):
+    /// 少键/多键/改名都会让平台报参数错误或被静默忽略,所以这里钉死。
+    #[test]
+    fn payload_matches_captured_shape() {
+        let args = CreateNemoWorkArgs {
+            name: "新的作品",
+            work_url: "https://creation.bcmcdn.com/490/xxx.bcm",
+            preview_url: "https://creation.bcmcdn.com/490/yyy.cover",
+            bcm_version: "0.16.2",
+            orientation: Some(2),
+            n_blocks: Some(0),
+            n_roles: Some(1),
+            cloud_variables: None,
+            root_ids: None,
+            template_type: None,
+        };
+        let payload = create_nemo_work_payload(&args);
+        let mut keys: Vec<&str> = payload.as_object().expect("对象").keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            vec![
+                "bcm_version",
+                "cloud_variables",
+                "n_blocks",
+                "n_roles",
+                "name",
+                "orientation",
+                "preview",
+                "root_ids",
+                "template_type",
+                "work_url",
+            ],
+            "字段集必须与抓包一致"
+        );
+        assert_eq!(payload["orientation"], 2, "横屏 = 2(抓包口径)");
+        assert_eq!(payload["cloud_variables"], json!([]), "缺省空数组");
+        assert_eq!(payload["root_ids"], json!([]));
+        assert_eq!(payload["template_type"], 0);
+        assert_eq!(
+            payload["preview"], "https://creation.bcmcdn.com/490/yyy.cover",
+            "封面走 preview 键(抓包口径)"
+        );
+        assert_eq!(payload["bcm_version"], "0.16.2");
+        assert_eq!(payload["n_roles"], 1);
+    }
+
+}
+
 pub struct WoodWorkManager {
     client: CodeMaoClient,
 }

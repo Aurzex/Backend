@@ -336,3 +336,54 @@ TLS-keylog 导出。拿到后优先在这几个族里找:`/nemo/v2/**`、`/nemo/
   KN/Kitten4 文件 ⇒ 走"上传"路线回到 NEMO 还缺 **KN→NEMO** 这个方向(平台**不存在**,
   见 `docs/27`)。所以方案 B 的现实用法是:**把 NEMO 作品转出来**(NEMO→KN→Kitten4),
   而不是把我们的产物塞回 NEMO。
+
+---
+
+## 13. 抓包/bundle 得到的 API:落地与清点(2026-09-25 收尾)
+
+### 13.1 本轮**新加进库**的两条
+
+| 端点 | 状态 | 证据 |
+| ---- | ---- | ---- |
+| **`POST /nemo/v3/works/upload/<orientation>`**(NEMO 建作品) | ✅ 已实现 `NemoWorkManager::create_nemo_work(CreateNemoWorkArgs)`(`src/api/work.rs`) | 抓包完整体 + 响应返回作品 id(§12);payload 的字段集与取值口径钉进了单测 `nemo_create_tests::payload_matches_captured_shape` |
+| **`GET /nemo/v2/config/apk`**(官方 APK 地址) | ✅ 已实现 `CommunityDataFetcher::fetch_nemo_apk_url()` | 无鉴权实测 200,返回 `https://static.codemao.cn/nemo/apk/编程猫Nemo_4.5.0_….apk`;主机是 **api.codemao.cn**(`nemo.codemao.cn` 只回 SPA) |
+
+### 13.2 文档 §4/A 清单逐条核对:其实**早就有了**
+
+`/creation-tools/v1/works/list/user`(统一作品列表)、`/nemo/v2/works/list/user`(NEMO 草稿列表)、`/nemo/v2/works/list/user/published`、
+`/nemo/v2/works/web/{id}`、`/nemo/v2/works/{id}/fork`、`/nemo/v2/works/business/total`、`/nemo/v2/home/banners`、`/nemo/v2/user/message/count`、
+`/nemo/v3/user/level/info`、`/creation-tools/v1/home/discover`、`/creation-tools/v1/user/center/honor`、`/neko/material/*`、
+`/neko/works`(`create_kn_work`)、`/neko/works/{id}`(`delete_kn_draft`)、`/neko/works/v2/list/user`、`/neko/works/list/user/published`、
+`/kitten/r2/work`、`/wood/project`、`/nemo/qiniu/upload/business/bind`(**均已在库**)—— 我逐条 `grep` 确认,不是靠推断。
+
+### 13.3 抓包/bundle 里还**存在、但判定为低价值、暂未包**的端点(全部已探测定性)
+
+| 端点 | 主机 | 探测结果 | 用途 | 价值 |
+| ---- | ---- | -------- | ---- | ---- |
+| `/nemo/v3/dialog/get` | api.codemao.cn | 401(需登录) | 弹窗文案 | 低 |
+| `/nemo/v3/user/level/report/login` | api.codemao.cn | 404 + `40103015`(**仅 POST**) | 登录打点 | 低 |
+| `/nemo/v2/user/privacy/policy` | api.codemao.cn | 406 `参数不能为空` | 隐私政策 | 低 |
+| `/nemo/v2/user/submit/work` | api.codemao.cn | 404 + `40103015`(**仅 POST**) | 活动投稿 | 低 |
+| `/neko/user/status` | api-creation | 401(`40201001`) | 创作者状态 | 低 |
+| `/public-api/aliyun-log/credentials?source=KN` | api-creation | 401(`40201001`) | 前端日志凭证 | 低 |
+| `/common/config/list-static-url-check` | api-creation | **200 公开** | 静态资源校验表 | 低 |
+| `/neko/config/preload-tools-sdk` | api-creation | **200 公开** | 预载工具 SDK | 低 |
+
+需要时按现有风格包成一层方法即可(就是"`build_request` + `send_and_parse`"两行);本轮**不做**的理由是
+价值低且没有使用场景,免得把公开面撑大。**没有一条是不存在的死路径** —— 这点已用判别器(`40103015`=路由存在但方法不对、
+`Path-Not-Found@Common`=无路由、`401/406`=存在但需登录/参数)逐一确认。
+
+### 13.4 `create_nemo_work` 的真机验证配方(等你拍板后再跑)
+
+它会在**你的账号下留一份 NEMO 草稿**,而**NEMO 侧删除接口目前未知**(KN 侧有 `delete_kn_draft`),
+所以我没有擅自真机跑。要验证时按官方顺序走(与我们 KN 路径的 `translate_work(upload=true)` 同构):
+
+```text
+1. GET  /cdn/qi-niu/tokens/uploading?projectName=nemo_android_ios&cdnName=qiniu&filePaths=<b64>.bcm   → 上传凭证
+2. POST <七牛 upload_url>(.bcm 字节)                                    → work_url
+3. POST /nemo/v3/works/upload/<1|2> {name, work_url, preview, bcm_version, …}   → 新作品 id
+4. POST /nemo/qiniu/upload/business/bind {business_id: <新 id>, url_list: [cover]}  → 绑封面
+```
+
+**路线 B 的更省版本**:第 1–2 步可跳过,直接把**源作品**的 `work_url` 填进第 3 步(零上传)——
+是否被平台接受**未验证**(§6 风险表里的那一项),这条正是需要你决定要不要试的。
