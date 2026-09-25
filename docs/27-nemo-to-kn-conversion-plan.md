@@ -19,8 +19,8 @@
 **没有** `nekoBcmToNemoBcm` / `nekoBcmToKittenBcm` 之类(全 bundle 搜过)⇒ 平台的语义是
 **"万物入 KN"**,KN 是枢纽。因此:
 
-- **做**:NEMO → KN。做完之后 **NEMO → Kitten4 免费获得**(走我们已有的 KN→Kitten4 反向),
-  这样"nemo / kitten / kn 三者互转"里**两个方向**(NEMO→KN→{KN,Kitten4}、Kitten→KN)都齐了。
+- **做**:NEMO → KN。做完之后 NEMO → Kitten4 **附带可得**(走已有 KN→Kitten4 反向),
+  但那是**自建有损反向**,损失会叠加 ⇒ 需单独做保真评估,不与 NEMO→KN 的验收混谈(评审 §8 #7)。
 - **不做(留置)**:KN → NEMO。平台没有对照实现,自建一套 NEMO 编码器成本高、风险大
   (还要能过 NEMO App 的校验),而且它唯一的现实用途是"把产物塞回 NEMO"(见 `docs/24 §12.3`)。
 
@@ -51,8 +51,8 @@ NEMO 只需要换**前端**与**映射表**,后端与装配**完全复用**:
 `TranslateReport` 里已有的 `UnmappedBlock` / `DegradedToText` / `DroppedField` 直接承载
 "NEMO 有、KN 没有"的语义,不新增报告形状。
 
-**源文档从哪来**:反编译侧 `editors/nemo.rs` 现在产 `DecompileResult::Path`(资源目录 + 解密后的
-编辑版)。需要一条**内存入口**(与 S1 已落地的 `DecompiledArtifact` 同构):把 NEMO 的编辑版
+**源文档从哪来**:反编译侧 `editors/nemo.rs` 现在产 `DecompileResult::Path`(资源目录 + 编辑版;
+注意:NEMO 编辑版是 fetcher 直接取明文 JSON,**没有解密步骤** —— 评审更正)。需要一条**内存入口**(与 S1 已落地的 `DecompiledArtifact` 同构):把 NEMO 的编辑版
 `Value` 直接给 translate,避免"落盘→读回"——这也是 `docs/23` P0-2 的同一套做法,属**加法**。
 
 ---
@@ -104,3 +104,35 @@ NEMO 只需要换**前端**与**映射表**,后端与装配**完全复用**:
 - KN → NEMO(平台无对照,且要先自建 NEMO 编码器);
 - 把产物上传回 NEMO 建作品(`docs/24 §12` 的端点已备好,但同样依赖 KN→NEMO);
 - 不顺手改 `docs/28` 的反向保真缺口(那是独立问题,已在预算断言里守住)。
+
+---
+
+## 8. 子代理评审结论(2026-09-25,ReviewNemoPlan):**有条件可行**,且工作量比我原估的大
+
+**原方案的三处乐观估计被代码事实推翻**,逐条记证据与修法:
+
+| # | 阻塞问题 | 证据(`文件:行号`) | 修法 |
+| - | -------- | ----------------- | ---- |
+| 1 | **"装配层完全复用"不成立**:`assembly::build_document` 强依赖 Kitten4 文档形状(NEMO `.bcm` 没有那些顶层键) | `assembly.rs:119` 读 `theatre`、`:497-498` 读 `size`、`:531` 读 `project_name`、`:536` 读 `broadcasts`、`:361-368` 读 `audio`、`:546-551` 读 `variables`/`cloud_variables`;`actor_entry` 还施加 Kitten 专属变换(横屏 10/13 缩放、`lock→locked`、坐标中心原点)。而 NEMO 编辑版按 `actors.actors_dict` 判定(`translate/mod.rs:772-778`)、资源在 `styles.styles_dict`(`decompile/editors/nemo.rs`) | 方案 §2 改为两条可选路线:**(a)** 新增 NEMO 专用装配 `build_document_nemo`;**(b)** 前端额外合成一份 Kitten4 形状的 `theatre/size/project_name/variables/broadcasts/audio` 外壳。二者都算**独立工作量**,不再写"同一套装配" |
+| 2 | **并行脚手架被硬编码**,不能"只在 match 加分支" | `translate/mod.rs:369-373` `parse_forward_item` 写死 `kitten::parse_block_data_json` + `translate_kitten_to_kn` + `EditorType::Kitten4`;S3a 的四阶段并行直接调它 | 明确新增 `convert_nemo_document`,**或**把四阶段脚手架参数化(前端/映射作为参数) |
+| 3 | **KN 后端程序集机制硬编码 Kitten 字段布局**,不是"改名"能复用 | `neko.rs:74-84` 的 `procedures_2_defnoreturn/_stable_parameter/_parameter/_return_value/_callnoreturn/_callreturn`;`split_procedures(:134-148)` 按 `DEF_ROOT` 摘根、`collect_params` 读 `fields.param_name` + `PARAMS<n>` 槽;`rewrite_calls` 重建 `<mutation def_id name>` 与 `ARG<i-1>` | R3 增加产出:**NEMO 函数定义/调用/参数/返回值 → Kitten `procedures_2_*` 结构与字段布局的合成规则**;§6 风险表补"程序集结构合成"风险 |
+| 4 | **`validateBcm` 硬门没有落地途径** | §3.1 把它当硬门,但 §4 的 R1 只覆盖 `WN`/`GN` | 新增 **R5**:把 `validateBcm`(bundle 模块 87123)也抽成 Node 可调 harness,**先证明离线能跑**;跑不起来就把它降级为"可选门"并在 §3 说明 |
+| 5 | **语义 diff 的归一化规则未定义**,且"重传资源"与"复用装配"自相矛盾 | §3.1 只说"忽略 id/location",没定义 `createTime`/`Date.now()`/`sortList` 顺序/资源 url/递归深度;而 `assembly::build_styles(assembly.rs:320)` 是**刻意不上传**、保留源 url 的离线近似 | §3.1 补**字段级归一化清单**;资源策略二选一并写死(建议沿用"离线近似保留源 url",与既有 Kitten 路径一致) |
+| 6 | **门面层还有两处必须改** | `convert/mod.rs:95-99` 对 `DecompiledArtifact::Path` 直接报错("NEMO / WOOD 请用反编译接口另行处理");`:107-110` `needs_source_upload` 只覆盖 Kitten2/3/4,而官方 NEMO→KN 也写 `source` | 方案列出这两处改动(接受 NEMO 的内存文档产物;把 Nemo 纳入 `needs_source_upload`) |
+| 7 | **"NEMO→Kitten4 免费获得"是过度陈述** | §1 的说法与 §3.3 自认的"KN→Kitten4 是自建有损反向(`docs/28`)"冲突;损失是**叠加**的 | 降级为"附带可得但需单独保真评估",不与 NEMO→KN 的验收混谈 |
+
+**评审补充的必查项(已并入执行前置)**:① 语义 diff 的字段级归一化 + 端到端守恒断言;
+② **NEMO 块类型总量与可映射比例**(决定整个工作量,含 micro:bit/传感器/AI 等 KN 无对应的降级策略);
+③ `validateBcm` 离线可行性;④ R2 夹具要覆盖函数定义/调用/参数/返回/云变量/列表,**单一简单作品不足**;
+⑤ **更正**:NEMO 编辑版是 fetcher 直接取明文 JSON(`work_id.url`),**没有解密步骤** —— 原文措辞已修正。
+
+### 8.1 修正后的规模判断
+
+原方案把 NEMO→KN 描述成"换前端 + 换映射表"。评审后应表述为:
+
+> **新增一条完整正向路径**:NEMO 前端(解析 + 形状归一化)+ 程序集结构合成(函数/参数/返回 →
+> `procedures_2_*`)+ 映射表 + 与 Kitten 路径并列的装配(或外壳合成)+ 门面层两处改动。
+
+⇒ 这不是"顺手加一个方向",而是一个**独立轮次**(与 `docs/20` 当年做 Kitten→KN 的体量相当)。
+因此本轮的执行边界调整为:**R1–R5 研究先把"官方产物夹具 + 表 + 结构合成规则 + validateBcm 可行性"备齐**,
+Rust 侧实现留到研究结论到手后再开工(见 §5 的 S1–S4,顺序不变)。
