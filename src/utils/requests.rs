@@ -1535,6 +1535,7 @@ impl FileUploader {
             UploadChannel::Pgaot => self.upload_pgaot(file_path, save_path),
             UploadChannel::Codegame => self.upload_codegame(file_path, save_path),
             UploadChannel::Codemao => self.upload_codemao(file_path, save_path),
+            UploadChannel::Nemo => self.upload_nemo(file_path, save_path),
         }
     }
 
@@ -1571,6 +1572,22 @@ impl FileUploader {
     }
 
     fn upload_codemao(&self, file_path: &Path, save_path: &str) -> MewResult<String> {
+        self.upload_qiniu_file(file_path, save_path, "community_frontend")
+    }
+
+    /// NEMO 渠道:官方 App 上传 `.bcm`/`.cover` 用的凭证项目名是 `nemo_android_ios`
+    /// (第三份抓包;见 `docs/rounds/24` §12)
+    fn upload_nemo(&self, file_path: &Path, save_path: &str) -> MewResult<String> {
+        self.upload_qiniu_file(file_path, save_path, "nemo_android_ios")
+    }
+
+    /// 七牛上传(社区前端 / NEMO 共用):唯一文件名 → 取凭证 → 表单上传 → 拼 bucket_url
+    fn upload_qiniu_file(
+        &self,
+        file_path: &Path,
+        save_path: &str,
+        project_name: &str,
+    ) -> MewResult<String> {
         let unique_filename = format!(
             "{}{}",
             generate_meow_id(4),
@@ -1581,7 +1598,7 @@ impl FileUploader {
         );
         let unique_name = format!("{}/{}", save_path, unique_filename);
 
-        let token_info = self.get_codemao_token(&unique_name)?;
+        let token_info = self.get_qiniu_token(&unique_name, project_name)?;
         let json = self.upload_qiniu_form(
             &token_info.token,
             &token_info.file_path,
@@ -1642,7 +1659,8 @@ impl FileUploader {
             })
     }
 
-    fn get_codemao_token(&self, file_path: &str) -> MewResult<UploadTokenInfo> {
+    /// 取七牛上传凭证;`project_name` 按渠道区分(社区前端 `community_frontend`、NEMO `nemo_android_ios`)
+    fn get_qiniu_token(&self, file_path: &str, project_name: &str) -> MewResult<UploadTokenInfo> {
         let response = self
             .client
             .build_request(
@@ -1650,7 +1668,7 @@ impl FileUploader {
                 "/cdn/qi-niu/tokens/uploading",
                 Some(BaseKey::OpenService),
             )
-            .with_param("projectName", "community_frontend")
+            .with_param("projectName", project_name)
             .with_param("filePaths", file_path)
             .with_param("filePath", file_path)
             .with_param("tokensCount", "1")
@@ -1863,6 +1881,8 @@ pub enum UploadChannel {
     Pgaot,
     Codegame,
     Codemao,
+    /// NEMO(`.bcm`/`.cover`):凭证项目名 `nemo_android_ios`(官方 App 抓包口径)
+    Nemo,
 }
 
 impl UploadChannel {
@@ -1872,6 +1892,7 @@ impl UploadChannel {
             "pgaot" => Some(UploadChannel::Pgaot),
             "codegame" => Some(UploadChannel::Codegame),
             "codemao" => Some(UploadChannel::Codemao),
+            "nemo" => Some(UploadChannel::Nemo),
             _ => None,
         }
     }

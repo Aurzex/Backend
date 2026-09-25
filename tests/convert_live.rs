@@ -299,3 +299,60 @@ fn has_unmapped(report: &TranslateReport) -> bool {
         )
     })
 }
+
+/// 端到端(写平台):反编译 → **上传到当前账号** → 建草稿 → 回读 → **删掉自己建的草稿**
+///
+/// 默认 `#[ignore]`(平台写操作)。与 `translate_work_creates_draft_when_ignored` 的区别:
+/// 这里验证的是**反编译侧**的 [`DecompileOptions::upload_to_account`](原样备份/搬家),
+/// 并且跑完**自行删除草稿**,不留垃圾。
+#[test]
+#[ignore = "会调用平台写接口(上传 + 建草稿),需显式 --ignored 运行"]
+fn decompile_uploads_backup_draft_and_cleans_up_when_ignored() {
+    let Some(cfg) = load_config() else { return };
+    if login(&cfg).is_none() {
+        return;
+    }
+    let Some(work_id) = first_work(&cfg, "NEKO") else {
+        eprintln!("[convert_live] 配置里没有 NEKO 作品,跳过");
+        return;
+    };
+    let dir = work_dir("backup");
+    let outcome = CodemaoDecompiler::global()
+        .decompile_outcome(
+            WorkId::new(work_id),
+            DecompileOptions::new()
+                .output_dir(&dir)
+                .upload_to_account(true),
+        )
+        .expect("反编译 + 上传到账号");
+    assert!(
+        outcome.artifact.exists(),
+        "产物应落盘:{:?}",
+        outcome.artifact
+    );
+    assert_eq!(outcome.editor, backend::core::convert::EditorType::Neko);
+    let created = outcome.work_id.expect("应返回新建的草稿作品 id");
+    assert!(created > 0, "草稿 id 应为正数:{created}");
+
+    // 回读:平台把它存成 KN 作品,并分配了 work_url
+    let detail = backend::api::work::WorkDataFetcher::new()
+        .fetch_kn_work_details(created as i32)
+        .expect("回读草稿详情");
+    assert!(
+        detail
+            .get("work_url")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|u| !u.is_empty()),
+        "平台没给草稿分配 work_url:{detail}"
+    );
+
+    // 自清理:本用例建的草稿必须删掉(否则会在账号里留垃圾)
+    let deleted = backend::api::work::NekoWorkManager::new()
+        .delete_kn_draft(created as i32, 2)
+        .expect("删除自建草稿");
+    assert!(deleted, "自建草稿应删除成功");
+    eprintln!(
+        "[convert_live] 反编译 {work_id} → 建草稿 {created} → 已自行删除(产物 {:?})",
+        outcome.artifact
+    );
+}

@@ -7,6 +7,7 @@ pub(crate) mod config;
 pub(crate) mod error;
 pub(crate) mod infra;
 pub(crate) mod model;
+pub(crate) mod upload;
 
 // 错误与错误上下文
 pub(crate) use error::{Result, ResultExt};
@@ -16,6 +17,8 @@ pub(crate) use config::{DecompilerConfig, ShadowBuilder, ShadowTemplate};
 pub(crate) use infra::{CodeMaoHttpClient, CryptoService, FileService, HttpClient, ValueExt};
 // 模型:编辑器判别、作品信息、抓取契约、id 生成
 pub(crate) use model::{IdGenerator, RawWorkData, WorkFetcher, WorkInfo};
+// 上传到账号(反编译 / 转化共用)
+pub(crate) use upload::{DraftUpload, create_draft, draft_name, supports_account_upload};
 
 // 门面项(`convert/mod.rs` 对外再导出,保持 `pub` 可见性)
 pub use error::DecompilerError;

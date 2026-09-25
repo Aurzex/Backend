@@ -19,7 +19,8 @@
 ```
 
 ⇒ **作品 id 由第 3 步返回**(第 4 步只是绑封面)。本库已实现第 3 步(`NemoWorkManager::create_nemo_work`)与第 4 步;
-第 1/2 步**没有 NEMO 渠道**(`UploadChannel` 只有 `Pgaot|Codegame|Codemao`,且 `Codemao` 的凭证写死 `projectName=community_frontend`)。
+第 1/2 步现由 `UploadChannel::Nemo` 提供(`projectName=nemo_android_ios`),**但没有真机验证过**
+(NEMO 侧删除端点未知 ⇒ 建了草稿擦不掉;见 `docs/rounds/30` §4)。
 
 ## 2. 决定性证据:**建作品不需要资源字节**
 

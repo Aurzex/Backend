@@ -20,20 +20,16 @@ pub mod translate;
 // 跨子域类型:域内两处都要用,只在这里留一条公开路径
 pub use crate::core::convert::shared::{DecompilerError, EditorType, WorkId};
 
-use crate::api::work::{
-    CreateKittenWorkArgs, CreateKnWorkArgs, KittenWorkManager, NekoWorkManager,
-};
 use crate::core::convert::decompile::{
     CodemaoDecompiler, DecompileOptions, DecompiledArtifact,
 };
-use crate::core::convert::shared::FileService;
+use crate::core::convert::shared::{DraftUpload, FileService};
 use crate::core::convert::translate::{
     TargetEditor, TranslateError, TranslateOptions, TranslateOutcome, detect_editor,
     product_path, set_source_reference_in, translate_value,
 };
-use crate::utils::filedata::{PathConfig, value_to_i64};
-use crate::utils::requests::{MewError, UploadChannel};
-use serde_json::Value;
+use crate::utils::filedata::PathConfig;
+use crate::utils::requests::UploadChannel;
 
 /// 作品 id → 目标编辑器作品文件(反编译取编辑版,再转化;可选上传并新建草稿作品)
 ///
@@ -220,87 +216,34 @@ fn upload_source_file(source_path: &std::path::Path) -> Result<String, Translate
         .map_err(TranslateError::Mew)
 }
 
-/// 草稿作品名:标注目标编辑器与来源作品 id,并显式标「可删」
-/// (会直接展示在用户的平台草稿列表里)
-fn draft_name(source_work_id: WorkId, target: TargetEditor) -> String {
-    let label = match target {
-        TargetEditor::KittenN => "KittenN",
-        TargetEditor::Kitten4 => "Kitten4",
-    };
-    format!("转化副本 {label} ← {source_work_id}(可删)")
-}
-
 /// 上传产物并新建同名草稿作品,返回新作品 id
+///
+/// 上传 + 建作品 + 取名都在 `shared::upload`(**反编译侧的"上传到账号"走同一份实现**,
+/// 见 `docs/rounds/30`);这里只负责把转化结果翻译成那份入参。
 fn create_draft_work(
     outcome: &TranslateOutcome,
     source_work_id: WorkId,
     target: TargetEditor,
 ) -> Result<i64, TranslateError> {
     let client = crate::utils::requests::CodeMaoClient::global().clone();
-    let uploader = client.file_uploader();
-    let url = uploader
-        .upload(&outcome.output, UploadChannel::Codemao, "convert")
-        .map_err(TranslateError::Mew)?;
-
-    let name = draft_name(source_work_id, target);
-    let created: Value = match target {
-        TargetEditor::KittenN => NekoWorkManager::new()
-            .create_kn_work(CreateKnWorkArgs {
-                name: &name,
-                work_url: &url,
-                preview_url: "",
-                bcm_version: crate::core::convert::translate::tables_gen::BCM_VERSION,
-                save_type: Some(2),
-                stage_type: Some(2),
-                n_blocks: Some(outcome.report.blocks_converted as i32),
-                n_roles: None,
-                n_scenes: None,
-                pic_need_check_file_url: None,
-            })
-            .map_err(TranslateError::Mew)?,
-        TargetEditor::Kitten4 => KittenWorkManager::new()
-            .create_kitten_work(CreateKittenWorkArgs {
-                name: &name,
-                work_url: &url,
-                preview: "",
-                version: "4.11.20",
-                orientation: None,
-                sample_id: None,
-                work_source_label: Some(1),
-                save_type: Some(2),
-            })
-            .map_err(TranslateError::Mew)?,
+    let spec = DraftUpload {
+        artifact: &outcome.output,
+        editor: match target {
+            TargetEditor::KittenN => EditorType::Neko,
+            TargetEditor::Kitten4 => EditorType::Kitten4,
+        },
+        source_work_id,
+        kind: "转化",
+        save_path: "convert",
+        bcm_version: "",
+        n_blocks: Some(outcome.report.blocks_converted as i32),
     };
-
-    let id = created
-        .get("id")
-        .and_then(value_to_i64)
-        .or_else(|| {
-            created
-                .get("data")
-                .and_then(|d| d.get("id"))
-                .and_then(value_to_i64)
-        })
-        .ok_or_else(|| {
-            TranslateError::Mew(MewError::InvalidArgument(format!(
-                "新建作品成功但响应里没有 id:{created}"
-            )))
-        })?;
-    Ok(id)
+    crate::core::convert::shared::create_draft(&client, &spec).map_err(TranslateError::Decompiler)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// 草稿名要能看出目标与来源,并标明可删(会展示在平台草稿列表里)
-    #[test]
-    fn draft_name_marks_target_source_and_deletable() {
-        let name = draft_name(WorkId::new(123), TargetEditor::KittenN);
-        assert!(name.contains("KittenN"), "{name}");
-        assert!(name.contains("123"), "{name}");
-        assert!(name.contains("可删"), "{name}");
-    }
 
     /// P0-1 回归:staging 必须是"每作品每次调用"独立目录(曾共用一个目录导致并发互删)
     #[test]

@@ -7,10 +7,11 @@ use crate::core::convert::decompile::editors::{
 };
 use crate::core::convert::shared::{
     CodeMaoHttpClient, DecompilerConfig, EditorType, FileService, HttpClient, IdGenerator,
-    RawWorkData, Result, ResultExt, WorkFetcher, WorkInfo,
+    RawWorkData, Result, ResultExt, WorkFetcher, WorkInfo, DraftUpload, create_draft,
+    supports_account_upload,
 };
 use crate::core::convert::shared::{DecompilerError, WorkId};
-use crate::utils::requests::CodeMaoClient;
+use crate::utils::requests::{CodeMaoClient, MewError};
 use log::{debug, info, warn};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -34,6 +35,12 @@ pub struct DecompileOptions {
     /// (NEMO 的 `.bcm`/`.userimg`/`.meta`/`.cover`),用于"只要作品结构"或
     /// "准备上传到平台"的场景 —— 1390 次请求 → 0 次
     skip_resources: bool,
+    /// 是否把产物上传到**当前账号**并建一份同名草稿(默认 false)
+    ///
+    /// 开 = 替用户在平台落一份草稿(等同发布动作,需调用方明确授权);产物名形如
+    /// `反编译副本 KittenN ← 330773110(可删)`。仅 Kitten4 / KittenN / NEMO 有已知的
+    /// 建作品端点,其余类型会明确报错而不是静默跳过。
+    upload_to_account: bool,
 }
 
 impl Default for DecompileOptions {
@@ -50,6 +57,7 @@ impl DecompileOptions {
             batch_concurrency: 1,
             resource_concurrency: 8,
             skip_resources: false,
+            upload_to_account: false,
         }
     }
 
@@ -81,6 +89,17 @@ impl DecompileOptions {
     pub fn skip_resources(mut self, on: bool) -> Self {
         self.skip_resources = on;
         self
+    }
+
+    /// 把产物上传到当前账号并建一份同名草稿(默认 false;开 = 替用户发布动作,需明确授权)
+    pub fn upload_to_account(mut self, on: bool) -> Self {
+        self.upload_to_account = on;
+        self
+    }
+
+    /// 是否上传到账号
+    pub(crate) fn uploads_to_account(&self) -> bool {
+        self.upload_to_account
     }
 }
 
@@ -188,6 +207,17 @@ impl Default for WorkProcessorRegistry {
     }
 }
 
+/// 反编译结果:产物路径 + 编辑器 + (开启了「上传到账号」时的)新作品 id
+#[derive(Debug, Clone)]
+pub struct DecompileOutcome {
+    /// 产物文件路径(反编译产物,落盘位置由 `output_dir` 决定)
+    pub artifact: PathBuf,
+    /// 新作品 id;仅当 [`DecompileOptions::upload_to_account`] 为真时存在
+    pub work_id: Option<i64>,
+    /// 产物对应的编辑器(决定它是哪种作品文件)
+    pub editor: EditorType,
+}
+
 // 主入口
 pub struct CodemaoDecompiler {
     config: Arc<DecompilerConfig>,
@@ -230,21 +260,43 @@ impl CodemaoDecompiler {
         self.decompile_with_options(work_id, options)
     }
 
-    /// 使用自定义选项反编译单个作品
+    /// 使用自定义选项反编译单个作品,只返回产物路径
     pub fn decompile_with_options(
         &self,
         work_id: WorkId,
         options: DecompileOptions,
     ) -> Result<PathBuf> {
+        Ok(self.decompile_outcome(work_id, options)?.artifact)
+    }
+
+    /// 使用自定义选项反编译单个作品,返回产物路径、编辑器,以及开启了
+    /// [`DecompileOptions::upload_to_account`] 时新建的草稿作品 id
+    pub fn decompile_outcome(
+        &self,
+        work_id: WorkId,
+        options: DecompileOptions,
+    ) -> Result<DecompileOutcome> {
         self.decompile_inner(work_id, &options)
     }
 
-    /// 批处理反编译多个作品,返回与输入顺序一致的 `Vec<Result>`
+    /// 批处理反编译多个作品,返回与输入顺序一致的 `Vec<Result>`(只含产物路径)
     pub fn decompile_batch(
         &self,
         work_ids: &[WorkId],
         options: DecompileOptions,
     ) -> Vec<Result<PathBuf>> {
+        self.decompile_batch_outcomes(work_ids, options)
+            .into_iter()
+            .map(|result| result.map(|outcome| outcome.artifact))
+            .collect()
+    }
+
+    /// 批处理反编译多个作品,返回与输入顺序一致的结果(含新作品 id,若开启「上传到账号」)
+    pub fn decompile_batch_outcomes(
+        &self,
+        work_ids: &[WorkId],
+        options: DecompileOptions,
+    ) -> Vec<Result<DecompileOutcome>> {
         let concurrency = options.batch_concurrency.max(1);
         if concurrency == 1 || work_ids.len() <= 1 {
             return work_ids
@@ -273,7 +325,7 @@ impl CodemaoDecompiler {
         let options_ref = &per_work;
         let mut results = Vec::with_capacity(work_ids.len());
         for chunk in work_ids.chunks(concurrency) {
-            let chunk_results: Vec<Result<PathBuf>> = std::thread::scope(|scope| {
+            let chunk_results: Vec<Result<DecompileOutcome>> = std::thread::scope(|scope| {
                 let handles: Vec<_> = chunk
                     .iter()
                     .map(|&id| scope.spawn(move || self.decompile_inner(id, options_ref)))
@@ -382,7 +434,12 @@ impl CodemaoDecompiler {
 
     /// 反编译主流程(模板方法)
     /// 流程为:获取信息 → 创建处理器 → 取原始数据 → (可选)保存原始数据 → 反编译 → 保存结果
-    fn decompile_inner(&self, work_id: WorkId, options: &DecompileOptions) -> Result<PathBuf> {
+    /// → (可选)**上传到账号**
+    fn decompile_inner(
+        &self,
+        work_id: WorkId,
+        options: &DecompileOptions,
+    ) -> Result<DecompileOutcome> {
         let (decompiler, result, context) = self.decompile_core(work_id, options)?;
         // 确定输出目录(用户指定或默认)
         let output_path = options
@@ -395,7 +452,51 @@ impl CodemaoDecompiler {
             work_id,
             saved.display()
         );
-        Ok(saved)
+
+        // 可选:把产物原样建到当前账号(备份/搬家);默认关,开=在平台落一份草稿
+        let new_work_id = if options.uploads_to_account() {
+            Some(self.upload_to_account(work_id, &context, &saved)?)
+        } else {
+            None
+        };
+
+        Ok(DecompileOutcome {
+            artifact: saved,
+            work_id: new_work_id,
+            editor: context.work_info.work_type,
+        })
+    }
+
+    /// 把反编译产物上传到当前账号并建一份同名草稿,返回新作品 id
+    ///
+    /// 产物就是刚才落盘的那一份(与反编译结果逐字节相同),不做资源重传;
+    /// 上传渠道按编辑器选(NEMO 走 `nemo_android_ios`),建作品调用见 `shared::upload`。
+    fn upload_to_account(
+        &self,
+        work_id: WorkId,
+        context: &DecompilerContext,
+        artifact: &Path,
+    ) -> Result<i64> {
+        let editor = context.work_info.work_type;
+        if !supports_account_upload(editor) {
+            return Err(DecompilerError::Mew(MewError::InvalidArgument(format!(
+                "{editor:?} 没有已知的建作品端点,不能上传到账号\
+                 (支持 Kitten4 / KittenN / NEMO;Coco / Wood / Kitten2 / Kitten3 只能反编译到本地)"
+            ))));
+        }
+        info!("作品 [work_id={}] 上传产物到当前账号…", work_id);
+        let spec = DraftUpload {
+            artifact,
+            editor,
+            source_work_id: work_id,
+            kind: "反编译",
+            save_path: "decompile-backup",
+            bcm_version: &context.work_info.bcm_version,
+            n_blocks: None,
+        };
+        let new_work_id = create_draft(self.client.as_ref(), &spec)?;
+        info!("已建草稿作品 id={new_work_id}(名称含「可删」)");
+        Ok(new_work_id)
     }
 
     /// 反编译主流程的**核心**(模板方法的前半段):取信息 → 建上下文 → 取原始数据

@@ -801,6 +801,7 @@ fn nemo_decompiler_offers_in_memory_editable_document() {
             name: "测试作品".to_string(),
             work_type: EditorType::Nemo,
             user_id: 0,
+            bcm_version: "0.16.2".to_string(),
         },
         http_client: Box::new(OfflineHttp),
         file_service: FileService::new(config.clone()),

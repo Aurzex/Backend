@@ -98,6 +98,8 @@ pub(crate) struct WorkInfo {
     pub(crate) name: String,
     pub(crate) work_type: EditorType,
     pub(crate) user_id: i64,
+    /// 源作品的 `bcm_version`(作品详情接口给的元信息;建作品时要原样带上,空值由调用方兜底)
+    pub(crate) bcm_version: String,
 }
 
 impl WorkInfo {
@@ -117,6 +119,7 @@ impl WorkInfo {
             name,
             work_type,
             user_id: data.get_i64_or_default("user_id", 0),
+            bcm_version: data.get_str_or("bcm_version", "").to_string(),
         })
     }
 
