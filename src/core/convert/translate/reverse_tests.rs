@@ -831,7 +831,13 @@ mod reverse_tests_inner {
                     if let Some(kind) = map.get("type").and_then(Value::as_str) {
                         // 只收"像类型名"的值:平台文档里 `type` 偶尔挂着影子 XML 串,
                         // 那是噪声不是积木(第 33 轮实测过这层)。
-                        if !kind.is_empty()
+                        // 只数**真块**:必须带字符串 `id`。两类噪声都被这一条挡掉:
+                        // ① `block_data_json.connections` 里是连接描述符
+                        //    (`{"input_name":…,"type":"input"|"next"}`),第三十四轮实测:
+                        //    它们造出"几乎每件作品都有"的 `input ⇄ next` 假差异;
+                        // ② 平台文档里 `type` 偶尔挂着影子 XML 串。
+                        if map.get("id").and_then(Value::as_str).is_some()
+                            && !kind.is_empty()
                             && kind.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
                         {
                             *out.entry(canonical_kind(kind)).or_default() += 1;

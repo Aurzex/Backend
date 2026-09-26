@@ -98,6 +98,27 @@ Kitten4 侧的列表引用挂在**父块的 `fields.VAR`** 上(见 `FIELD_NAME_M
 > **教训(写进方法)**:扫描器打印的差异行很长,我用 `cut -c1-230` 截断看输出,结果把"替代品那一半"
 > 截掉了 ⇒ 差点把归一化读成丢失。**看差异要看整行**;代理指标(节点数)必须用实例复核才能下结论。
 
+## 4quater. 口径又抓到一层噪声:`connections` 里的"连接描述符"被当成积木
+
+给扫描器加"只数**带 `id`** 的真块"之后,`input ⇄ next` 这族**几乎每件作品都有**的差异**整族消失**,
+有差异的作品从 **19/33 降到 12/33**。
+
+根因:`block_data_json.connections` 里存的是
+`{"input_name":"message","input_type":"value","type":"input"}` 这类**连接描述符**(描述槽位连到哪),
+不是积木 —— 我的计数把其中的 `type` 当成了块类型(实测某件作品虚增 1 万多个"input 块")。
+
+修正后的残留(12/33),逐条定性:
+
+| 残留 | 件数 | 性质 |
+| --- | --- | --- |
+| `stop → terminate`、`shadow_number → …` | 6 | 反向 `GC` 特例 / 官方拆包降级(`mapping.rs:1304`、`gc_node`,均有专门断言) |
+| `controls_if`/`logic_compare`/`logic_operation`/`default_value` 小幅 +n | 3 | `GC` 横屏坐标包装的连带 |
+| `procedures_2_*` 翻倍 | 1 | 正向 `zC` 拆 `NORMAL`+`ROUND`(已文档化) |
+| `lists_get: N → M` | 4 | **待最后一查**(计算型列表槽 + 退化影子已解释一部分) |
+| `change_cloud_variable`/`cloud_lists_*` 小幅 +n | 1 | **待查**:怀疑反向在"云/本地"歧义里选了云 —— 代码注释写的是"非云优先" |
+
+> 最后两行是下一段唯一还没收口的东西;其余都是已文档化族(带测试或带注释)。
+
 ## 5. 环境:clippy 门恢复干净
 
 `cargo clippy --all-targets -- -D warnings`(CONTRIBUTING 要求)此前被 **7 条工具链新 lint** 挡着,
