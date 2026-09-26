@@ -27,9 +27,7 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use backend::api::work::WorkDataFetcher;
-use backend::core::convert::decompile::{
-    CodemaoDecompiler, DecompileOptions, decompile_work_with,
-};
+use backend::core::convert::decompile::{CodemaoDecompiler, DecompileOptions, decompile_work_with};
 use serde_json::Value;
 
 /// 递归收集所有 `work_id` / `id`(数字或数字字符串)。
@@ -132,7 +130,11 @@ fn harvest_corpus() {
             break;
         }
     }
-    println!("[采集] 命中目标类型 {wanted:?} 的 {}/{} 件", targets.len(), want_n);
+    println!(
+        "[采集] 命中目标类型 {wanted:?} 的 {}/{} 件",
+        targets.len(),
+        want_n
+    );
 
     // 3. 逐件反编译落盘(关掉资源下载:语料只需要文档本身,1390 次请求 → 0 次)
     //
@@ -167,7 +169,10 @@ fn harvest_corpus() {
                                 .unwrap_or_default();
                             let dest = player_load_dir.join(format!("player-load-{id}.json"));
                             let _ = std::fs::write(&dest, source.to_string());
-                            println!("[采集]   ↳ 播放器载荷(编译态)→ {} (顶层键 {keys:?})", dest.display());
+                            println!(
+                                "[采集]   ↳ 播放器载荷(编译态)→ {} (顶层键 {keys:?})",
+                                dest.display()
+                            );
                         }
                         Err(e) => println!("[采集]   ↳ 源码拉取失败: {e}"),
                     }

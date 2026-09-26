@@ -1179,6 +1179,13 @@ mod time_difference_cache {
         (now.saturating_duration_since(stamped) < TTL).then_some(diff)
     }
 
+    /// 写入(幂等:并发首校准时后写覆盖先写,值差异可忽略)
+    pub(super) fn put(diff: i64, now: Instant) {
+        if let Ok(mut guard) = cell().lock() {
+            *guard = Some((diff, now));
+        }
+    }
+
     #[cfg(test)]
     mod tests {
         use super::*;
@@ -1198,13 +1205,6 @@ mod time_difference_cache {
                 get(t0 + TTL * 10).is_none(),
                 "远超有效期必须视为过期(重新校准)"
             );
-        }
-    }
-
-    /// 写入(幂等:并发首校准时后写覆盖先写,值差异可忽略)
-    pub(super) fn put(diff: i64, now: Instant) {
-        if let Ok(mut guard) = cell().lock() {
-            *guard = Some((diff, now));
         }
     }
 }

@@ -1051,8 +1051,8 @@ impl FileService {
 
     /// 写 JSON:**流式**(`to_writer` + `BufWriter`),不产生整份中间 `String`。
     ///
-    /// 与 `to_string` 逐字节相同(同一个序列化器),只省掉"文档大小 ×1 的中间串
-    /// + 一次整块拷贝"与相应峰值内存(方案 23 P0-1)。10 MB 级作品实测占
+    /// 与 `to_string` 逐字节相同(同一个序列化器),只省掉"文档大小 ×1 的中间串"
+    /// 以及一次整块拷贝、相应峰值内存(方案 23 P0-1)。10 MB 级作品实测占
     /// `serialize` 的 15–25%。
     pub(crate) fn write_json(path: &Path, data: &Value) -> Result<()> {
         use std::io::Write as _;
@@ -1101,7 +1101,7 @@ where
     P: Fn() -> E + Sync,
 {
     if concurrency <= 1 || items.len() <= 1 {
-        return items.iter().map(|item| work(item)).collect();
+        return items.iter().map(&work).collect();
     }
     let mut results = Vec::with_capacity(items.len());
     for chunk in items.chunks(concurrency) {

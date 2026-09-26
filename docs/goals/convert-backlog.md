@@ -45,6 +45,13 @@
    **已修/已定性**:实体侧真缺口在正向 —— 影子步骤写在子块循环体内,已提到循环外;定义体侧
    残留是退化影子 `fields.list="?"` 的归一化)、`script_variables` 子树(假设三,待查)。
    语料面:**扫描器 `kn_corpus_round_trip_sweep` 已就位**(任意 `.bcmkn` 自动纳入,守"能转 + 确定性"
+   **第三十四轮**:① 正向判据误伤修复(`size` 太严 ⇒ Kitten4 作品被误判;放松后 Kitten3 被静默空转 ⇒
+   改用"实体有没有 `block_data_json`"判定);② 内联对象形态影子前置拦截并明确报错(支持它 = 转成影子 XML,
+   待办);③ **正向扫描器换上 `download/compile/*.bcm4` 真语料(21/22 件吃得下,离线)**,
+   口径加了"类型名折等价类代表"(否则有意的改名全被算成差异);④ 定义体预算收紧到 `0/0`;
+   ⑤ clippy 门恢复干净(修掉 7 条工具链新 lint)。详见 `docs/rounds/34`。
+   **待分诊(风险最高)**:正向往返里 `lists_get` 大量改类、`get_current_scene ⇄ get_screens` 成对替换 ⇒
+   疑似反向表把积木映射到功能不同的块(改语义而非改名)。
    **第三十三轮(续)定义体缺口已查清 = 残块归一化**:源 KN 的 `proceduresDict` 条目里除定义根外还残留
    没人挂的块(根块 `parent_id` 为空、无任何可达块引用,实测与被删的 `callreturn`/`repeat_n_times`/
    `script_variables`/`callnoreturn` 簇逐条对上)。反向重建树时自然消失 = 正确行为。

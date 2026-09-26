@@ -53,7 +53,6 @@ use std::sync::LazyLock;
 // 非数字时就会这样);这里同样**丢弃该键**,不落 `null`。
 
 /// 官方 `lI`:影子 / 变异 XML 的命名空间
-
 /// 程序集类型:普通(官方 `iI.NORMAL`)
 pub(crate) const PROCEDURE_NORMAL: &str = "NORMAL";
 /// 程序集类型:带返回值(官方 `iI.ROUND`)
@@ -221,7 +220,6 @@ const SPECIAL_BLOCK_TYPES: &[&str] = &[
 
 /// KN 的四种"文本占位积木"(降级产物)
 #[rustfmt::skip]
-
 pub(crate) fn is_logic_compare_block(kind: &str) -> bool {
     LOGIC_COMPARE_BLOCKS.contains(&kind)
 }

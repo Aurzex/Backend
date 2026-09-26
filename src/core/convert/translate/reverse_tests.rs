@@ -791,12 +791,47 @@ mod reverse_tests_inner {
     /// 为什么不能"数文档里所有 `type`":体积清单、素材、音频对象都带 `type`,会把数字吹到天上
     /// (第 33 轮实测:某作品"654 块",其实绝大多数是资源对象)。编辑格式里 `block_data_json` 是
     /// **JSON 字符串**,反编译/装配产物里是 **map**,两种都解析。
+    /// 把"同一个积木在不同方向的名字"折成同一类,取类内字典序最小的名字当代表。
+    ///
+    /// 为什么必须折:正向没改名、反向"歧义时保留 KN 名"是**有意且有告警**的行为
+    /// (`start_on_click` ⇒ `on_running_group_activated`、`text` ⇄ `get_split_options` ……),
+    /// 而且这些对在表里**互为表项**(双向对射),所以只映射一次会把两侧推向相反方向。
+    /// 取等价类代表后,这类改名在两个方向都抵消,剩下的才是真的数量差。
+    /// 必须取**传递闭包**:`change_variable`/`change_cloud_variable` 都指向 `change_variables`,
+    /// 而 `change_variables` 的反向候选又是这两个 —— 只走一步会把它们判成不同的类。
+    fn canonical_kind(kind: &str) -> String {
+        let mut names: Vec<String> = vec![kind.to_string()];
+        let mut cursor = 0usize;
+        while cursor < names.len() {
+            let current = names[cursor].clone();
+            cursor += 1;
+            let mut push = |name: &str, names: &mut Vec<String>| {
+                if !names.iter().any(|existing| existing == name) {
+                    names.push(name.to_string());
+                }
+            };
+            push(super::mapping::translate_type(&current), &mut names);
+            for candidate in super::mapping::reverse_candidates(&current) {
+                push(candidate, &mut names);
+            }
+        }
+        names.sort();
+        names.dedup();
+        names.first().cloned().unwrap_or_default()
+    }
+
     fn census_kitten4_blocks(doc: &Value) -> BTreeMap<String, usize> {
         fn count_inside(node: &Value, out: &mut BTreeMap<String, usize>, depth: usize) {
             match node {
                 Value::Object(map) => {
                     if let Some(kind) = map.get("type").and_then(Value::as_str) {
-                        *out.entry(kind.to_string()).or_default() += 1;
+                        // 只收"像类型名"的值:平台文档里 `type` 偶尔挂着影子 XML 串,
+                        // 那是噪声不是积木(第 33 轮实测过这层)。
+                        if !kind.is_empty()
+                            && kind.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                        {
+                            *out.entry(canonical_kind(kind)).or_default() += 1;
+                        }
                     }
                     for value in map.values() {
                         count_inside(value, out, depth);
@@ -860,10 +895,12 @@ mod reverse_tests_inner {
     /// 口径与反向扫描一致:不设保真断言(差异先分诊),只守"每件都转换得动"+"往返确定性"。
     #[test]
     fn k4_corpus_round_trip_sweep() {
-        // 语料是**编辑格式**的 Kitten4 文档(`block_data_json` 是 JSON 字符串),
-        // 由 `tests/convert_corpus_harvest.rs` 从作品源码接口落盘 —— **不是** `download/compile/*.bcm4`
-        // (那是反编译产物的**上传格式**,`block_data_json` 是 map,喂进去会 `invalid type: map, expected a string`)。
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("download/compile/k4raw");
+        // 语料 = `download/compile/*.bcm4`(真作品的**反编译产物**),实测 22 件里 20 件正向吃得下。
+        // 这也正是用户会走的路径:「反编译一个 Kitten4 作品 → 转成 KN」。
+        //
+        // 两件读不了的按形态跳过(各自有明确原因,见 `convert_kitten4_document` 的两处守卫):
+        // `.bcm`(Kitten3,积木在 blocksXML)、影子是内联对象形态的作品。
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("download/compile");
         let Ok(entries) = std::fs::read_dir(&root) else {
             eprintln!(
                 "跳过:没有 {}(先跑 `cargo test --test convert_corpus_harvest -- --ignored`)",
@@ -874,11 +911,11 @@ mod reverse_tests_inner {
         let mut files: Vec<std::path::PathBuf> = entries
             .flatten()
             .map(|e| e.path())
-            .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("json"))
+            .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("bcm4"))
             .collect();
         files.sort();
         if files.is_empty() {
-            eprintln!("跳过:{} 下没有 .json", root.display());
+            eprintln!("跳过:{} 下没有 .bcm4", root.display());
             return;
         }
         let options = TranslateOptions::new().deterministic_ids(true);
@@ -890,9 +927,9 @@ mod reverse_tests_inner {
                 .unwrap_or(path)
                 .display()
                 .to_string();
-            let Ok(source) = serde_json::from_str::<Value>(
-                &std::fs::read_to_string(path).expect("读 .bcm4"),
-            ) else {
+            let Ok(source) =
+                serde_json::from_str::<Value>(&std::fs::read_to_string(path).expect("读 .bcm4"))
+            else {
                 eprintln!("[跳过] {label}:不是 JSON");
                 continue;
             };
@@ -916,7 +953,7 @@ mod reverse_tests_inner {
             // 三腿各自的块总量:用来区分"真丢"与"我的 census 看不见"(第 33 轮踩过一次)
             if !is_editor_format_kitten4(&source) {
                 eprintln!(
-                    "[跳过] {label}:不是编辑格式(角色/场景没有 block_data_json)⇒ 正向转换的输入形态不是它"
+                    "[跳过] {label}:实体没有 block_data_json(Kitten2/3 的 blocksXML 作品)⇒ 本库不支持该方向"
                 );
                 continue;
             }
@@ -925,8 +962,19 @@ mod reverse_tests_inner {
                 crate::core::convert::EditorType::Kitten4,
                 TargetEditor::KittenN,
             );
-            let kn_mid = convert_kitten4_document(&mut k4_mid, &options, &mut f_report)
-                .unwrap_or_else(|e| panic!("{label}:正向失败: {e}"));
+            let kn_mid = match convert_kitten4_document(&mut k4_mid, &options, &mut f_report) {
+                Ok(kn) => kn,
+                Err(error) => {
+                    // 形态问题(不支持的方向 / 不支持的影子形态)按跳过处理并说明;
+                    // 其它错误一律算缺陷。
+                    let text = error.to_string();
+                    if text.contains("暂不支持") {
+                        eprintln!("[跳过] {label}:{text}");
+                        continue;
+                    }
+                    panic!("{label}:正向失败: {text}");
+                }
+            };
             let src_total: usize = census_kitten4_blocks(&source).values().sum();
             eprintln!(
                 "[扫描·正向·腿] {label}: 源积木={src_total} (KN 顶层键 {:?})",
@@ -952,7 +1000,10 @@ mod reverse_tests_inner {
                 "{label}:往返必须确定性(两遍逐字节一致)"
             );
 
-            let diffs = census_diff(&census_kitten4_blocks(&source), &census_kitten4_blocks(&back1));
+            let diffs = census_diff(
+                &census_kitten4_blocks(&source),
+                &census_kitten4_blocks(&back1),
+            );
             if !diffs.is_empty() {
                 with_diffs += 1;
                 eprintln!("[扫描·正向] {label}: {}", diffs.join("; "));
@@ -1000,15 +1051,15 @@ mod reverse_tests_inner {
         diffs
     }
 
-    /// 真实 `.bcmkn`(3.7 MB,0.27.1 转换器产物)的 KN → Kitten4 → KN:
-    /// 类型多重集差异必须**逐条落在文档化的 allow-list 里**。
-    ///
-    /// 两条腿之间还夹着一次正向(`KC`/`zC`/`GC`),所以差异里既有反向也没做错、纯属正向行为的部分:
-    ///
-    /// 1. **实体侧**:正向 `GC` 会给横屏坐标输入包一层 `math_arithmetic divide 1.3`(+1 算术块 +1 数字块);
-    ///    0.27.1 作品里这类输入本来没被包过,于是每个这样的输入都多出这两个积木。断言口径:
-    ///    差异只允许出现在 `math_arithmetic`/`math_number`,且两者增量必须相等(一次包装各加一个),
-    ///    并且 `KC` 的复制语义用 `unrewrite_calls` 归一后再比(否则每个实参子树会被数两遍)。
+    // 真实 `.bcmkn`(3.7 MB,0.27.1 转换器产物)的 KN → Kitten4 → KN:
+    // 类型多重集差异必须**逐条落在文档化的 allow-list 里**。
+    //
+    // 两条腿之间还夹着一次正向(`KC`/`zC`/`GC`),所以差异里既有反向也没做错、纯属正向行为的部分:
+    //
+    // 1. **实体侧**:正向 `GC` 会给横屏坐标输入包一层 `math_arithmetic divide 1.3`(+1 算术块 +1 数字块);
+    //    0.27.1 作品里这类输入本来没被包过,于是每个这样的输入都多出这两个积木。断言口径:
+    //    差异只允许出现在 `math_arithmetic`/`math_number`,且两者增量必须相等(一次包装各加一个),
+    //    并且 `KC` 的复制语义用 `unrewrite_calls` 归一后再比(否则每个实参子树会被数两遍)。
     // ---------------------------------------------------------------- 真作品:纯程序集库
 
     /// 两份真作品(本地 `download/compile/`,gitignored;来源为平台上传的 `.bcmkn`):
@@ -1097,7 +1148,8 @@ mod reverse_tests_inner {
                     crate::core::convert::EditorType::Neko,
                     TargetEditor::Kitten4,
                 );
-                let k4 = convert_kn_document(source, &options, &mut report).expect("反向 KN→Kitten4");
+                let k4 =
+                    convert_kn_document(source, &options, &mut report).expect("反向 KN→Kitten4");
                 let mut k4: Value = serde_json::from_str(&k4.to_string()).expect("复刻中间态");
                 let mut back = TranslateReport::new(
                     crate::core::convert::EditorType::Kitten4,
@@ -1114,7 +1166,10 @@ mod reverse_tests_inner {
                 "{label}:往返必须确定性(两遍逐字节一致)"
             );
 
-            let entity_diffs = census_diff(&census_entities_with(&source, true), &census_entities_with(&kn2, true));
+            let entity_diffs = census_diff(
+                &census_entities_with(&source, true),
+                &census_entities_with(&kn2, true),
+            );
             let def_diffs: Vec<String> = {
                 let before = def_census(&source, &std::collections::BTreeSet::new());
                 let known: std::collections::BTreeSet<String> = before.keys().cloned().collect();

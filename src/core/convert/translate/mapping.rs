@@ -282,7 +282,10 @@ static APPEARANCE_ATTRIBUTE_INDEX: std::sync::LazyLock<
 });
 
 /// `LC` 查表(`translateBlockType` 77860),表里没有就返回原值
-fn translate_type(kind: &str) -> &str {
+///
+/// `pub(super)`:往返扫描(测试)要用同一张表把两侧类型**归一化到同一等价类**,
+/// 否则"有意的改名"(歧义类型保留 KN 名,见 `mod.rs` 顶部说明)会被当成保真差异。
+pub(super) fn translate_type(kind: &str) -> &str {
     KITTEN_TO_KN_INDEX.get(kind).copied().unwrap_or(kind)
 }
 
@@ -982,6 +985,16 @@ fn is_kitten_side(kind: &str) -> bool {
                 | "get_3"
                 | "self_disappear"
         )
+}
+
+/// 某个类型在反向表里的候选 Kitten 原类型(没有则空)。
+///
+/// 与 [`translate_type`] 一起用于把"同一个积木在不同方向的名字"折成一类。
+pub(super) fn reverse_candidates(kind: &str) -> &'static [&'static str] {
+    match REVERSE_TYPES.get(kind) {
+        Some(candidates) => candidates.as_slice(),
+        None => &[],
+    }
 }
 
 /// `LC` 里键值不同的类型(正向会改名):保留它们的 KN 名**不能**保证往返回来

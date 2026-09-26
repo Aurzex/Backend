@@ -387,9 +387,7 @@ fn nemo_real_samples_match_official_products() {
         // harness 的 Node 侧会先打两行 banner,判定本身是最后一行
         let verdict = stdout
             .lines()
-            .map(str::trim)
-            .filter(|line| *line == "VALID" || *line == "INVALID")
-            .next_back()
+            .map(str::trim).rfind(|line| *line == "VALID" || *line == "INVALID")
             .unwrap_or("NO-VERDICT");
         assert_eq!(
             verdict, "VALID",
@@ -497,7 +495,7 @@ fn same_order(left: &[Value], right: &[Value]) -> bool {
 /// 是 `BTreeMap`(按键排序),源文件顺序在解析后就不可见 ⇒ 我们按 id 排序。
 /// 两边的**集合完全相同**(`diff_value` 对这两条路径按集合比较,集合不同照样报差异),
 /// 差异只在先后;这也是本层唯一的顺序敏感点(变量重名去重同源,但两份真作品无重名)。
-fn allowed(difference: &String) -> bool {
+fn allowed(difference: &str) -> bool {
     difference.starts_with(ALLOW_ORDER)
 }
 

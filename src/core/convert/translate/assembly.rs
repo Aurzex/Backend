@@ -489,7 +489,7 @@ fn cloud_variable(
 // ---------------------------------------------------------------- 小工具
 
 /// 源舞台尺寸:官方 `size?.width ?? width ?? 562` / `size?.height ?? height ?? 900`
-fn source_stage_size(src: &Map<String, Value>) -> (f64, f64) {
+pub(super) fn source_stage_size(src: &Map<String, Value>) -> (f64, f64) {
     let size = src.get("size").and_then(Value::as_object);
     let pick = |key: &str, fallback: f64| -> f64 {
         size.and_then(|s| s.get(key))

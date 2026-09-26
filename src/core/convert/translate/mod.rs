@@ -469,21 +469,57 @@ pub(crate) fn convert_kitten4_document(
     use serde_json::Value;
     let started = std::time::Instant::now();
 
-    // 官方 GN 第一行就读 `size`,Kitten2/3(`.bcm` + blocksXML)没有它 —— 直接给明确错误,
+    // 官方 GN 第一行就读 `size`;Kitten2/3(`.bcm` + blocksXML)没有它 —— 给明确错误,
     // 而不是像官方那样抛 TypeError(见 docs/rounds/20 §1/§11.1)。
-    let size = source.get("size").ok_or_else(|| {
-        TranslateError::InvalidArgument(
-            "源作品没有 size 字段:这看起来是 Kitten2/3(.bcm/blocksXML)作品,本库暂不支持该方向"
+    //
+    // 但 **`size` 不是可靠判据**:第三十三轮实测有 Kitten4 作品(`捕鱼达人_259694808`,
+    // 文件就是 `.bcm4`)顶层只有 `width`/`height`,旧判据一票否决、把它误判成 Kitten2/3。
+    // 改用与装配**同一套回退**(`assembly::source_stage_size`: `size.*` → 顶层
+    // `width`/`height` → 官方默认 562×900),只有三者都缺才认定是 Kitten2/3。
+    let src_map = source
+        .as_object()
+        .ok_or_else(|| TranslateError::InvalidArgument("源作品不是 JSON 对象".into()))?;
+    if !["size", "width", "height"]
+        .iter()
+        .any(|key| src_map.contains_key(*key))
+    {
+        return Err(TranslateError::InvalidArgument(
+            "源作品没有 size/width/height:这看起来是 Kitten2/3(.bcm/blocksXML)作品,本库暂不支持该方向"
                 .into(),
-        )
-    })?;
-    let landscape = match (
-        size.get("width").and_then(Value::as_f64),
-        size.get("height").and_then(Value::as_f64),
-    ) {
-        (Some(w), Some(h)) => w > h,
-        _ => false,
-    };
+        ));
+    }
+    let (src_w, src_h) = assembly::source_stage_size(src_map);
+    let landscape = src_w > src_h;
+
+    // Kitten4 的真正特征:实体带 `block_data_json`。Kitten2/3 的积木在 `blocksXML` 里
+    // (没有 `block_data_json`)—— 那种喂进来只会得到"零积木的空产物",所以明确报错。
+    // (画布字段不能当判据:`捕鱼达人_259694808` 是 Kitten4 却没有 `size`;`春风得意_324995084.bcm`
+    // 是 Kitten3 却有 `width`/`height` —— 第三十三轮实测。)
+    let entities: Vec<&Value> = ["actors", "scenes"]
+        .iter()
+        .filter_map(|container| source["theatre"][container].as_object())
+        .flat_map(|map| map.values())
+        .collect();
+    if !entities.is_empty()
+        && !entities
+            .iter()
+            .any(|entity| entity.get("block_data_json").is_some())
+    {
+        return Err(TranslateError::InvalidArgument(
+            "源作品的实体里没有 block_data_json:这看起来是 Kitten2/3(.bcm + blocksXML)作品,本库暂不支持该方向"
+                .into(),
+        ));
+    }
+
+    // 影子形态:本库吃 XML 字符串(`shadows: {槽: "<shadow …>"}`),但平台上有些作品的
+    // 影子是**内联对象**(`shadows: {槽: {type, fields, …}}`)。直接喂进去只会在深层
+    // 反序列化时报 `invalid type: map, expected a string`(第三十三轮实测 `A28社区-开幕_174408420`),
+    // 所以在这里拦下并说清楚是什么(支持对象形态 = 把对象转成影子 XML,列在待办里)。
+    if let Some((kind, slot)) = find_object_shadow(source) {
+        return Err(TranslateError::InvalidArgument(format!(
+            "源作品的内联影子是对象形态(块 `{kind}` 的槽 `{slot}`):本库目前只支持 XML 字符串形态的影子,暂不支持该作品"
+        )));
+    }
 
     let mut items = collect_forward_items(source)?;
     let weights: Vec<usize> = items.iter().map(|item| item.weight).collect();
@@ -1021,6 +1057,50 @@ pub(crate) fn unique_test_dir(tag: &str) -> std::path::PathBuf {
         std::process::id(),
         fastrand::u32(..)
     ))
+}
+
+/// 找出第一个"影子是内联对象"的位置(`shadows` 的值不是字符串),返回 `(块类型, 槽名)`。
+///
+/// `block_data_json` 既可能是对象,也可能是 JSON 字符串(编辑格式),两种都看。
+fn find_object_shadow(source: &serde_json::Value) -> Option<(String, String)> {
+    use serde_json::Value;
+
+    fn inspect(bdj: &Value) -> Option<(String, String)> {
+        let inner: std::borrow::Cow<'_, Value> = match bdj {
+            Value::String(text) if text.trim_start().starts_with('{') => {
+                std::borrow::Cow::Owned(serde_json::from_str(text).ok()?)
+            }
+            other => std::borrow::Cow::Borrowed(other),
+        };
+        fn walk(node: &Value) -> Option<(String, String)> {
+            match node {
+                Value::Object(map) => {
+                    if let Some(shadows) = map.get("shadows").and_then(Value::as_object) {
+                        for (slot, value) in shadows {
+                            if value.is_object() {
+                                let kind = map
+                                    .get("type")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("(未知)")
+                                    .to_string();
+                                return Some((kind, slot.clone()));
+                            }
+                        }
+                    }
+                    map.values().find_map(walk)
+                }
+                Value::Array(items) => items.iter().find_map(walk),
+                _ => None,
+            }
+        }
+        walk(&inner)
+    }
+    ["actors", "scenes"]
+        .iter()
+        .filter_map(|container| source["theatre"][container].as_object())
+        .flat_map(|map| map.values())
+        .filter_map(|entity| entity.get("block_data_json"))
+        .find_map(inspect)
 }
 
 #[cfg(test)]
