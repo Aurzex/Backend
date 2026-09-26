@@ -45,6 +45,11 @@
    **已修/已定性**:实体侧真缺口在正向 —— 影子步骤写在子块循环体内,已提到循环外;定义体侧
    残留是退化影子 `fields.list="?"` 的归一化)、`script_variables` 子树(假设三,待查)。
    语料面:**扫描器 `kn_corpus_round_trip_sweep` 已就位**(任意 `.bcmkn` 自动纳入,守"能转 + 确定性"
+   **第三十四轮(真 bug 修掉)**:转换出的 Kitten4 文件缺 **15 个平台骨架键**(`toolbox`/`toolbox_order`/
+   `last_toolbox_order`/`ai_lab`/`matrix`/`models`/`midi_order`/`midimusic`/`is_partial`/`sample_id`/`codemao_value`/
+   `work_source_label`/`device_widget_type`/`hardware_type`/`painter`)⇒ **编辑器读不出积木**(用户实测)。
+   根因:`build_kitten4_document` 只从 KN 源照搬这几个键,而 KN 源没有。已兜底写平台默认值,
+   修后产物与平台原件只差 `painter`(与反编译产物同档)。详见 `docs/rounds/34` §4octies。
    **第三十四轮**:① 正向判据误伤修复(`size` 太严 ⇒ Kitten4 作品被误判;放松后 Kitten3 被静默空转 ⇒
    改用"实体有没有 `block_data_json`"判定);② 内联对象形态影子前置拦截并明确报错(支持它 = 转成影子 XML,
    待办);③ **正向扫描器换上 `download/compile/*.bcm4` 真语料(21/22 件吃得下,离线)**,

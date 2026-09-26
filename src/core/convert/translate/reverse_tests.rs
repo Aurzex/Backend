@@ -896,6 +896,21 @@ mod reverse_tests_inner {
         })
     }
 
+    /// 从差异行里抽出**类别名**。
+    ///
+    /// 行格式:`kind: a -> b`(多条用 `"; "` 连);定义体侧的每条前面还挂着 `定义 <id>: ` 前缀。
+    fn diff_classes(line: &str) -> Vec<String> {
+        line.split("; ")
+            .filter_map(|item| {
+                let body = match item.split_once(": ") {
+                    Some((head, rest)) if head.starts_with("定义 ") => rest,
+                    _ => item,
+                };
+                body.split_once(": ").map(|(kind, _)| kind.trim().to_string())
+            })
+            .collect()
+    }
+
     /// 从角色/场景的积木树里收集"被引用的实体 id":列表槽与变量槽引用的对象 id。
     ///
     /// 为什么这是**能当门用的不变量**(第三十四轮 §4quinquies/§4sexies):往返里块的**数量**会变
@@ -1016,6 +1031,8 @@ mod reverse_tests_inner {
         }
         let options = TranslateOptions::new().deterministic_ids(true);
         let mut with_diffs = 0usize;
+        // 出现过的**差异类别**(只收类别名,数量随作品变,只打印不断言)
+        let mut seen_classes: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
 
         for path in &files {
             let label = path
@@ -1109,11 +1126,53 @@ mod reverse_tests_inner {
                 &census_kitten4_blocks(&source),
                 &census_kitten4_blocks(&back1),
             );
+            for diff in &diffs {
+                seen_classes.extend(diff_classes(diff));
+            }
             if !diffs.is_empty() {
                 with_diffs += 1;
                 eprintln!("[扫描·正向] {label}: {}", diffs.join("; "));
             }
         }
+        // 门:差异**类别**必须落在文档化族里(新类别出现 = 要么是新问题,要么是新语料的形态,
+        // 先分诊再决定是修、还是补进这份清单并写明理由)。
+        let allowed: &[&str] = &[
+            // ① 槽的默认影子不回写(rounds/34 §4quinquies):源在同一个槽里同时存默认影子与真子块
+            "lists_get", "pure_list_get", "list_item", "lists_get_value", "list_append", "list_insert_value",
+            "delete_list_item", "lists_replace", "replace_list_item", "list_length", "lists_length",
+            "lists_append", "lists_delete", "lists_insert_value", "lists_is_exist", "lists_copy", "list_copy",
+            // ② 云/本地名字合并(rounds/34 §4sexies):KN 侧本来就只有一种变量/列表积木,
+            //    区别在 id 与定义表 ⇒ 名字合并、数量在类别间挪动
+            "change_cloud_variable", "variables_get", "variables_set",
+            "cloud_lists_append", "cloud_lists_delete", "cloud_lists_get_value", "cloud_lists_insert_value",
+            "cloud_lists_is_exist", "cloud_lists_length", "cloud_lists_replace",
+            // ③ 反向的 GC 特例 / 官方拆包降级(`mapping.rs` 的 `reverse_kind`/`gc_node`,均有断言)
+            "shadow_number", "stop", "terminate",
+            // ④ 官方 `zC` 把带返回值的定义拆成 NORMAL + ROUND(rounds/32 §3.2)
+            "procedures_2_defnoreturn", "procedures_2_parameter", "procedures_2_return_value",
+            "procedures_2_stable_parameter", "procedures_2_callreturn", "procedures_2_callnoreturn",
+            // ⑤ 反向**手写特例**引起的改名(`mapping.rs` 的 `reverse_kind`/占位块还原:`text_join` ⇒ `shadow_text`、
+            //    `get_play_audio` ⇒ `get_audios`、数学族 ⇒ `math_round`/`math_modulo`/`math_number_property`、
+            //    `text_select` ⇒ `text_split`、`get_styles` ⇒ `get_stage_info`、触发类 ⇒ `repeat_n_times`/
+            //    `self_go_forward`/`self_change_effect` 等)—— 同名两类在往返里互换,数量守恒
+            "shadow_text", "text_split", "text_join", "get_audios", "play_audio", "get_stage_info",
+            "get_split_options", "text",
+            "math_round", "math_modulo", "math_number_property", "math_single", "math_function",
+            "repeat_n_times", "self_go_forward", "self_change_effect", "cloud_variables_get", "cloud_variables_set",
+            // ⑥ 横屏坐标包装与它的连带(`GC`:坐标除 1.3、算数/逻辑壳、默认值影子)
+            "math_arithmetic", "math_number", "logic_compare", "logic_operation", "controls_if",
+            "default_value", "bump", "dispose_clone", "start", "below", "x", "y", "width", "height",
+        ];
+        let allowed_set: std::collections::BTreeSet<&str> = allowed.iter().copied().collect();
+        let offenders: Vec<&String> = seen_classes
+            .iter()
+            .filter(|kind| !allowed_set.contains(kind.as_str()))
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "正向往返出现未文档化的差异类别:{offenders:?} —— 先分诊是结构性 / 归一化 / 缺陷,再决定修还是补清单"
+        );
+
         eprintln!(
             "[扫描汇总·正向] {}/{} 件作品存在往返差异(逐条见上;差异只作分诊,不作断言)",
             with_diffs,
@@ -1237,6 +1296,8 @@ mod reverse_tests_inner {
         }
         let options = TranslateOptions::new().deterministic_ids(true);
         let mut with_diffs = 0usize;
+        // 出现过的**差异类别**(实体侧 + 定义体侧;数量只打印不断言)
+        let mut seen_classes: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
 
         for path in &files {
             let label = path
@@ -1291,6 +1352,9 @@ mod reverse_tests_inner {
                 }
                 out
             };
+            for diff in entity_diffs.iter().chain(def_diffs.iter()) {
+                seen_classes.extend(diff_classes(diff));
+            }
             if !entity_diffs.is_empty() || !def_diffs.is_empty() {
                 with_diffs += 1;
             }
@@ -1301,6 +1365,21 @@ mod reverse_tests_inner {
                 eprintln!("[扫描·定义] {label} {line}");
             }
         }
+        // 门:差异类别同样必须落在文档化族里(反向侧只有这四类:横屏包装成对、`calculate` 1:1 降级)
+        let allowed: &[&str] = &[
+            "math_arithmetic", "math_number",
+            "calculate", "bcm_translator_text_return_value_block",
+        ];
+        let allowed_set: std::collections::BTreeSet<&str> = allowed.iter().copied().collect();
+        let offenders: Vec<&String> = seen_classes
+            .iter()
+            .filter(|kind| !allowed_set.contains(kind.as_str()))
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "反向往返出现未文档化的差异类别:{offenders:?} —— 先分诊再决定修还是补清单"
+        );
+
         eprintln!(
             "[扫描汇总] {}/{} 件作品存在往返差异(逐条见上;差异只作分诊,不作断言)",
             with_diffs,

@@ -191,6 +191,36 @@ Kitten4 侧的列表引用挂在**父块的 `fields.VAR`** 上(见 `FIELD_NAME_M
    (`List`/`String`/`Audio`/`Custom`/`Label`),计数时会把它们当成积木类型(实测某作品 182 个)。
    ⇒ 计数只认**真块**,并优先用库自己的 tree census 做判据(它天然不带这两类噪声)。
 
+## 4octies. **真 bug**:转换出的 Kitten4 文件缺平台骨架键 ⇒ 编辑器读不出积木(用户实测发现)
+
+**症状**:`Node VM v3`(328981781)转出来的 `.bcm4` 在 Kitten4 编辑器里**完全看不到积木**。
+
+**先排除**:不是 XML —— 平台的 Kitten4 文件也是扁平 `block_data_json`
+(`{blocks, comments, connections}`,块级字段逐个相同),我们产物形态一致。
+
+**真正的原因**:两个写出器的**顶层键**不一样:
+
+| 写出器 | 相对平台原件缺的顶层键 |
+| --- | --- |
+| 反编译器(编辑器能正常读) | 只缺 `painter` |
+| **转换(KN → Kitten4)** | 缺 **15 个**:`toolbox`/`toolbox_order`/`last_toolbox_order`/`ai_lab`/`matrix`/`models`/`midi_order`/`midimusic`/`is_partial`/`sample_id`/`codemao_value`/`work_source_label`/`device_widget_type`/`hardware_type`/`painter` |
+
+根因:`build_kitten4_document` 里写着"`toolbox`/`toolbox_order`/`hidden_toolbox` 源里有就照搬",
+而**源是 KN 文档、根本没有这些键** ⇒ 一个都没写。
+
+**修法**:兜底写平台默认骨架(源里真有仍优先),值照平台原件抄:`toolbox` 18 个开关、
+`toolbox_order`/`last_toolbox_order`(平台顺序,`data` 重复两次也照抄)、`work_source_label=1`、
+`device_widget_type=null`、`ai_lab`/`matrix`/`models` = `{}`、`midi_order`/`midimusic` = `[]`、
+`codemao_value=""`(目标作品 id 由平台保存时回填)。
+
+**验证**:转换产物相对平台原件现在**只缺 `painter`** —— 与"编辑器能读"的反编译产物**同档** ✓。
+
+**顺手核对反方向**:扫 10 份平台 KN 文档取顶层键并集 ⇒ 我们的 KN 产物**不缺**(`classifyModels`
+只在 5/10 出现,是"用了 AI 模型"的作品才有的功能键,不是必需)⇒ KN 侧不用改 ✓。
+
+> **教训**:跨编辑器转换要**对着平台真实文件比"顶层键集合"**,不能只比积木;两个写出器
+> (反编译 / 转换)的产物必须同档 —— 差 15 个键时,积木比对得再仔细也白搭。
+
 ## 5. 环境:clippy 门恢复干净
 
 `cargo clippy --all-targets -- -D warnings`(CONTRIBUTING 要求)此前被 **7 条工具链新 lint** 挡着,

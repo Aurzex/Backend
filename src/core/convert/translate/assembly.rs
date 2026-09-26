@@ -947,6 +947,39 @@ fn kn_stage_size(src: &serde_json::Map<String, serde_json::Value>) -> (f64, f64)
     )
 }
 
+/// Kitten4 默认工具箱开关表(照平台 Kitten4 文件抄:18 个开关,只有 `cognitive` 默认开)
+fn kitten4_default_toolbox() -> serde_json::Value {
+    json!({
+        "current_type": "",
+        "physics": false,
+        "physics2": false,
+        "block_ai_classification": false,
+        "block_ai_game": false,
+        "block_hardware_arduino": false,
+        "block_hardware_weeemake": false,
+        "block_hardware_microbit": false,
+        "cloud_variable": false,
+        "cloud_list": false,
+        "advanced": false,
+        "camera": false,
+        "video": false,
+        "wood": false,
+        "ai_lab": false,
+        "midimusic": false,
+        "mobile_control": false,
+        "cognitive": true,
+    })
+}
+
+/// Kitten4 工具箱分类顺序(照平台原件抄;`data` 出现两次是平台原样,别"顺手去重")
+#[rustfmt::skip]
+const KITTEN4_TOOLBOX_ORDER: &[&str] = &[
+    "event", "control", "action", "appearance", "audio", "pen", "sensing", "operator", "data", "data",
+    "procedure", "mobile_control", "physic", "physics2", "cloud_variable", "cloud_list", "advanced",
+    "ai_lab", "ai_game", "cognitive", "camera", "video", "wood", "arduino", "weeemake", "microbit",
+    "ai", "midimusic",
+];
+
 /// 装配 Kitten4 编辑版文档
 fn build_kitten4_document(
     src: &serde_json::Map<String, serde_json::Value>,
@@ -1057,12 +1090,37 @@ fn build_kitten4_document(
     doc.insert("audio".into(), Value::Object(audio));
     doc.insert("audio_order".into(), Value::Array(audio_order));
     doc.insert("broadcasts".into(), kitten4_broadcasts(src, report));
-    // 这几个键 Kitten4 也有,源里有就照搬
-    for key in ["toolbox", "toolbox_order", "hidden_toolbox"] {
+    // Kitten4 **编辑版必备的平台骨架键**:源(KN 文档)里通常**没有** `toolbox` 这几个,
+    // 而平台自己的 Kitten4 文件都有(实测:转换产物比平台原件少 15 个顶层键,而反编译产物
+    // 只少 `painter` —— 那条路编辑器能正常读)。缺了它们,编辑器可能读不出积木 ⇒ 兜底补默认值;
+    // 源里真有就照搬(仍然优先)。
+    doc.insert("hidden_toolbox".into(), json!({ "toolbox": [], "blocks": [] }));
+    doc.insert("toolbox".into(), kitten4_default_toolbox());
+    doc.insert("toolbox_order".into(), json!(KITTEN4_TOOLBOX_ORDER));
+    doc.insert("last_toolbox_order".into(), json!(KITTEN4_TOOLBOX_ORDER));
+    for key in [
+        "toolbox",
+        "toolbox_order",
+        "last_toolbox_order",
+        "hidden_toolbox",
+    ] {
         if let Some(value) = src.get(key) {
             doc.insert(key.to_string(), value.clone());
         }
     }
+    // 平台文件里同样存在的其余骨架键(转换路径原来一个都没有)
+    doc.insert("ai_lab".into(), json!({}));
+    doc.insert("matrix".into(), json!({}));
+    doc.insert("models".into(), json!({}));
+    doc.insert("midi_order".into(), json!([]));
+    doc.insert("midimusic".into(), json!([]));
+    doc.insert("is_partial".into(), json!(false));
+    doc.insert("sample_id".into(), json!(""));
+    doc.insert("device_widget_type".into(), Value::Null);
+    doc.insert("hardware_type".into(), json!(""));
+    doc.insert("work_source_label".into(), json!(1));
+    // 目标作品的 id 由平台在保存/导入时写回,转换阶段无从得知 ⇒ 空串
+    doc.insert("codemao_value".into(), json!(""));
     // KN 专属的顶层键:明确列出来、逐条记进报告(不静默丢弃)
     for key in [
         "stageSize",
