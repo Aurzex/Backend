@@ -896,6 +896,89 @@ mod reverse_tests_inner {
         })
     }
 
+    /// 从角色/场景的积木树里收集"被引用的实体 id":列表槽与变量槽引用的对象 id。
+    ///
+    /// 为什么这是**能当门用的不变量**(第三十四轮 §4quinquies/§4sexies):往返里块的**数量**会变
+    /// (槽的默认影子不回写、云/本地名字合并),但"源引用过的列表/变量 id 必须一个不少地出现在
+    /// 产物里" —— 少一个就意味着真的接错或丢了东西。按块类型家族分开取,避免 `lists_get`
+    /// 与 `variables_get` 都用 `VAR` 造成串味。
+    #[allow(clippy::type_complexity)]
+    fn referenced_entity_ids(
+        doc: &Value,
+    ) -> (
+        std::collections::BTreeSet<String>,
+        std::collections::BTreeSet<String>,
+    ) {
+        use std::collections::BTreeSet;
+
+        fn walk(node: &Value, lists: &mut BTreeSet<String>, vars: &mut BTreeSet<String>) {
+            match node {
+                Value::Object(map) => {
+                    let kind = map.get("type").and_then(Value::as_str);
+                    let bucket = kind.and_then(|kind| {
+                        if kind.starts_with("list") || kind.starts_with("cloud_lists") {
+                            Some(true)
+                        } else if kind.contains("variable") {
+                            Some(false)
+                        } else {
+                            None
+                        }
+                    });
+                    if let Some(is_list) = bucket {
+                        for field in ["VAR", "list", "variable", "valname"] {
+                            if let Some(id) = map
+                                .get("fields")
+                                .and_then(|fields| fields.get(field))
+                                .and_then(Value::as_str)
+                                && !id.is_empty()
+                            {
+                                if is_list {
+                                    lists.insert(id.to_string());
+                                } else {
+                                    vars.insert(id.to_string());
+                                }
+                            }
+                        }
+                    }
+                    for value in map.values() {
+                        walk(value, lists, vars);
+                    }
+                }
+                Value::Array(items) => {
+                    for item in items {
+                        walk(item, lists, vars);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let mut lists = BTreeSet::new();
+        let mut vars = BTreeSet::new();
+        for container in ["actors", "scenes"] {
+            // Kitten4:实体 `block_data_json`;KN:`nekoBlockJsonList`
+            if let Some(entities) = doc
+                .get("theatre")
+                .and_then(|t| t.get(container))
+                .and_then(Value::as_object)
+            {
+                for entity in entities.values() {
+                    if let Some(blocks) = entity.get("block_data_json") {
+                        walk(blocks, &mut lists, &mut vars);
+                    }
+                }
+            }
+            if let Some(entities) = doc.get(container).and_then(Value::as_object) {
+                for entity in entities.values() {
+                    if let Some(blocks) = entity.get("nekoBlockJsonList") {
+                        walk(blocks, &mut lists, &mut vars);
+                    }
+                }
+            }
+        }
+        (lists, vars)
+    }
+
     /// 通用语料往返扫描(**正向**方向):`download/compile/*.bcm4` 里每一件真 Kitten4 作品都跑
     /// Kitten4 → KN → Kitten4,逐条打印类型多重集差异。
     ///
@@ -1010,6 +1093,15 @@ mod reverse_tests_inner {
                 "{label}:往返必须确定性(两遍逐字节一致)"
             );
 
+            // 门:源引用过的列表 / 变量 id,产物里必须一个不少(数量差异属表示差异,见 rounds/34 §4quinquies/§4sexies)
+            let (src_lists, src_vars) = referenced_entity_ids(&source);
+            let (back_lists, back_vars) = referenced_entity_ids(&back1);
+            let lost_lists: Vec<&String> = src_lists.difference(&back_lists).collect();
+            let lost_vars: Vec<&String> = src_vars.difference(&back_vars).collect();
+            assert!(
+                lost_lists.is_empty() && lost_vars.is_empty(),
+                "{label}:往返后丢失了被引用的实体 id —— 列表{lost_lists:?} 变量{lost_vars:?}"
+            );
             let diffs = census_diff(
                 &census_kitten4_blocks(&source),
                 &census_kitten4_blocks(&back1),
@@ -1117,10 +1209,12 @@ mod reverse_tests_inner {
     /// 而往返缺陷往往只在**特定块形态组合**下暴露 —— 上一轮的 `pure_list_get` 影子丢失就是
     /// 只在 `delete_list_item` 且"没有已连接子块"时发生。语料每加一件,就多一组形态组合。
     ///
-    /// 口径:扫描**不设保真断言**。新语料上的差异必须先读懂语义,再判定"结构性(Kitten4 承载不了)"
-    /// 还是"缺陷",然后才谈修。它只守两条铁律:
+    /// 口径:类型多重集差异**仍只打印**(新语料上的差异要先读懂语义,再判定"结构性 / 归一化 / 缺陷"),
+    /// 但**有三条铁律是硬断言**:
     /// ① 每件作品都转换得动(解码 / 解析 / 两个方向都不 Err、不 panic);
-    /// ② 往返确定性:同一输入跑两遍,最终 KN 产物逐字节一致(两腿任一腿不确定都会被抓住)。
+    /// ② 往返确定性:同一输入跑两遍,产物逐字节一致(任一腿不确定都会被抓住);
+    /// ③ **实体 id 覆盖**:源引用过的列表 / 变量 id,产物里必须一个不少(见 [`referenced_entity_ids`] ——
+    ///    往返里块**数量**会变:槽的默认影子不回写、云/本地名字合并,但"引用关系"不许丢)。
     #[test]
     fn kn_corpus_round_trip_sweep() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("download/compile");
