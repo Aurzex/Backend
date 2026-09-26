@@ -983,17 +983,17 @@ mod reverse_tests_inner {
                     .map(|m| m.keys().take(6).cloned().collect::<Vec<_>>())
                     .unwrap_or_default()
             );
+            let back1 = round_trip(&source);
+            let back2 = round_trip(&source);
             if std::env::var("DUMP_FWD").is_ok() {
                 let tag: String = label
                     .chars()
                     .filter(|c| c.is_ascii_alphanumeric())
                     .collect();
+                let _ = std::fs::write(format!("/tmp/fwd-back-{tag}.json"), back1.to_string());
                 let _ = std::fs::write(format!("/tmp/fwd-src-{tag}.json"), source.to_string());
                 let _ = std::fs::write(format!("/tmp/fwd-kn-{tag}.json"), kn_mid.to_string());
             }
-
-            let back1 = round_trip(&source);
-            let back2 = round_trip(&source);
             assert_eq!(
                 back1.to_string(),
                 back2.to_string(),

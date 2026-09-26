@@ -50,8 +50,10 @@
    待办);③ **正向扫描器换上 `download/compile/*.bcm4` 真语料(21/22 件吃得下,离线)**,
    口径加了"类型名折等价类代表"(否则有意的改名全被算成差异);④ 定义体预算收紧到 `0/0`;
    ⑤ clippy 门恢复干净(修掉 7 条工具链新 lint)。详见 `docs/rounds/34`。
-   **待分诊(风险最高)**:正向往返里 `lists_get` 大量改类、`get_current_scene ⇄ get_screens` 成对替换 ⇒
-   疑似反向表把积木映射到功能不同的块(改语义而非改名)。
+   **待修(已定位到腿)**:列表影子在正向往返里**两腿都丢**(`原气骑士`:源 768 → 中间 682 → 往返 490 ⇒
+   正向丢 86、反向丢 192)。线索:源里的 `pure_list_get` 是**没有 `fields.list` 的裸影子**(Kitten4 侧列表引用
+   挂在父块 `fields.VAR` 上),而正向的影子步骤硬读 `fields.list` ⇒ 识别不了、也没被当普通子块保住。
+   三态计数表与读法见 `docs/rounds/34` §4bis。
    **第三十三轮(续)定义体缺口已查清 = 残块归一化**:源 KN 的 `proceduresDict` 条目里除定义根外还残留
    没人挂的块(根块 `parent_id` 为空、无任何可达块引用,实测与被删的 `callreturn`/`repeat_n_times`/
    `script_variables`/`callnoreturn` 簇逐条对上)。反向重建树时自然消失 = 正确行为。

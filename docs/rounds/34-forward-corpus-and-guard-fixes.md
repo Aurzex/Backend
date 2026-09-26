@@ -38,6 +38,39 @@
 | 4 | `stop ⇄ terminate`、`below: 0→12`、`x/y/width/height` 小增量、`shadow_number: 2→0` | 多件 | 疑似坐标系/占位表达 |
 | 5 | `procedures_2_defnoreturn` 翻倍 + `parameter`/`return_value`/`stable_parameter` 增加 | `射箭-1`、`烂` | **已文档化**:正向 `zC` 拆 `NORMAL`+`ROUND`(rounds/32 §3.2)⇒ 预期 |
 
+## 4bis. 正向侧最值得追的一条:列表影子的「分腿丢」(三态计数,2026-09-26)
+
+对 `原气骑士 且听风吟_136021231.bcm4`(最严重的一件)落盘**源 / 中间(KN)/ 往返(Kitten4)**三态并计数
+(只数真块,不看 `shadows` XML):
+
+| 类型 | 源(Kitten4) | 中间(KN) | 往返(Kitten4) |
+| --- | --- | --- | --- |
+| `lists_get` | 768 | 0 | **490** |
+| `pure_list_get` | 0 | **682** | 0 |
+| `lists_get_value` / `list_item` | 505 | 480 | 505 |
+| `lists_replace` / `replace_list_item` | 266 | 205 | 266 |
+| `lists_append` / `list_append` | 6 | 6 | 6 |
+| `input` | 10186 | 0 | 9853 |
+| `next` | 2126 | 0 | 2179 |
+| 块总数 | 25170 | 14485 | 24625 |
+
+读法:
+
+- **正向腿**:`lists_get`(768)→ `pure_list_get`(**682**)⇒ **丢 86**;同一条腿上 `lists_get_value` 505 → `list_item` 480(−25)、
+  `lists_replace` 266 → `replace_list_item` 205(−61);
+- **反向腿**:`pure_list_get`(682)→ `lists_get`(**490**)⇒ **再丢 192**;而 `list_item`/`replace_list_item`
+  反向**原样保留**(不回改成源里的名字 —— 但同义,已被扫描器的等价类口径抵消);
+- ⇒ **两条腿都在丢**(86 + 192 = 278),不是单侧问题。
+
+**关键线索**:源(Kitten4)里的 `pure_list_get` 影子是**没有 `fields.list` 的裸影子** ——
+Kitten4 侧的列表引用挂在**父块的 `fields.VAR`** 上(见 `FIELD_NAME_MAP` 的 `("VAR","list")`),
+而正向的列表影子步骤读的是 `fields.list` ⇒ **这些"已经存在的影子"既不会被识别、也没被当作普通子块保住**。
+
+**下一条(明确)**:比较"影子作为子块"与"影子作为列表槽输入"两种形态在父块槽位里的差别 ——
+即正向的列表影子步骤该按**Kitten 侧字段名**(`get_mapped_name` 反查)取字段,而不是硬读 `fields.list`。
+
+另外 `input`(10186 → 9853,**−333**)与 `next`(2126 → 2179,+53)几乎每件作品都有,是**占位块**的表述差异,待定性。
+
 ## 5. 环境:clippy 门恢复干净
 
 `cargo clippy --all-targets -- -D warnings`(CONTRIBUTING 要求)此前被 **7 条工具链新 lint** 挡着,
