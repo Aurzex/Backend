@@ -916,7 +916,10 @@ mod reverse_tests_inner {
                 Value::Object(map) => {
                     let kind = map.get("type").and_then(Value::as_str);
                     let bucket = kind.and_then(|kind| {
-                        if kind.starts_with("list") || kind.starts_with("cloud_lists") {
+                        if kind.starts_with("list")
+                            || kind.starts_with("cloud_lists")
+                            || kind == "pure_list_get"
+                        {
                             Some(true)
                         } else if kind.contains("variable") {
                             Some(false)
@@ -1380,6 +1383,16 @@ mod reverse_tests_inner {
             let mut k4_again: Value = serde_json::from_str(&k4.to_string()).expect("复刻");
             let kn2 = convert_kitten4_document(&mut k4_again, &options, &mut back_report)
                 .expect("再次正向");
+
+            // 门:源引用过的列表 / 变量 id,反向往返后同样必须一个不少(与正向同一条不变量)
+            let (src_lists, src_vars) = referenced_entity_ids(source);
+            let (back_lists, back_vars) = referenced_entity_ids(&kn2);
+            let lost_lists: Vec<&String> = src_lists.difference(&back_lists).collect();
+            let lost_vars: Vec<&String> = src_vars.difference(&back_vars).collect();
+            assert!(
+                lost_lists.is_empty() && lost_vars.is_empty(),
+                "{label}:反向往返后丢失了被引用的实体 id —— 列表{lost_lists:?} 变量{lost_vars:?}"
+            );
 
             let before = census_entities_with(source, true);
             let after = census_entities_with(&kn2, true);
