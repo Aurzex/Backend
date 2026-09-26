@@ -112,7 +112,10 @@ fn harvest_corpus() {
         .fetch_new_works_web(Some(40), Some(offset), false)
         .expect("拉取最新作品流");
     collect_work_ids(&raw, &mut ids);
-    println!("[采集] 来源①最新作品流 offset={offset}:累计 {} 个 id", ids.len());
+    println!(
+        "[采集] 来源①最新作品流 offset={offset}:累计 {} 个 id",
+        ids.len()
+    );
     // `/tiger/work/ide/recommended` 的 `type` 是**数字**(实测 1 与 5 有数据,字符串枚举一律 400;
     // `/tiger/work/list/all` 无论传什么都 400 —— 估计要登录态,先不用)。
     // 返回的 id 未必都是可反编译的作品 id(有些像社区帖 id)⇒ 交给后面的"详情定类型"过滤,

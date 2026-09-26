@@ -163,6 +163,34 @@ Kitten4 侧的列表引用挂在**父块的 `fields.VAR`** 上(见 `FIELD_NAME_M
 
 ⇒ **正向侧已全部解释完毕:没有确认未修的缺陷。** 剩下的都是文档化的归一化 / 官方行为 / 可选打磨项。
 
+## 4septies. 手工转换两件线上作品(工具 + 数字口径的两次踩坑)
+
+新增工具 `tests/convert_work.rs`(`WORK_ID=<id> cargo test --test convert_work -- --ignored`):
+按作品类型自动选方向(`NEKO → Kitten4`、`KITTEN4 → KittenN`),调 `translate_work`
+(抓取 → 反编译到编辑版 → 重排 → 落盘),产物写 `download/converted/`(**不塞进** `download/compile/`
+——那里是往返扫描器的语料,混进手工产物会破坏"每件都是真作品"的前提)。**只转换、不上传**。
+
+实测:
+
+| 作品 | 类型 | 产物 | 体积 / 实体 | 告警(分类) |
+| --- | --- | --- | --- | --- |
+| `now`(273988379) | NEKO | `now_273988379.kitten4.bcm4` | 6.56 MB / 110 | 3977:KN 顶层键 Kitten4 没有、形参类型 `Custom`/`Audio`、`stop.scope=2/3` |
+| `Node VM v3 - 全猫最强解释器`(328981781) | NEKO | `…_328981781.kitten4.bcm4` | 5.38 MB / 4 | 2494:同上(含大量 `param(type=List)` —— Kitten4 没有 list 形参) |
+
+两件都做了**回程自检**(把产物再转回 KN)⇒ 都能转,且 `Node VM v3` 的回程里
+`proceduresDict` 从 **52 条**(NORMAL 10 / ROUND 39 / HEXAGONAL 3)变成 **93 条**(NORMAL 52 / ROUND 41)
+—— 这就是**官方 `zC` 把带返回值的定义拆成 NORMAL + ROUND 两条**的行为(rounds/32 §3.2 已文档化,
+`def_census` 会把两条合并回同一定义再比),所以回程块数看着多一截是**定义体被写了两遍**,不是丢或坏。
+
+### 数字口径的两次踩坑(都记下来)
+
+1. **别用 `parent_id` 是否存在当"是不是块"的判据**:官方/反编译产物里 `next` 子节点**不带** `parent_id`
+   (库的 `diff_tests` 注释里就写着"官方会丢 `is_output`/`field_constraints`,且 `next` 子节点不带 `parent_id`,
+   我们刻意保留"),拿它计数会把我们的产物虚增一大截;
+2. **`params[]` 不是块**:`proceduresDict[..].params[] = {"id","name","type"}` 里 `type` 是**形参类型名**
+   (`List`/`String`/`Audio`/`Custom`/`Label`),计数时会把它们当成积木类型(实测某作品 182 个)。
+   ⇒ 计数只认**真块**,并优先用库自己的 tree census 做判据(它天然不带这两类噪声)。
+
 ## 5. 环境:clippy 门恢复干净
 
 `cargo clippy --all-targets -- -D warnings`(CONTRIBUTING 要求)此前被 **7 条工具链新 lint** 挡着,

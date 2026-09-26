@@ -387,7 +387,8 @@ fn nemo_real_samples_match_official_products() {
         // harness 的 Node 侧会先打两行 banner,判定本身是最后一行
         let verdict = stdout
             .lines()
-            .map(str::trim).rfind(|line| *line == "VALID" || *line == "INVALID")
+            .map(str::trim)
+            .rfind(|line| *line == "VALID" || *line == "INVALID")
             .unwrap_or("NO-VERDICT");
         assert_eq!(
             verdict, "VALID",

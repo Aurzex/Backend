@@ -58,7 +58,9 @@ fn convert_one_work() {
     let outcome = translate_work(WorkId::new(id), target, options).expect("转换失败");
 
     // 3. 报账:产物路径 / 体积 / 报告摘要 / 顶层结构 sanity
-    let size = std::fs::metadata(&outcome.output).map(|m| m.len()).unwrap_or(0);
+    let size = std::fs::metadata(&outcome.output)
+        .map(|m| m.len())
+        .unwrap_or(0);
     println!("[转换] {name}({kind} / id {id})→ {target:?}");
     println!("[转换] 产物: {} ({size} 字节)", outcome.output.display());
     println!(
@@ -112,41 +114,14 @@ fn convert_one_work() {
         Ok(outcome_back) => {
             let back_path = outcome_back.output.clone();
             let back_text = std::fs::read_to_string(&back_path).expect("读回产物");
-            let back_doc: serde_json::Value = serde_json::from_str(&back_text).expect("回产物 JSON");
+            // 只做合法性校验:产物必须是 JSON(块数/账号上传等不在本工具职责内)
+            let _: serde_json::Value = serde_json::from_str(&back_text).expect("回产物 JSON");
             println!(
-                "[自检] 再转回 {back_target:?} → {} ({} 个块,告警 {} 条)",
+                "[自检] 再转回 {back_target:?} → {}(告警 {} 条)",
                 back_path.display(),
-                count_blocks(&back_doc),
                 outcome_back.report.warnings().len()
             );
         }
         Err(e) => println!("[自检] 回程转换失败: {e}"),
     }
-}
-
-/// 数一棵作品文档里的块(带字符串 `id` 与 `type` 的对象;连接描述符等伪对象不算)。
-fn count_blocks(doc: &serde_json::Value) -> usize {
-    fn walk(node: &serde_json::Value, n: &mut usize) {
-        match node {
-            serde_json::Value::Object(map) => {
-                if map.get("id").map(serde_json::Value::is_string).unwrap_or(false)
-                    && map.get("type").map(serde_json::Value::is_string).unwrap_or(false)
-                {
-                    *n += 1;
-                }
-                for value in map.values() {
-                    walk(value, n);
-                }
-            }
-            serde_json::Value::Array(items) => {
-                for item in items {
-                    walk(item, n);
-                }
-            }
-            _ => {}
-        }
-    }
-    let mut n = 0;
-    walk(doc, &mut n);
-    n
 }
