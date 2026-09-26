@@ -45,6 +45,11 @@
    **已修/已定性**:实体侧真缺口在正向 —— 影子步骤写在子块循环体内,已提到循环外;定义体侧
    残留是退化影子 `fields.list="?"` 的归一化)、`script_variables` 子树(假设三,待查)。
    语料面:**扫描器 `kn_corpus_round_trip_sweep` 已就位**(任意 `.bcmkn` 自动纳入,守"能转 + 确定性"
+   **第三十三轮(续)定义体缺口已查清 = 残块归一化**:源 KN 的 `proceduresDict` 条目里除定义根外还残留
+   没人挂的块(根块 `parent_id` 为空、无任何可达块引用,实测与被删的 `callreturn`/`repeat_n_times`/
+   `script_variables`/`callnoreturn` 簇逐条对上)。反向重建树时自然消失 = 正确行为。
+   `def_census` 口径改为**定义根子树**,定义体侧两条豁免删除,预算 **`≤6/≤21` → `0/0`**,三件真作品全绿。
+   详见 `docs/rounds/33` §3bis。
    **第三十三轮新增两台仪器**:反向 `kn_corpus_round_trip_sweep`(任意 `download/compile/*.bcmkn`)、
    正向 `k4_corpus_round_trip_sweep`(吃 `download/compile/k4raw/*.json`);采集器
    `tests/convert_corpus_harvest.rs`(`#[ignore]`,公开发现流抓作品 + 反编译落盘)。

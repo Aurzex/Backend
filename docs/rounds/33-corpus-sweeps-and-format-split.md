@@ -64,6 +64,36 @@
 > **不做**:① 不把"map → 字符串"或"编译态 → 编辑态"自己拼一遍当语料(拿自造输入验自家转换,结论不可信);
 > ② 不在没拿到 ③ 之前对正向转换器下"丢程序"的结论(本轮已经证明那是语料错)。
 
+## 3bis. 定义体侧那 6 条 / 21 块"缺口"查清了:**残块归一化**,不是丢失(本轮)
+
+rounds/32 留下的最后一项(定义体里 `script_variables` / `break` / `repeat_n_times` / `logic_compare` /
+`temporary_list` / `callreturn` / `parameter` 的减少,预算 `≤6 / ≤21`)本轮**查清了**。
+
+**方法**:把源 / 中间态 / 往返三态都落盘,按定义体逐块做**可达性**分析
+(源 KN 用条目内 `parent_id` 链求可达集,中间态按扁平块表的 `parent_id` 反查)。
+
+**结果**:所有"丢失"的块都是**孤儿** —— 它们所在子树的根块 `parent_id` 为空,且**任何可达块都不引用它们**。
+逐条对上:
+
+| 定义 | 差异 | 孤儿簇 |
+| --- | --- | --- |
+| `c50c29e1` | `repeat_n_times -1`、`break -1`、`math_number -1` | `repeat_n_times`(根)+ `break` + 计数块 |
+| `b9858f0c` | `logic_compare -1`、`callreturn -1`、`parameter -1` | 孤儿 `logic_compare` + 其 `callreturn`/`parameter` |
+| `bfa2f83c` | `callreturn -1`、`callnoreturn -1`、`parameter -2`、`temporary_list -1` | 孤儿 `callreturn`/`callnoreturn` 两簇 |
+| `6be6ac61` | `script_variables -1`、`script_variables_param -2`、`variables_set -1` | 孤儿 `script_variables` 簇 |
+| `71540544` | `callreturn -1`、`parameter -2` | 孤儿 `callreturn` 簇 |
+
+(唯一"被引用"的孤儿是 mutation 里的 `List`/`String` 伪对象 —— 那是形参**类型元数据**,不是块。)
+
+**结论**:`proceduresDict` 的条目里除定义根外还挂着编辑器残留的、**不属于任何定义**的块;
+反向按定义根重建树时它们自然消失(正确行为),正向也不可能凭空再造 ⇒ **归一化**,不是保真损失。
+
+**处置**:
+- `def_census` 的口径从"整条条目"改成"**定义根子树**"(`accumulate_subtree`),并保留原有"首根不是定义块就跳过整条"的语义
+  (改这条会假红:`定义 id 不丢` 那条断言会因为镜像侧 id 被重铸而误报 —— 本轮踩过);
+- 定义体侧的两条豁免(`pure_list_get:`、`procedures_2_callreturn:`)随之删除;
+- 预算按 rounds/28 §4.3 从 **`≤6 / ≤21`** 收紧到 **`0 / 0`**,三件真作品语料全绿。
+
 ## 4. 已就位的检查手段(留给后面)
 
 ```bash

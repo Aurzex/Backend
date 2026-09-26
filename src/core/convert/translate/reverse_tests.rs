@@ -705,6 +705,30 @@ mod reverse_tests_inner {
         out
     }
 
+    /// 只数**从定义根走得到**的块。
+    ///
+    /// 为什么要这么数:`proceduresDict` 的条目里除了定义根,还会残留**没人挂的块** ——
+    /// 第三十三轮实测:被删掉的 `callreturn` / `repeat_n_times` / `script_variables` / `callnoreturn`
+    /// 簇,根块 `parent_id` 为空、任何可达块都不引用它们(只有 mutation 里的 `List`/`String`
+    /// 伪对象会被引用,那是形参类型元数据,不是块)。
+    /// 反向按定义根重建树时这些残块自然消失,正向也不可能凭空再造 ⇒ 属**归一化**,
+    /// 不是保真损失。旧口径(`entry.tree.count_types()`)把整条目的残块都算进来,
+    /// 于是 6/21 的预算里一大半是假缺口。
+    fn accumulate_subtree(node: &model::BlockJson, out: &mut BTreeMap<String, usize>) {
+        if !node.kind.is_empty() {
+            *out.entry(node.kind.clone()).or_default() += 1;
+        }
+        for child in node.inputs.values() {
+            accumulate_subtree(child, out);
+        }
+        for child in node.statements.values() {
+            accumulate_subtree(child, out);
+        }
+        if let Some(next) = &node.next {
+            accumulate_subtree(next, out);
+        }
+    }
+
     /// 程序集侧:按**定义积木 id** 聚合的定义体类型频次。
     ///
     /// `known` 是参考文档(通常是转换前的 KN)的定义 id 集合,用于把转换后文档里的
@@ -720,14 +744,17 @@ mod reverse_tests_inner {
         for entry in model::parse_kn_procedures(doc.get("procedures").unwrap_or(&Value::Null))
             .unwrap_or_default()
         {
+            // 注意:`roots.first()`(而不是"找第一个定义根")。条目里可能挂着残块根,
+            // 首根不是定义块时**整条跳过** —— 这是本轮之前就有的语义,别动:改了它会把
+            // "镜像里 id 被重铸"的条目也算进来,`定义 id 不丢` 那条断言就假红(实测过)。
             let Some(root) = entry.tree.roots.first() else {
                 continue;
             };
-            // 只把"首块是定义块(`procedures_2_def*`)"的条目算作定义体。
+            // 只把"首根是定义块(`procedures_2_def*`)"的条目算作定义体。
             //
             // 第三十二轮实测:`proceduresDict` 里同名条目可能**不是**定义 —— 例如 `Node VM v3` 里
-            // 名字 `bfa2f83c` 同时对应两条 ROUND 条目:一条首块是 `procedures_2_defnoreturn`(16 块,真定义体),
-            // 另一条首块是 `procedures_2_callreturn`(**128 块的调用树**)。旧口径按名字聚合取较大者,
+            // 名字 `bfa2f83c` 同时对应两条 ROUND 条目:一条首根是 `procedures_2_defnoreturn`(真定义体),
+            // 另一条首根是 `procedures_2_callreturn`(**128 块的调用树**)。旧口径按名字聚合取较大者,
             // 于是把调用树当成定义体比较,凭空造出 118 块的"缺口"。
             if !root.kind.starts_with("procedures_2_def") {
                 continue;
@@ -747,13 +774,13 @@ mod reverse_tests_inner {
             } else {
                 body_name.to_string()
             };
-            let count = entry.tree.count();
+            let mut census = BTreeMap::new();
+            accumulate_subtree(root, &mut census);
+            let count: usize = census.values().sum();
             if sizes.get(&key).is_some_and(|size| *size >= count) {
                 continue;
             }
             sizes.insert(key.clone(), count);
-            let mut census = BTreeMap::new();
-            accumulate(&entry.tree, &mut census);
             out.insert(key, census);
         }
         out
@@ -1252,20 +1279,20 @@ mod reverse_tests_inner {
             );
             // 定义体内同样会出现横屏包装成对增加(与实体侧同一机制),外加 `calculate` 的 1:1 降级。
             //
-            // **已知保真缺口(本测试抓到,未修)**:定义体里的 `list_append` 若带
-            // `<shadow type="pure_list_get" inline="true">`,往返一圈后该影子不再出现,
-            // 同时少掉一个 `procedures_2_callreturn`(这两条差必须成对看:是同一个调用点
-            // 的输入影子在反向 `fold_pure_list_get` 与正向云列表特例之间被改写)。
-            // 目前只在"纯程序集库"这类作品上出现;修它需要先弄清官方在**定义体**里对
-            // inline `pure_list_get` 的处理(实体侧有现成对照),故先按 allow-list 记录、守住不恶化。
+            // **曾经的"定义体缺口"(6 条定义 / 净减 21 块)已查清 = 残块归一化**(第三十三轮):
+            // `proceduresDict` 条目里除定义根外还残留**没人挂的块** —— 根块 `parent_id` 为空,
+            // 且任何可达块都不引用它们(实测:被删掉的 `callreturn` / `repeat_n_times` /
+            // `script_variables` / `callnoreturn` 簇,数目与差异逐条对上;仅 mutation 里的
+            // `List`/`String` 伪对象被引用,那是形参类型元数据,不是块)。
+            // 反向按定义根重建树时这些残块自然消失,正向也不可能凭空再造。
+            // 旧口径数的是**整条条目**(`entry.tree.count_types()`),于是把残块算成缺口;
+            // 现在 `def_census` 只数**定义根子树**(见 `accumulate_subtree`)——
+            // 三件真作品语料的定义体侧差异随之**归零**,预算按 rounds/28 §4.3 收紧到 0。
             let allowed = [
                 "calculate:",
                 "bcm_translator_text_return_value_block:",
                 "math_arithmetic:",
                 "math_number:",
-                // 见上方说明:定义体侧这对是"调用 + 其输入影子"成对减少,结构性待证
-                "pure_list_get:",
-                "procedures_2_callreturn:",
             ];
             // 中间态(K4)的定义体 census:用于三分定性
             if std::env::var("DUMP_K4").is_ok() {
@@ -1398,8 +1425,10 @@ mod reverse_tests_inner {
             // 见 `def_census` 注释)后重测:6 条定义 / 净减 **21** 块(旧口径 6 / 133 中约 118 块是
             // "把调用树当定义体比"造成的假缺口)。修口径前的真实现象、证据与后续见 `docs/rounds/32`。
             assert!(
-                affected <= 6 && deficit <= 21,
-                "{label}:反向保真缺口扩大(受影响定义 {affected}/{}，净减块 {deficit};基线 6 / 21)",
+                affected == 0 && deficit == 0,
+                "{label}:反向定义体出现保真缺口(受影响定义 {affected}/{}，净减块 {deficit};基线 0 / 0)。\
+                 真出现差异先分诊:结构性(如 Kitten4 无 list 参数)或退化数据(如列表名 `?`)进 allow-list \
+                 并写明理由;是实现缺陷就修。",
                 before_defs.len()
             );
         }
