@@ -221,6 +221,45 @@ Kitten4 侧的列表引用挂在**父块的 `fields.VAR`** 上(见 `FIELD_NAME_M
 > **教训**:跨编辑器转换要**对着平台真实文件比"顶层键集合"**,不能只比积木;两个写出器
 > (反编译 / 转换)的产物必须同档 —— 差 15 个键时,积木比对得再仔细也白搭。
 
+## 4nonies. 实机验证(无头浏览器 + 线上真编辑器):把问题锁到"KN → Kitten4"这条写出路径
+
+**方法**:用无头浏览器打开线上 Kitten4 编辑器(`https://kitten4.codemao.cn/`),
+用它自己的**「打开本地作品」**入口(隐藏 `<input accept=".bcm, .bcm4">`)把文件喂进去,
+再数画布 DOM(`g.blocklyBlockCanvas g.blocklyDraggable`)与作品名输入框。
+
+| 文件 | 作品名读取 | 画布积木 |
+| --- | --- | --- |
+| 平台原件(`raw/几何对战-联机.bcm4`) | ✓ | **52** |
+| 我们**反编译**的产物(`几何对战-联机_215246857.bcm4`) | ✓ | **52** |
+| 我们**转换**(KN → Kitten4)的产物 | ✓ | **0** |
+
+⇒ 编辑器没问题、反编译这条路没问题 —— **问题只在 KN → Kitten4**。
+
+**又抓到两个硬缺陷(已修 + 有验证)**:
+
+1. **顶层平台骨架键缺失**(与 §4octies 同源):转换产物缺 `toolbox`/`toolbox_order`/`ai_lab`/`matrix`/`models`/
+   `midi_order`/`midimusic`/`is_partial`/`sample_id`/`codemao_value`/`work_source_label`/
+   `device_widget_type`/`hardware_type`/`painter`(共 15 个)⇒ 已兜底补默认值(源里真有仍优先)。
+   修后:与平台原件只差 `painter`。
+2. **产物里含编辑器不认识的积木类型**:把编辑器的注册表导出来当**权威词汇表**
+   (`Object.keys(window.Blockly.Blocks)` = **349 条**,落在 `translate/kitten4_vocab.rs`),
+   再逐类型比对 —— 转换产物 80 种类型里 **20 种不认识**(`list_item` 852 次、`temporary_list` 285 次、
+   `replace_list_item`、`list_append`、`script_variables*`、`get_split_options` …)。
+   编辑器遇到不认识的类型会让**整份工作区加载失败**(实测现象:名称/变量进得来,画布一块不显示)。
+   - 歧义挑选改为**按编辑器词汇挑**:候选里编辑器认识的优先 → KN 名本身认识就保留 →
+     再退"非云优先"(顺带修掉我先前"非云优先"把 `math_arithmetic` 挑成编辑器不认识的
+     `math_arithmetic_common` 的回归);
+   - 仍然无解的 12 种(`temporary_list`/`get_split_options`/`script_variables*`/`traverse_number*`/
+     `self_listen*`/`self_broadcast_with_param` —— 我们的表是 Kitten3 口径,没有 Kitten4 对应名)
+     **从积木表与影子 XML 里剔掉并逐类记报告**(宁可少几块,也要让作品能打开);
+   - 修后:积木表未知类型 **0**,影子 XML 未知类型 **0**(9696 条里原有 174 条)。
+
+**仍未解决(下一步)**:产物在编辑器里**作品名与变量能进,但 3 个角色一个都不出现**(⇒ 画布 0 块)。
+怀疑范围已缩小到**实体/造型数据**:`theatre.styles` 造型条目(平台 vs 我们的差异)、
+场景 `groups`/`actorIds` 归属校验 —— 两个写出器(反编译 ✓ / 转换 ✗)恰好在这一段不同。
+
+> 方法留档:**编辑器注册表就是"目标语言"的权威词汇表** —— 拿它当判据比在映射表里猜名字可靠得多。
+
 ## 5. 环境:clippy 门恢复干净
 
 `cargo clippy --all-targets -- -D warnings`(CONTRIBUTING 要求)此前被 **7 条工具链新 lint** 挡着,

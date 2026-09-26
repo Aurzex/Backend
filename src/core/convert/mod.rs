@@ -210,6 +210,19 @@ fn create_draft_work(
     target: TargetEditor,
 ) -> Result<i64, TranslateError> {
     let client = crate::utils::requests::CodeMaoClient::global().clone();
+    // 平台建作品要求封面合法(`preview` 空串会被拒:"参数preview封面非法")⇒ 拿**源作品的封面**顶上;
+    // 取不到就留空(仍可能被拒,但至少不自造非法值)。
+    let preview = crate::api::work::WorkDataFetcher::new()
+        .fetch_work_details(source_work_id.get() as i32)
+        .ok()
+        .and_then(|details| {
+            details
+                .get("preview")
+                .and_then(|value| value.as_str())
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        });
+
     let spec = DraftUpload {
         artifact: &outcome.output,
         editor: target.as_editor(),
@@ -218,6 +231,7 @@ fn create_draft_work(
         save_path: "convert",
         bcm_version: "",
         n_blocks: Some(outcome.report.blocks_converted as i32),
+        preview: preview.as_deref(),
     };
     crate::core::convert::shared::create_draft(&client, &spec).map_err(TranslateError::Decompiler)
 }

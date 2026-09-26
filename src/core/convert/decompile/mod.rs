@@ -421,6 +421,7 @@ impl CodemaoDecompiler {
             save_path: "decompile-backup",
             bcm_version: &context.work_info.bcm_version,
             n_blocks: None,
+            preview: context.work_info.preview.as_deref(),
         };
         let new_work_id = create_draft(self.client.as_ref(), &spec)?;
         info!("已建草稿作品 id={new_work_id}(名称含「可删」)");

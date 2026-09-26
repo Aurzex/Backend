@@ -1370,28 +1370,36 @@ fn reverse_kind(
     match REVERSE_TYPES.get(kn_kind).map(Vec::as_slice) {
         Some([only]) => ((*only).to_string(), None),
         Some(candidates) => {
-            // 歧义:能安全保留 KN 名(它本身就是 Kitten 侧的名字)就保留,否则按"非云优先"挑一个
-            // 歧义走**独立类别**(原先借 `DroppedProperty`,会让报告把它读成"丢了属性")
+            // 歧义:KN 侧一个名字对应多个 Kitten 原类型(如 `change_variables` ←
+            // `change_variable` | `change_cloud_variable`)。
+            //
+            // **必须挑一个 Kitten 名**:产物是给 Kitten4 **编辑器**读的,保留 KN 名会让编辑器
+            // 认不出这些积木 —— 实机验证(docs/rounds/34 §4nonies):转换产物 80 种块类型里
+            // 20 种 Kitten4 不认识(`list_item` 852 次、`temporary_list` 285 次……),
+            // 编辑器打开后画布**一块都不显示**。挑法沿用"非云优先"(
+            // 云列表/云变量与本地版语义不同,本地版是更保守的默认)。
+            //
+            // 代价:往返的类型多重集不再"名字逐一相等"(扫描器用等价类口径抵消这类改名),
+            // 换来的是**产物能被编辑器打开** —— 后者才是这条路径存在的意义。
             let all: Vec<String> = candidates.iter().map(|c| (*c).to_string()).collect();
-            if !is_renamed_lc_key(kn_kind) {
-                ctx.report.warn(TranslateWarning::AmbiguousType {
-                    kind: kn_kind.to_string(),
-                    candidates: all,
-                    chosen: None,
-                });
-                (kn_kind.to_string(), None)
-            } else {
-                let chosen = candidates
-                    .iter()
-                    .find(|c| !c.starts_with("cloud_"))
-                    .unwrap_or(&candidates[0]);
-                ctx.report.warn(TranslateWarning::AmbiguousType {
-                    kind: kn_kind.to_string(),
-                    candidates: all,
-                    chosen: Some((*chosen).to_string()),
-                });
-                ((*chosen).to_string(), None)
-            }
+            // 挑选顺序(都要落到**编辑器认识**的名字上,否则产物在编辑器里整份加载失败):
+            // ① 候选里编辑器认识的;② KN 名本身就认识就保留(如 `math_arithmetic`);
+            // ③ 退而求其次"非云优先";④ 最后才拿第一个候选。
+            let chosen = candidates
+                .iter()
+                .copied()
+                .find(|c| super::kitten4_vocab::kitten4_editor_knows(c))
+                .or_else(|| {
+                    super::kitten4_vocab::kitten4_editor_knows(kn_kind).then_some(kn_kind)
+                })
+                .or_else(|| candidates.iter().copied().find(|c| !c.starts_with("cloud_")))
+                .unwrap_or(candidates[0]);
+            ctx.report.warn(TranslateWarning::AmbiguousType {
+                kind: kn_kind.to_string(),
+                candidates: all,
+                chosen: Some((*chosen).to_string()),
+            });
+            ((*chosen).to_string(), None)
         }
         // 不是 LC 值:可能是 LC 的键(恒等 → 保留;会改名 → 不可逆)、也可能完全在表外
         None => {

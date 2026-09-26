@@ -980,6 +980,120 @@ const KITTEN4_TOOLBOX_ORDER: &[&str] = &[
     "ai", "midimusic",
 ];
 
+/// 剔掉 Kitten4 编辑器不认识的积木(连带清理 `connections` 里的父子引用),逐类记报告。
+///
+/// 背景见 [`crate::core::convert::translate::kitten4_vocab`] 与 `docs/rounds/34` §4nonies:
+/// 编辑器遇到未知积木类型会让**整份工作区**加载失败 ⇒ 不剔的后果是"打开什么都看不到"。
+fn strip_unknown_blocks(
+    blocks: serde_json::Value,
+    report: &mut TranslateReport,
+) -> serde_json::Value {
+    use serde_json::{Map, Value};
+
+    let Some(mut root) = blocks.as_object().cloned() else {
+        return blocks;
+    };
+    let Some(table) = root.get("blocks").and_then(Value::as_object).cloned() else {
+        return Value::Object(root);
+    };
+
+    let mut kept = Map::new();
+    let mut dropped: Map<String, Value> = Map::new();
+    for (id, block) in table {
+        let unknown = block
+            .get("type")
+            .and_then(Value::as_str)
+            .is_some_and(|kind| !super::kitten4_vocab::kitten4_editor_knows(kind));
+        if unknown {
+            let kind = block
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let count = dropped.get(&kind).and_then(Value::as_u64).unwrap_or(0);
+            dropped.insert(kind, json!(count + 1));
+        } else {
+            kept.insert(id, block);
+        }
+    }
+    if dropped.is_empty() {
+        return Value::Object(root);
+    }
+
+    // 被剔掉的块不能再出现在任何父子关系里(否则编辑器照样解析失败)
+    if let Some(connections) = root.get("connections").and_then(Value::as_object).cloned() {
+        let mut rebuilt = Map::new();
+        for (parent, children) in connections {
+            if !kept.contains_key(&parent) {
+                continue;
+            }
+            let mut kept_children = Map::new();
+            if let Some(map) = children.as_object() {
+                for (child, slot) in map {
+                    if kept.contains_key(child) {
+                        kept_children.insert(child.clone(), slot.clone());
+                    }
+                }
+            }
+            rebuilt.insert(parent, Value::Object(kept_children));
+        }
+        root.insert("connections".into(), Value::Object(rebuilt));
+    }
+
+    // 影子 XML 里也可能写着编辑器不认识的类型(它是**字符串**,清积木表时扫不到)。
+    // 实测某作品 9696 条影子里 174 条如此(`get_split_options` 占 158)⇒ 一并清成空串
+    // (库里既有的占位写法),并逐类计入报告。**必须在把 `kept` 交给 root 之前就地改**。
+    let mut shadow_fixed: Map<String, Value> = Map::new();
+    for block in kept.values_mut() {
+        let Some(map) = block.as_object_mut() else {
+            continue;
+        };
+        let Some(shadows) = map.get("shadows").and_then(Value::as_object).cloned() else {
+            continue;
+        };
+        let mut new_shadows = shadows.clone();
+        let mut changed = false;
+        for (slot, xml) in shadows {
+            let Some(text) = xml.as_str() else { continue };
+            let Some(start) = text.find("type=\"") else {
+                continue;
+            };
+            let rest = &text[start + 6..];
+            let Some(end) = rest.find('"') else { continue };
+            let kind = &rest[..end];
+            if !super::kitten4_vocab::kitten4_editor_knows(kind) {
+                new_shadows.insert(slot.clone(), Value::String(String::new()));
+                changed = true;
+                let count = shadow_fixed.get(kind).and_then(Value::as_u64).unwrap_or(0);
+                shadow_fixed.insert(kind.to_string(), json!(count + 1));
+            }
+        }
+        if changed {
+            map.insert("shadows".into(), Value::Object(new_shadows));
+        }
+    }
+
+    root.insert("blocks".into(), Value::Object(kept));
+    for (kind, count) in shadow_fixed {
+        report.warn(TranslateWarning::UnmappedBlock {
+            kind: format!(
+                "{kind}(Kitten4 编辑器不认识,已清空 {} 条影子)",
+                count.as_u64().unwrap_or(0)
+            ),
+        });
+    }
+
+    for (kind, count) in dropped {
+        report.warn(TranslateWarning::UnmappedBlock {
+            kind: format!(
+                "{kind}(Kitten4 编辑器不认识,已剔除 {} 块)",
+                count.as_u64().unwrap_or(0)
+            ),
+        });
+    }
+    Value::Object(root)
+}
+
 /// 装配 Kitten4 编辑版文档
 fn build_kitten4_document(
     src: &serde_json::Map<String, serde_json::Value>,
@@ -1025,6 +1139,10 @@ fn build_kitten4_document(
         debug_assert_eq!(position, index, "blocks_by_entity 顺序须与 entities 一致");
         // 移动实体源对象与积木数据(都不再 clone)
         let source = entity.source;
+        // 产物是给 Kitten4 **编辑器**读的:编辑器不认识的积木会让它**整份工作区加载失败**
+        // (实机实测:80 种类型里 20 种不认识 ⇒ 画布一块都不显示)。所以先把不认识的块剔掉,
+        // 逐类记进报告 —— 宁可少几块,也要让作品能打开(见 `kitten4_vocab`、rounds/34 §4nonies)。
+        let blocks = strip_unknown_blocks(blocks, report);
         if entity.is_scene {
             scenes.insert(
                 entity.source_id.clone(),

@@ -185,6 +185,11 @@ pub(crate) struct WorkInfo {
     pub(crate) user_id: i64,
     /// 源作品的 `bcm_version`(作品详情接口给的元信息;建作品时要原样带上,空值由调用方兜底)
     pub(crate) bcm_version: String,
+    /// 源作品的封面 URL(详情接口的 `preview`)。
+    ///
+    /// **建作品要用**:平台对 `preview` 做合法性校验,空串会被拒(`参数preview封面非法`),
+    /// 所以"上传到账号"这条路上要么给源作品封面、要么给平台认的封面地址。
+    pub(crate) preview: Option<String>,
 }
 
 impl WorkInfo {
@@ -205,6 +210,11 @@ impl WorkInfo {
             work_type,
             user_id: data.get_i64_or_default("user_id", 0),
             bcm_version: data.get_str_or("bcm_version", "").to_string(),
+            preview: data
+                .get("preview")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(str::to_string),
         })
     }
 
@@ -1151,6 +1161,9 @@ pub(crate) struct DraftUpload<'a> {
     pub(crate) bcm_version: &'a str,
     /// 积木数(仅展示用;反编译侧通常拿不到,传 `None` 走平台默认)
     pub(crate) n_blocks: Option<i32>,
+    /// 封面(平台建作品校验"preview"合法:空串会被拒)。
+    /// 由调用方提供(通常是**源作品**的封面);`None` 时按空串发,平台可能拒。
+    pub preview: Option<&'a str>,
 }
 
 /// 该编辑器有没有已知的建作品端点(其余类型不能"上传到账号")
@@ -1205,7 +1218,7 @@ pub(crate) fn create_draft(client: &CodeMaoClient, spec: &DraftUpload<'_>) -> Re
             NekoWorkManager::new_with_client(client.clone()).create_kn_work(CreateKnWorkArgs {
                 name: &name,
                 work_url: &url,
-                preview_url: "",
+                preview_url: spec.preview.unwrap_or(""),
                 bcm_version,
                 save_type: Some(2),
                 stage_type: Some(2),
@@ -1219,7 +1232,7 @@ pub(crate) fn create_draft(client: &CodeMaoClient, spec: &DraftUpload<'_>) -> Re
             .create_kitten_work(CreateKittenWorkArgs {
                 name: &name,
                 work_url: &url,
-                preview: "",
+                preview: spec.preview.unwrap_or(""),
                 version: KITTEN4_APP_VERSION,
                 orientation: None,
                 sample_id: None,
@@ -1230,7 +1243,7 @@ pub(crate) fn create_draft(client: &CodeMaoClient, spec: &DraftUpload<'_>) -> Re
             CreateNemoWorkArgs {
                 name: &name,
                 work_url: &url,
-                preview_url: "",
+                preview_url: spec.preview.unwrap_or(""),
                 bcm_version,
                 orientation: None,
                 n_blocks: spec.n_blocks,

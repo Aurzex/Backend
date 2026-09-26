@@ -54,7 +54,31 @@ fn convert_one_work() {
     // 2. 转换(抓取 → 反编译到编辑版 → 重排 → 落盘,全程内存直通)
     let out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("download/converted");
     std::fs::create_dir_all(&out_dir).expect("建 download/converted");
-    let options = TranslateOptions::new().output_dir(out_dir.clone());
+    // 可选:上传到账号并建草稿(默认关)。**开了就等于替用户发布一次**,但只有上传后
+    // 编辑器才能按正常路径加载产物 —— 实机验证要走这条。
+    let upload = std::env::var("UPLOAD")
+        .map(|v| matches!(v.as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false);
+    if upload {
+        let cfg_path = std::env::var("BACKEND_TEST_CONFIG")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("data/test-config.json"));
+        let text = std::fs::read_to_string(&cfg_path).expect("读测试配置(含账号)");
+        let cfg: serde_json::Value = serde_json::from_str(&text).expect("配置 JSON");
+        let account = cfg["accounts"][0]["account"].as_str().expect("accounts[0].account").to_string();
+        let password = cfg["accounts"][0]["password"].as_str().expect("accounts[0].password").to_string();
+        let login = backend::api::auth::LoginBuilder::new()
+            .identity(&account)
+            .password(&password)
+            .execute()
+            .expect("登录调用失败");
+        assert!(login.success, "登录未成功:{:?}", login.message);
+        println!("[上传] 已登录 {account}");
+    }
+
+    let options = TranslateOptions::new()
+        .output_dir(out_dir.clone())
+        .upload(upload);
     let outcome = translate_work(WorkId::new(id), target, options).expect("转换失败");
 
     // 3. 报账:产物路径 / 体积 / 报告摘要 / 顶层结构 sanity
@@ -63,6 +87,21 @@ fn convert_one_work() {
         .unwrap_or(0);
     println!("[转换] {name}({kind} / id {id})→ {target:?}");
     println!("[转换] 产物: {} ({size} 字节)", outcome.output.display());
+    println!("[转换] 上传得到的新作品 id: {:?}", outcome.work_id);
+    if let Some(new_id) = outcome.work_id {
+        // 上传后**回读平台侧**:确认平台是按目标编辑器类型收下的(这是"文件合法"的强证据)
+        match WorkDataFetcher::new().fetch_work_details(new_id as i32) {
+            Ok(details) => println!(
+                "[上传] 平台回读: id={} type={:?} name={:?} bcm_version={:?} preview={:?}",
+                new_id,
+                details.get("type"),
+                details.get("work_name"),
+                details.get("bcm_version"),
+                details.get("preview").and_then(|v| v.as_str()).map(|s| &s[..s.len().min(60)])
+            ),
+            Err(e) => println!("[上传] 平台回读失败: {e}"),
+        }
+    }
     println!(
         "[转换] 报告: 有损={} 告警={} 条",
         outcome.report.is_lossy(),
