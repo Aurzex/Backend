@@ -814,6 +814,10 @@ mod reverse_tests_inner {
             for candidate in super::mapping::reverse_candidates(&current) {
                 push(candidate, &mut names);
             }
+            // "谁指向我":正向表里值等于当前名的 Kitten 键(`stop` ← `terminate` 这类)
+            for incoming in super::mapping::kitten_names_for(&current) {
+                push(incoming, &mut names);
+            }
         }
         names.sort();
         names.dedup();

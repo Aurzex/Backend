@@ -26,6 +26,7 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
+use backend::api::community::CommunityDataFetcher;
 use backend::api::work::WorkDataFetcher;
 use backend::core::convert::decompile::{CodemaoDecompiler, DecompileOptions, decompile_work_with};
 use serde_json::Value;
@@ -102,16 +103,37 @@ fn harvest_corpus() {
     std::fs::create_dir_all(&out_dir).expect("建 download/compile");
     let fetcher = WorkDataFetcher::new();
 
-    // 1. 公开发现流:最新作品(匿名可读,一批 40 条)
+    // 1. 两个公开来源(都匿名可读),id 合并去重:
+    //    ① 最新作品流 `/creation-tools/v1/pc/discover/newest-work`;
+    //    ② 社区/IDE 推荐作品 `/tiger/work/ide/recommended`(按编辑器类型各取一批)。
+    //    推荐位与最新流的作品风格差别大(推荐位多是精华/教程向),混起来语料更杂。
+    let mut ids = BTreeSet::new();
     let raw = fetcher
         .fetch_new_works_web(Some(40), Some(offset), false)
         .expect("拉取最新作品流");
-    let mut ids = BTreeSet::new();
     collect_work_ids(&raw, &mut ids);
-    println!("[采集] 发现流 offset={offset} 拿到 {} 个作品 id", ids.len());
+    println!("[采集] 来源①最新作品流 offset={offset}:累计 {} 个 id", ids.len());
+    // `/tiger/work/ide/recommended` 的 `type` 是**数字**(实测 1 与 5 有数据,字符串枚举一律 400;
+    // `/tiger/work/list/all` 无论传什么都 400 —— 估计要登录态,先不用)。
+    // 返回的 id 未必都是可反编译的作品 id(有些像社区帖 id)⇒ 交给后面的"详情定类型"过滤,
+    // 取不到就跳过,不会污染语料。
+    for work_type in ["1", "5"] {
+        match CommunityDataFetcher::new().fetch_recommended_ide_works(work_type, 1, 40) {
+            Ok(raw) => {
+                let before = ids.len();
+                collect_work_ids(&raw, &mut ids);
+                println!(
+                    "[采集] 来源②IDE 推荐({work_type}):新增 {} 个 id(累计 {})",
+                    ids.len() - before,
+                    ids.len()
+                );
+            }
+            Err(e) => println!("[采集] 来源②IDE 推荐({work_type})失败: {e}"),
+        }
+    }
     if ids.is_empty() {
         let head: String = raw.to_string().chars().take(600).collect();
-        println!("[采集] 一个 id 都没解析出来,响应前 600 字符 = {head}");
+        println!("[采集] 一个 id 都没解析出来,最新流前 600 字符 = {head}");
     }
 
     // 2. 逐个查详情定类型,只留下目标类型

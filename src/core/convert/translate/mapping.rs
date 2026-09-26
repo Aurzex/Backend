@@ -987,6 +987,18 @@ fn is_kitten_side(kind: &str) -> bool {
         )
 }
 
+/// 正向表里**映射到** `kn_name` 的所有 Kitten 类型(即"谁指向我")。
+///
+/// 往返扫描折等价类时必须有这条边:只走"我指向谁"会漏掉 `stop` ← `terminate` 这类
+/// ——`terminate` 不是正向表的键,但它的伙伴 `stop` 的反向候选里有它。
+pub(super) fn kitten_names_for(kn_name: &str) -> Vec<&'static str> {
+    KITTEN_TO_KN
+        .iter()
+        .filter(|(_, kn)| *kn == kn_name)
+        .map(|(kitten, _)| *kitten)
+        .collect()
+}
+
 /// 某个类型在反向表里的候选 Kitten 原类型(没有则空)。
 ///
 /// 与 [`translate_type`] 一起用于把"同一个积木在不同方向的名字"折成一类。
