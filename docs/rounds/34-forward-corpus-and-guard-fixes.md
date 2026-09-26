@@ -136,6 +136,33 @@ Kitten4 侧的列表引用挂在**父块的 `fields.VAR`** 上(见 `FIELD_NAME_M
 **定性**:表示差异(编辑器里那个槽会显示空白,而不是默认影子),**不影响功能、不丢任何引用**;
 量级 ~86(正向)+ ~192(反向)。若要完全对齐,需要在「槽被真块占着」时也回写该槽的默认影子 —— 列为**可选打磨项**。
 
+## 4sexies. 最后一条"云/本地"也收口:名字合并 ≠ 语义丢失
+
+三态**原始**类型名计数(`原气骑士 且听风吟_136021231`,只列有变化的):
+
+| 名字 | 源(Kitten4) | 中间(KN) | 往返(Kitten4) |
+| --- | --- | --- | --- |
+| `change_variable`(本地) | 89 | 0 | 0 |
+| `change_variables` | 0 | 86 | 89 |
+| `cloud_variables_get`(云) | 11 | 0 | 0 |
+| `variables_get` | 800 | 806 | 811 |
+| `cloud_variables_set`(云) | 7 | 0 | 0 |
+| `variables_set` | 294 | 265 | 301 |
+| `stop` → `terminate` | 10 | 9 | 0 / 10 |
+
+结论:
+
+1. **不是"把云当成本地"**:KN 侧本来就**只有一种**变量积木(`cloud_variables_get` 在表里也映射到
+   `variables_get`)—— **云 / 本地的区别在变量 id 与变量定义表里,不在积木类型名上** ⇒ 名字合并
+   **不丢语义**;反向"歧义时保留 KN 名 + `AmbiguousType` 告警"是**既定策略**(`mod.rs` 顶部有说明),
+   而且它其实**不选云**:真正会改名的歧义才按"非云优先"挑(`mapping.rs` 的 `reverse_kind` (f)),
+   恒等歧义直接保留原 KN 名。
+2. `stop → terminate` 是反向 `GC` 特例(`mapping.rs`:`fields.scope="0"` ⇒ `terminate`,有专门断言);
+   `shadow_number` 被 `gc_node` 按官方行为拆包/降级(有专门断言)。
+3. `lists_get` 减少是"槽的默认影子不回写"(§4quinquies)。
+
+⇒ **正向侧已全部解释完毕:没有确认未修的缺陷。** 剩下的都是文档化的归一化 / 官方行为 / 可选打磨项。
+
 ## 5. 环境:clippy 门恢复干净
 
 `cargo clippy --all-targets -- -D warnings`(CONTRIBUTING 要求)此前被 **7 条工具链新 lint** 挡着,
