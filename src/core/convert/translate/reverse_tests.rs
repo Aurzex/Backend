@@ -768,6 +768,31 @@ mod reverse_tests_inner {
         "coordinate_of_sprite",
     ];
 
+    /// 反向报告的"剔除量":(被剔除的块数, 被清空的影子数)。
+    ///
+    /// 编辑器不认识的类型**必须**剔除/清空(否则编辑器加载整份工作区失败,rounds/34 §4nonies),
+    /// `strip_unknown_blocks` 把它们记成 [`TranslateWarning::UnmappedBlock`],
+    /// `kind` 形如 `temporary_list(Kitten4 编辑器不认识,已剔除 285 块)` / `…已清空 170 条影子)`。
+    /// 取出来给"只许变少"的预算门用(rounds/36 起)。
+    fn strip_counts(report: &TranslateReport) -> (u64, u64) {
+        let count_after = |text: &str, marker: &str| -> u64 {
+            text.split_once(marker)
+                .and_then(|(_, tail)| tail.split_whitespace().next())
+                .and_then(|n| n.parse().ok())
+                .unwrap_or(0)
+        };
+        let mut blocks = 0u64;
+        let mut shadows = 0u64;
+        for warning in report.warnings() {
+            let TranslateWarning::UnmappedBlock { kind } = warning else {
+                continue;
+            };
+            blocks += count_after(kind, "已剔除 ");
+            shadows += count_after(kind, "已清空 ");
+        }
+        (blocks, shadows)
+    }
+
     /// 反演出的类型名是否"可用":编辑器认识,或落在上面那份**已文档化**清单里。
     fn known_or_documented(kind: &str) -> bool {
         let editor_knows = super::super::kitten4_vocab::kitten4_editor_knows(kind);
@@ -1299,6 +1324,25 @@ mod reverse_tests_inner {
     /// ② 往返确定性:同一输入跑两遍,产物逐字节一致(任一腿不确定都会被抓住);
     /// ③ **实体 id 覆盖**:源引用过的列表 / 变量 id,产物里必须一个不少(见 [`referenced_entity_ids`] ——
     ///    往返里块**数量**会变:槽的默认影子不回写、云/本地名字合并,但"引用关系"不许丢)。
+    /// **剔除量预算**(rounds/36 起,只许变小)
+    ///
+    /// 编辑器不认识的类型**必须**剔除/清空(否则编辑器加载整份工作区失败),所以"少了几块"是**刻意取舍**;
+    /// 但取舍的量必须看得见、不许悄悄变大 —— 变多说明词表/映射退化了(典型:`text` 又被写成了
+    /// Kitten3 口径的 `get_split_options`)。基线 = **2026-09-26 全语料实测值**:
+    /// `(文件名, 剔除块数, 清空影子数)`。
+    const STRIP_BUDGET: &[(&str, u64, u64)] = &[
+        ("AI小哪吒_302205776.bcmkn", 8, 0),
+        ("FjDQB0v0geuG4y9BaTVyi_WcZ1jc.bcmkn", 604, 52),
+        ("FjSwU2iKY6bLe6fexZJTvsX3X7AI.bcmkn", 429, 4),
+        ("HEX Editor_317683843.bcmkn", 182, 17),
+        ("P0-准备课_297852982.bcmkn", 4, 0),
+        ("喵大战_259251919.bcmkn", 1, 0),
+        ("滑动算法_301113412.bcmkn", 0, 0),
+        ("穿越荆棘林-伯臻_301155466.bcmkn", 0, 0),
+        ("算乘法_287002279.bcmkn", 1, 0),
+        ("飞机大战20_297979992.bcmkn", 8, 0),
+    ];
+
     #[test]
     fn kn_corpus_round_trip_sweep() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("download/compile");
@@ -1334,27 +1378,52 @@ mod reverse_tests_inner {
                 continue;
             };
 
-            let round_trip = |source: &Value| -> Value {
+            let round_trip = |source: &Value| -> (Value, (u64, u64)) {
                 let mut report = TranslateReport::new(
                     crate::core::convert::EditorType::Neko,
                     TargetEditor::Kitten4,
                 );
                 let k4 =
                     convert_kn_document(source, &options, &mut report).expect("反向 KN→Kitten4");
+                let strip = strip_counts(&report);
                 let mut k4: Value = serde_json::from_str(&k4.to_string()).expect("复刻中间态");
                 let mut back = TranslateReport::new(
                     crate::core::convert::EditorType::Kitten4,
                     TargetEditor::KittenN,
                 );
-                convert_kitten4_document(&mut k4, &options, &mut back).expect("正向 Kitten4→KN")
+                let kn = convert_kitten4_document(&mut k4, &options, &mut back)
+                    .expect("正向 Kitten4→KN");
+                (kn, strip)
             };
 
-            let kn2 = round_trip(&source);
-            let kn3 = round_trip(&source);
+            let (kn2, (stripped_blocks, cleared_shadows)) = round_trip(&source);
+            let (kn3, _) = round_trip(&source);
             assert_eq!(
                 kn2.to_string(),
                 kn3.to_string(),
                 "{label}:往返必须确定性(两遍逐字节一致)"
+            );
+
+            // 剔除量读数 + **预算门**(只许变小)。表外的新语料按"已记录的最大值"守:
+            // 要么本来就不超,要么把它补进 [`STRIP_BUDGET`] 并写明是哪类块。
+            eprintln!("[剔除量] {label}: 块 {stripped_blocks} / 影子 {cleared_shadows}");
+            let file_name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default();
+            let (budget_blocks, budget_shadows) = STRIP_BUDGET
+                .iter()
+                .find(|(name, _, _)| *name == file_name)
+                .map(|(_, blocks, shadows)| (*blocks, *shadows))
+                .unwrap_or((
+                    STRIP_BUDGET.iter().map(|(_, b, _)| *b).max().unwrap_or(0),
+                    STRIP_BUDGET.iter().map(|(_, _, s)| *s).max().unwrap_or(0),
+                ));
+            assert!(
+                stripped_blocks <= budget_blocks && cleared_shadows <= budget_shadows,
+                "{label}:剔除量**变大**(块 {stripped_blocks} ≤ {budget_blocks}、\
+                 影子 {cleared_shadows} ≤ {budget_shadows})。\
+                 编辑器不认识的类型必须剔除,但只许变少:变大说明词表/映射退化了(见 rounds/36)"
             );
 
             let entity_diffs = census_diff(

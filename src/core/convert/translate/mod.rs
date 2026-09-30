@@ -153,6 +153,10 @@ impl TranslateOptions {
     }
 
     /// 正向时保留源作品文件引用(对齐官方 `source` 字段行为,默认开)
+    ///
+    /// ⚠️ **已知偏差(已文档化,不再改)**:上传给平台的那份"源文件"是**反编译重建的编辑版**,
+    /// 不是源作品的原始字节 —— 原始 `.bcm*` 的字节在反编译阶段就被解开了,本库手上只有重建版。
+    /// 因此平台侧的"保留原件"打开的是重建版;可读、可再转换等语义不受影响。
     pub fn keep_source(mut self, on: bool) -> Self {
         self.keep_source = on;
         self
@@ -889,8 +893,13 @@ pub(crate) fn detect_editor(
 /// 一类告警
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TranslateWarning {
-    /// 目标编辑器没有对应积木:**保留 KN 原类型名 + 告警**(不丢弃积木 ⇒ 往返的类型多重集仍守恒,
-    /// 但 Kitten4 侧可能不认这个类型名)。判定"哪些类型属此类"见 `mapping.rs` 顶部注释。
+    /// 目标编辑器**没有对应积木**的类型。
+    ///
+    /// ⚠️ **行为已变更(rounds/34 §4nonies 起)**:早期是"保留 KN 原类型名 + 告警、不丢积木",
+    /// 但编辑器遇到不认识的名字会**整份工作区加载失败** ⇒ 现在写出阶段把它们
+    /// **剔除/清空**(见 `assembly.rs::strip_unknown_blocks`)并逐类记进本告警
+    /// (`kind` 里带 `(Kitten4 编辑器不认识,已剔除 N 块)` 这样的后缀与计数)。
+    /// ⇒ **这类告警现在意味着真的少了积木**。判定"哪些类型属此类"见 `mapping.rs` 顶部注释。
     UnmappedBlock { kind: String },
     /// 映射到文本占位积木(`bcm_translator_text_*`),原文进 mutation
     DegradedToText { kind: String },

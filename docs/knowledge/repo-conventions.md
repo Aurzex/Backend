@@ -30,7 +30,11 @@
 - 业务面**统一注入**:`src/api/**` 的 Manager、反编译器、`core` 举报引擎的 `DataQuery`/`CommentQueryBuilder`/`ReportFetcher`/`ViolationChecker`/`ReportProcessor`/`FileProcessor` 都通过 `new_with_client(client)` 注入;`client: &'static CodeMaoClient` 字段已**全仓归零**。
 - **有意保留的全局**:`CodemaoDecompiler::global()` 门面;多账号身份槽(`switch_identity`)、`ActionRegistry`(`LazyLock`)、报告展示注册表 —— 因为"多账号 = 切全局身份槽",**不能部分注入**。
 - `KittyFactory` 门面已删除(全仓 grep 零命中),不要再引入同类门面。
-- **未注入的残留**(已知,待决策):`cloudvar.rs` 的 `detect_editor` 用 `WorkDataFetcher::new()`(全局)—— 注入需要 `CloudBuilder` 额外持有 `CodeMaoClient`,牵涉 WS/HTTP 客户端关系 ⇒ 属独立设计决策(见目标库)。
+- ✅ **已完成(2026-09-26)**:`cloudvar.rs` 的 `detect_editor` 原用全局 `WorkDataFetcher::new()` —— 现改为
+  `CloudBuilder::new_with_client(work_id, client)` + `CloudConnection` 暴露 `client()`(`impl ClientAccess`),
+  缺省构造仍走 `CodeMaoClient::global()`(对既有使用方行为不变)。回归测试见 `cloudvar::tests::cloud_builder_uses_injected_client`。
+- **仍未注入的一处(已知,记在目标库)**:`src/core/convert/mod.rs` 上传前取作品 `preview` 用 `WorkDataFetcher::new()`
+  (全局);要注入得让 `DecompileOptions`/`TranslateOptions` 持有客户端 ⇒ 独立决策。
 
 ## 4. 错误类型
 

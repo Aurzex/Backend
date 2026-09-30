@@ -57,10 +57,25 @@
 
 抓包量级参照(156.4 s / 386 连接 / 16 582 包):上下行 **1.99 MB / 22.40 MB**,`api.codemao.cn` 独占 **249 条连接** 1.46 MB,下行大头是 `creation.codemao.cn` 12.8 MB ⇒ **控制面连接数**才是 NEMO 反编译慢的根源,不是字节量。
 
+## 5bis. 上传:单包大小上限与速率(实测 2026-09-26)
+
+| 项 | 实测值 |
+| -- | ------ |
+| 单包上限 | **20 MB 可传、24 MB 被 qiniu 拒 `413`** ⇒ 落在 **20~24 MB** 之间(5/9/10/12/14/16/20 MB 全部成功) |
+| 上传速率 | 约 **200 KB/s**(5 MB ≈ 24 s;20 MB ≈ 105 s) |
+| 渠道 | 社区前端 `UploadChannel::Codemao`(`save_path = "convert-source"`);NEMO 走 `nemo_android_ios` |
+
+- 实测方法:用与生产路径**同一条渠道**逐档上传临时文件(先登录,再 `file_uploader().upload(...)`),
+  记录每档的成功/失败与耗时。结论对 `translate_work(upload=true)` 与反编译"上传到账号"都成立。
+- ⇒ **上传请求必须单独放宽超时**(`UPLOAD_TIMEOUT = 600 s`;全局 30 s 会让 9 MB 左右的产物直接超时,A1),
+  且产物超过上限时**提前报错**(`shared::ensure_single_package_fits`,别让用户白等几分钟再吃 413)。
+- 要传更大的作品只能做**分片上传**(见 `docs/goals/convert-backlog.md`);真实 KN 产物多在 3~9 MB。
+
 ## 依据
 
 - `docs/rounds/01-websocket-pitfalls.md`(25 条坑与调试方法论;其中路径/版本号已过时,勘误见 `errata.md`)。
 - `docs/rounds/10-ai-chat-cloudvar-test.md`(真机 AI 对话 + 云变量观察)。
+- 上传上限/速率:2026-09-26 逐档实测(同渠道),记录见 `docs/goals/pending-decisions.md` A5。
 - `docs/rounds/08/09-protocol-compliance*.md`(六协议;`LoginSession` 等表述已失效)。
 - `docs/rounds/24-nemo-upload-route-and-apis.md` §1/§2/§12(抓包与建作品证据)、`docs/rounds/13`(端点面)。
 - 代码锚点:`src/utils/socketio.rs`(parse_frame / set_stream_read_timeout / Notify / wait_flag)、`src/core/cloudvar.rs`、`src/core/converse.rs`、`src/api/work.rs`。

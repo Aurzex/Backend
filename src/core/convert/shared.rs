@@ -1190,6 +1190,33 @@ fn editor_label(editor: EditorType) -> &'static str {
     }
 }
 
+/// 平台**单包上传上限**(实测,2026-09-26)
+///
+/// 用与生产路径**同一条渠道**(`UploadChannel::Codemao` + `save_path = "convert-source"`)逐档实测:
+/// 5 / 9 / 10 / 12 / 14 / 16 / **20 MB 全部成功**,**24 / 30 MB 均被 qiniu 拒 `413`**
+/// ⇒ 上限落在 **20~24 MB** 之间。上传速率约 200 KB/s(20 MB 要 ~105 s),这也是上传路径
+/// 必须单独放宽超时(`UPLOAD_TIMEOUT = 600 s`,A1)的原因。
+///
+/// 超过它就**提前报错**:别让用户白等几分钟再吃一个 `413`。要传更大的作品得做分片上传
+/// (见 `docs/goals/convert-backlog.md`);真实 KN 产物多在 3~9 MB,不阻塞日常使用。
+const SINGLE_PACKAGE_LIMIT: u64 = 20 * 1024 * 1024;
+
+/// 产物超过单包上限时提前失败(见 [`SINGLE_PACKAGE_LIMIT`])
+fn ensure_single_package_fits(path: &Path) -> Result<()> {
+    let size = std::fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
+    if size > SINGLE_PACKAGE_LIMIT {
+        return Err(DecompilerError::Other {
+            msg: format!(
+                "产物 {:.1} MB 超过平台单包上传上限(实测 20 MB 可传、24 MB 被 413 拒):{}",
+                size as f64 / (1024.0 * 1024.0),
+                path.display()
+            ),
+            source: None,
+        });
+    }
+    Ok(())
+}
+
 /// 上传渠道:只有 NEMO 的凭证项目名特殊(`nemo_android_ios`),其余走社区前端
 fn channel_for(editor: EditorType) -> UploadChannel {
     match editor {
@@ -1202,6 +1229,8 @@ fn channel_for(editor: EditorType) -> UploadChannel {
 ///
 /// 客户端由调用方注入(与第 14–17 轮的注入纪律一致;避免再用全局 `new()`)。
 pub(crate) fn create_draft(client: &CodeMaoClient, spec: &DraftUpload<'_>) -> Result<i64> {
+    // 先量体积:超上限就别开传(实测上传 ~200 KB/s,白等几分钟才吃 413 太亏)
+    ensure_single_package_fits(spec.artifact)?;
     let url =
         client
             .file_uploader()
@@ -1308,6 +1337,34 @@ mod upload_tests {
     }
 
     /// NEMO 上传必须走 `nemo_android_ios` 渠道,其余走社区前端
+    /// 单包上限门:超一点就提前报错,正好等于上限要放行
+    /// (上限值来自 2026-09-26 的同渠道实测,见 `SINGLE_PACKAGE_LIMIT`)
+    #[test]
+    fn oversized_artifact_is_rejected_before_upload() {
+        let dir = std::env::temp_dir().join("backend-single-package-limit");
+        std::fs::create_dir_all(&dir).unwrap();
+        // 稀疏文件:只设长度,不真写 20 MB 字节
+        let make = |name: &str, size: u64| {
+            let path = dir.join(name);
+            let file = std::fs::File::create(&path).unwrap();
+            file.set_len(size).unwrap();
+            path
+        };
+
+        let exact = make("exact.bin", SINGLE_PACKAGE_LIMIT);
+        ensure_single_package_fits(&exact).expect("正好等于上限应放行");
+
+        let over = make("over.bin", SINGLE_PACKAGE_LIMIT + 1);
+        let error = ensure_single_package_fits(&over).expect_err("超上限应提前报错");
+        assert!(
+            error.to_string().contains("单包上传上限"),
+            "错误信息要指出上限:{error}"
+        );
+
+        let _ = std::fs::remove_file(&exact);
+        let _ = std::fs::remove_file(&over);
+    }
+
     #[test]
     fn nemo_uses_dedicated_upload_channel() {
         assert_eq!(channel_for(EditorType::Nemo), UploadChannel::Nemo);

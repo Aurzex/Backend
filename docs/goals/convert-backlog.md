@@ -8,7 +8,7 @@
 | 项 | 出处 | 说明 |
 | -- | ---- | ---- |
 | ~~A1 大作品上传必失败~~ ✅ **已修(2026-09-26)**:`MewRequestBuilder::with_timeout` + 上传路径 `UPLOAD_TIMEOUT = 600 s`(实测 30 MB 请求跑 228 s 未被掐断) | `docs/rounds/21` §8.4 N1 | 剩下的是**单包上限**(qiniu 413,落在 9.3~30 MB 之间)⇒ 见 `pending-decisions.md` A5 |
-| A2 `keep_source` 上传的是**反编译重建的编辑版**,非原始字节 | `docs/rounds/21` §8.4 N2 | 平台的"保留原件"因此打不开原件 |
+| ~~A2 `keep_source` 上传的是**反编译重建的编辑版**~~ ✅ **已决(2026-09-26,方案① 文档化)**:`TranslateOptions::keep_source` 的 rustdoc 写明偏差,不改反编译侧 | `docs/rounds/21` §8.4 N2 | 无(名实不符已写进文档) |
 | B2 KN → NEMO 是否立轮 | `docs/rounds/24` §12.3、`docs/rounds/27` §1 | 建议不做(平台无对照;要自建 NEMO 编码器) |
 | **A4 NEMO 是否真机验证"上传到账号"** | `docs/rounds/30` §4、`docs/rounds/24` §13.4 | 链路已就绪(渠道 + 编排 + 选项);只差"敢不敢建一份擦不掉的 NEMO 草稿"(KN 侧已端到端验证) |
 | `entity_concurrency` 是否对**大作品自动开** | `docs/rounds/25` §9 | 现在默认 1,由使用者显式传;自动开需定阈值 |
@@ -44,6 +44,11 @@
      编辑格式只存在于**编辑器保存时的载荷**里 ⇒ 需要浏览器会话抓包(形态与两次误判见 rounds/33 §2;
      扫描器已加"缺 `block_data_json` 即跳过"的形态守卫)。
 2. **NEMO 侧内存入口**:按 `docs/rounds/27` §2,应像 KN 侧一样把编辑版 `Value` 直接交给 translate,避免"落盘→读回"。落地情况 **[待核验]**。
+2a. ✅ **已完成(2026-09-26)**:单包上传上限实测 **20 MB 可传 / 24 MB 413**(同渠道逐档),并加了
+   `shared::ensure_single_package_fits` 提前报错闸(>20 MB 直接给出"上限 + 实测值"的错误)。
+   要传更大作品需**分片上传**(qiniu 支持),目前无此需求(真实 KN 产物 3~9 MB)。
+2b. **convert 上传前取 preview 仍走全局客户端**:`src/core/convert/mod.rs` 用 `WorkDataFetcher::new()`
+   取作品 `preview`;要注入得让 `DecompileOptions`/`TranslateOptions` 持有客户端(与 A3 同类的收尾,独立决策)。
 3. **P3 结构化失败记录**:`decompile/mod.rs` 的资源下载失败重试用 `line.split(": ").next()` 从错误串反解 URL(URL 或文本含 `": "` 会截断)⇒ 改成结构化 `(url, error)` 记录,直接消掉反解(`docs/rounds/29` §4)。
 4. **重连放弃的文档化**:云变量重连 5 次后仅 warn 并永久放弃,且**不再发事件**(仅初始 `Closed`)⇒ 调用方可能无限等待,需在 rustdoc 写清(`docs/rounds/29` §4)。
 5. **转换域 P2**:`simple.rs` 的 `Arc<Value>` 可 `Arc::try_unwrap` 免拷(`docs/rounds/29` §3-4)。
@@ -62,11 +67,11 @@
 10. **6 条零调用私有项**(审计 §3.6「零调用点私有项」):`BlockJson::count_types` / `BlockTree::count_types`(仅测试用)、
     `nemo::parse`(仅测试用)、`DecompilerContextBuilder`(已随骨架瘦身删除)、`TOP_BLOCKS` / `KN_TYPES`。
     处理口径:仅测试用 ⇒ 标 `#[cfg(test)]` 或保留并注明;完全不用的 ⇒ 删(删除前按仓库约定确证零调用)。
-0b. **词汇表新鲜度**:`kitten4_vocab.rs` 的 349 条是 2026-09-26 从线上编辑器导出的快照;
+0b. ✅ **已完成(2026-09-26)**:词汇表新鲜度:`kitten4_vocab.rs` 的 349 条是 2026-09-26 从线上编辑器导出的快照;
    编辑器升级后名字会漂移(名字认错 = 整份打不开)。待做:把"重导 + 整体替换"写成一个可复跑的小流程
    (浏览器一句 `Object.keys(window.Blockly.Blocks).sort()`,方法见 §5bis 的"判据与证据来源"),
    并在注释里记下导出日期与命令(现状只记了日期)。
-0c. **剔除量的预算门**:目前只有定义体侧有预算断言;块/影子的剔除量还没有门
+0c. ✅ **已落地(2026-09-26)**:剔除量的预算门:目前只有定义体侧有预算断言;块/影子的剔除量还没有门
    (rounds/36 的 942 → 715 / 398 → 50 是靠 A/B 人工比出来的)。待做:把"每件作品的剔除块数与影子数
    ≤ 记录值"写成断言(先对 `download/compile/*.bcmkn` 全语料测一遍记录基线)。
 11. **剩余重复项的定性结论已归档**(`docs/rounds/31` §3.6):`D2` 族 JS 值强转、`N3` Fetcher/ResourceManager 样板、

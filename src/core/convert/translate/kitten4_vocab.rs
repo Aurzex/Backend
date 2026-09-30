@@ -9,6 +9,16 @@
 //! **编辑器真的认识**的名字。挑错的后果实测很重:产物里只要有编辑器不认识的类型,
 //! 编辑器加载整份工作区就会失败 —— 画布**一块都不显示**(见 `docs/rounds/34` §4nonies)。
 
+/// **重导流程(编辑器升级后必做)**
+///
+/// ① 无头浏览器打开 `https://kitten4.codemao.cn/` 并等编辑器就绪(页面有 `window.Blockly`);
+/// ② 在页面里取 `Object.keys(window.Blockly.Blocks).sort()`;
+/// ③ 用结果**整体替换**下面的数组,并更新本节末尾的"最近一次导出"。
+///
+/// 判据:产物里出现的类型名(含影子 XML 的 `type`)必须都在这个数组里 ——
+/// 少一个,编辑器加载**整份工作区**就会失败(见 `docs/knowledge/convert-semantics.md` §5bis)。
+/// 最近一次导出:**2026-09-26,349 条**。
+///
 /// 编辑器认识的积木类型(已排序,二分查找用)
 #[rustfmt::skip]
 pub(crate) const KITTEN4_EDITOR_TYPES: &[&str] = &[

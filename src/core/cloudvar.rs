@@ -14,6 +14,7 @@ use tungstenite::http::HeaderValue;
 use tungstenite::{WebSocket, connect};
 
 use crate::api::auth::CloudAuthenticator;
+use crate::utils::requests::{ClientAccess, CodeMaoClient};
 use crate::utils::socketio::{
     self, CONNECTED_MESSAGE, CallbackStore, EVENT_MESSAGE_PREFIX, Frame, Notify, PONG_MESSAGE,
     SocketError, Ws, set_stream_read_timeout, truncate, wait_flag,
@@ -581,6 +582,8 @@ impl std::fmt::Debug for Events {
 /// 云连接共享内部状态
 struct CloudInner {
     work_id: i64,
+    /// 自动识别编辑器类型时用它取作品详情(注入纪律:14–17 轮起不再用全局客户端)
+    client: CodeMaoClient,
     /// 显式指定的编辑器类型;None 表示连接时按作品详情自动识别
     editor: Mutex<Option<CloudEditorType>>,
     token: Option<String>,
@@ -643,10 +646,18 @@ impl std::fmt::Debug for CloudConnection {
     }
 }
 
+impl ClientAccess for CloudConnection {
+    fn client(&self) -> &CodeMaoClient {
+        &self.inner.client
+    }
+}
+
 /// 建造者模式:链式配置后构造 [`CloudConnection`]
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct CloudBuilder {
     work_id: i64,
+    /// 供"连接阶段自动识别编辑器类型"使用;缺省是全局客户端
+    client: CodeMaoClient,
     editor: Option<CloudEditorType>,
     authorization_token: Option<String>,
     auto_reconnect: bool,
@@ -657,11 +668,31 @@ pub struct CloudBuilder {
     sync_timeout: Duration,
 }
 
+impl std::fmt::Debug for CloudBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CloudBuilder")
+            .field("work_id", &self.work_id)
+            .field("editor", &self.editor)
+            .field("auto_reconnect", &self.auto_reconnect)
+            .field("max_reconnect_attempts", &self.max_reconnect_attempts)
+            .finish_non_exhaustive()
+    }
+}
+
 impl CloudBuilder {
-    /// 以作品 ID 创建建造者
+    /// 以作品 ID 创建建造者(自动识别编辑器类型时用**全局客户端**)
     pub fn new(work_id: i64) -> Self {
+        Self::new_with_client(work_id, CodeMaoClient::global().clone())
+    }
+
+    /// 以作品 ID + **注入的客户端**创建建造者
+    ///
+    /// 连接阶段在未显式指定 [`CloudBuilder::editor`] 时会去取作品详情来识别编辑器类型;
+    /// 那个请求走这个客户端 ⇒ 纯注入式使用方(不依赖全局身份槽)也能正确识别。
+    pub fn new_with_client(work_id: i64, client: CodeMaoClient) -> Self {
         Self {
             work_id,
+            client,
             editor: None,
             authorization_token: None,
             auto_reconnect: true,
@@ -726,6 +757,7 @@ impl CloudBuilder {
     pub fn build(self) -> CloudConnection {
         let inner = CloudInner {
             work_id: self.work_id,
+            client: self.client,
             editor: Mutex::new(self.editor),
             token: self.authorization_token,
             auto_reconnect: AtomicBool::new(self.auto_reconnect),
@@ -2264,9 +2296,9 @@ fn emit_connection_event(inner: &Arc<CloudInner>, event: ConnectionEvent) {
 /// 按作品详情自动识别编辑器类型(查询 `/creation-tools/v1/works/{id}` 的 `type` 字段)
 /// 映射:KITTEN2/3/4/KITTEN→Kitten,NEMO→Nemo,NEKO→KittenN,COCO→Coco
 /// 查询失败或类型未知时回退 Kitten(与历史默认一致)
-fn detect_editor(work_id: i64) -> CloudEditorType {
+fn detect_editor(work_id: i64, client: &CodeMaoClient) -> CloudEditorType {
     use crate::api::work::WorkDataFetcher;
-    match WorkDataFetcher::new().fetch_work_details(work_id as i32) {
+    match WorkDataFetcher::new_with_client(client.clone()).fetch_work_details(work_id as i32) {
         Ok(v) => match v.get("type").and_then(Value::as_str) {
             Some("NEMO") => CloudEditorType::Nemo,
             Some("NEKO") => CloudEditorType::KittenN,
@@ -2297,7 +2329,7 @@ fn establish_locked(inner: &Arc<CloudInner>) -> Result<()> {
     {
         let mut editor = inner.editor.lock().unwrap();
         if editor.is_none() {
-            let detected = detect_editor(inner.work_id);
+            let detected = detect_editor(inner.work_id, &inner.client);
             info!("自动识别作品 {} 编辑器类型: {:?}", inner.work_id, detected);
             *editor = Some(detected);
         }
@@ -2553,5 +2585,38 @@ fn flush_loop(inner: Arc<CloudInner>) {
             plan.private.len(),
             plan.public.len(),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::utils::requests::{ClientConfig, CodeMaoClient, Identity};
+
+    impl CloudConnection {
+        fn work_id_for_test(&self) -> i64 {
+            self.inner.work_id
+        }
+    }
+
+    /// A3 回归:自动识别编辑器类型必须走**注入的**客户端,而不是全局
+    /// (14–17 轮的注入纪律 —— 纯注入式使用方不该被全局身份槽串味)
+    #[test]
+    fn cloud_builder_uses_injected_client() {
+        let injected = CodeMaoClient::new_independent(ClientConfig::default());
+        let other = CodeMaoClient::new_independent(ClientConfig::default());
+        injected.set_token(Identity::Fluffy, "tok-cloud").unwrap();
+
+        let connection = CloudBuilder::new_with_client(123, injected.clone()).build();
+        assert_eq!(
+            connection.client().current_token().as_deref(),
+            Some("tok-cloud"),
+            "CloudConnection 必须持有注入的客户端"
+        );
+        assert_eq!(other.current_token(), None, "另一个客户端不受影响");
+
+        // 缺省构造仍可用(走全局客户端);全局身份槽在别处有测试,这里不碰全局状态
+        let default_built = CloudBuilder::new(123).build();
+        assert_eq!(default_built.work_id_for_test(), 123);
     }
 }
