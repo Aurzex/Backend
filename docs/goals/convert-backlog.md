@@ -3,6 +3,9 @@
 > 目标库。**已完成**的项见 `docs/knowledge/convert-*` 与 `docs/rounds/20–29` 的落地记录;这里只留**没做完/待核验**的。
 > 决策类见 `pending-decisions.md`。
 
+> **重构方案**:`docs/rounds/37-convert-architecture-refactor-plan.md`(架构归位 + 合并清单 + 性能工作单 P1–P11;
+> 已含**先决阻塞**:`convert_bench` 的 SHA 基线在 34–36 轮后未刷新 ⇒ 现在无法证明"输出不变")。
+
 ## 1. 待你做决策才能动的
 
 | 项 | 出处 | 说明 |

@@ -16,6 +16,7 @@
 | [34](34-forward-corpus-and-guard-fixes.md) | 正向吃真语料;判据误伤修复;**§4octies** 平台骨架键 15 个、**§4nonies** 编辑器词汇表 + 实机方法 | 已落地 |
 | [35](35-kitten4-groups-fix.md) | `theatre.groups` + 场景 `group_order`:**角色不显示/画布 0 块**的根因与修法(实机验证) | 已落地 |
 | [36](36-editor-vocabulary-single-candidate.md) | 块与影子的取名**统一过编辑器词汇判据**;剔除量 942→715 / 398→50 | 已落地 |
+| [37](37-convert-architecture-refactor-plan.md) | **convert 域重构方案**(架构归位 / 合并 / 性能;约束:产物逐字节不变)+ 实测分阶段基准 + "SHA 基线当前红"的先决结论 | **方案,未实施** |
 
 ## 更早的轮次(01–27)
 

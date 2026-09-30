@@ -31,7 +31,7 @@
 
 ## 历史记录 `rounds/`(过程)
 
-`rounds/01-websocket-pitfalls.md` … `rounds/36-editor-vocabulary-single-candidate.md` —— 每轮一份的方案/评审/整改记录。
+`rounds/01-websocket-pitfalls.md` … `rounds/37-convert-architecture-refactor-plan.md` —— 每轮一份的方案/评审/整改记录。
 **入口先看 [`rounds/README.md`](rounds/README.md)**(28–36 轮的索引 + "该看哪几篇"),再看本篇。
 价值在**证据链**(真机实测、抓包、官方 bundle 逆向、逐条评审),以及"为什么当初这么决定"。
 读它们时先看 `knowledge/errata.md`:早期文档里的文件名/类型名/行号多数已经漂移。
