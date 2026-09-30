@@ -1212,7 +1212,10 @@ fn build_kitten4_document(
     // 而平台自己的 Kitten4 文件都有(实测:转换产物比平台原件少 15 个顶层键,而反编译产物
     // 只少 `painter` —— 那条路编辑器能正常读)。缺了它们,编辑器可能读不出积木 ⇒ 兜底补默认值;
     // 源里真有就照搬(仍然优先)。
-    doc.insert("hidden_toolbox".into(), json!({ "toolbox": [], "blocks": [] }));
+    doc.insert(
+        "hidden_toolbox".into(),
+        json!({ "toolbox": [], "blocks": [] }),
+    );
     doc.insert("toolbox".into(), kitten4_default_toolbox());
     doc.insert("toolbox_order".into(), json!(KITTEN4_TOOLBOX_ORDER));
     doc.insert("last_toolbox_order".into(), json!(KITTEN4_TOOLBOX_ORDER));

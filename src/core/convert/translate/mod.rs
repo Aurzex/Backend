@@ -46,6 +46,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 pub(crate) mod assembly;
+mod kitten4_vocab;
 pub(crate) mod mapping;
 pub(crate) mod model;
 pub(crate) mod nemo;
@@ -54,7 +55,6 @@ pub(crate) mod nemo_mapping;
 mod nemo_tests;
 #[cfg(test)]
 mod reverse_tests;
-mod kitten4_vocab;
 pub(crate) mod tables_gen;
 
 /// 目标编辑器

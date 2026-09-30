@@ -62,11 +62,19 @@ fn convert_one_work() {
     if upload {
         let cfg_path = std::env::var("BACKEND_TEST_CONFIG")
             .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("data/test-config.json"));
+            .unwrap_or_else(|_| {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("data/test-config.json")
+            });
         let text = std::fs::read_to_string(&cfg_path).expect("读测试配置(含账号)");
         let cfg: serde_json::Value = serde_json::from_str(&text).expect("配置 JSON");
-        let account = cfg["accounts"][0]["account"].as_str().expect("accounts[0].account").to_string();
-        let password = cfg["accounts"][0]["password"].as_str().expect("accounts[0].password").to_string();
+        let account = cfg["accounts"][0]["account"]
+            .as_str()
+            .expect("accounts[0].account")
+            .to_string();
+        let password = cfg["accounts"][0]["password"]
+            .as_str()
+            .expect("accounts[0].password")
+            .to_string();
         let login = backend::api::auth::LoginBuilder::new()
             .identity(&account)
             .password(&password)
@@ -97,7 +105,10 @@ fn convert_one_work() {
                 details.get("type"),
                 details.get("work_name"),
                 details.get("bcm_version"),
-                details.get("preview").and_then(|v| v.as_str()).map(|s| &s[..s.len().min(60)])
+                details
+                    .get("preview")
+                    .and_then(|v| v.as_str())
+                    .map(|s| &s[..s.len().min(60)])
             ),
             Err(e) => println!("[上传] 平台回读失败: {e}"),
         }

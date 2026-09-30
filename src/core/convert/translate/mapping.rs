@@ -1389,10 +1389,13 @@ fn reverse_kind(
                 .iter()
                 .copied()
                 .find(|c| super::kitten4_vocab::kitten4_editor_knows(c))
+                .or_else(|| super::kitten4_vocab::kitten4_editor_knows(kn_kind).then_some(kn_kind))
                 .or_else(|| {
-                    super::kitten4_vocab::kitten4_editor_knows(kn_kind).then_some(kn_kind)
+                    candidates
+                        .iter()
+                        .copied()
+                        .find(|c| !c.starts_with("cloud_"))
                 })
-                .or_else(|| candidates.iter().copied().find(|c| !c.starts_with("cloud_")))
                 .unwrap_or(candidates[0]);
             ctx.report.warn(TranslateWarning::AmbiguousType {
                 kind: kn_kind.to_string(),
