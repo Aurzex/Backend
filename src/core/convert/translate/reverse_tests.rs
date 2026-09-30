@@ -1692,9 +1692,14 @@ mod reverse_tests_inner {
             // "把调用树当定义体比"造成的假缺口)。修口径前的真实现象、证据与后续见 `docs/rounds/32`。
             // **预算(只许变小;§4nonies 的刻意取舍)**:反向会把"编辑器不认识"的类型从积木表里**剔掉**
             // (宁可少几块,也要让整份作品能在 Kitten4 打开),被剔子树连同子块一起消失 ⇒ 定义体 census
-            // 出现缺口。实测本语料受影响定义 **38/51**、净减 **3237** 块 ⇒ 记为基线,只许变小,变大即回退。
+            // 出现缺口。实测本语料受影响定义 **35/51**、净减 **3193** 块 ⇒ 记为基线,只许变小,变大即回退。
             // 逐条缺口已由上面的 `[保真缺口]` + 报告分类打印。
-            const DEFICIT_BUDGET: i64 = 3237;
+            const DEFICIT_BUDGET: i64 = 3193;
+            // 常显读数:预算门只在超预算时才喊,这条让每次跑都能看到当前缺口量
+            eprintln!(
+                "[预算] {label}: 受影响定义 {affected}/{} 净减 {deficit}(上限 {DEFICIT_BUDGET})",
+                before_defs.len()
+            );
             assert!(
                 deficit <= DEFICIT_BUDGET,
                 "{label}:反向定义体保真缺口**变大**(受影响定义 {affected}/{},净减块 {deficit};基线 {DEFICIT_BUDGET})。\
@@ -2308,5 +2313,27 @@ mod reverse_tests_inner {
         assert_eq!(s1.len(), 2, "s1 的两个角色");
         let s1_ids: Vec<&str> = s1.iter().filter_map(Value::as_str).collect();
         assert_eq!(s1_ids, vec!["a1", "a2"]);
+    }
+
+    /// 单候选也要过**编辑器词汇**判据(rounds/36)。
+    ///
+    /// 表(`REVERSE_TYPES`)里的 Kitten 侧名字是 **Kitten3 口径**,与 Kitten4 编辑器实际认识的
+    /// 名单不一致:平台 40 件 Kitten4 语料里 `get_split_options` 出现 **0** 次、`text` **1338** 次。
+    /// 挑错名字的后果不是"改名",而是写出阶段把它当"编辑器不认识"**剔掉** ⇒ 积木白丢。
+    #[test]
+    fn single_candidate_respects_editor_vocabulary() {
+        // KN `text`:候选只有 `get_split_options`(编辑器不认识)⇒ 保留编辑器认识的 `text`
+        let (node, _) = reverse(
+            json!({ "type": "text", "id": "t1", "fields": { "TEXT": "hi" } }),
+            false,
+        );
+        assert_eq!(node.kind, "text");
+        assert!(super::super::kitten4_vocab::kitten4_editor_knows(
+            &node.kind
+        ));
+
+        // 候选与 KN 名都不认识:照旧给候选(写出阶段剔除 + 报告),不在这里静默改名
+        let (node, _) = reverse(json!({ "type": "get_split_options", "id": "t2" }), false);
+        assert_eq!(node.kind, "get_split_options");
     }
 }

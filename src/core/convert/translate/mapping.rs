@@ -1145,10 +1145,12 @@ fn untransform_shadow_xml(kitten_type: &str, xml: &str) -> String {
         // 影子 XML 里保持原名
         Some("math_number") => root.to_string(),
         Some(kind) => {
+            // 单候选与块路径**同一套规则**(见 `pick_single_reverse_name`);多候选(歧义)时
+            // 影子侧保持原名 —— 歧义挑选是块侧的事(要连带挑形状)
             let back = REVERSE_TYPES
                 .get(kind)
                 .filter(|candidates| candidates.len() == 1)
-                .map(|candidates| candidates[0]);
+                .map(|candidates| pick_single_reverse_name(kind, candidates[0]));
             match back {
                 Some(back) if back != kind => set_attr_value(root, "type", back),
                 _ => root.to_string(),
@@ -1292,6 +1294,26 @@ fn reverse_node(mut node: BlockJson, ctx: &mut RevCtx) -> BlockJson {
 }
 
 /// 类型反演:返回 (Kitten 侧类型名, `get_3` 需要补的 `attribute` 取值)
+/// 单候选时的取名规则(块与影子**共用**,rounds/36):
+///
+/// 表(`REVERSE_TYPES`)里的 Kitten 侧名字是 **Kitten3 口径**,与 Kitten4 编辑器实际认识的名单
+/// 不一致 —— 实测平台 40 件 Kitten4 语料:`get_split_options` 出现 **0** 次、`text` **1338** 次。
+/// 挑错名字的后果不是"改名",而是写出阶段把它当"编辑器不认识"**剔掉/清空**,内容白丢
+/// (见 `docs/rounds/34` §4nonies 与 `strip_unknown_blocks`)。
+///
+/// 规则:候选编辑器认识 ⇒ 用它;否则 KN 名编辑器认识 ⇒ 保留 KN 名(名字与形状都不用动);
+/// 否则照旧给候选,交给写出阶段剔除并逐类报告。
+fn pick_single_reverse_name<'a>(kn_kind: &'a str, candidate: &'a str) -> &'a str {
+    let knows = super::kitten4_vocab::kitten4_editor_knows;
+    if knows(candidate) {
+        candidate
+    } else if knows(kn_kind) {
+        kn_kind
+    } else {
+        candidate
+    }
+}
+
 fn reverse_kind(
     kn_kind: &str,
     node: &mut BlockJson,
@@ -1368,7 +1390,12 @@ fn reverse_kind(
     }
     // (f) `LC` 反演
     match REVERSE_TYPES.get(kn_kind).map(Vec::as_slice) {
-        Some([only]) => ((*only).to_string(), None),
+        // 单候选也要过**编辑器词汇**判据:表里的 Kitten 侧名字是 **Kitten3 口径**,
+        // 与 Kitten4 编辑器实际认识的名单不一致。实测(rounds/36):KN `text` 的候选只有
+        // `get_split_options`,而平台 40 件 Kitten4 语料里 `get_split_options` 出现 **0** 次、
+        // `text` **1338** 次 ⇒ Kitten4 那边就叫 `text`。挑错的名字会被写出阶段当"编辑器不认识"
+        // **剔掉**,积木就白丢了(现象同 rounds/34 §4nonies,只是从"整份加载失败"变成"少几块")。
+        Some([only]) => (pick_single_reverse_name(kn_kind, only).to_string(), None),
         Some(candidates) => {
             // 歧义:KN 侧一个名字对应多个 Kitten 原类型(如 `change_variables` ←
             // `change_variable` | `change_cloud_variable`)。
