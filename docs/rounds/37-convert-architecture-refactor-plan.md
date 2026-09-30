@@ -129,7 +129,7 @@ nemo_mapping   ≈ 2580 NEMO 解析 + 映射 + 表
 
 | # | 项 | 证据(锚点) | 预期收益 | 验证 | 风险 |
 | - | -- | ---------- | -------- | ---- | ---- |
-| **P1** | `translate_work` 关掉 `save_raw` | `convert/mod.rs:67-69` 用 `DecompileOptions::new()`(默认 `save_raw = true`,decompile/mod.rs:35/63)⇒ 每次白写一份与源同量级的 JSON(NEMO 两份)再被 `remove_dir_all` 删掉(:45-47) | 每次 translate_work **数百 ms~1 s** 的无产出开销 | 一行改动 + "staging 内无 raw" 断言 + SHA 不变 | **最低**:raw 不是产物 |
+| **P1** ✅ 已落地 | `translate_work` 关掉 `save_raw` | `convert/mod.rs:67-69` 用 `DecompileOptions::new()`(默认 `save_raw = true`,decompile/mod.rs:35/63)⇒ 每次白写一份与源同量级的 JSON(NEMO 两份)再被 `remove_dir_all` 删掉(:45-47) | 每次 translate_work **数百 ms~1 s** 的无产出开销 | 一行改动 + "staging 内无 raw" 断言 + SHA 不变 | **最低**:raw 不是产物 |
 | **P2** | `KnEntity.source` 不再深拷 `nekoBlockJsonList` | `assembly.rs:847` `entity.as_object().cloned()`,而装配侧读 `source` 的位置(1135-1146、1336-1373、1376-1445、1476-1515)**从不读这个键** | 反向最大的一笔分配(9.4 MB 样本 ≈10⁵ 节点) | convert_bench `core` 列 + SHA | 低:过滤式克隆或改借用 `&'a Map` |
 | **P3** | `strip_unknown_blocks` 改就地消费 | assembly.rs:996 `cloned()`、999 `blocks.cloned()`、1027 `connections.cloned()`、1054/1057 逐块 `shadows` 双拷(即使无未知类型) | 同一份积木数据**3~4 次深拷 → 0** | 同上 | 低:`root.remove` 取所有权;**保持 BTreeMap 键序** ⇒ 字节不变 |
 | **P4** | `find_object_shadow` 惰性化 | `translate/mod.rs:523` **无条件**全文档扫描 + 字符串形态再做一次 `from_str`(:1080-1082);触发形态实测只 1 例(:518-521) | 正向入口省 3–10% e2e(≈ 一次 read+parse 量级) | SHA 不变 + 错误消息文本兼容(有测试引用) | 中:错误**触发时机**变化,需 grep 引用该文本的断言 |
@@ -150,6 +150,9 @@ nemo_mapping   ≈ 2580 NEMO 解析 + 映射 + 表
 
 | 阶段 | 内容 | 出门条件(全绿才算过) | 回退 |
 | ---- | ---- | -------------------- | ---- |
+| **Phase 0** ✅ **已完成(2026-09-26)** | 门加固 + 基线有据重刷 + 三条协议冻结 + decompile 侧首批离线单测 | `fmt`/`clippy` 干净;`cargo test` **109 过**(104+5);`BACKEND_REQUIRE_BENCH=1 … convert_bench` **绿** | — |
+| **Phase 1** ✅ **已完成(2026-09-26)** | `options.rs`(262)/`report.rs`(180)/`pipeline.rs`(1655,含测试)/`xml.rs`(1278,含测试)四个新文件 + 断两环 + 模块文档纠错 | 同上 + **四样本 SHA256 与 `#meta` 逐字节不变**(纯搬迁的硬证明);`assembly.rs` 2644 → **2024**(回到 2500 上限内) | 一次提交 `14ba14d` |
+| **Phase 3** 🕓 **进行中**:P1/M5/§0.5 已落地 | `translate_work` 关 `save_raw`;删 `FileService` 死字段;NEMO 补 `elapsed_ms` | 同上(SHA 不变) | 提交 `c55dce7` |
 | **Phase 0** | §1 的 6 项(门 + 冻结协议 + 补 decompile/NEMO/translate_work 证据) | `fmt` / `clippy -D warnings` / `cargo test`(含两条扫描器) / `BACKEND_REQUIRE_BENCH=1 … convert_bench` | 逐条独立,单条 revert |
 | **Phase 1** | 纯搬迁:报告层、选项、`pipeline.rs`(含调度器回迁)、`xml.rs`(断两环) | 同上 + `forward_parallel_tests`(不依赖 download/)+ `cargo test --lib` 的 46 份正向 + 10 份反向扫描器 | 每个搬迁一次提交,单独 revert |
 | **Phase 2** | 样板与死重量:M1–M9 + Q1/Q2 的裁定 | 同上 + decompile 侧新单测(0.4 先补) | 同上 |
@@ -256,3 +259,24 @@ nemo_mapping   ≈ 2580 NEMO 解析 + 映射 + 表
 1. **是否按本方案执行**(Phase 0 → 1 → 2 → 3 → 4),还是只做其中某几段(例如"只要性能,不要搬迁")?
 2. **Q2**:`assembly.rs` 的调度器搬到 `pipeline.rs`(让文件回到 2500 行上限内)—— 做 or 不做?
 3. **Q1**:`kitten4_vocab.rs` 是否并进 `mapping.rs`(少一个文件 vs 丢掉"整体替换"工作流锚点)—— 我的建议是保持独立。
+
+---
+
+## 10. 执行实况(2026-09-26 本轮)
+
+| 阶段 | 状态 | 提交 | 硬证据 |
+| ---- | ---- | ---- | ------ |
+| Phase 0(门 + 协议 + decompile 测试) | ✅ 完成 | `ae41361` | 严格模式 bench 绿;`cargo test` 104 → **109**;基线重刷**逐键可审计**(正向只多 `source_sha256`;反向 SHA 与产物字节变化 = 34–36 轮刻意改动) |
+| Phase 1(options/report/pipeline/xml) | ✅ 完成 | `14ba14d` | 四个新文件 + 断 `model⇄mapping`、`nemo⇄nemo_mapping` 两环;`assembly.rs` **2644 → 2024**;四样本 **SHA 逐字节不变** |
+| Phase 3 第一批(P1/M5/NEMO 计时) | ✅ 完成 | `c55dce7` | 同上(SHA 不变) |
+
+**已按判断确定的项**:Q1 = `kitten4_vocab.rs` **保持独立**;Q2 = remint **随管线搬入 `pipeline.rs`**(已执行,文件回到上限内);Q6 = 两套批处理执行器**不合并**(已核实不同构)。
+
+**仍在队列(按方案 §4 的优先级)**:
+
+1. **P2/P3**(反向装配的整份深拷:`KnEntity.source` 带 `nekoBlockJsonList`、`strip_unknown_blocks` 3~4 次 `cloned()`)—— 收益最大、风险低(纯所有权重构),但需要一次完整验证周期;
+2. **P4**(正向入口 `find_object_shadow` 无条件全文档扫描 + 二次 parse)、**P7**(正向装配解构移动 + `duplicate_ids` 借用 + `count()` 复用);
+3. **Phase 2** 的样板与死数据:M1–M4(`editors.rs` 的 5 份 Fetcher 壳/3 份 `save_result`/5 份变体错误分支)、M7(`TOP_BLOCKS`/`KN_TYPES` 死数据 + 生成器)、M5 残项(三个纯转发的 `file_service` 字段);
+4. **P5/P6/P8–P11**(逐块线性扫描、`#[serde(flatten)]`、告警 String、`Arc<str>`、临时 id clone);
+5. **Phase 4** 收尾(文档锚点、backlog 的 `k4raw` 漂移、`BlockJson::walk`);
+6. **补一条 `translate_work` 端到端基准** —— 没有它,P1 这类改动的收益只有代码论证、给不出同轮 A/B 数字(方案 §0.5 ③)。
