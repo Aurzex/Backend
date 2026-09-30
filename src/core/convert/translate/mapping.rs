@@ -38,7 +38,7 @@
 
 use crate::core::convert::shared::XHTML;
 use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde_json::{Value, json};
 
@@ -284,6 +284,42 @@ static APPEARANCE_ATTRIBUTE_INDEX: std::sync::LazyLock<
     map
 });
 
+// 降级占位积木的标题表索引(与上面的正向表同理:`entry().or_insert()` = 原来的
+// `iter().find(...)`,表里真有重复键时同样"取第一个")。
+static KITTEN_MUTATION_TEXT_INDEX: std::sync::LazyLock<HashMap<&'static str, &'static str>> =
+    std::sync::LazyLock::new(|| {
+        let mut map = HashMap::with_capacity(KITTEN_MUTATION_TEXT.len());
+        for (kind, text) in KITTEN_MUTATION_TEXT {
+            map.entry(*kind).or_insert(*text);
+        }
+        map
+    });
+
+static KITTEN_MUTATION_TEXT_SELECT_INDEX: std::sync::LazyLock<
+    HashMap<&'static str, HashMap<&'static str, &'static str>>,
+> = std::sync::LazyLock::new(|| {
+    let mut map: HashMap<&'static str, HashMap<&'static str, &'static str>> =
+        HashMap::with_capacity(KITTEN_MUTATION_TEXT_SELECT.len());
+    for (kind, entries) in KITTEN_MUTATION_TEXT_SELECT {
+        let entry = map.entry(*kind).or_default();
+        for (key, text) in *entries {
+            entry.entry(*key).or_insert(*text);
+        }
+    }
+    map
+});
+
+/// `KITTEN_TO_KN` 的**键 ∪ 值**(判定"两个编辑器都可能有的名字"用,见 [`is_kitten_side`])
+static KITTEN_SIDE_KINDS: std::sync::LazyLock<HashSet<&'static str>> =
+    std::sync::LazyLock::new(|| {
+        let mut set = HashSet::with_capacity(KITTEN_TO_KN.len() * 2);
+        for (kitten, kn) in KITTEN_TO_KN {
+            set.insert(*kitten);
+            set.insert(*kn);
+        }
+        set
+    });
+
 /// `LC` 查表(`translateBlockType` 77860),表里没有就返回原值
 ///
 /// `pub(super)`:往返扫描(测试)要用同一张表把两侧类型**归一化到同一等价类**,
@@ -407,17 +443,14 @@ fn is_uuid(text: &str) -> bool {
 // ---------------------------------------------------------------- 降级占位积木的变异文本
 
 fn rc_plain(kind: &str) -> Option<&'static str> {
-    KITTEN_MUTATION_TEXT
-        .iter()
-        .find(|(k, _)| *k == kind)
-        .map(|(_, v)| *v)
+    KITTEN_MUTATION_TEXT_INDEX.get(kind).copied()
 }
 
 fn select_text(kind: &str, key: &str) -> Option<&'static str> {
-    KITTEN_MUTATION_TEXT_SELECT
-        .iter()
-        .find(|(k, _)| *k == kind)
-        .and_then(|(_, entries)| entries.iter().find(|(k, _)| *k == key).map(|(_, v)| *v))
+    KITTEN_MUTATION_TEXT_SELECT_INDEX
+        .get(kind)?
+        .get(key)
+        .copied()
 }
 
 /// 官方 `createMutationForBlockType`(78303)的近似:返回 (标题文本, 是否近似)
@@ -625,7 +658,9 @@ fn parse_node(mut node: BlockJson, ctx: &mut Ctx) -> BlockJson {
     };
 
     // (3) 降级占位积木的变异文本 + 执行/事件型置灰
-    if rc_plain(&orig).is_some() || KITTEN_MUTATION_TEXT_SELECT.iter().any(|(k, _)| *k == orig) {
+    if KITTEN_MUTATION_TEXT_INDEX.contains_key(orig.as_str())
+        || KITTEN_MUTATION_TEXT_SELECT_INDEX.contains_key(orig.as_str())
+    {
         let (text, approximate) = mutation_text(&orig, &orig_fields);
         node.mutation = Some(mutation_xml(&text));
         if approximate {
@@ -811,7 +846,7 @@ fn route_children(node: &mut BlockJson, ctx: &mut Ctx) {
 //
 // 三条纪律:
 //
-// 1. **不可逆的必须进报告**:KN 原生而 Kitten 侧无来源的类型(`KN_TYPES − LC 值域` 的 68 类,
+// 1. **不可逆的必须进报告**:KN 原生而 Kitten 侧无来源的类型(`KN 原生类型全集 − LC 值域` 的 68 类,
 //    以及 `calculate` 这类"正向会降级"的 KN 原生块)保留原类型 + [`TranslateWarning::UnmappedBlock`];
 //    一个 KN 类型有多个 Kitten 原类型时保留 KN 名(与正向的恒等分支相容)+ `DroppedProperty`;
 // 2. **不做语义猜测**:云列表/本地列表(`list_append` ← `lists_append` | `cloud_lists_append`)
@@ -867,7 +902,7 @@ static REVERSE_PLACEHOLDER_TITLES: std::sync::LazyLock<BTreeMap<&'static str, Ve
 /// 一个 KN 类型是否是"两个编辑器都可能有的名字"(Kitten 侧出现过这个名字:LC 的键/值、
 /// 或正向代码里当 Kitten 侧认得的类型)→ 保留它不算"未映射"。
 fn is_kitten_side(kind: &str) -> bool {
-    KITTEN_TO_KN.iter().any(|(k, v)| *k == kind || *v == kind)
+    KITTEN_SIDE_KINDS.contains(kind)
         || NEXT_ROUTE_TYPES.contains(&kind)
         || LOOP_DO_TYPES.contains(&kind)
         || LIST_INPUT_TYPES.contains(&kind)
