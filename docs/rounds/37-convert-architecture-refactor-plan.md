@@ -404,3 +404,38 @@ nemo_mapping   ≈ 2580 NEMO 解析 + 映射 + 表
   可能改产物字节(rounds/31 D5 只说过"可合并",没验证过字节)。
 
 验证:fmt/clippy 零告警;`cargo test` **109** 全绿;四样本 SHA256 与 `#meta` 逐字节不变。
+
+### 10.5 **profiler 结果**(2026-09-26,用户要求的一轮)
+
+工具:`perf 7.2.8`(用户授权安装)+ `--call-graph dwarf`,采 `convert_bench` 全部四样本
+(`CARGO_PROFILE_BENCH_PERF_DEBUG=1 CARGO_PROFILE_BENCH_PERF_STRIP=none` 带符号重建);
+25,392 个样本(`-F 999`)。
+
+**按归属**:`convert_bench`(静态链接的全部 Rust 代码)59.5% / **`libc.so.6` 40.7%** / [unknown] 1%。
+
+**自身耗时 Top 段(节选)**
+
+| % | 符号 | 读法 |
+| -- | ---- | ---- |
+| 7.7 | `sha2::sha256::soft::unroll::compress` | `.bcmkn` 解密链上的 SHA256(AES 密钥派生) |
+| ~30 | 一串 `0x…` 裸地址 | 主要是 **libc 内部**(malloc/free/memcpy;libc 被 strip) |
+| 3.9 + 1.5 | `cfree` + `malloc` | 分配器自身 |
+| 3.7 + 1.8 | `drop_glue::<serde_json::value::Value>` | **析构 Value 树** |
+| 2.8 + 1.4 + 1.5 | `BTreeMap<String, Value>::insert` / `VacantEntry::insert_entry` | 建文档要插大量 BTreeMap 节点 |
+| 2.7 + 1.5 | `IntoIter::dying_next` | **消耗/丢弃大 BTreeMap** |
+| 2.6 | `serde_json::read::SliceRead::skip_to_escape` | 解析字符串 |
+| 2.1 | `ser::format_escaped_str` | 序列化字符串 |
+| 1.7 | `Map<String,Value>::deserialize_any::<BlockJson 的 Visitor>` | **逐节点 `BlockJson::from_value`** |
+| 1.5 + 1.3 | `Value as Serialize` | 序列化 Value |
+
+**结论(与前面的 A/B 互相印证)**
+
+1. **我们自己的函数没有热点**:`backend::core::convert::*` 单条自身耗时都 **< 0.4%** ⇒
+   P2/P3(少几次深拷)、P5(少几次线性扫描)之所以测不出收益,是因为**它们都不是这里的瓶颈** ✓;
+2. **瓶颈是"分配与 Value 树本身"**:libc 40.7%(malloc/free/memcpy)+ Value 析构 5.5% +
+   BTreeMap 插入/消耗 ≈ 10% ⇒ 合起来**过半时间花在"反复构造并丢弃 serde_json 中间树"**上 ✓
+   —— 这正是之前端到端里那"≈30% 未归类"的去向 ✓;
+3. ⇒ **P6(`#[serde(flatten)]` 逐节点 serde)确实是下一个正确的方向** ✓:它同时减少
+   `deserialize_any` 的逐节点缓冲、BTreeMap 插入与随后的 Value 析构;
+4. 但要记住前车之鉴:**先量后改** —— P6 落地后必须用同一套同轮 A/B 证明它真的动了 `core`/`e2e`,
+   而不是又一次"落在噪声里"。
