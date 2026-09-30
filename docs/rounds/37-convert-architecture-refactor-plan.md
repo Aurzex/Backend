@@ -28,7 +28,7 @@
 | 0.2 | **严格模式开关** | `convert_bench` 在 debug / 缺样本 / 未加 `--ignored` 时**静默 return 却显示 pass**(:216-230),CI 上等于没有这条门 | 照 `BACKEND_REQUIRE_LIVE=1` 的先例加 `BACKEND_REQUIRE_BENCH=1`:缺样本或非 bench 构建时直接 panic |
 | 0.3 | **冻结三条"协议"** | 重构不得改变它们,否则门会以假象通过或误报 | ①`strip_counts` 反解的中文 marker(`已剔除 N`/`已清空 N`,reverse_tests.rs:777-795);②告警**产生顺序**(procedure_library 测试比 `report.warnings()` 逐条 :1556-1559);③**id 铸造顺序**(deterministic 下产物 id 是铸造序号的纯函数,model.rs:443-444) |
 | 0.4 | **补 decompile 侧离机单测** | `src/core/convert/decompile/` **零** `#[cfg(test)]`(1844+1661 行生产代码无单测),它的回归只能靠真机门 ⇒ 改这里的风险被系统性低估 | 用 `nemo_tests.rs:794` 那种自造 `DecompilerContext` + `OfflineHttp` 的写法,先给 `XmlBlockWriter::write_blocks`、`referenced_ids`、`child_input_name` 这类纯函数加 1–2 条断言 |
-| 0.5 | **给 NEMO 方向补门** | NEMO 既无 SHA 基线也无默认扫描器,唯一强门靠不入库的 `temp/harness` + 2 份夹具(`nemo_tests.rs:317-337`,默认 ignore) | ①把现成 NEMO 样本加进 `convert_bench` 的 `SAMPLES`;②给 NEMO 分支补 `report.elapsed_ms`(现在**恒 0**,translate/mod.rs:712-719) |
+| 0.5 | **给 NEMO 方向补门(口径已更正)** | 更正:说"NEMO 没有门"**过强** —— `nemo_tests` 有 **6 条默认跑的单测**(`nemo_tests.rs:107/148/200/283/720/793`,走内存文档,覆盖值槽/双形态/QC-YC 迁移/占位降级/元素计数/内存反编译入口);真正缺的是 ① **SHA 字节基线** ② `translate_file` 真文件路径 + 真作品这一层的默认门(现状只有 `#[ignore]` 的 `nemo_real_samples_match_official_products:335`)③ 性能观测(`elapsed_ms` **恒 0**) | ①`nemo.rs:65` 补 `let started = Instant::now();`、`:570` 前 `report.elapsed_ms = …`;②把 `download/compile/蛋仔派对2-…/194684070.bcm`(3.4 MB,NEMO 0.16.2)加进 `convert_bench` 的 `SAMPLES`(`target: KittenN`、`slug: "kn"`;`detect_editor` **按内容**判定,扩展名无关);③可选:用手写极小 NEMO 文档(照 `nemo_tests.rs:11-84`)加一条默认跑的 `translate_file` 门 |
 | 0.6 | **确认产物链无 `HashMap` 迭代** | 有的话 SHA 会随机红 | 本次静态排查未发现(产物键序由 `serde_json::Map`=BTreeMap 保证,Cargo 未开 `preserve_order`);Phase 1 之后再用扫描器复验一次 |
 
 **Phase 0 出门条件**:`fmt/clippy/test` 全绿 + `BACKEND_REQUIRE_BENCH=1 cargo test --profile bench_perf --test convert_bench -- --ignored` **全绿**。
@@ -242,6 +242,7 @@ nemo_mapping   ≈ 2580 NEMO 解析 + 映射 + 表
 | P9 的收益(NEMO 省 1/2~2/3 解析) | 无 profile(NEMO 连 `elapsed_ms` 都没有) | ⚖️ **推断** ⇒ Phase 0.5 补仪器后再量 |
 | `KITTEN_MUTATION_TEXT_SELECT` 表长 | 粗计 ≈41 vs 侦察报 17,**不一致** | ⚖️ 未定 ⇒ 动手前精算(不影响方向) |
 | `BlockJson::walk` 零生产调用 | grep 只命中**同名局部函数**,未精确区分方法 | ⚖️ 未定 ⇒ Phase 4 用 dead_code 复核 |
+| "NEMO 方向没有离线门" | 读 `nemo_tests.rs` 的 `#[test]` 列表 | ❌ **方案原措辞过强** ⇒ 已更正:有 6 条默认跑的内存单测;缺的是 SHA 基线 + 真文件路径门 + `elapsed_ms` |
 | Q6 两套批处理执行器是否同构 | 逐行读 `assembly.rs:2191-2250` 与 `shared.rs:1100-1131` | ✅ **不同构**(装箱/panic/所有权/返回四点都不同)⇒ 结论"不合并" |
 
 **本轮复核改正的三处**:

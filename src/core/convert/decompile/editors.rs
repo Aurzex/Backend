@@ -1659,3 +1659,112 @@ impl<'a> WoodResourceManager<'a> {
         Ok(())
     }
 }
+
+// ===========================================================================
+// 离线单测(不联网、不落盘):blocksXML 序列化的产物字节
+// ===========================================================================
+#[cfg(test)]
+mod xml_writer_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// 只把**未被引用**的块当根块输出;被引用者必须嵌在 `<next>` 里,不得再带 x/y。
+    ///
+    /// 守的是 blocksXML 的根块判定:同一个编译块树里,子块若被误判成根块,
+    /// 就会被再输出一遍并带上 `x="0" y="220"`(编辑器里每个块都独立出现在画布上 ⇒ 散块)。
+    /// 断言 `y="220"` **不出现**,正好锁住"引用块不能有第二条根输出"这条不变量;
+    /// 只数 `<block type=` 个数是不够的(散块时计数同样是 2,只是多了一处 x/y)。
+    #[test]
+    fn write_blocks_emits_only_unreferenced_blocks_as_roots() {
+        let config = DecompilerConfig::default();
+        let writer = XmlBlockWriter::new(&config);
+        // a 是根块,通过 next_block 引用 b;b 在块表里也有自己的条目
+        let actor = json!({
+            "compiled_block_map": {
+                "a": {
+                    "type": "controls_repeat",
+                    "id": "a",
+                    "params": {"TIMES": {"type": "math_number", "id": "m1", "params": {"NUM": 10}}},
+                    "next_block": {"type": "data_setvariableto", "id": "b", "params": {"VALUE": "hi"}}
+                },
+                "b": {
+                    "type": "data_setvariableto",
+                    "id": "b",
+                    "params": {"VALUE": "hi"}
+                }
+            }
+        });
+        let xml = writer.write_blocks(&actor).unwrap();
+
+        assert!(xml.starts_with("<variables></variables>"));
+        // 两个块各渲染一次:a 作根(+x/y),b 作 a 的 <next> 子块
+        assert_eq!(
+            xml.matches("<block type=").count(),
+            2,
+            "两个块应各渲染一次,实际:{xml}"
+        );
+        assert!(xml.contains(
+            r#"<block type="controls_repeat" id="a" inline="true" visible="visible" x="0" y="0">"#
+        ));
+        assert!(xml.contains("<next>"), "next 链应嵌在 <next> 里:{xml}");
+        // 关键不变量:被引用的 b 不得作为第二个根块再输出一遍(散块的症状)
+        assert!(
+            !xml.contains(r#"y="220""#),
+            "被引用的块 b 被当成了根块(产物会出现散块):{xml}"
+        );
+
+        // 边界:`compiled_block_map` 缺失时不是错误,只输出表头
+        assert_eq!(
+            writer.write_blocks(&json!({})).unwrap(),
+            "<variables></variables>"
+        );
+        // 边界:空块表同样只有表头
+        assert_eq!(
+            writer
+                .write_blocks(&json!({"compiled_block_map": {}}))
+                .unwrap(),
+            "<variables></variables>"
+        );
+    }
+
+    /// XML 字段文本必须**单遍转义**,不能"先替换 `<` 再替换 `&`"(那会把已生成的实体二次转义)。
+    ///
+    /// 守的是产物字节:一条含 `&<>"'` 的文本字段,块名/字符串里的这些字符若转义错误,
+    /// blocksXML 会被编辑器判为非法 XML 或积木文本被改写(如 `&lt;` 变成 `&amp;lt;` 显示成 `&lt;`)。
+    /// 断言的是**整串**具体文本,而不是"包含 &lt;"这种弱断言 —— 单遍实现的正确输出与
+    /// 链式 replace 的错误输出只差 `&amp;` 这一处,只有全串比对能分开。
+    #[test]
+    fn write_blocks_escapes_field_text_and_leaves_empties_alone() {
+        let config = DecompilerConfig::default();
+        let writer = XmlBlockWriter::new(&config);
+        let actor = json!({
+            "compiled_block_map": {
+                "root": {
+                    "type": "data_setvariableto",
+                    "id": "root",
+                    "params": {
+                        "TEXT": "a&b<c>d\"e'f",
+                        "NUM": 3,
+                        "FLAG": true,
+                        "EMPTY": ""
+                    }
+                }
+            }
+        });
+        let xml = writer.write_blocks(&actor).unwrap();
+
+        // 单遍转义:& 先于 < 处理,结果里不会出现 &amp;lt;
+        assert!(
+            xml.contains(r#"<field name="TEXT">a&amp;b&lt;c&gt;d&quot;e&apos;f</field>"#),
+            "文本字段转义不对(链式 replace 的二次转义症状是 &amp;lt;):{xml}"
+        );
+        // 数字/布尔按文本写,不加引号
+        assert!(xml.contains(r#"<field name="NUM">3</field>"#));
+        assert!(xml.contains(r#"<field name="FLAG">true</field>"#));
+        // 空字符串字段仍要写出空 <field> 对(而不是整条丢掉)
+        assert!(
+            xml.contains(r#"<field name="EMPTY"></field>"#),
+            "空字段被丢掉了:{xml}"
+        );
+    }
+}

@@ -13,15 +13,22 @@
 //! `ser`(Value→JSON)/ `e2e`(translate_file 全程,含自身读写与序列化)/
 //! 产物字节数 / 积木数 / 告警数 / 产物 SHA256。
 //!
-//! 断言:
-//! - **产物不变(第一职责)**:与 `tests/fixtures/translate/convert_bench_baseline.json`
-//!   逐项 SHA256 相同;该文件不存在时**写入它**并提示(首次跑即建立基线)。
-//!   `deterministic_ids(true)` 下重复跑同一份输入,只要产物有半点不确定就会撞上这条。
+//! 断言(三条,**产物不变**是核心):
+//! - **产物不变**:与 `tests/fixtures/translate/convert_bench_baseline.json` 逐项 SHA256 相同;
+//!   另外 `#meta`(源文件 SHA256 / 产物字节 / 块数 / 告警数)也参与断言 —— "字节没变但报告退化
+//!   (块变少、告警变多)"与"输入被换掉"都必须被抓住。
 //! - **并发不改产物(第二职责)**:每个样本再用 `entity_concurrency = [`PARALLEL_FACTOR`]`
 //!   跑一遍,与并发 1 的 SHA256 必须相同 —— 这是实体级并行(方案 25 S3a)的核心门;
 //!   同时它的 `core`/`e2e` 列就是加速比证据(绑核、5 轮取最小)。
 //!
 //! 性能可以变,产物不能变 —— 所以基准的第一职责是守住 SHA256。
+//!
+//! **两个环境开关**(默认都关,行为与历史一致):
+//! - `BACKEND_REQUIRE_BENCH=1`:**严格模式** —— debug 构建、样本缺失、基线缺失都**直接失败**
+//!   (默认这些情况是"打印后 return 显示 pass",CI/干净检出上等于没有这条门);
+//! - `BACKEND_BENCH_REFRESH=1`:**有据刷新基线** —— 写出新的基线文件,并**逐键打印变化**
+//!   (产物/元信息),让"为什么变"在提交信息里可审计;不使用它时基线损坏/缺失一律炸,
+//!   绝不静默重建。
 //!
 //! 测量纪律:这台机器(笔记本/CPU 调频)上**绝对毫秒会漂**(同一二进制两次跑
 //! `core` 差 20–40% 是常事),所以:
@@ -216,6 +223,9 @@ fn warmup(sample: &Sample, dir: &Path, entity_concurrency: usize) {
 #[ignore = "性能基准:需 --profile bench_perf 且本机有 download/ 真作品样本"]
 fn convert_bench() {
     if cfg!(debug_assertions) {
+        if strict_mode() {
+            panic!("严格模式:convert_bench 必须在 --profile bench_perf(release)下跑");
+        }
         eprintln!("[convert_bench] 这是 debug 构建,数字会误导;请用 --profile bench_perf 运行");
         return;
     }
@@ -225,8 +235,14 @@ fn convert_bench() {
         .map(|s| s.path)
         .collect();
     if missing.len() == SAMPLES.len() {
+        if strict_mode() {
+            panic!("严格模式:样本全缺(需先反编译作品到 download/):{missing:#?}");
+        }
         eprintln!("[convert_bench] 缺样本(需先反编译作品到 download/),跳过。缺:{missing:#?}");
         return;
+    }
+    if !missing.is_empty() {
+        eprintln!("[convert_bench] 警告:部分样本缺失,这些键不参与断言:{missing:#?}");
     }
     let dir = bench_dir("flow");
 
@@ -244,6 +260,7 @@ fn convert_bench() {
     let mut fresh = serde_json::Map::new();
     let mut mismatched = Vec::new();
     let mut parallel_mismatched = Vec::new();
+    let mut meta_mismatched = Vec::new();
 
     for sample in SAMPLES {
         if !Path::new(sample.path).exists() {
@@ -251,6 +268,7 @@ fn convert_bench() {
             continue;
         }
         let src_bytes = std::fs::metadata(sample.path).expect("stat 失败").len();
+        let source_sha = sha256_hex(&std::fs::read(sample.path).expect("读源文件失败"));
         let m = measure(sample, &dir, 1);
         println!(
             "| {} | {:.1} | {:.0} | {:.0} | {:.0} | {:.0} | {:.0} | {:.1} | {}→{} | {} | {} |",
@@ -323,16 +341,21 @@ fn convert_bench() {
             mismatched.push((key.clone(), old.to_string(), m.sha256.clone()));
         }
         fresh.insert(key.clone(), serde_json::Value::String(m.sha256.clone()));
-        fresh.insert(
-            format!("{key}#meta"),
-            serde_json::json!({
-                "source_bytes": src_bytes,
-                "output_bytes": m.out_bytes,
-                "blocks_total": m.blocks_total,
-                "blocks_converted": m.blocks_converted,
-                "warnings": m.warnings,
-            }),
-        );
+        let meta = serde_json::json!({
+            "source_sha256": source_sha,
+            "source_bytes": src_bytes,
+            "output_bytes": m.out_bytes,
+            "blocks_total": m.blocks_total,
+            "blocks_converted": m.blocks_converted,
+            "warnings": m.warnings,
+        });
+        // 元信息也参与断言:字节没变但块数/告警退化、或输入被换掉,都要抓
+        if let Some(old) = baseline.get(&format!("{key}#meta"))
+            && old != &meta
+        {
+            meta_mismatched.push((key.clone(), old.clone(), meta.clone()));
+        }
+        fresh.insert(format!("{key}#meta"), meta);
     }
 
     if !parallel_mismatched.is_empty() {
@@ -345,6 +368,30 @@ fn convert_bench() {
         panic!("convert 基准:实体级并发改变了产物");
     }
 
+    // 有据重刷:显式开关才写,并逐键打印变化(让"为什么变"可审计)
+    if refresh_mode() {
+        eprintln!("\n[convert_bench] BACKEND_BENCH_REFRESH=1:**重刷基线** —— 变化逐键列出:");
+        for key in fresh.keys() {
+            let old = baseline.get(key);
+            let new = fresh.get(key);
+            if old != new {
+                eprintln!("  {key}\n    旧 {old:?}\n    新 {new:?}");
+            }
+        }
+        std::fs::write(BASELINE, serde_json::to_string_pretty(&fresh).unwrap())
+            .expect("写基线失败");
+        println!("[convert_bench] 基线已写入 {BASELINE}(记得在提交信息里写清原因)");
+        return;
+    }
+
+    if !meta_mismatched.is_empty() {
+        eprintln!("\n[convert_bench] 元信息与基线不一致(字节可能没变,但**报告退化或输入被换**):");
+        for (key, old, new) in &meta_mismatched {
+            eprintln!("  {key}\n    基线 {old}\n    现在 {new}");
+        }
+        panic!("convert 基准:元信息(source SHA/块数/告警/字节)与基线不一致");
+    }
+
     if mismatched.is_empty() && !fresh.is_empty() {
         if baseline.is_empty() {
             std::fs::write(BASELINE, serde_json::to_string_pretty(&fresh).unwrap())
@@ -352,7 +399,7 @@ fn convert_bench() {
             println!("\n[convert_bench] 首次运行:基线已写入 {BASELINE}");
         } else {
             println!(
-                "\n[convert_bench] 产物 SHA256 与基线一致 ✅;实体级并发 1 vs {PARALLEL_FACTOR} 同 SHA256 ✅"
+                "\n[convert_bench] 产物 SHA256 与元信息都与基线一致 ✅;实体级并发 1 vs {PARALLEL_FACTOR} 同 SHA256 ✅"
             );
         }
         return;
@@ -368,8 +415,32 @@ fn convert_bench() {
 }
 
 fn load_baseline() -> serde_json::Map<String, serde_json::Value> {
-    let Ok(text) = std::fs::read_to_string(BASELINE) else {
-        return serde_json::Map::new();
+    let text = match std::fs::read_to_string(BASELINE) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            if strict_mode() {
+                panic!(
+                    "严格模式:基线 {BASELINE} 缺失 —— 先不带 BACKEND_REQUIRE_BENCH 跑一次建立基线"
+                );
+            }
+            return serde_json::Map::new();
+        }
+        Err(e) => panic!("读基线 {BASELINE} 失败:{e}"),
     };
-    serde_json::from_str(&text).unwrap_or_default()
+    // 基线损坏必须炸:静默 `unwrap_or_default()` 会把"基线被删/弄坏"变成"悄悄重建基线",
+    // 第一职责门就白设了。要重刷请显式用 BACKEND_BENCH_REFRESH=1。
+    match serde_json::from_str(&text) {
+        Ok(map) => map,
+        Err(e) => panic!("基线 {BASELINE} 解析失败(不要手改;重刷用 BACKEND_BENCH_REFRESH=1):{e}"),
+    }
+}
+
+/// `BACKEND_REQUIRE_BENCH=1`:把"静默跳过"变成失败(见模块文档)
+fn strict_mode() -> bool {
+    std::env::var("BACKEND_REQUIRE_BENCH").is_ok_and(|v| matches!(v.as_str(), "1" | "true" | "yes"))
+}
+
+/// `BACKEND_BENCH_REFRESH=1`:有据重刷基线(打印逐键变化;不写就永远不写)
+fn refresh_mode() -> bool {
+    std::env::var("BACKEND_BENCH_REFRESH").is_ok_and(|v| matches!(v.as_str(), "1" | "true" | "yes"))
 }

@@ -5,6 +5,7 @@
     "blocks_total": 374,
     "output_bytes": 308057,
     "source_bytes": 322465,
+    "source_sha256": "9fcdb87e7b12719bfd8b775ec6226451d16636894d5f0d743dee4a17b090a21d",
     "warnings": 0
   },
   "kitten4-10.8MB-kn": "bafeb50c0a8e4eeb13c41019d17f72eb6cda64657aa69c66bd0099b7141f0d77",
@@ -13,22 +14,25 @@
     "blocks_total": 12764,
     "output_bytes": 9661640,
     "source_bytes": 10841323,
+    "source_sha256": "1db6364217d5e1f39b2b53b00eca3a2d2650f6659279b97eba0174d88f9dd6c5",
     "warnings": 209
   },
-  "kn-3.7MB-kitten4": "bfde1fc159031eae25c980b6cc42ecbc326eaabbf22c2c7030652876d2e5e3f0",
+  "kn-3.7MB-kitten4": "eb29bd55c81136188066c48272b1737d4e7d0034c79e97f6c267d5cbb983246f",
   "kn-3.7MB-kitten4#meta": {
     "blocks_converted": 1597,
     "blocks_total": 1597,
-    "output_bytes": 4223554,
+    "output_bytes": 3963260,
     "source_bytes": 3713319,
-    "warnings": 489
+    "source_sha256": "8c3591fc9a2960a21ffd0321fb429f8c5a41409c818ca8a496a44130c48fbac0",
+    "warnings": 508
   },
-  "kn-9.4MB-kitten4": "e7680dcc6dca5cedefc7081e60d47576850af062923102c8e44154a83c9b545f",
+  "kn-9.4MB-kitten4": "97053e47a1c357cc9619c5d9e84365804f34aa76c09ffdc1b97b67a698a75717",
   "kn-9.4MB-kitten4#meta": {
     "blocks_converted": 4624,
     "blocks_total": 5235,
-    "output_bytes": 9794289,
+    "output_bytes": 9780218,
     "source_bytes": 9357732,
+    "source_sha256": "b4af1e8312285803b88ccb1f196066f59ebacad6d6d7b9c138d7fbcb4474597a",
     "warnings": 1817
   }
 }

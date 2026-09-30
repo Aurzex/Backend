@@ -1842,3 +1842,104 @@ pub(crate) fn create_block_decompiler<'a>(
         _ => Box::new(DefaultBlockDecompiler::new(compiled)),
     }
 }
+
+// ===========================================================================
+// 离线单测(不联网、不落盘):积木插槽命名与根块判定
+// ===========================================================================
+#[cfg(test)]
+mod block_helper_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// `child_input_name` 的 if/else 边界与函数体插槽名。
+    ///
+    /// 守的是:`index == conditions_count` 的**那个** child_block 是 else 分支(插槽 `ELSE`),
+    /// 而不是 `DO{conditions_count}`;写错(如 `<=`)会让 else 分支落到编辑器里不存在的插槽上,
+    /// 产物照样写盘、积木数照样对得上,但角色编辑页里 if-else 会掉分支。
+    /// `DO{index}` 必须**无空格**、带下标,否则多分支 if 会全部挤进同一个 `DO`。
+    #[test]
+    fn child_input_name_covers_if_else_boundary_and_function_body() {
+        // 两个条件 + 一个 else 的 controls_if:DO0 / DO1 是条件体,最后一个补位是 ELSE
+        assert_eq!(child_input_name("controls_if", 0, 2), "DO0");
+        assert_eq!(child_input_name("controls_if", 1, 2), "DO1");
+        assert_eq!(child_input_name("controls_if", 2, 2), "ELSE");
+        // 只有 if、没有 else 时也是同一规则(index 越界即 ELSE)
+        assert_eq!(child_input_name("controls_if_no_else", 0, 1), "DO0");
+        assert_eq!(child_input_name("controls_if_no_else", 1, 1), "ELSE");
+        // 函数定义块的函数体是 STACK,不是 DO
+        assert_eq!(child_input_name("procedures_2_defnoreturn", 0, 0), "STACK");
+        assert_eq!(child_input_name("procedures_2_defnoreturn", 7, 7), "STACK");
+        // 其余块一律 DO(无论下标/条件数)
+        assert_eq!(child_input_name("controls_repeat", 0, 0), "DO");
+        assert_eq!(child_input_name("motion_movesteps", 3, 3), "DO");
+    }
+
+    /// `referenced_ids`:只认**内联对象**引用;`params` 的标量值一律不算引用、也不报错。
+    ///
+    /// 守的是"根块判定"的**误报方向**:若把 `params` 里的标量(数字/布尔/字符串)也当引用,
+    /// 或把 `params` 值里的任意字符串当成块 id,正常的 `{"TIMES": 3}` 会被当成引用了块 "3"
+    /// (无害)或直接报错(整份作品反编译失败);反之若漏收集 `child_block`/`conditions`,
+    /// 子块会被当成根块 ⇒ 产物多出一堆散块(见本模块文档注释的失败模式)。
+    #[test]
+    fn referenced_ids_collects_inline_object_refs_only() {
+        let blocks = json!({
+            "root": {
+                "type": "controls_if",
+                "next_block": {"id": "n1"},
+                "child_block": [{"id": "c1"}, {"id": "c2"}],
+                "conditions": [{"id": "cond0"}, {"id": "cond1"}],
+                "params": {
+                    "A": {"id": "p1"},
+                    // 标量:不是引用
+                    "TIMES": 3,
+                    "TEXT": "DO",
+                    "FLAG": true,
+                    // 对象但没有 id:算不出引用,不能 panic
+                    "SHADOW": {"type": "math_number", "params": {"NUM": 1}}
+                }
+            },
+            // 叶子块自己不是被引用者(root 才是根)
+            "n1": {"type": "text", "params": {"TEXT": "hi"}}
+        });
+        let got = referenced_ids(blocks.as_object().unwrap()).unwrap();
+
+        let mut expected: HashSet<String> = HashSet::new();
+        for id in ["n1", "c1", "c2", "cond0", "cond1", "p1"] {
+            expected.insert(id.to_string());
+        }
+        // 恰好这些:没有根块自己、没有标量、没有无 id 的 params 对象
+        assert_eq!(got, expected);
+
+        // 空块表是合法输入(空作品/只有全局块),不得报错
+        assert!(referenced_ids(&serde_json::Map::new()).unwrap().is_empty());
+    }
+
+    /// 字符串引用必须**显式报错**而不是静默漏掉。
+    ///
+    /// 编译版引用恒为内联对象;真出现 `"next_block": "b"` 说明编译格式漂移。
+    /// 静默忽略会让 `b` 变成"根块",产物多出一堆散块 —— 这是本模块最贵的失败模式,
+    /// 所以这条断言要求**报错且错误信息点名出错的字段**(便于定位漂移)。
+    #[test]
+    fn referenced_ids_rejects_string_reference_instead_of_silently_dropping_it() {
+        for (field, raw) in [
+            ("next_block", json!({"a": {"type": "x", "next_block": "b"}})),
+            (
+                "child_block",
+                json!({"a": {"type": "x", "child_block": ["b"]}}),
+            ),
+            (
+                "conditions",
+                json!({"a": {"type": "x", "conditions": ["b"]}}),
+            ),
+        ] {
+            let map = raw.as_object().unwrap();
+            let err = referenced_ids(map)
+                .expect_err("字符串 id 引用必须报错,否则子块会被当成根块(产物多出散块)");
+            let msg = err.to_string();
+            assert!(
+                msg.contains(field),
+                "错误信息应点名出错的字段 {field},实际:{msg}"
+            );
+        }
+    }
+}
