@@ -2212,4 +2212,101 @@ mod reverse_tests_inner {
             translate_file(&path, TargetEditor::Kitten4, strict).expect_err("strict 应失败");
         assert!(matches!(error, TranslateError::Lossy { .. }), "{error:?}");
     }
+
+    /// 实机现象(rounds/34 §4nonies):产物在 Kitten4 编辑器里**作品名/变量能进,但角色一个都不显示**。
+    /// 根因是 `theatre.groups` 与场景 `group_order` 都是空的 —— 平台原件用"每组一个角色 + 组上带
+    /// `scene` 归属"表达"谁在场景里"。反向必须**合成**这张表(见 `synthesize_group`)。
+    #[test]
+    fn reverse_synthesizes_groups_so_editor_lists_actors() {
+        let doc = json!({
+            "stageSize": { "width": 562, "height": 900 },
+            "scenes": {
+                "scenesDict": {
+                    "s1": { "actorIds": ["a1", "a2"] },
+                    "s2": { "actorIds": ["a3"] }
+                },
+                "sortList": ["s1", "s2"]
+            },
+            "actors": {
+                "actorsDict": {
+                    "a1": { "x": 0, "y": 0 },
+                    "a2": { "x": 10, "y": 0 },
+                    "a3": { "x": 20, "y": 0 },
+                    // 不在任何 `actorIds` 里:装配阶段兜底挂到第一个场景,也必须有条组
+                    "loner": { "x": 30, "y": 0 }
+                }
+            },
+            "procedures": { "proceduresDict": {} }
+        });
+
+        let options = TranslateOptions::new().deterministic_ids(true);
+        let mut report = TranslateReport::new(
+            crate::core::convert::EditorType::Neko,
+            TargetEditor::Kitten4,
+        );
+        let out = convert_kn_document(&doc, &options, &mut report).expect("反向转换");
+
+        let theatre = &out["theatre"];
+        let groups = theatre["groups"]
+            .as_object()
+            .expect("`theatre.groups` 必须是对象");
+        assert_eq!(groups.len(), 4, "每个角色一条组(含兜底到首个场景的 loner)");
+
+        // 组条目形态照平台原件;`id` 必须与键一致(编辑器按 id 查表)
+        for (key, group) in groups {
+            assert_eq!(group["id"], json!(key.as_str()), "组 id 与键必须一致");
+            assert_eq!(group["is_group"], json!(false));
+            assert_eq!(group["is_fold"], json!(false));
+            assert_eq!(group["visible"], json!(true));
+            assert_eq!(group["name"], json!(""));
+            assert_eq!(
+                group["actors"].as_array().map(Vec::len),
+                Some(1),
+                "一角色一组:{group}"
+            );
+            let scene = group["scene"].as_str().unwrap_or_default();
+            assert!(
+                ["s1", "s2"].contains(&scene),
+                "组的 scene 必须指向真实场景:{group}"
+            );
+        }
+
+        // 场景 `group_order` 必须是本场景的组 id;每个角色**恰好被列一次**
+        let mut listed: Vec<String> = Vec::new();
+        for (scene_key, scene) in theatre["scenes"]
+            .as_object()
+            .expect("theatre.scenes 必须是对象")
+        {
+            let order = scene["group_order"]
+                .as_array()
+                .unwrap_or_else(|| panic!("{scene_key} 缺 group_order"));
+            for group_id in order {
+                let group_id = group_id.as_str().unwrap_or_default().to_string();
+                let group = groups
+                    .get(&group_id)
+                    .unwrap_or_else(|| panic!("group_order 引用了不存在的组 {group_id}"));
+                assert_eq!(
+                    group["scene"],
+                    json!(scene_key.as_str()),
+                    "组挂在了别的场景上"
+                );
+                listed.push(group_id);
+            }
+        }
+        assert_eq!(
+            listed.len(),
+            4,
+            "所有角色都要出现在某个场景的 group_order 里"
+        );
+        let unique: std::collections::BTreeSet<&String> = listed.iter().collect();
+        assert_eq!(unique.len(), 4, "组 id 必须唯一");
+
+        // 场景 `actors`(正向照抄的那份)与合成出来的组一一对应
+        let s1 = theatre["scenes"]["s1"]["actors"]
+            .as_array()
+            .expect("s1.actors");
+        assert_eq!(s1.len(), 2, "s1 的两个角色");
+        let s1_ids: Vec<&str> = s1.iter().filter_map(Value::as_str).collect();
+        assert_eq!(s1_ids, vec!["a1", "a2"]);
+    }
 }

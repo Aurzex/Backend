@@ -900,9 +900,12 @@ pub(crate) fn convert_kn_document(
         src,
         entities,
         blocks_by_entity,
-        landscape,
-        (canvas_w, canvas_h),
-        (kn_w, kn_h),
+        StageSize {
+            landscape,
+            canvas: (canvas_w, canvas_h),
+            kn: (kn_w, kn_h),
+        },
+        &mut ids,
         report,
     ))
 }
@@ -1094,6 +1097,13 @@ fn strip_unknown_blocks(
     Value::Object(root)
 }
 
+/// 装配阶段需要的舞台口径(打包传参:横竖屏 + 画布尺寸 + KN 舞台尺寸)
+struct StageSize {
+    landscape: bool,
+    canvas: (f64, f64),
+    kn: (f64, f64),
+}
+
 /// 装配 Kitten4 编辑版文档
 fn build_kitten4_document(
     src: &serde_json::Map<String, serde_json::Value>,
@@ -1102,12 +1112,18 @@ fn build_kitten4_document(
     // —— 一份文档级别的白拷贝(方案 23 P0-3)
     entities: Vec<KnEntity>,
     blocks_by_entity: Vec<(usize, serde_json::Value)>,
-    landscape: bool,
-    canvas: (f64, f64),
-    kn_stage: (f64, f64),
+    stage: StageSize,
+    // `theatre.groups` 的组 id 由它现铸(`deterministic_ids` 下稳定,见该段的说明)
+    ids: &mut model::IdSource,
     report: &mut TranslateReport,
 ) -> serde_json::Value {
     use serde_json::{Map, Value, json};
+
+    let StageSize {
+        landscape,
+        canvas,
+        kn: kn_stage,
+    } = stage;
 
     // actor → 所属场景:KN 的场景用 `actorIds` 反向指认;找不到就落到第一个场景
     let first_scene = entities
@@ -1173,13 +1189,62 @@ fn build_kitten4_document(
             .collect(),
     };
 
+    // ── `theatre.groups` + 场景 `group_order`:**必须合成**,否则编辑器一个角色都不显示
+    //
+    // 实机现象(rounds/34 §4nonies):转换产物在 Kitten4 编辑器里作品名/变量能进,但**角色一个都不出现**
+    // —— 平台原件的 `theatre.groups` 是"每组一个角色、组上带 `scene` 归属"的表,场景的 `group_order`
+    // 列本场景的组 id;我们的写出器原先这两处分别是 `{}` / `[]`(KN 侧确实没有分组概念)。
+    // 这里按"一角色一组"合成:组 id 现铸(`IdSource`,`deterministic_ids` 下稳定),
+    // 组的 `scene` 指向角色所属场景,`group_order` 按 `actorIds` 顺序列出组 id。
+    let mut groups = Map::new();
+    let mut group_order_by_scene: Map<String, Value> = Map::new();
+    let mut grouped: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for (scene_key, scene) in scenes.iter() {
+        let mut order: Vec<Value> = Vec::new();
+        if let Some(actor_ids) = scene.get("actors").and_then(Value::as_array) {
+            for actor_id in actor_ids.iter().filter_map(Value::as_str) {
+                order.push(Value::String(synthesize_group(
+                    &mut groups,
+                    ids,
+                    actor_id,
+                    scene_key,
+                )));
+                grouped.insert(actor_id.to_string());
+            }
+        }
+        group_order_by_scene.insert(scene_key.clone(), Value::Array(order));
+    }
+    // 没被任何场景 `actorIds` 指认的角色(装配阶段兜底挂到了"第一个场景")也要有条组,否则它不显示
+    for (actor_id, actor) in actors.iter() {
+        if grouped.contains(actor_id) {
+            continue;
+        }
+        let Some(scene_key) = actor
+            .get("scene")
+            .and_then(Value::as_str)
+            .filter(|key| scenes.contains_key(*key))
+            .map(str::to_string)
+        else {
+            continue;
+        };
+        let group_id = synthesize_group(&mut groups, ids, actor_id, &scene_key);
+        if let Some(Value::Array(order)) = group_order_by_scene.get_mut(&scene_key) {
+            order.push(Value::String(group_id));
+        }
+    }
+    for (scene_key, order) in group_order_by_scene {
+        if let Some(scene) = scenes.get_mut(&scene_key) {
+            scene["group_order"] = order;
+        }
+    }
+
     let mut theatre = Map::new();
     theatre.insert("scenes_order".into(), Value::Array(scenes_order));
     theatre.insert("scenes".into(), Value::Object(scenes));
     theatre.insert("actors".into(), Value::Object(actors));
     theatre.insert("styles".into(), Value::Object(kitten4_styles(src, report)));
     theatre.insert("videos".into(), json!({}));
-    theatre.insert("groups".into(), json!({}));
+    theatre.insert("groups".into(), Value::Object(groups));
     theatre.insert("timer".into(), json!({}));
 
     let (variables, variable_order) = kitten4_variables(src, canvas, kn_stage, report);
@@ -1380,6 +1445,33 @@ fn kitten4_actor(
     out
 }
 
+/// 合成一条 Kitten4 "单角色组"(`theatre.groups` 的条目形态照平台原件,组 id 现铸)
+///
+/// 编辑器靠这张表枚举"场景里有哪些角色";KN 侧没有分组概念,所以反向按"一角色一组"合成
+/// (见 `build_kitten4_document` 里 `theatre.groups` 那段的说明)。
+fn synthesize_group(
+    groups: &mut serde_json::Map<String, serde_json::Value>,
+    ids: &mut model::IdSource,
+    actor_id: &str,
+    scene_id: &str,
+) -> String {
+    use serde_json::json;
+    let id = ids.uuid();
+    groups.insert(
+        id.clone(),
+        json!({
+            "actors": [actor_id],
+            "id": id,
+            "is_fold": false,
+            "is_group": false,
+            "name": "",
+            "scene": scene_id,
+            "visible": true,
+        }),
+    );
+    id
+}
+
 /// KN 场景 → Kitten4 场景条目
 fn kitten4_scene(
     source: &serde_json::Map<String, serde_json::Value>,
@@ -1398,7 +1490,8 @@ fn kitten4_scene(
         out.insert("screen_name".into(), screen_name.clone());
     }
     // 正向:有 groups 时 actorIds 由 group_order 展开,无 groups 时照抄 `scene.actors`;
-    // 反向没有 groups 概念,写回 `actors` 即可(再正向时 `actorIds = scene.actors`)。
+    // 这里写的 `actors` 就是正向要照抄的那份。`group_order` 先占位,真正的值由装配阶段按
+    // 合成出来的 `theatre.groups` 填(编辑器靠它 + groups 枚举角色,空着就一个角色都不显示)。
     out.insert(
         "actors".into(),
         source.get("actorIds").cloned().unwrap_or_else(|| json!([])),

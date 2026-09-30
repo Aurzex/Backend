@@ -31,7 +31,7 @@
 
 ## 历史记录 `rounds/`(过程)
 
-`rounds/01-websocket-pitfalls.md` … `rounds/32-reverse-definition-body-investigation.md` —— 每轮一份的方案/评审/整改记录。
+`rounds/01-websocket-pitfalls.md` … `rounds/35-kitten4-groups-fix.md` —— 每轮一份的方案/评审/整改记录。
 价值在**证据链**(真机实测、抓包、官方 bundle 逆向、逐条评审),以及"为什么当初这么决定"。
 读它们时先看 `knowledge/errata.md`:早期文档里的文件名/类型名/行号多数已经漂移。
 
