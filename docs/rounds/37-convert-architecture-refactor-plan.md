@@ -133,12 +133,12 @@ nemo_mapping   ≈ 2580 NEMO 解析 + 映射 + 表
 | **P2** ✅ 已落地(`df92e03`,实测 ≈2–3%) | `KnEntity.source` 不再深拷 `nekoBlockJsonList` | `assembly.rs:847` `entity.as_object().cloned()`,而装配侧读 `source` 的位置(1135-1146、1336-1373、1376-1445、1476-1515)**从不读这个键** | 反向最大的一笔分配(9.4 MB 样本 ≈10⁵ 节点) | convert_bench `core` 列 + SHA | 低:过滤式克隆或改借用 `&'a Map` |
 | **P3** ✅ 已落地(`df92e03`) | `strip_unknown_blocks` 改就地消费 | assembly.rs:996 `cloned()`、999 `blocks.cloned()`、1027 `connections.cloned()`、1054/1057 逐块 `shadows` 双拷(即使无未知类型) | 同一份积木数据**3~4 次深拷 → 0** | 同上 | 低:`root.remove` 取所有权;**保持 BTreeMap 键序** ⇒ 字节不变 |
 | ~~**P4**~~ ❌ **判定不做(2026-09-26,执行时重新裁决)** | `find_object_shadow` 惰性化 | `translate/mod.rs:523` **无条件**全文档扫描 + 字符串形态再做一次 `from_str`(:1080-1082);触发形态实测只 1 例(:518-521) | 正向入口省 3–10% e2e(≈ 一次 read+parse 量级) | SHA 不变 + 错误消息文本兼容(有测试引用) | **不做**:已 grep 确认错误文案无测试断言,但惰性化会把"内联对象影子作品"从**拒绝**变成**先尝试解析**(可能被接受)⇒ 改变了对外行为,而收益只是"3–10% 正向 e2e"的**推断值** ⇒ 按仓库"无数据不做 + 不悄悄改行为"的纪律不做 |
-| **P5** | 逐块线性扫描 → `LazyLock` 索引 | `rc_plain`(mapping.rs:418)在**每个块**上扫 180 条且未命中走满(:730);`is_kitten_side`(:971-983)扫 367×2(表长实测:`KITTEN_TO_KN` ≈367、`KITTEN_MUTATION_TEXT` ≈180、`_SELECT` 粗计 ≈41 —— 侦察报 17,动手前精确数一次) | 正向 ~2.5M、反向 ~3.8M 次短串比较 ⇒ 换成哈希(≈ core 的 1–3%) | bench `core` 列(必须超出噪声才算) | 低:`or_insert` 保持"首命中优先" |
+| **P5** ✅ 已落地(`3f05b0f`) | 逐块线性扫描 → `LazyLock` 索引 | `rc_plain`(mapping.rs:418)在**每个块**上扫 180 条且未命中走满(:730);`is_kitten_side`(:971-983)扫 367×2(表长实测:`KITTEN_TO_KN` ≈367、`KITTEN_MUTATION_TEXT` ≈180、`_SELECT` 粗计 ≈41 —— 侦察报 17,动手前精确数一次) | 正向 ~2.5M、反向 ~3.8M 次短串比较 ⇒ 换成哈希(≈ core 的 1–3%) | bench `core` 列(必须超出噪声才算) | 低:`or_insert` 保持"首命中优先" |
 | **P6** | `#[serde(flatten)] extra` 手写 | model.rs:94-97 的 `extra` 被 `from_value`/`to_value` **逐节点**调用(:133/146,调用点 translate/mod.rs:428、model.rs:796/1783) | 逐节点 serde 成本 **1.5–3×** ⇒ `core` 的大头 | 先跑 `model_tests/null_tolerance_tests` + 四样本 SHA | **中高**:`extra` 键序与 null 容错必须逐字节复现;且 `extra` 有**生产消费者**——`model.rs:1184/1751`(`def.extra.insert`/`body.extra`)与 **`assembly.rs:2445`**(remint 的 `remap_object(&mut node.extra)`)必须原样可用(只换反序列化机制,field 语义不动) |
-| **P7** | 正向装配解构移动 + `duplicate_ids` 借用 + `count()` 复用 | `assembly.rs:128` `entity.source.clone()`(按值收却仍克隆,与 :1110-1113 注释自相矛盾);:914-926 每节点 `to_string()`;:841/884 同一棵树数两遍 | 每实体一次深拷 + ~5k 次 String + 一趟 DFS | SHA 不变 | 低(注意 `blocks_total` 取点在映射**前**、`converted` 在编码后,语义不可互换) |
+| **P7** ✅ **部分**(P7.1 已落地 `915c8ff`;另两条经核实不可行/会改口径,见 §10) | 正向装配解构移动 + `duplicate_ids` 借用 + `count()` 复用 | `assembly.rs:128` `entity.source.clone()`(按值收却仍克隆,与 :1110-1113 注释自相矛盾);:914-926 每节点 `to_string()`;:841/884 同一棵树数两遍 | 每实体一次深拷 + ~5k 次 String + 一趟 DFS | SHA 不变 | 低(注意 `blocks_total` 取点在映射**前**、`converted` 在编码后,语义不可互换) |
 | **P8** | 告警 String 延迟构造 | 反向 5235 块产 1817 条告警(rounds/23 §2 F);产生点 13 处(mapping.rs:735/1332/1350/1427-1430…;assembly.rs:347/374/878/890/1082/1091…) | 反向 `core` 的 5–15% | 告警**逐条同序**断言(procedure_library) | 低:不改公开枚举形状 |
 | **P9** | NEMO:去重复解析 + 分配 | `nemo.rs:624`/`nemo_mapping.rs:709` 用 `format!("<root>{xml}</root>")` 再解析;`has_return_blocks`(:738-742)把同一段**再包一次再解析**;含返回的条目共 3 次解析 + 1 次深拷;`text_content`(:1570)每次 2 次堆分配(万级 `<field>`);三趟 `replace_*` 递归(:641-646) | NEMO 前端解析时间**可省一半到三分之二** | **先补 NEMO SHA 门**(Phase 0.5) | 中:畸形输入下 `<root>` 包装与裸 `Parser::run` 行为不同 ⇒ 必须保持同样严格 |
-| **P10** | `create_draft_work` 复用已取到的 `preview` | `convert/mod.rs:212-224` 为拿 preview **重新拉一次详情**;而反编译侧 `WorkInfo.preview` 早就有(decompile/mod.rs:538-546、shared.rs:188-192),只是 `DecompiledArtifact::Document` 没带出来 | 每次带上传的 translate_work 省一个 RTT;顺带消掉 backlog 2b 的全局客户端依赖 | 编译 + 真机上传门 | 低 |
+| **P10** ✅ 已落地(`915c8ff`) | `create_draft_work` 复用已取到的 `preview` | `convert/mod.rs:212-224` 为拿 preview **重新拉一次详情**;而反编译侧 `WorkInfo.preview` 早就有(decompile/mod.rs:538-546、shared.rs:188-192),只是 `DecompiledArtifact::Document` 没带出来 | 每次带上传的 translate_work 省一个 RTT;顺带消掉 backlog 2b 的全局客户端依赖 | 编译 + 真机上传门 | 低 |
 | **P11** | `parent_id` 改 `Arc<str>` / 临时 id clone | mapping.rs:832/836/841 每子节点一次 String;translate/mod.rs:600 每铸造点 clone 一次临时 id | 万级分配,占 `core` 3–8% / <2% | SHA 不变 | 中:动 `BlockJson` 字段类型,排后面 |
 
 **明确不做的性能项**:`BTreeMap`→`HashMap`(改字节)、`kitten4_editor_knows` 换 `HashSet`(实测 ~1.3×10⁵ 次比较,亚毫秒级)、
@@ -152,10 +152,10 @@ nemo_mapping   ≈ 2580 NEMO 解析 + 映射 + 表
 | ---- | ---- | -------------------- | ---- |
 | **Phase 0** ✅ **已完成(2026-09-26)** | 门加固 + 基线有据重刷 + 三条协议冻结 + decompile 侧首批离线单测 | `fmt`/`clippy` 干净;`cargo test` **109 过**(104+5);`BACKEND_REQUIRE_BENCH=1 … convert_bench` **绿** | — |
 | **Phase 1** ✅ **已完成(2026-09-26)** | `options.rs`(262)/`report.rs`(180)/`pipeline.rs`(1655,含测试)/`xml.rs`(1278,含测试)四个新文件 + 断两环 + 模块文档纠错 | 同上 + **四样本 SHA256 与 `#meta` 逐字节不变**(纯搬迁的硬证明);`assembly.rs` 2644 → **2024**(回到 2500 上限内) | 一次提交 `14ba14d` |
-| **Phase 3** 🕓 **进行中**:P1/M5/§0.5(`c55dce7`)、**P2/P3(`df92e03`)** 已落地 | `translate_work` 关 `save_raw`;删 `FileService` 死字段;NEMO 补 `elapsed_ms` | 同上(SHA 不变) | 提交 `c55dce7` |
+| **Phase 3** ✅ **P1/M5/§0.5**(`c55dce7`)、**P2/P3**(`df92e03`)、**P5**(`3f05b0f`)、**P7.1/P10**(`915c8ff`)已落地;P4/P6/P8–P11 见 §10 | `translate_work` 关 `save_raw`;删 `FileService` 死字段;NEMO 补 `elapsed_ms` | 同上(SHA 不变) | 提交 `c55dce7` |
 | **Phase 0** | §1 的 6 项(门 + 冻结协议 + 补 decompile/NEMO/translate_work 证据) | `fmt` / `clippy -D warnings` / `cargo test`(含两条扫描器) / `BACKEND_REQUIRE_BENCH=1 … convert_bench` | 逐条独立,单条 revert |
 | **Phase 1** | 纯搬迁:报告层、选项、`pipeline.rs`(含调度器回迁)、`xml.rs`(断两环) | 同上 + `forward_parallel_tests`(不依赖 download/)+ `cargo test --lib` 的 46 份正向 + 10 份反向扫描器 | 每个搬迁一次提交,单独 revert |
-| **Phase 2** | 样板与死重量:M1–M9 + Q1/Q2 的裁定 | 同上 + decompile 侧新单测(0.4 先补) | 同上 |
+| **Phase 2** ✅ **M1–M5/M7 已落地**(`915c8ff`/`b7d4e07`);M6/M8/M9 见 §10 | 同上 + decompile 侧新单测(0.4 先补) | 同上 |
 | **Phase 3** | 性能:P1→P11 每条**独立提交** | 同上 + **同轮 A/B**(绑核、5 轮取最小,记 `read/parse/core/ser/e2e`) + SHA 逐样本比对 | 单条 revert;若 SHA 变则**先解释再决定**是否接受 |
 | **Phase 4** | 收尾:文档锚点失效(4 处指向已删模块)、`convert-backlog` 的 `k4raw` 漂移、`BlockJson::walk` 零调用处理、`#meta` 升级后的基线维护说明 | 文档自检(引用可达)+ 门全绿 | — |
 
@@ -323,3 +323,19 @@ nemo_mapping   ≈ 2580 NEMO 解析 + 映射 + 表
 4. **P5/P6/P8–P11**(逐块线性扫描、`#[serde(flatten)]`、告警 String、`Arc<str>`、临时 id clone);
 5. **Phase 4** 收尾(文档锚点、backlog 的 `k4raw` 漂移、`BlockJson::walk`);
 6. **补一条 `translate_work` 端到端基准** —— 没有它,P1 这类改动的收益只有代码论证、给不出同轮 A/B 数字(方案 §0.5 ③)。
+
+### 10.1 第二批(2026-09-26 续)
+
+| 项 | 状态 | 提交 | 备注 |
+| -- | ---- | ---- | ---- |
+| P5 逐块线性扫描 → 索引 | ✅ | `3f05b0f` | `LazyLock<HashMap>/<HashSet>`;"首个命中优先"用 `entry().or_insert()` 与原 `iter().find()` 等价;`is_renamed_lc_key`/`kitten_names_for` 仍线性(留给后续) |
+| M1–M4 反编译侧去样板 | ✅ | `915c8ff` | M1 行数**净增**(rustfmt 的 `struct_lit_width` 迫使垂直展开),收益在"一处定义";M2 持平;M3 净增 —— **方案的行数估计偏乐观**,已在报告里记账 |
+| M5 残项 | ✅ | `915c8ff` | `DecompilerContext.file_service` + 构造 + `nemo_tests` 传参 + 已无调用者的 `FileService::new` 一并删 |
+| P7.1 | ✅ | `915c8ff` | `build_document` 解构搬移;**P7 的另两条判定不做**:`duplicate_ids` 借用版过不了 `walk` 的 HRTB 闭包生命周期;`count()` 复用会改 `blocks_total`(映射前)/`converted`(编码后)的口径 |
+| P10 | ✅ | `915c8ff` | `DecompiledArtifact::Document.preview` 带出封面 ⇒ 建草稿不再重拉详情(省一个 RTT + 消掉那处全局客户端依赖;backlog 2b 关闭) |
+| M7 死数据 | ✅ | `b7d4e07` | 生成物 −225 行 + 生成器同步;等价性用"模板重建 + rustfmt 实证 + 字节级差分"证明 |
+| **`.gitignore` 误伤(新发现)** | ✅ | `b7d4e07` | Python 模板的 `bin/` 通配把 `src/bin/` 一起忽略 ⇒ 生成器 `src/bin/gen_translate_tables.rs` **从未入库**(与文件头"随 crate 源码提交"及 rounds/20 的记录都矛盾)。已加 `!/src/bin/`;该文件现已入库(267 行) |
+
+**验证(全批次)**:`cargo fmt --check` ✓ / `cargo clippy --all-targets -- -D warnings` **零告警** ✓ /
+`cargo test` **109 全绿**(含 46 份正向 + 10 份反向语料扫描器)/ `BACKEND_REQUIRE_BENCH=1 … convert_bench` **绿**
+⇒ 四样本 SHA256 与 `#meta` 逐字节不变。

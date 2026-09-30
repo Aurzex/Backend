@@ -49,14 +49,23 @@ fn login_or_skip() -> bool {
         });
     let Ok(text) = std::fs::read_to_string(&cfg_path) else {
         if strict_mode() {
-            panic!("严格模式:缺测试配置 {}(无法跑 translate_work 基准)", cfg_path.display());
+            panic!(
+                "严格模式:缺测试配置 {}(无法跑 translate_work 基准)",
+                cfg_path.display()
+            );
         }
         eprintln!("[work-bench] 跳过:缺 {}", cfg_path.display());
         return false;
     };
     let cfg: serde_json::Value = serde_json::from_str(&text).expect("配置 JSON");
-    let account = cfg["accounts"][0]["account"].as_str().expect("account").to_string();
-    let password = cfg["accounts"][0]["password"].as_str().expect("password").to_string();
+    let account = cfg["accounts"][0]["account"]
+        .as_str()
+        .expect("account")
+        .to_string();
+    let password = cfg["accounts"][0]["password"]
+        .as_str()
+        .expect("password")
+        .to_string();
     let login = backend::api::auth::LoginBuilder::new()
         .identity(&account)
         .password(&password)
@@ -78,7 +87,8 @@ fn translate_work_end_to_end_bench() {
         return;
     }
 
-    let dir = std::env::temp_dir().join(format!("backend-convert-work-bench-{}", std::process::id()));
+    let dir =
+        std::env::temp_dir().join(format!("backend-convert-work-bench-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("建临时目录");
 
     let mut best_ms = f64::INFINITY;
@@ -111,7 +121,10 @@ fn translate_work_end_to_end_bench() {
         hashes.iter().all(|h| h == &hashes[0]),
         "同一输入多次 translate_work 的产物必须逐字节一致(确定性):{hashes:?}"
     );
-    println!("[work-bench] work_id={id} 最小值 **{best_ms:.0} ms**,产物 SHA256 {}", &hashes[0][..16]);
+    println!(
+        "[work-bench] work_id={id} 最小值 **{best_ms:.0} ms**,产物 SHA256 {}",
+        &hashes[0][..16]
+    );
 
     // 附带:把同一件作品"从本地重新转一遍"的耗时也打出来(不含抓取/反编译,便于对照)
     if let Ok(local) = std::env::var("LOCAL_FILE") {
@@ -121,9 +134,11 @@ fn translate_work_end_to_end_bench() {
             let outcome = translate_file(
                 &path,
                 TargetEditor::Kitten4,
-                TranslateOptions::new().deterministic_ids(true).output_dir(dir.clone()),
+                TranslateOptions::new()
+                    .deterministic_ids(true)
+                    .output_dir(dir.clone()),
             )
-                .expect("translate_file 失败");
+            .expect("translate_file 失败");
             println!(
                 "[work-bench] 对照 translate_file(本地文件):{:.0} ms,产物 {}",
                 started.elapsed().as_secs_f64() * 1000.0,

@@ -50,8 +50,9 @@
 2a. ✅ **已完成(2026-09-26)**:单包上传上限实测 **20 MB 可传 / 24 MB 413**(同渠道逐档),并加了
    `shared::ensure_single_package_fits` 提前报错闸(>20 MB 直接给出"上限 + 实测值"的错误)。
    要传更大作品需**分片上传**(qiniu 支持),目前无此需求(真实 KN 产物 3~9 MB)。
-2b. **convert 上传前取 preview 仍走全局客户端**:`src/core/convert/mod.rs` 用 `WorkDataFetcher::new()`
-   取作品 `preview`;要注入得让 `DecompileOptions`/`TranslateOptions` 持有客户端(与 A3 同类的收尾,独立决策)。
+2b. ✅ **已完成(2026-09-26)**:convert 上传前取 preview 仍走全局客户端:`src/core/convert/mod.rs` 用 `WorkDataFetcher::new()`
+   取作品 `preview` —— 已改为:`DecompiledArtifact::Document` 随产物带出 `preview`(反编译阶段本就拿到),
+   建草稿不再重拉详情 ⇒ 省一个 RTT,那处全局客户端依赖随之消失(`915c8ff`,rounds/37 P10)。
 3. **P3 结构化失败记录**:`decompile/mod.rs` 的资源下载失败重试用 `line.split(": ").next()` 从错误串反解 URL(URL 或文本含 `": "` 会截断)⇒ 改成结构化 `(url, error)` 记录,直接消掉反解(`docs/rounds/29` §4)。
 4. **重连放弃的文档化**:云变量重连 5 次后仅 warn 并永久放弃,且**不再发事件**(仅初始 `Closed`)⇒ 调用方可能无限等待,需在 rustdoc 写清(`docs/rounds/29` §4)。
 5. **转换域 P2**:`simple.rs` 的 `Arc<Value>` 可 `Arc::try_unwrap` 免拷(`docs/rounds/29` §3-4)。

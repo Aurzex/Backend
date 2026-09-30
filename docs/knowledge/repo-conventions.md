@@ -36,6 +36,13 @@
 - **仍未注入的一处(已知,记在目标库)**:`src/core/convert/mod.rs` 上传前取作品 `preview` 用 `WorkDataFetcher::new()`
   (全局);要注入得让 `DecompileOptions`/`TranslateOptions` 持有客户端 ⇒ 独立决策。
 
+## 3bis. `.gitignore` 的一个坑(已修,读到这里先知道)
+
+仓库的 `.gitignore` 从 Python 模板继承了通配规则 `bin/`,它会**连带忽略 Rust 的 `src/bin/`**
+⇒ `src/bin/gen_translate_tables.rs`(translate 表的生成器)**长期没进版本库**,而文件头与 `docs/rounds/20` 都以为它已提交。
+已在 `.gitignore` 里显式放行(`!/src/bin/`、`!/src/bin/**`),该文件现已入库。
+**教训**:往仓库里加"生成器/工具"时,确认 `git check-ignore -v <path>` 是空的 —— 否则"改生成器"这件事本身会悄悄丢失。
+
 ## 4. 错误类型
 
 - 统一 `MewError` / `MewResult<T>`(`src/utils/requests.rs`);HTTP 状态码枚举已改名为 `StatusCode`(`HTTPStatus` 已不存在)。
