@@ -97,6 +97,20 @@ fn tokens(line: &str) -> Vec<String> {
     .collect()
 }
 
+/// `convert_bench` 的样本键(`kitten4-10.8MB` / `kn-9.4MB` …)会被
+/// `looks_like_password` 误判成口令 —— 它们是仓库自己的基准标签,文档里反复出现,
+/// 明确放行(比在每张表上打 `hygiene-allow` 标记更不容易漏)。
+fn is_bench_sample_label(token: &str) -> bool {
+    let rest = match token.split_once('-') {
+        Some(("kitten4", rest)) | Some(("kn", rest)) => rest,
+        _ => return false,
+    };
+    let Some(size) = rest.strip_suffix("MB") else {
+        return false;
+    };
+    !size.is_empty() && size.chars().all(|c| c.is_ascii_digit() || c == '.')
+}
+
 /// 只打印首尾各 2 字符,避免把疑似口令原样写进测试输出/CI 日志
 fn masked(token: &str) -> String {
     let chars: Vec<char> = token.chars().collect();
@@ -138,7 +152,9 @@ pub fn findings_in(path: &str, text: &str) -> Vec<String> {
             continue;
         }
         if line.trim_start().starts_with('|')
-            && let Some(secret) = toks.iter().find(|t| looks_like_password(t))
+            && let Some(secret) = toks
+                .iter()
+                .find(|t| looks_like_password(t) && !is_bench_sample_label(t))
         {
             out.push(format!(
                 "{path}:{line_no}: table-secret: 表格里疑似口令 {}",
