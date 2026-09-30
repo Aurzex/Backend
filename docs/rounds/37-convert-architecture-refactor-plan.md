@@ -129,9 +129,9 @@ nemo_mapping   ≈ 2580 NEMO 解析 + 映射 + 表
 
 | # | 项 | 证据(锚点) | 预期收益 | 验证 | 风险 |
 | - | -- | ---------- | -------- | ---- | ---- |
-| **P1** ✅ 已落地 | `translate_work` 关掉 `save_raw` | `convert/mod.rs:67-69` 用 `DecompileOptions::new()`(默认 `save_raw = true`,decompile/mod.rs:35/63)⇒ 每次白写一份与源同量级的 JSON(NEMO 两份)再被 `remove_dir_all` 删掉(:45-47) | 每次 translate_work **数百 ms~1 s** 的无产出开销 | 一行改动 + "staging 内无 raw" 断言 + SHA 不变 | **最低**:raw 不是产物 |
-| **P2** | `KnEntity.source` 不再深拷 `nekoBlockJsonList` | `assembly.rs:847` `entity.as_object().cloned()`,而装配侧读 `source` 的位置(1135-1146、1336-1373、1376-1445、1476-1515)**从不读这个键** | 反向最大的一笔分配(9.4 MB 样本 ≈10⁵ 节点) | convert_bench `core` 列 + SHA | 低:过滤式克隆或改借用 `&'a Map` |
-| **P3** | `strip_unknown_blocks` 改就地消费 | assembly.rs:996 `cloned()`、999 `blocks.cloned()`、1027 `connections.cloned()`、1054/1057 逐块 `shadows` 双拷(即使无未知类型) | 同一份积木数据**3~4 次深拷 → 0** | 同上 | 低:`root.remove` 取所有权;**保持 BTreeMap 键序** ⇒ 字节不变 |
+| **P1** ✅ 已落地(`c55dce7`) | `translate_work` 关掉 `save_raw` | `convert/mod.rs:67-69` 用 `DecompileOptions::new()`(默认 `save_raw = true`,decompile/mod.rs:35/63)⇒ 每次白写一份与源同量级的 JSON(NEMO 两份)再被 `remove_dir_all` 删掉(:45-47) | 每次 translate_work **数百 ms~1 s** 的无产出开销 | 一行改动 + "staging 内无 raw" 断言 + SHA 不变 | **最低**:raw 不是产物 |
+| **P2** ✅ 已落地(`df92e03`) | `KnEntity.source` 不再深拷 `nekoBlockJsonList` | `assembly.rs:847` `entity.as_object().cloned()`,而装配侧读 `source` 的位置(1135-1146、1336-1373、1376-1445、1476-1515)**从不读这个键** | 反向最大的一笔分配(9.4 MB 样本 ≈10⁵ 节点) | convert_bench `core` 列 + SHA | 低:过滤式克隆或改借用 `&'a Map` |
+| **P3** ✅ 已落地(`df92e03`) | `strip_unknown_blocks` 改就地消费 | assembly.rs:996 `cloned()`、999 `blocks.cloned()`、1027 `connections.cloned()`、1054/1057 逐块 `shadows` 双拷(即使无未知类型) | 同一份积木数据**3~4 次深拷 → 0** | 同上 | 低:`root.remove` 取所有权;**保持 BTreeMap 键序** ⇒ 字节不变 |
 | **P4** | `find_object_shadow` 惰性化 | `translate/mod.rs:523` **无条件**全文档扫描 + 字符串形态再做一次 `from_str`(:1080-1082);触发形态实测只 1 例(:518-521) | 正向入口省 3–10% e2e(≈ 一次 read+parse 量级) | SHA 不变 + 错误消息文本兼容(有测试引用) | 中:错误**触发时机**变化,需 grep 引用该文本的断言 |
 | **P5** | 逐块线性扫描 → `LazyLock` 索引 | `rc_plain`(mapping.rs:418)在**每个块**上扫 180 条且未命中走满(:730);`is_kitten_side`(:971-983)扫 367×2(表长实测:`KITTEN_TO_KN` ≈367、`KITTEN_MUTATION_TEXT` ≈180、`_SELECT` 粗计 ≈41 —— 侦察报 17,动手前精确数一次) | 正向 ~2.5M、反向 ~3.8M 次短串比较 ⇒ 换成哈希(≈ core 的 1–3%) | bench `core` 列(必须超出噪声才算) | 低:`or_insert` 保持"首命中优先" |
 | **P6** | `#[serde(flatten)] extra` 手写 | model.rs:94-97 的 `extra` 被 `from_value`/`to_value` **逐节点**调用(:133/146,调用点 translate/mod.rs:428、model.rs:796/1783) | 逐节点 serde 成本 **1.5–3×** ⇒ `core` 的大头 | 先跑 `model_tests/null_tolerance_tests` + 四样本 SHA | **中高**:`extra` 键序与 null 容错必须逐字节复现;且 `extra` 有**生产消费者**——`model.rs:1184/1751`(`def.extra.insert`/`body.extra`)与 **`assembly.rs:2445`**(remint 的 `remap_object(&mut node.extra)`)必须原样可用(只换反序列化机制,field 语义不动) |
@@ -152,7 +152,7 @@ nemo_mapping   ≈ 2580 NEMO 解析 + 映射 + 表
 | ---- | ---- | -------------------- | ---- |
 | **Phase 0** ✅ **已完成(2026-09-26)** | 门加固 + 基线有据重刷 + 三条协议冻结 + decompile 侧首批离线单测 | `fmt`/`clippy` 干净;`cargo test` **109 过**(104+5);`BACKEND_REQUIRE_BENCH=1 … convert_bench` **绿** | — |
 | **Phase 1** ✅ **已完成(2026-09-26)** | `options.rs`(262)/`report.rs`(180)/`pipeline.rs`(1655,含测试)/`xml.rs`(1278,含测试)四个新文件 + 断两环 + 模块文档纠错 | 同上 + **四样本 SHA256 与 `#meta` 逐字节不变**(纯搬迁的硬证明);`assembly.rs` 2644 → **2024**(回到 2500 上限内) | 一次提交 `14ba14d` |
-| **Phase 3** 🕓 **进行中**:P1/M5/§0.5 已落地 | `translate_work` 关 `save_raw`;删 `FileService` 死字段;NEMO 补 `elapsed_ms` | 同上(SHA 不变) | 提交 `c55dce7` |
+| **Phase 3** 🕓 **进行中**:P1/M5/§0.5(`c55dce7`)、**P2/P3(`df92e03`)** 已落地 | `translate_work` 关 `save_raw`;删 `FileService` 死字段;NEMO 补 `elapsed_ms` | 同上(SHA 不变) | 提交 `c55dce7` |
 | **Phase 0** | §1 的 6 项(门 + 冻结协议 + 补 decompile/NEMO/translate_work 证据) | `fmt` / `clippy -D warnings` / `cargo test`(含两条扫描器) / `BACKEND_REQUIRE_BENCH=1 … convert_bench` | 逐条独立,单条 revert |
 | **Phase 1** | 纯搬迁:报告层、选项、`pipeline.rs`(含调度器回迁)、`xml.rs`(断两环) | 同上 + `forward_parallel_tests`(不依赖 download/)+ `cargo test --lib` 的 46 份正向 + 10 份反向扫描器 | 每个搬迁一次提交,单独 revert |
 | **Phase 2** | 样板与死重量:M1–M9 + Q1/Q2 的裁定 | 同上 + decompile 侧新单测(0.4 先补) | 同上 |
