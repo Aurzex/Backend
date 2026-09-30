@@ -79,7 +79,12 @@ fn translate_work_in(
 ) -> Result<TranslateOutcome, TranslateError> {
     // 1. 取编辑版(Kitten 会重建成 block_data_json;NEKO 会解密成明文 KN 文档)
     let artifact = CodemaoDecompiler::global()
-        .decompile_artifact_with(work_id, DecompileOptions::new().output_dir(staging))
+        // `.save_raw(false)`:那条路上的 raw 只落在 staging,收尾整目录删掉
+        // (phase 3 P1,rounds/37)—— 默认 true 会白写一份与源同量级的 JSON(9 MB 级作品 ≈ 数百 ms)。
+        .decompile_artifact_with(
+            work_id,
+            DecompileOptions::new().output_dir(staging).save_raw(false),
+        )
         .map_err(TranslateError::Decompiler)?;
     let (source_document, source_file_name, source_version) = match artifact {
         DecompiledArtifact::Document {

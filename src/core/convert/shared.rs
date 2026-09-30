@@ -1025,14 +1025,17 @@ impl ValueExt for Value {
 // ===== 文件服务(原 files.rs 的 FileService)=====
 
 // 文件服务
+/// 文件读写工具(命名空间式:方法全是关联函数,**不持有配置**)
+///
+/// 曾经带一个 `config: Arc<DecompilerConfig>` 字段,但全仓**零读取点** ⇒ 已删
+/// (rounds/37 M5:它只是在 DecompilerContext / *ResourceConfig 之间白传一个 Arc)。
 #[derive(Clone)]
-pub(crate) struct FileService {
-    config: Arc<DecompilerConfig>,
-}
+pub(crate) struct FileService;
 
 impl FileService {
-    pub(crate) fn new(config: Arc<DecompilerConfig>) -> Self {
-        Self { config }
+    /// 兼容既有调用点:参数已不再使用(见类型注释),保留签名只为少改调用处
+    pub(crate) fn new(_config: Arc<DecompilerConfig>) -> Self {
+        Self
     }
 
     pub(crate) fn safe_filename(name: &str, work_id: i64, extension: &str) -> String {

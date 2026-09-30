@@ -66,6 +66,8 @@ pub(crate) fn convert_nemo_document(
     options: &TranslateOptions,
     report: &mut TranslateReport,
 ) -> Result<Value, TranslateError> {
+    // 计时(rounds/37 §0.5):基准表的 `core ms` 取自 `report.elapsed_ms`,此前 NEMO 侧从不设它(恒 0)
+    let started = std::time::Instant::now();
     let (qc, yc) = migration_flags(options.source_version_ref());
     let deterministic = options.ids_deterministic();
     let now_ms = if deterministic {
@@ -566,6 +568,7 @@ pub(crate) fn convert_nemo_document(
     // 官方产物里的 `stageSize`/`timerPosition`/变量坐标因此都是整数形态;这里统一到同一口径。
     let mut document = Value::Object(document);
     normalize_integral_numbers(&mut document);
+    report.elapsed_ms = started.elapsed().as_millis();
     Ok(document)
 }
 
