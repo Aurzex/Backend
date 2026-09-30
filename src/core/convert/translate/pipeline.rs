@@ -124,7 +124,7 @@ fn parse_forward_item(
         TargetEditor::KittenN,
     );
     let mut tree = match block_data_json {
-        Some(block_data_json) => model::parse_block_data_json(block_data_json)?.tree,
+        Some(block_data_json) => model::parse_block_data_json(block_data_json)?,
         None => model::BlockTree::default(),
     };
     local.blocks_total += tree.count(); // 源文件里的积木数(映射前)
@@ -1107,7 +1107,7 @@ mod forward_parallel_tests {
             for (id, entity) in map {
                 let entity = entity.as_object().expect("实体");
                 let mut tree = match entity.get("block_data_json") {
-                    Some(bdj) => model::parse_block_data_json(bdj).expect("解析实体").tree,
+                    Some(bdj) => model::parse_block_data_json(bdj).expect("解析实体"),
                     None => model::BlockTree::default(),
                 };
                 report.blocks_total += tree.count();

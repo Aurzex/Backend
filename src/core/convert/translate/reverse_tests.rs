@@ -504,7 +504,7 @@ mod reverse_tests_inner {
                 "每个积木都要有一条连接表条目(叶子的值是空对象)"
             );
             assert_eq!(bdj["comments"], json!({}));
-            let back = model::parse_block_data_json(&bdj).expect("再解析").tree;
+            let back = model::parse_block_data_json(&bdj).expect("再解析");
             // `blocks` 是 id 字典(serde_json 的 Map 按 key 排序),根的顺序会变成 id 序 ——
             // Kitten4 的根块各自带 `location`,顺序不影响语义,故按 id 比较集合。
             let mut left: Vec<_> = tree.roots.clone();

@@ -803,7 +803,7 @@ fn transform_servo_shadow_type(nodes: &mut [XmlNode]) {
             shadow.set_attr("type", "math_number_with_servo");
             if let Some(field) = find_named_mut(shadow, "field", "NUM") {
                 field.set_attr("constraints", "-135,135,1,");
-                let value = parse_int_prefix(&field.text_content()).unwrap_or(0);
+                let value = super::xml::parse_int_prefix(&field.text_content()).unwrap_or(0);
                 let clamped = value.clamp(-135, 135);
                 field.text = clamped.to_string();
             }
@@ -1108,7 +1108,7 @@ fn replace_scene_index(node: &mut XmlNode, scenes_order: &[String]) {
             .map(XmlNode::text_content)
             .filter(|text| !text.is_empty());
         if let Some(text) = field_value
-            && let Some(index) = parse_int_prefix(&text)
+            && let Some(index) = super::xml::parse_int_prefix(&text)
         {
             let index = index - 1;
             if index >= 0
@@ -1241,22 +1241,6 @@ fn has_value_shadow(node: &XmlNode, name: &str) -> bool {
 /// handler 里的 `descendant_value_shadow_mut` = [`find_value_shadow_mut`] 的别名(可读性)
 fn descendant_value_shadow_mut<'a>(node: &'a mut XmlNode, name: &str) -> Option<&'a mut XmlNode> {
     find_value_shadow_mut(node, name)
-}
-
-/// 官方 `parseInt` 的前缀解析(复用 `nemo_mapping` 的口径)
-fn parse_int_prefix(text: &str) -> Option<i64> {
-    let trimmed = text.trim_start();
-    let (sign, digits) = match trimmed.strip_prefix('-') {
-        Some(rest) => (-1i64, rest),
-        None => (1i64, trimmed.strip_prefix('+').unwrap_or(trimmed)),
-    };
-    let end = digits
-        .find(|c: char| !c.is_ascii_digit())
-        .unwrap_or(digits.len());
-    if end == 0 {
-        return None;
-    }
-    digits[..end].parse::<i64>().ok().map(|value| value * sign)
 }
 
 /// JS 真值(`undefined`/`null`/`false`/`0`/`""`/`NaN` → false)

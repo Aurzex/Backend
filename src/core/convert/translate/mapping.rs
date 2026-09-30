@@ -43,7 +43,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use serde_json::{Value, json};
 
 use super::model::IdSource;
-use super::model::{BlockJson, BlockTree};
+use super::model::{BlockJson, BlockTree, flat_index, nested_index};
 use super::report::{TranslateReport, TranslateWarning};
 use super::tables_gen::{
     KITTEN_MUTATION_TEXT, KITTEN_MUTATION_TEXT_SELECT, KITTEN_TO_KN, SHADOW_XML,
@@ -212,102 +212,37 @@ pub(crate) fn translate_kitten_to_kn(
 // ---------------------------------------------------------------- 正向查表索引
 //
 // 表是生成的 `&[(k, v)]`,直接 `iter().find` 是 O(表长) 线性扫描,而每积木每影子都会查。
-// 这里建 `LazyLock` 索引;一律用 `entry().or_insert()`(**首个命中优先**),
-// 与原来的 `iter().find(...)` 逐键等价(表里真有重复键时也保持"取第一个")。
+// 索引构造统一走 `model::flat_index`/`nested_index`(一律 `entry().or_insert()`,
+// **首个命中优先**,与原来的 `iter().find(...)` 逐键等价)。
 static KITTEN_TO_KN_INDEX: std::sync::LazyLock<HashMap<&'static str, &'static str>> =
-    std::sync::LazyLock::new(|| {
-        let mut map = HashMap::with_capacity(KITTEN_TO_KN.len());
-        for (kitten, kn) in KITTEN_TO_KN {
-            map.entry(*kitten).or_insert(*kn);
-        }
-        map
-    });
+    std::sync::LazyLock::new(|| flat_index(KITTEN_TO_KN));
 
 static SHADOW_XML_INDEX: std::sync::LazyLock<
     HashMap<&'static str, HashMap<&'static str, &'static str>>,
-> = std::sync::LazyLock::new(|| {
-    let mut map: HashMap<&'static str, HashMap<&'static str, &'static str>> =
-        HashMap::with_capacity(SHADOW_XML.len());
-    for (kind, slots) in SHADOW_XML {
-        let entry = map.entry(*kind).or_default();
-        for (slot, xml) in *slots {
-            entry.entry(*slot).or_insert(*xml);
-        }
-    }
-    map
-});
+> = std::sync::LazyLock::new(|| nested_index(SHADOW_XML));
 
 static FIELD_NAME_MAP_INDEX: std::sync::LazyLock<HashMap<&'static str, &'static str>> =
-    std::sync::LazyLock::new(|| {
-        let mut map = HashMap::with_capacity(FIELD_NAME_MAP.len());
-        for (from, to) in FIELD_NAME_MAP {
-            map.entry(*from).or_insert(*to);
-        }
-        map
-    });
+    std::sync::LazyLock::new(|| flat_index(FIELD_NAME_MAP));
 
 static SPECIAL_FIELD_VALUES_INDEX: std::sync::LazyLock<
     HashMap<&'static str, HashMap<&'static str, &'static str>>,
-> = std::sync::LazyLock::new(|| {
-    let mut map: HashMap<&'static str, HashMap<&'static str, &'static str>> =
-        HashMap::with_capacity(SPECIAL_FIELD_VALUES.len());
-    for (field, entries) in SPECIAL_FIELD_VALUES {
-        let entry = map.entry(*field).or_default();
-        for (text, mapped) in *entries {
-            entry.entry(*text).or_insert(*mapped);
-        }
-    }
-    map
-});
+> = std::sync::LazyLock::new(|| nested_index(SPECIAL_FIELD_VALUES));
 
 static INPUT_NAME_MAP_INDEX: std::sync::LazyLock<
     HashMap<&'static str, HashMap<&'static str, &'static str>>,
-> = std::sync::LazyLock::new(|| {
-    let mut map: HashMap<&'static str, HashMap<&'static str, &'static str>> =
-        HashMap::with_capacity(INPUT_NAME_MAP.len());
-    for (kind, slots) in INPUT_NAME_MAP {
-        let entry = map.entry(*kind).or_default();
-        for (slot, mapped) in *slots {
-            entry.entry(*slot).or_insert(*mapped);
-        }
-    }
-    map
-});
+> = std::sync::LazyLock::new(|| nested_index(INPUT_NAME_MAP));
 
 static APPEARANCE_ATTRIBUTE_INDEX: std::sync::LazyLock<
     HashMap<&'static str, (&'static str, &'static str)>,
-> = std::sync::LazyLock::new(|| {
-    let mut map = HashMap::with_capacity(APPEARANCE_ATTRIBUTE.len());
-    for (key, mapped) in APPEARANCE_ATTRIBUTE {
-        map.entry(*key).or_insert(*mapped);
-    }
-    map
-});
+> = std::sync::LazyLock::new(|| flat_index(APPEARANCE_ATTRIBUTE));
 
-// 降级占位积木的标题表索引(与上面的正向表同理:`entry().or_insert()` = 原来的
-// `iter().find(...)`,表里真有重复键时同样"取第一个")。
+// 降级占位积木的标题表索引(与上面的正向表同口径)
 static KITTEN_MUTATION_TEXT_INDEX: std::sync::LazyLock<HashMap<&'static str, &'static str>> =
-    std::sync::LazyLock::new(|| {
-        let mut map = HashMap::with_capacity(KITTEN_MUTATION_TEXT.len());
-        for (kind, text) in KITTEN_MUTATION_TEXT {
-            map.entry(*kind).or_insert(*text);
-        }
-        map
-    });
+    std::sync::LazyLock::new(|| flat_index(KITTEN_MUTATION_TEXT));
 
 static KITTEN_MUTATION_TEXT_SELECT_INDEX: std::sync::LazyLock<
     HashMap<&'static str, HashMap<&'static str, &'static str>>,
-> = std::sync::LazyLock::new(|| {
-    let mut map: HashMap<&'static str, HashMap<&'static str, &'static str>> =
-        HashMap::with_capacity(KITTEN_MUTATION_TEXT_SELECT.len());
-    for (kind, entries) in KITTEN_MUTATION_TEXT_SELECT {
-        let entry = map.entry(*kind).or_default();
-        for (key, text) in *entries {
-            entry.entry(*key).or_insert(*text);
-        }
-    }
-    map
-});
+> = std::sync::LazyLock::new(|| nested_index(KITTEN_MUTATION_TEXT_SELECT));
 
 /// `KITTEN_TO_KN` 的**键 ∪ 值**(判定"两个编辑器都可能有的名字"用,见 [`is_kitten_side`])
 static KITTEN_SIDE_KINDS: std::sync::LazyLock<HashSet<&'static str>> =

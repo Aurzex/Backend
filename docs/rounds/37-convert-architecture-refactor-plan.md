@@ -155,7 +155,7 @@ nemo_mapping   ≈ 2580 NEMO 解析 + 映射 + 表
 | **Phase 3** ✅ **P1/M5/§0.5**(`c55dce7`)、**P2/P3**(`df92e03`)、**P5**(`3f05b0f`)、**P7.1/P10**(`915c8ff`)已落地;P4/P6/P8–P11 见 §10 | `translate_work` 关 `save_raw`;删 `FileService` 死字段;NEMO 补 `elapsed_ms` | 同上(SHA 不变) | 提交 `c55dce7` |
 | **Phase 0** | §1 的 6 项(门 + 冻结协议 + 补 decompile/NEMO/translate_work 证据) | `fmt` / `clippy -D warnings` / `cargo test`(含两条扫描器) / `BACKEND_REQUIRE_BENCH=1 … convert_bench` | 逐条独立,单条 revert |
 | **Phase 1** | 纯搬迁:报告层、选项、`pipeline.rs`(含调度器回迁)、`xml.rs`(断两环) | 同上 + `forward_parallel_tests`(不依赖 download/)+ `cargo test --lib` 的 46 份正向 + 10 份反向扫描器 | 每个搬迁一次提交,单独 revert |
-| **Phase 2** ✅ **M1–M5/M7 已落地**(`915c8ff`/`b7d4e07`);M6/M8/M9 见 §10 | 同上 + decompile 侧新单测(0.4 先补) | 同上 |
+| **Phase 2** ✅ **M1–M9 全部落地**(`915c8ff`/`b7d4e07`/本次 M6+M8+M9) | 同上 + decompile 侧新单测(0.4 先补) | 同上 |
 | **Phase 3** | 性能:P1→P11 每条**独立提交** | 同上 + **同轮 A/B**(绑核、5 轮取最小,记 `read/parse/core/ser/e2e`) + SHA 逐样本比对 | 单条 revert;若 SHA 变则**先解释再决定**是否接受 |
 | **Phase 4** | 收尾:文档锚点失效(4 处指向已删模块)、`convert-backlog` 的 `k4raw` 漂移、`BlockJson::walk` 零调用处理、`#meta` 升级后的基线维护说明 | 文档自检(引用可达)+ 门全绿 | — |
 
@@ -390,3 +390,17 @@ nemo_mapping   ≈ 2580 NEMO 解析 + 映射 + 表
 | `BlockJson::count_types` / `BlockTree::count_types` 的"零调用" | ✅ 复核后**保留并注明**:仅测试/仪器用;`walk` 是递归核心且有生产调用(`assembly::duplicate_ids`)⇒ 不删 |
 | `unique_test_dir` 夹在 `#[cfg(test)]` 与生产代码之间 | 低价值(仅排版),**不做** |
 | staging 懒创建 | 收益微秒级且 `output_dir` 需要目录先存在,**不做** |
+
+### 10.4 M6/M8/M9(2026-09-26,Phase 2/4 收尾)
+
+- **M8**:删单字段 newtype `ParsedEntity` ⇒ `parse_block_data_json`/`parse_parts` 直接返回 `BlockTree`,
+  4 个生产/测试调用点与 10 处 model 内断言去掉 `.tree` 拆包(纯拆包消除,derive 能力全仓无第二处使用);
+- **M6**:新增 `model::flat_index` / `model::nested_index` 两个泛型自由函数(不用宏、不引环),
+  `mapping.rs` 8 份 + `nemo_mapping.rs` 5 份 `LazyLock` 索引各压成一行;逐张核对表参数类型与
+  "首个命中优先" 语义(`entry().or_insert()`);唯一类型变化是 `MUTATION_TEXT_INDEX` 的值由
+  `&'static NemoMutationText` 改成按值(该 enum 加 `Clone, Copy`,全仓仅本文件用);
+- **M9**(只做安全的一半):两份逐字相同的 `parse_int_prefix` 合并到 `xml.rs`;
+  `number_value`/`normalize_integral_numbers`/`assembly::num` 的合并**未做** —— 涉及浮点表示,
+  可能改产物字节(rounds/31 D5 只说过"可合并",没验证过字节)。
+
+验证:fmt/clippy 零告警;`cargo test` **109** 全绿;四样本 SHA256 与 `#meta` 逐字节不变。

@@ -6,6 +6,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::json;
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::collections::HashSet;
 
 // 来自 src/core/convert/translate/model.rs
@@ -570,14 +571,8 @@ mod id_tests {
 // - 同一子积木可以出现在多个父之下的**菱形**结构里,官方是逐边重新展开,我们照做;
 // 只有**环**会致命,遇环直接报错(官方会栈溢出)。
 
-/// 一个实体的解析结果
-#[derive(Debug, Clone, Default)]
-pub(crate) struct ParsedEntity {
-    pub tree: BlockTree,
-}
-
 /// 解析 Kitten4 编辑版的 `block_data_json`
-pub(crate) fn parse_block_data_json(block_data_json: &Value) -> Result<ParsedEntity> {
+pub(crate) fn parse_block_data_json(block_data_json: &Value) -> Result<BlockTree> {
     let bdj = block_data_json
         .as_object()
         .ok_or_else(|| DecompilerError::TypeMismatch {
@@ -611,7 +606,7 @@ pub(crate) fn parse_block_data_json(block_data_json: &Value) -> Result<ParsedEnt
     })
 }
 
-fn parse_parts(blocks: &Map<String, Value>, connections: Option<&Value>) -> Result<ParsedEntity> {
+fn parse_parts(blocks: &Map<String, Value>, connections: Option<&Value>) -> Result<BlockTree> {
     let connections = connections
         .and_then(Value::as_object)
         .cloned()
@@ -643,9 +638,7 @@ fn parse_parts(blocks: &Map<String, Value>, connections: Option<&Value>) -> Resu
         )));
     }
 
-    Ok(ParsedEntity {
-        tree: BlockTree::new(roots),
-    })
+    Ok(BlockTree::new(roots))
 }
 
 /// 递归把一个积木及其子图变成节点
@@ -849,15 +842,15 @@ mod kitten_tests {
             }),
         );
         let parsed = parse_block_data_json(&value).expect("parse");
-        assert_eq!(parsed.tree.roots.len(), 1);
-        let root = &parsed.tree.roots[0];
+        assert_eq!(parsed.roots.len(), 1);
+        let root = &parsed.roots[0];
         assert_eq!(root.kind, "start_on_click");
         assert_eq!(root.next.as_ref().unwrap().kind, "repeat_forever");
         assert_eq!(
             root.next.as_ref().unwrap().next.as_ref().unwrap().kind,
             "self_appear"
         );
-        assert_eq!(parsed.tree.count(), 3);
+        assert_eq!(parsed.count(), 3);
     }
 
     #[test]
@@ -876,7 +869,7 @@ mod kitten_tests {
             }),
         );
         let parsed = parse_block_data_json(&value).expect("parse");
-        let root = &parsed.tree.roots[0];
+        let root = &parsed.roots[0];
         assert_eq!(
             root.inputs.get("times").map(|b| b.kind.as_str()),
             Some("math_number")
@@ -885,7 +878,7 @@ mod kitten_tests {
             root.statements.get("DO").map(|b| b.kind.as_str()),
             Some("self_go_forward")
         );
-        assert_eq!(parsed.tree.roots.len(), 1);
+        assert_eq!(parsed.roots.len(), 1);
     }
 
     #[test]
@@ -904,7 +897,7 @@ mod kitten_tests {
             json!({ "b": {} }),
         );
         let parsed = parse_block_data_json(&value).expect("parse");
-        let node = &parsed.tree.roots[0];
+        let node = &parsed.roots[0];
         assert_eq!(
             node.shadows.get("times").map(String::as_str),
             Some("<shadow type=\"math_number\"/>")
@@ -926,8 +919,8 @@ mod kitten_tests {
         });
         let value = json!({ "blocks": inner.to_string(), "connections": {}, "comments": {} });
         let parsed = parse_block_data_json(&value).expect("parse");
-        assert_eq!(parsed.tree.roots.len(), 1);
-        assert_eq!(parsed.tree.roots[0].kind, "start_on_click");
+        assert_eq!(parsed.roots.len(), 1);
+        assert_eq!(parsed.roots[0].kind, "start_on_click");
     }
 
     #[test]
@@ -964,7 +957,7 @@ mod kitten_tests {
         let empty =
             parse_block_data_json(&json!({ "blocks": {}, "connections": {}, "comments": {} }))
                 .expect("空实体解析为空树");
-        assert_eq!(empty.tree.roots.len(), 0);
+        assert_eq!(empty.roots.len(), 0);
     }
 
     #[test]
@@ -987,8 +980,8 @@ mod kitten_tests {
             "comments": {}
         });
         let parsed = parse_block_data_json(&diamond).expect("parse");
-        assert_eq!(parsed.tree.roots.len(), 1);
-        assert_eq!(parsed.tree.count(), 4, "s 在两个槽下各展开一份");
+        assert_eq!(parsed.roots.len(), 1);
+        assert_eq!(parsed.count(), 4, "s 在两个槽下各展开一份");
     }
 }
 
@@ -1854,6 +1847,35 @@ fn params_index(slot: &str) -> i64 {
         .collect::<String>()
         .parse()
         .unwrap_or(0)
+}
+
+// ---------------------------------------------------------------- 查表索引
+
+/// 由 `&[(键, 值)]` 表建哈希索引(`mapping.rs`/`nemo_mapping.rs` 的 `LazyLock` 索引共用)。
+///
+/// 一律 `entry().or_insert()`:**首个命中优先** —— 与原来的 `iter().find(...)` 逐键等价
+/// (表里真有重复键时也取第一个)。表本身是 `&'static` 数据,索引只存它的拷贝。
+pub(super) fn flat_index<V: Copy>(pairs: &'static [(&'static str, V)]) -> HashMap<&'static str, V> {
+    let mut index = HashMap::with_capacity(pairs.len());
+    for (key, value) in pairs {
+        index.entry(*key).or_insert(*value);
+    }
+    index
+}
+
+/// 两级表 `&[(键, &[(子键, 值)])]` 的嵌套索引(外层 → 内层),两级同样**首个命中优先**
+pub(super) fn nested_index<V: Copy>(
+    pairs: &'static [(&'static str, &'static [(&'static str, V)])],
+) -> HashMap<&'static str, HashMap<&'static str, V>> {
+    let mut index: HashMap<&'static str, HashMap<&'static str, V>> =
+        HashMap::with_capacity(pairs.len());
+    for (key, entries) in pairs {
+        let slots: &mut HashMap<&'static str, V> = index.entry(*key).or_default();
+        for (slot, value) in *entries {
+            slots.entry(*slot).or_insert(*value);
+        }
+    }
+    index
 }
 
 #[cfg(test)]

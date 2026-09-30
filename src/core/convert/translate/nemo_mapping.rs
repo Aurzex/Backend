@@ -1,4 +1,4 @@
-use super::model::{BlockJson, BlockTree, IdSource};
+use super::model::{BlockJson, BlockTree, IdSource, flat_index, nested_index};
 use super::report::{TranslateReport, TranslateWarning};
 use super::xml::XmlNode;
 use crate::core::convert::shared::XHTML;
@@ -124,58 +124,21 @@ pub(crate) struct NemoParseContext {
 // 查表索引(与 `mapping.rs` 同口径:线性 `iter().find` → `LazyLock<HashMap>`,首个命中优先)
 // ---------------------------------------------------------------------------
 
-static NEMO_TO_KN_INDEX: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
-    let mut map = HashMap::with_capacity(NEMO_TO_KN.len());
-    for (nemo, kn) in NEMO_TO_KN {
-        map.entry(*nemo).or_insert(*kn);
-    }
-    map
-});
+static NEMO_TO_KN_INDEX: LazyLock<HashMap<&'static str, &'static str>> =
+    LazyLock::new(|| flat_index(NEMO_TO_KN));
 
 static INPUT_NAME_MAP_INDEX: LazyLock<HashMap<&'static str, HashMap<&'static str, &'static str>>> =
-    LazyLock::new(|| {
-        let mut map: HashMap<&'static str, HashMap<&'static str, &'static str>> =
-            HashMap::with_capacity(NEMO_INPUT_NAME_MAP.len());
-        for (kind, slots) in NEMO_INPUT_NAME_MAP {
-            let entry = map.entry(*kind).or_default();
-            for (slot, mapped) in *slots {
-                entry.entry(*slot).or_insert(*mapped);
-            }
-        }
-        map
-    });
+    LazyLock::new(|| nested_index(NEMO_INPUT_NAME_MAP));
 
 static SPECIAL_FIELD_VALUES_INDEX: LazyLock<
     HashMap<&'static str, HashMap<&'static str, &'static str>>,
-> = LazyLock::new(|| {
-    let mut map: HashMap<&'static str, HashMap<&'static str, &'static str>> =
-        HashMap::with_capacity(NEMO_SPECIAL_FIELD_VALUES.len());
-    for (field, entries) in NEMO_SPECIAL_FIELD_VALUES {
-        let entry = map.entry(*field).or_default();
-        for (text, mapped) in *entries {
-            entry.entry(*text).or_insert(*mapped);
-        }
-    }
-    map
-});
+> = LazyLock::new(|| nested_index(NEMO_SPECIAL_FIELD_VALUES));
 
 static SHADOW_FIELD_NAMES_INDEX: LazyLock<HashMap<&'static str, &'static str>> =
-    LazyLock::new(|| {
-        let mut map = HashMap::with_capacity(NEMO_SHADOW_FIELD_NAMES.len());
-        for (kind, field) in NEMO_SHADOW_FIELD_NAMES {
-            map.entry(*kind).or_insert(*field);
-        }
-        map
-    });
+    LazyLock::new(|| flat_index(NEMO_SHADOW_FIELD_NAMES));
 
-static MUTATION_TEXT_INDEX: LazyLock<HashMap<&'static str, &'static NemoMutationText>> =
-    LazyLock::new(|| {
-        let mut map = HashMap::with_capacity(NEMO_MUTATION_TEXT.len());
-        for (kind, text) in NEMO_MUTATION_TEXT {
-            map.entry(*kind).or_insert(text);
-        }
-        map
-    });
+static MUTATION_TEXT_INDEX: LazyLock<HashMap<&'static str, NemoMutationText>> =
+    LazyLock::new(|| flat_index(NEMO_MUTATION_TEXT));
 
 /// 官方 `mapType`(`sI[e]||e`):表里没有就返回原值
 pub(crate) fn map_type(raw: &str) -> &str {
@@ -484,26 +447,10 @@ fn shadow_field_name<'a>(kind: &str, field: &'a str) -> &'a str {
 
 /// 官方 `e.getAttribute("x")||"0"` + `parseInt(…, 10)`;解析不出数字 → `null`(JS 的 `NaN`)
 fn parse_int(node: &XmlNode, name: &str) -> Value {
-    match parse_int_prefix(node.attr(name).unwrap_or("0")) {
+    match super::xml::parse_int_prefix(node.attr(name).unwrap_or("0")) {
         Some(value) => Value::from(value),
         None => Value::Null,
     }
-}
-
-/// `parseInt(s, 10)` 的前缀解析(允许前导空白、正负号)
-fn parse_int_prefix(text: &str) -> Option<i64> {
-    let trimmed = text.trim_start();
-    let (sign, digits) = match trimmed.strip_prefix('-') {
-        Some(rest) => (-1i64, rest),
-        None => (1i64, trimmed.strip_prefix('+').unwrap_or(trimmed)),
-    };
-    let end = digits
-        .find(|c: char| !c.is_ascii_digit())
-        .unwrap_or(digits.len());
-    if end == 0 {
-        return None;
-    }
-    digits[..end].parse::<i64>().ok().map(|value| value * sign)
 }
 
 /// 官方 `getArgIndex`(`/arg(\d+)/`)
@@ -1035,7 +982,7 @@ impl Mapper<'_> {
             return format!("<mutation xmlns=\"{XHTML}\" items=\"0\"></mutation>");
         };
         let title = match text {
-            NemoMutationText::Plain(text) => (*text).to_string(),
+            NemoMutationText::Plain(text) => text.to_string(),
             NemoMutationText::Select(map) => {
                 let key = match raw_type {
                     "show_ranking" => {
@@ -2551,6 +2498,7 @@ pub(crate) const NEMO_SHADOW_FIELD_NAMES: &[(&str, &str)] = &[
 ];
 
 /// 官方 `oI`:需要合成 mutation 的积木,其 mutation 里的中文标题(按原文保留,含 `{...}` 占位符)
+#[derive(Clone, Copy)]
 pub(crate) enum NemoMutationText {
     /// 固定标题
     Plain(&'static str),

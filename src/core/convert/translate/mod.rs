@@ -363,7 +363,7 @@ mod diff_tests {
             TargetEditor::KittenN,
         );
         let mut ids = model::IdSource::new(true); // 确定性 id:对齐测试必需
-        let mut tree = model::parse_block_data_json(bdj).expect("解析实体").tree;
+        let mut tree = model::parse_block_data_json(bdj).expect("解析实体");
         mapping::translate_kitten_to_kn(&mut tree, landscape, &mut ids, &mut report);
         let (kept, procs) = model::split_procedures(tree, &mut ids, &mut report);
         let mut kept = kept;

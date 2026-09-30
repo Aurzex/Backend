@@ -74,6 +74,25 @@ pub(crate) fn decrement_items(xml: &str) -> String {
     }
 }
 
+/// 官方 `parseInt(s, 10)` 的前缀解析(允许前导空白、正负号);解析不出数字 → `None`(JS 的 `NaN`)
+///
+/// NEMO 侧的属性值解析共用这一份(`nemo_mapping.rs` 的 `parse_int` 与 `nemo.rs` 的几个前置改写;
+/// 原先两边各有一份逐字相同的副本)。
+pub(crate) fn parse_int_prefix(text: &str) -> Option<i64> {
+    let trimmed = text.trim_start();
+    let (sign, digits) = match trimmed.strip_prefix('-') {
+        Some(rest) => (-1i64, rest),
+        None => (1i64, trimmed.strip_prefix('+').unwrap_or(trimmed)),
+    };
+    let end = digits
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(digits.len());
+    if end == 0 {
+        return None;
+    }
+    digits[..end].parse::<i64>().ok().map(|value| value * sign)
+}
+
 /// JS 属性访问 / `String(v)` / 模板拼接的等价物(缺失 → `undefined`)
 pub(crate) fn js_text(value: Option<&Value>) -> String {
     match value {
