@@ -379,3 +379,14 @@ nemo_mapping   ≈ 2580 NEMO 解析 + 映射 + 表
 3. **剩余性能项(P6/P8–P11)处在同一量级** ⇒ 预期仍是几个百分点以内 ⇒ 应当按"可维护性"而不是"提速"来权衡;
    若确实要提速,只有两条路:① `#[serde(flatten)]` 的逐节点 serde(P6,字节敏感、风险最高);
    ② 查清端到端里那 **≈30% 未归类**的耗时(需要 profiler,不是加探针)。
+
+### 10.3 Phase 4 收尾(2026-09-26)
+
+| 项 | 处置 |
+| -- | ---- |
+| 失效模块名引用(`mapping.rs` 指向已并入的 `neko.rs`、`translate/mod.rs` 指向 `remint`、`nemo_mapping.rs` 指向 `tables_gen_nemo`/`nemo_xml`) | 由 M6/M8/M9 那一批顺路改成现路径(纯注释) |
+| `docs/goals/convert-backlog.md` 的 `k4raw` 漂移 | ✅ 已改正为 `download/compile/*.bcm4` |
+| 生成物死数据(`TOP_BLOCKS`/`KN_TYPES`) | ✅ 已删(`b7d4e07`) |
+| `BlockJson::count_types` / `BlockTree::count_types` 的"零调用" | ✅ 复核后**保留并注明**:仅测试/仪器用;`walk` 是递归核心且有生产调用(`assembly::duplicate_ids`)⇒ 不删 |
+| `unique_test_dir` 夹在 `#[cfg(test)]` 与生产代码之间 | 低价值(仅排版),**不做** |
+| staging 懒创建 | 收益微秒级且 `output_dir` 需要目录先存在,**不做** |

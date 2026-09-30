@@ -40,7 +40,7 @@
    - **已知结构性(不是缺陷)**:Kitten4 没有 **list 类型的程序集参数** ⇒ `param(type=List)` 必丢;
      `script_variables` 子树等 Neko 专有能力无对应概念(⇒ 见 `pending-decisions.md` D1)。
    - **仪器**:`kn_corpus_round_trip_sweep`(反向,吃任意 `download/compile/*.bcmkn`)、
-     `k4_corpus_round_trip_sweep`(正向,吃 `download/compile/k4raw/*.json`)、采集器
+     `k4_corpus_round_trip_sweep`(正向,吃 **`download/compile/*.bcm4`** —— 早前文档写的 `k4raw/*.json` 是漂移)、采集器
      `tests/convert_corpus_harvest.rs`(`#[ignore]`)。
    - **仍然卡住的一步**:正向扫描器要的**编辑格式**平台拿不到 —— `player/load` 是编译态(喂进去会静默产出空 KN,
      实测 654→13),`kitten/r2/work/edit/load/*` 与 `kitten/work/ide/load/*` 都 404,`source/public` 对 Kitten 报 422;
@@ -65,10 +65,12 @@
    `translate/model.rs` 另定义 `ROOT_LAYOUT_Y=80 / STEP=220` 并注释自称"与 `XmlBlockWriter` 的约定一致",
    但起点不一致。**先核实 0 与 80 哪个是对的**(对官方产物取样),再决定共享常量或修一边。
    出处:第三十一轮只读审计(`docs/rounds/31` §3.6 N4)。
-9. **生成物里的零消费者常量**:`translate/tables_gen.rs` 的 `TOP_BLOCKS` / `KN_TYPES` 全仓无使用点。
+9. ✅ **已完成(2026-09-26,`b7d4e07`)**:生成物里的零消费者常量 `translate/tables_gen.rs` 的 `TOP_BLOCKS` / `KN_TYPES` 已删(含生成器同步;顺带发现 `.gitignore` 的 `bin/` 通配误伤 `src/bin/`,生成器此前**从未入库** ⇒ 已修)。原记录:全仓无使用点。
    注意它们是 `src/bin/gen_translate_tables.rs` **整文件生成**的 ⇒ 要删得改**生成器**再重新生成,
    否则下次生成又回来(顺带核对生成器与手工表的分工)。
-10. **6 条零调用私有项**(审计 §3.6「零调用点私有项」):`BlockJson::count_types` / `BlockTree::count_types`(仅测试用)、
+10. **零调用私有项**(审计 §3.6;2026-09-26 复核后收口):`BlockJson::count_types` / `BlockTree::count_types` ——
+    复核结论:二者**仅测试/仪器用**(`reverse_tests` 的 census),`BlockJson::walk` 与 `BlockTree::walk` 是**递归核心**、
+    有生产调用(`assembly::duplicate_ids`)⇒ 按仓库口径"**保留并注明**",不删。原记录:
     `nemo::parse`(仅测试用)、`DecompilerContextBuilder`(已随骨架瘦身删除)、`TOP_BLOCKS` / `KN_TYPES`。
     处理口径:仅测试用 ⇒ 标 `#[cfg(test)]` 或保留并注明;完全不用的 ⇒ 删(删除前按仓库约定确证零调用)。
 0b. ✅ **已完成(2026-09-26)**:词汇表新鲜度:`kitten4_vocab.rs` 的 349 条是 2026-09-26 从线上编辑器导出的快照;
