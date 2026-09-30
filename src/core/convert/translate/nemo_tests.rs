@@ -811,7 +811,6 @@ fn nemo_decompiler_offers_in_memory_editable_document() {
             preview: None,
         },
         http_client: Box::new(OfflineHttp),
-        file_service: FileService::new(config.clone()),
         id_generator: IdGenerator::new(),
         config,
     };

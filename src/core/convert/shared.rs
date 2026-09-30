@@ -1033,11 +1033,6 @@ impl ValueExt for Value {
 pub(crate) struct FileService;
 
 impl FileService {
-    /// 兼容既有调用点:参数已不再使用(见类型注释),保留签名只为少改调用处
-    pub(crate) fn new(_config: Arc<DecompilerConfig>) -> Self {
-        Self
-    }
-
     pub(crate) fn safe_filename(name: &str, work_id: i64, extension: &str) -> String {
         let safe_name: String = name
             .chars()

@@ -119,15 +119,23 @@ pub(crate) fn build_document(
     let mut actors = Map::new();
     let mut scenes = Map::new();
     for entity in entities {
-        let mut value = entity.source.clone();
+        // P7(rounds/37):`entities` 是按值收的 Vec ⇒ 解构搬走,不再 clone 每个实体对象
+        // (与上方 `build_kitten4_document` 的同段改法同一口径)。
+        let ConvertedEntity {
+            source_id,
+            is_scene,
+            blocks,
+            mut source,
+        } = entity;
+        let mut value = source;
         value.remove("block_data_json");
-        value.insert("nekoBlockJsonList".into(), Value::Array(entity.blocks));
-        if entity.is_scene {
+        value.insert("nekoBlockJsonList".into(), Value::Array(blocks));
+        if is_scene {
             scene_entry(&mut value, groups, &mut scene_used);
-            scenes.insert(entity.source_id, Value::Object(value));
+            scenes.insert(source_id, Value::Object(value));
         } else {
             actor_entry(&mut value, groups, &mut actor_used, landscape);
-            actors.insert(entity.source_id, Value::Object(value));
+            actors.insert(source_id, Value::Object(value));
         }
     }
 

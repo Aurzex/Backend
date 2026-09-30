@@ -315,6 +315,7 @@ impl CodemaoDecompiler {
                 document: editable.document,
                 file_name,
                 source_version: editable.source_version,
+                preview: context.work_info.preview.clone(),
             });
         }
         let result = decompiler.decompile(raw, &context)?;
@@ -342,6 +343,7 @@ impl CodemaoDecompiler {
                     // 只有走"内存形态编辑版"的反编译器(NEMO)能给出源版本;
                     // Kitten/NEKO 方向不做版本迁移,这里留空。
                     source_version: String::new(),
+                    preview: context.work_info.preview.clone(),
                 })
             }
             result @ DecompileResult::Path(_) => {
@@ -487,7 +489,6 @@ impl CodemaoDecompiler {
             download_resources: !options.skip_resources,
             work_info,
             http_client,
-            file_service: FileService::new(config.clone()),
             id_generator: self.id_generator.clone(),
             config,
         };
@@ -728,7 +729,6 @@ pub(crate) struct DecompilerContext {
     pub(crate) download_resources: bool,
     pub(crate) work_info: WorkInfo,
     pub(crate) http_client: Box<dyn HttpClient>,
-    pub(crate) file_service: FileService,
     pub(crate) id_generator: IdGenerator,
     pub(crate) config: Arc<DecompilerConfig>,
 }
@@ -760,6 +760,11 @@ pub enum DecompiledArtifact {
         /// 只有 NEMO 方向用得到:老作品的转化要做版本迁移(见 `docs/rounds/27` §9.3),
         /// 而编辑版文档里**没有**版本号,只能靠元信息带过来。
         source_version: String,
+        /// 源作品的封面 URL(作品元信息里的)。
+        ///
+        /// 建草稿作品时平台要校验 `preview` 合法性(空串会被拒)⇒ 随产物一起带出来,
+        /// 省掉调用方**再拉一次作品详情**的 RTT(rounds/37 P10;也消掉那处全局客户端依赖)。
+        preview: Option<String>,
     },
     /// 只有落盘形态的产物(NEMO/WOOD):文件或资源目录
     Path(PathBuf),

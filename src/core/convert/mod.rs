@@ -86,12 +86,13 @@ fn translate_work_in(
             DecompileOptions::new().output_dir(staging).save_raw(false),
         )
         .map_err(TranslateError::Decompiler)?;
-    let (source_document, source_file_name, source_version) = match artifact {
+    let (source_document, source_file_name, source_version, preview) = match artifact {
         DecompiledArtifact::Document {
             document,
             file_name,
             source_version,
-        } => (document, file_name, source_version),
+            preview,
+        } => (document, file_name, source_version, preview),
         DecompiledArtifact::Path(path) => {
             return Err(TranslateError::InvalidArgument(format!(
                 "作品 {work_id} 的产物是资源形态({}):互相转化只支持编辑版文档 \
@@ -154,7 +155,7 @@ fn translate_work_in(
         report: converted.report,
     };
     if options.upload_enabled() {
-        outcome.work_id = Some(create_draft_work(&outcome, work_id, target)?);
+        outcome.work_id = Some(create_draft_work(&outcome, work_id, target, preview)?);
     }
     Ok(outcome)
 }
@@ -213,20 +214,16 @@ fn create_draft_work(
     outcome: &TranslateOutcome,
     source_work_id: WorkId,
     target: TargetEditor,
+    preview: Option<String>,
 ) -> Result<i64, TranslateError> {
     let client = crate::utils::requests::CodeMaoClient::global().clone();
-    // 平台建作品要求封面合法(`preview` 空串会被拒:"参数preview封面非法")⇒ 拿**源作品的封面**顶上;
+    // 平台建作品要求封面合法(`preview` 空串会被拒:"参数preview封面非法")⇒ 用**源作品的封面**;
     // 取不到就留空(仍可能被拒,但至少不自造非法值)。
-    let preview = crate::api::work::WorkDataFetcher::new()
-        .fetch_work_details(source_work_id.get() as i32)
-        .ok()
-        .and_then(|details| {
-            details
-                .get("preview")
-                .and_then(|value| value.as_str())
-                .filter(|value| !value.is_empty())
-                .map(str::to_string)
-        });
+    //
+    // P10(rounds/37):这个封面由**反编译阶段**随产物一起带出来(`DecompiledArtifact::Document::preview`,
+    // 本来就是同一个 `WorkInfo.preview`),原先却在这里**再拉一次作品详情** ——
+    // 白付一个 RTT,还引入了对全局客户端的隐式依赖(见 `docs/goals/convert-backlog.md` 2b)。
+    let preview = preview.filter(|value| !value.is_empty());
 
     let spec = DraftUpload {
         artifact: &outcome.output,

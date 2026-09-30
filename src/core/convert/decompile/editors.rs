@@ -44,6 +44,85 @@ use std::sync::Arc;
 // `NekoDecompiler` / `NekoFetcher`、`NemoDecompiler` / `NemoFetcher`、
 // `WoodDecompiler` / `WoodFetcher`。
 
+/// Kitten/Coco/Neko 三个 JSON 编辑器共享的 `save_result` 实现(仅编辑器名字面量不同)。
+fn save_json_result_for_editor(
+    result: &DecompileResult,
+    output_dir: Option<&Path>,
+    context: &DecompilerContext,
+    editor: &str,
+) -> Result<PathBuf> {
+    // 扩展名与其它编辑器同一来源(与 coco/kitten 一致,不再硬编码)
+    let extension = context
+        .work_info
+        .file_extension(&context.config)
+        .trim_start_matches('.')
+        .to_owned();
+    save_json_result(result, output_dir, context, &extension, editor)
+}
+
+// `decompile` 入口的变体校验:取出目标变体,错变体时的错误文案与原各反编译器逐字一致。
+impl RawWorkData {
+    fn expect_kitten(self) -> Result<Arc<Value>> {
+        match self {
+            RawWorkData::Kitten(data) => Ok(data),
+            _ => Err(DecompilerError::Decompile(
+                "KittenDecompiler 只能处理 Kitten 数据".into(),
+            )),
+        }
+    }
+
+    fn expect_nemo(self) -> Result<(Arc<Value>, Arc<Value>)> {
+        match self {
+            RawWorkData::Nemo(bcm, source_info) => Ok((bcm, source_info)),
+            _ => Err(DecompilerError::Decompile(
+                "NemoDecompiler 需要 Nemo 数据".into(),
+            )),
+        }
+    }
+
+    fn expect_coco(self) -> Result<Arc<Value>> {
+        match self {
+            RawWorkData::Coco(data) => Ok(data),
+            _ => Err(DecompilerError::Decompile(
+                "CocoDecompiler 需要 Coco 数据".into(),
+            )),
+        }
+    }
+
+    fn expect_neko_encrypted(self) -> Result<String> {
+        match self {
+            RawWorkData::NekoEncrypted(encrypted) => Ok(encrypted),
+            _ => Err(DecompilerError::Decompile(
+                "NekoDecompiler 需要 NekoEncrypted 数据".into(),
+            )),
+        }
+    }
+
+    fn expect_wood(self) -> Result<Arc<Value>> {
+        match self {
+            RawWorkData::Wood(data) => Ok(data),
+            _ => Err(DecompilerError::Decompile(
+                "WoodDecompiler 需要 Wood 数据".into(),
+            )),
+        }
+    }
+}
+
+/// 五个 Fetcher 共用的持有结构:HTTP 客户端 + 反编译配置。
+struct HttpFetchCtx {
+    http_client: Box<dyn HttpClient>,
+    config: Arc<DecompilerConfig>,
+}
+
+impl HttpFetchCtx {
+    fn new(http_client: Box<dyn HttpClient>, config: Arc<DecompilerConfig>) -> Self {
+        Self {
+            http_client,
+            config,
+        }
+    }
+}
+
 // 来自 src/core/convert/decompile/editors/kitten.rs
 // Kitten(Kitten2/3/4)抓取与反编译。
 // 三件事同一文件(原 `kitten/{mod,decompiler,xml}.rs`):
@@ -54,15 +133,13 @@ use std::sync::Arc;
 
 // KITTEN
 pub(crate) struct KittenFetcher {
-    http_client: Box<dyn HttpClient>,
-    config: Arc<DecompilerConfig>,
+    ctx: HttpFetchCtx,
 }
 
 impl KittenFetcher {
     pub(crate) fn new(http_client: Box<dyn HttpClient>, config: Arc<DecompilerConfig>) -> Self {
         Self {
-            http_client,
-            config,
+            ctx: HttpFetchCtx::new(http_client, config),
         }
     }
 }
@@ -71,30 +148,23 @@ impl WorkFetcher for KittenFetcher {
     fn fetch(&self, work_info: &WorkInfo) -> Result<RawWorkData> {
         let url = format!(
             "{}/kitten/r2/work/player/load/{}",
-            self.config.creation_base_url, work_info.id
+            self.ctx.config.creation_base_url, work_info.id
         );
-        let data = self.http_client.get_json(&url, None)?;
+        let data = self.ctx.http_client.get_json(&url, None)?;
         let compiled_url = data
             .get("source_urls")
             .and_then(|v| v.as_array())
             .and_then(|arr| arr.first())
             .and_then(|v| v.as_str())
             .ok_or_else(|| DecompilerError::InvalidResponse("无法获取source_urls".to_string()))?;
-        let compiled = self.http_client.get_json(compiled_url, None)?;
+        let compiled = self.ctx.http_client.get_json(compiled_url, None)?;
         Ok(RawWorkData::Kitten(Arc::new(compiled)))
     }
 }
 
 impl WorkDecompiler for KittenDecompiler {
     fn decompile(&self, raw: RawWorkData, context: &DecompilerContext) -> Result<DecompileResult> {
-        let work_arc = match raw {
-            RawWorkData::Kitten(data) => data,
-            _ => {
-                return Err(DecompilerError::Decompile(
-                    "KittenDecompiler 只能处理 Kitten 数据".into(),
-                ));
-            }
-        };
+        let work_arc = raw.expect_kitten()?;
 
         // 提取需要恢复的全局字段,仅克隆这 13 个字段而非整份作品 JSON
         // 反编译会重写 work 的 theatre 与各角色积木,但 variables/lists/broadcasts 等
@@ -275,12 +345,7 @@ impl WorkDecompiler for KittenDecompiler {
         output_dir: Option<&Path>,
         context: &DecompilerContext,
     ) -> Result<PathBuf> {
-        let extension = context
-            .work_info
-            .file_extension(&context.config)
-            .trim_start_matches('.')
-            .to_owned();
-        save_json_result(result, output_dir, context, &extension, "KITTEN")
+        save_json_result_for_editor(result, output_dir, context, "KITTEN")
     }
 }
 
@@ -769,9 +834,9 @@ impl<'a> XmlBlockWriter<'a> {
 // 来自 src/core/convert/decompile/editors/nemo.rs
 
 // NEMO
-pub(crate) struct NemoResourceConfig<'a> {
+/// NEMO / WOOD 两个资源管理器共用的配置(字段逐项相同)。
+pub(crate) struct ResourceConfig<'a> {
     pub(crate) http_client: &'a dyn HttpClient,
-    pub(crate) file_service: &'a FileService,
     pub(crate) work_id: WorkId,
     /// 资源下载并发数(见 [`DecompileOptions::resource_concurrency`])
     pub(crate) resource_concurrency: usize,
@@ -780,15 +845,13 @@ pub(crate) struct NemoResourceConfig<'a> {
 }
 
 pub(crate) struct NemoFetcher {
-    http_client: Box<dyn HttpClient>,
-    config: Arc<DecompilerConfig>,
+    ctx: HttpFetchCtx,
 }
 
 impl NemoFetcher {
     pub(crate) fn new(http_client: Box<dyn HttpClient>, config: Arc<DecompilerConfig>) -> Self {
         Self {
-            http_client,
-            config,
+            ctx: HttpFetchCtx::new(http_client, config),
         }
     }
 }
@@ -797,9 +860,9 @@ impl WorkFetcher for NemoFetcher {
     fn fetch(&self, work_info: &WorkInfo) -> Result<RawWorkData> {
         let source_url = format!(
             "{}/creation-tools/v1/works/{}/source/public",
-            self.config.base_url, work_info.id
+            self.ctx.config.base_url, work_info.id
         );
-        let source_info = self.http_client.get_json(&source_url, None)?;
+        let source_info = self.ctx.http_client.get_json(&source_url, None)?;
 
         let bcm_url = source_info
             .get("work_urls")
@@ -808,7 +871,7 @@ impl WorkFetcher for NemoFetcher {
             .and_then(|v| v.as_str())
             .ok_or_else(|| DecompilerError::InvalidResponse("无法获取work_urls".to_string()))?;
 
-        let bcm_data = self.http_client.get_json(bcm_url, None)?;
+        let bcm_data = self.ctx.http_client.get_json(bcm_url, None)?;
         Ok(RawWorkData::Nemo(Arc::new(bcm_data), Arc::new(source_info)))
     }
 }
@@ -830,9 +893,8 @@ impl NemoDecompiler {
             .unwrap_or(&context.config.default_output_dir);
         let work_dir = base_dir.join(folder_name);
 
-        let resource_config = NemoResourceConfig {
+        let resource_config = ResourceConfig {
             http_client: &*context.http_client,
-            file_service: &context.file_service,
             work_id,
             resource_concurrency: context.resource_concurrency,
             download_resources: context.download_resources,
@@ -852,14 +914,7 @@ impl NemoDecompiler {
 
 impl WorkDecompiler for NemoDecompiler {
     fn decompile(&self, raw: RawWorkData, context: &DecompilerContext) -> Result<DecompileResult> {
-        let (bcm, src) = match raw {
-            RawWorkData::Nemo(b, s) => (b, s),
-            _ => {
-                return Err(DecompilerError::Decompile(
-                    "NemoDecompiler 需要 Nemo 数据".into(),
-                ));
-            }
-        };
+        let (bcm, src) = raw.expect_nemo()?;
         let path = Self::decompile_inner(context, bcm, src)?;
         Ok(DecompileResult::Path(path))
     }
@@ -895,14 +950,14 @@ impl WorkDecompiler for NemoDecompiler {
 }
 
 pub(crate) struct NemoResourceManager<'a> {
-    config: NemoResourceConfig<'a>,
+    config: ResourceConfig<'a>,
     work_dir: PathBuf,
     dirs: HashMap<String, PathBuf>,
     sha_cache: RefCell<HashMap<String, String>>,
 }
 
 impl<'a> NemoResourceManager<'a> {
-    pub(crate) fn new(config: NemoResourceConfig<'a>, work_dir: PathBuf) -> Self {
+    pub(crate) fn new(config: ResourceConfig<'a>, work_dir: PathBuf) -> Self {
         Self {
             config,
             work_dir,
@@ -1102,15 +1157,13 @@ impl<'a> NemoResourceManager<'a> {
 
 // COCO
 pub(crate) struct CocoFetcher {
-    http_client: Box<dyn HttpClient>,
-    config: Arc<DecompilerConfig>,
+    ctx: HttpFetchCtx,
 }
 
 impl CocoFetcher {
     pub(crate) fn new(http_client: Box<dyn HttpClient>, config: Arc<DecompilerConfig>) -> Self {
         Self {
-            http_client,
-            config,
+            ctx: HttpFetchCtx::new(http_client, config),
         }
     }
 }
@@ -1119,15 +1172,15 @@ impl WorkFetcher for CocoFetcher {
     fn fetch(&self, work_info: &WorkInfo) -> Result<RawWorkData> {
         let url = format!(
             "{}/coconut/web/work/{}/load",
-            self.config.creation_base_url, work_info.id
+            self.ctx.config.creation_base_url, work_info.id
         );
-        let data = self.http_client.get_json(&url, None)?;
+        let data = self.ctx.http_client.get_json(&url, None)?;
         let compiled_url = data
             .get("data")
             .and_then(|v| v.get("bcmc_url"))
             .and_then(|v| v.as_str())
             .ok_or_else(|| DecompilerError::InvalidResponse("无法获取bcmc_url".to_string()))?;
-        let compiled = self.http_client.get_json(compiled_url, None)?;
+        let compiled = self.ctx.http_client.get_json(compiled_url, None)?;
         Ok(RawWorkData::Coco(Arc::new(compiled)))
     }
 }
@@ -1296,14 +1349,7 @@ impl CocoDecompiler {
 
 impl WorkDecompiler for CocoDecompiler {
     fn decompile(&self, raw: RawWorkData, context: &DecompilerContext) -> Result<DecompileResult> {
-        let mut work = match raw {
-            RawWorkData::Coco(data) => (*data).clone(),
-            _ => {
-                return Err(DecompilerError::Decompile(
-                    "CocoDecompiler 需要 Coco 数据".into(),
-                ));
-            }
-        };
+        let mut work = (*raw.expect_coco()?).clone();
         Self::reorganize(&mut work, context)?;
         Ok(DecompileResult::Json(work))
     }
@@ -1314,12 +1360,7 @@ impl WorkDecompiler for CocoDecompiler {
         output_dir: Option<&Path>,
         context: &DecompilerContext,
     ) -> Result<PathBuf> {
-        let extension = context
-            .work_info
-            .file_extension(&context.config)
-            .trim_start_matches('.')
-            .to_owned();
-        save_json_result(result, output_dir, context, &extension, "COCO")
+        save_json_result_for_editor(result, output_dir, context, "COCO")
     }
 }
 
@@ -1329,15 +1370,13 @@ impl WorkDecompiler for CocoDecompiler {
 
 // NEKO
 pub(crate) struct NekoFetcher {
-    http_client: Box<dyn HttpClient>,
-    config: Arc<DecompilerConfig>,
+    ctx: HttpFetchCtx,
 }
 
 impl NekoFetcher {
     pub(crate) fn new(http_client: Box<dyn HttpClient>, config: Arc<DecompilerConfig>) -> Self {
         Self {
-            http_client,
-            config,
+            ctx: HttpFetchCtx::new(http_client, config),
         }
     }
 }
@@ -1346,7 +1385,7 @@ impl WorkFetcher for NekoFetcher {
     fn fetch(&self, work_info: &WorkInfo) -> Result<RawWorkData> {
         let detail_url = format!(
             "{}/neko/community/player/published-work-detail/{}",
-            self.config.creation_base_url, work_info.id
+            self.ctx.config.creation_base_url, work_info.id
         );
 
         let mut auth = CloudAuthenticator::new(None);
@@ -1366,7 +1405,7 @@ impl WorkFetcher for NekoFetcher {
         let headers: Vec<(String, String)> =
             vec![("x-creation-tools-device-auth".to_string(), device_auth)];
 
-        let detail = self.http_client.get_json(&detail_url, Some(headers))?;
+        let detail = self.ctx.http_client.get_json(&detail_url, Some(headers))?;
 
         let encrypted_url = detail
             .get("source_urls")
@@ -1375,7 +1414,7 @@ impl WorkFetcher for NekoFetcher {
             .and_then(|v| v.as_str())
             .ok_or_else(|| DecompilerError::InvalidResponse("无法获取source_urls".to_string()))?;
 
-        let encrypted_content = self.http_client.get_text(encrypted_url)?;
+        let encrypted_content = self.ctx.http_client.get_text(encrypted_url)?;
         Ok(RawWorkData::NekoEncrypted(encrypted_content))
     }
 }
@@ -1394,16 +1433,10 @@ impl NekoDecompiler {
 
 impl WorkDecompiler for NekoDecompiler {
     fn decompile(&self, raw: RawWorkData, _context: &DecompilerContext) -> Result<DecompileResult> {
-        match raw {
-            RawWorkData::NekoEncrypted(encrypted) => {
-                // `CryptoService` 内部只有 `Arc<[u8]>` salt,直接借用即可,无需克隆
-                let decrypted_json = self.crypto_service.decrypt_bcmkn_json(&encrypted)?;
-                Ok(DecompileResult::Json(decrypted_json))
-            }
-            _ => Err(DecompilerError::Decompile(
-                "NekoDecompiler 需要 NekoEncrypted 数据".into(),
-            )),
-        }
+        let encrypted = raw.expect_neko_encrypted()?;
+        // `CryptoService` 内部只有 `Arc<[u8]>` salt,直接借用即可,无需克隆
+        let decrypted_json = self.crypto_service.decrypt_bcmkn_json(&encrypted)?;
+        Ok(DecompileResult::Json(decrypted_json))
     }
 
     fn save_result(
@@ -1412,13 +1445,7 @@ impl WorkDecompiler for NekoDecompiler {
         output_dir: Option<&Path>,
         context: &DecompilerContext,
     ) -> Result<PathBuf> {
-        // 扩展名与其它编辑器同一来源(与 coco/kitten 一致,不再硬编码)
-        let extension = context
-            .work_info
-            .file_extension(&context.config)
-            .trim_start_matches('.')
-            .to_owned();
-        save_json_result(result, output_dir, context, &extension, "NEKO")
+        save_json_result_for_editor(result, output_dir, context, "NEKO")
     }
 }
 
@@ -1427,26 +1454,14 @@ impl WorkDecompiler for NekoDecompiler {
 // ===========================================================================
 
 // WOOD
-pub(crate) struct WoodResourceConfig<'a> {
-    pub(crate) http_client: &'a dyn HttpClient,
-    pub(crate) file_service: &'a FileService,
-    pub(crate) work_id: WorkId,
-    /// 资源下载并发数(见 [`DecompileOptions::resource_concurrency`])
-    pub(crate) resource_concurrency: usize,
-    /// 是否下载资源文件(见 [`DecompileOptions::skip_resources`])
-    pub(crate) download_resources: bool,
-}
-
 pub(crate) struct WoodFetcher {
-    http_client: Box<dyn HttpClient>,
-    config: Arc<DecompilerConfig>,
+    ctx: HttpFetchCtx,
 }
 
 impl WoodFetcher {
     pub(crate) fn new(http_client: Box<dyn HttpClient>, config: Arc<DecompilerConfig>) -> Self {
         Self {
-            http_client,
-            config,
+            ctx: HttpFetchCtx::new(http_client, config),
         }
     }
 }
@@ -1455,9 +1470,9 @@ impl WorkFetcher for WoodFetcher {
     fn fetch(&self, work_info: &WorkInfo) -> Result<RawWorkData> {
         let publish_url = format!(
             "{}/wood/work/{}/publish?channel_type=0",
-            self.config.creation_base_url, work_info.id
+            self.ctx.config.creation_base_url, work_info.id
         );
-        let data = self.http_client.get_json(&publish_url, None)?;
+        let data = self.ctx.http_client.get_json(&publish_url, None)?;
         Ok(RawWorkData::Wood(Arc::new(data)))
     }
 }
@@ -1475,9 +1490,8 @@ impl WoodDecompiler {
             .unwrap_or(&context.config.default_output_dir);
         let work_dir = base_dir.join(folder_name);
 
-        let resource_config = WoodResourceConfig {
+        let resource_config = ResourceConfig {
             http_client: &*context.http_client,
-            file_service: &context.file_service,
             work_id,
             resource_concurrency: context.resource_concurrency,
             download_resources: context.download_resources,
@@ -1492,14 +1506,7 @@ impl WoodDecompiler {
 
 impl WorkDecompiler for WoodDecompiler {
     fn decompile(&self, raw: RawWorkData, context: &DecompilerContext) -> Result<DecompileResult> {
-        let data = match raw {
-            RawWorkData::Wood(d) => d,
-            _ => {
-                return Err(DecompilerError::Decompile(
-                    "WoodDecompiler 需要 Wood 数据".into(),
-                ));
-            }
-        };
+        let data = raw.expect_wood()?;
         let path = Self::decompile_inner(context, data)?;
         Ok(DecompileResult::Path(path))
     }
@@ -1515,13 +1522,13 @@ impl WorkDecompiler for WoodDecompiler {
 }
 
 pub(crate) struct WoodResourceManager<'a> {
-    config: WoodResourceConfig<'a>,
+    config: ResourceConfig<'a>,
     work_dir: PathBuf,
     dirs: HashMap<String, PathBuf>,
 }
 
 impl<'a> WoodResourceManager<'a> {
-    pub(crate) fn new(config: WoodResourceConfig<'a>, work_dir: PathBuf) -> Self {
+    pub(crate) fn new(config: ResourceConfig<'a>, work_dir: PathBuf) -> Self {
         Self {
             config,
             work_dir,
