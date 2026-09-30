@@ -21,6 +21,10 @@ __pycache__/
 .venv/
 env/
 bin/
+# ↑ 这条是 Python 模板带进来的通配规则,会**误伤 `src/bin/`**(Rust 的 bin 目标目录):
+# 生成器 `src/bin/gen_translate_tables.rs` 因此从未入库(rounds/37 发现)⇒ 显式放行。
+!/src/bin/
+!/src/bin/**
 build/
 develop-eggs/
 dist/
