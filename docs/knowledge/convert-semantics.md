@@ -45,28 +45,51 @@ NEMO → KN 是另一条前端(`hI.parseBlocksXML`),官方管线共 12 步(`main
 ## 5. 反向(KN → Kitten4)是自建且有损
 
 - 逐条与正面对称反查(改名逆表、字段反查、槽位还原),但不变量只能靠**往返 + 预算断言**守。
-- **已知保真缺口**:inline `pure_list_get` 影子在往返中丢失,实体侧与定义体侧都出现(受影响定义 6 / 净减块 **21** —— 原记录的 133 里约 118 是测试口径把「调用树」当定义体的假象,见 `docs/rounds/32` §3.2;已写成断言,扩大会失败)。根因与后续研究见 `docs/rounds/28-*`。
+- **保真缺口(当前口径,2026-09-26 起)**:见 §5bis —— 反向的可见损失来自"**编辑器不认识的名字必须剔除**"
+  这条硬约束;`def_census` 口径修正(只数定义根子树)后,定义体侧的"残块假缺口"已归零(rounds/33 §3bis),
+  现行门是**预算断言 `≤3193`**(rounds/36,只许变小;每次跑都会打印读数)。历史研究路线见 `docs/rounds/28`、`docs/rounds/32`。
 - **整作品实测(2026-09-26,真作品 `325806995` = `now但是1080P`,KN → Kitten4)**:
   告警 3 973 条按类别 = `未映射积木 643 · 丢弃实体属性 3 301 · 丢弃字段 12 · 重铸 id 17`
   (由 `tests/convert_live::kn_work_to_kitten4_file` 按类别打印)。
-  - ⚠️ **643 个"未映射积木"不是缺口**:逐类型核对官方正向表(`KITTEN_TO_KN`,367 条 / KN 侧 159 个类型),
-    **22 种全部不在表内** ⇒ 它们是 **KN 的扩展能力**(Kitten4 无对应概念),反向按既定策略**保留 KN 原类型名 + 告警**、
-    **不丢弃积木**(所以往返的类型多重集仍然守恒;代价是 Kitten4 侧可能不认这个类型名)。
-    构成:脚本变量族 281(44%)、文字效果族 170(26%)、遍历循环族 93(14%),其余为排行榜 / 临时列表 /
-    画笔图层 / 打印 / 带参数广播 / 键盘值等;其中约 1/3 是这些功能的**内部子块与影子类型**
-    (`*_value` / `*_param` / `color_size_slider` / `procedure_boolean`,无中文名)。
-  - 丢弃类告警 3 313 条(39 种)同样需要拆开看:**≈2 950 条其实是"类型歧义"报告**
-    (KN 一个类型 ← Kitten 多个原类型,保留 KN 名,如 `math_arithmetic` 1083 · `variables_get` 668 ·
-    `controls_if` 291 · `variables_set` 253 · `on_running_group_activated` 215),
-    **不是属性丢失**;真正的实体键丢弃只有 ≈333 条(`comments` 113 · `editable` 112 · `deletable` 104 ——
-    KN 实体的渲染标志,Kitten4 无此键;`rotation` 4)外加 5 条程序集形参类型。
-  - 因此**反向的产物丢失实际很小**;剩下可评估的是 round 28 的定义体积木类型差(**6 条定义 / 净减 21 块**,见 `docs/rounds/32` §3.2)与
-    "类型歧义"这类**单向**信息损失(Kitten 原类型名不可恢复,但语义等价)。
-  - ✅ **告警分类已修正**(2026-09-26):类型歧义原先借用 `DroppedProperty` 上报,类别标签「丢弃实体属性」与事实不符。
-    现拆出独立变体 [`TranslateWarning::AmbiguousType`](`kind`/`candidates`/`chosen`),
-    报告类别变为:`类型歧义 2959 · 未映射积木 643 · 丢弃实体属性 342 · 丢弃字段 12 · 重铸 id 17`。
-    ⇒ 实体属性**真丢**只有 342 条(其中 329 条是 `comments`/`editable`/`deletable` 这类渲染标志)。
+    - ⚠️ **口径已在 rounds/34 变更**:早期结论是"未映射/不认识的类型**保留 KN 原名 + 告警、不丢积木**" ——
+    **这会让编辑器整份加载失败**(实测:80 种类型里 20 种 Kitten4 不认识 ⇒ 画布一块都不显示,rounds/34 §4nonies)。
+    现行行为:写出阶段**剔除**编辑器不认识的**块**、**清空**这类**影子**,逐类型计入报告
+    (`strip_unknown_blocks`),即"**宁可少几块,也要让作品能打开**"。
+  - 因此"未映射积木"这个类别现在的含义是**真的少了**:两个真作品实测(rounds/36,A/B 对照)——
+    `Node VM v3`(328981781)剔块 527 → **429**、清影子 174 → **4**;`now`(273988379)剔块 415 → **286**、
+    清影子 224 → **46**;`get_split_options`(Kitten3 口径名)的块与影子已**全部消失**(改回编辑器认识的 `text`)。
+  - 剩下剔的是**Kitten4 没有对应概念**的 Neko 专有块族:`temporary_list`、`script_variables*`、
+    `traverse_number*`、`self_listen*`/`self_broadcast_with_param`、`procedure_boolean`、
+    `self_text_effect_color`、`color_size_slider`(证据:平台 40 件 Kitten4 语料里这些名字**0 次出现**,
+    编辑器注册表 349 条里也没有)。要继续减损只能做"语义降级"(改语义,见 `goals/pending-decisions.md` D1)。
 - 运行时实测:KN→Kitten4 产物有 `theatre`/`size`/`block_data_json`,可被平台接受。
+
+## 5bis. Kitten4 **编辑器的隐性契约**(实机验证得出,改写出器前必读)
+
+这一节是 rounds/34–36 的产物:**积木数对得上 ≠ 编辑器能打开**。四条,每条都有实机证据。
+
+1. **顶层平台骨架键必须齐**(15 个):`toolbox` / `toolbox_order` / `last_toolbox_order` / `ai_lab` / `matrix` /
+   `models` / `midi_order` / `midimusic` / `is_partial` / `sample_id` / `codemao_value` / `work_source_label` /
+   `device_widget_type` / `hardware_type` / `hidden_toolbox`(反编译产物只差 `painter`,同档即"能读")。
+   缺了 ⇒ 编辑器读不出积木(rounds/34 §4octies)。
+2. **`theatre.groups` + 场景 `group_order` 必须自洽非空**:平台用"每组一个角色、组上带 `scene` 归属"表达
+   "谁在场景里";两张表都空 ⇒ **角色一个都不列、画布 0 块**(积木一块没少也照样黑屏)。KN 侧没有分组概念,
+   反向必须**合成**(rounds/35)。
+3. **所有积木类型名(含影子 XML 的 `type`)**必须是编辑器**注册表里有的名字** —— 不认识的名字会让
+   **整份工作区加载失败**。注册表 = 线上编辑器 `Object.keys(window.Blockly.Blocks)`(349 条,导出快照在
+   `src/core/convert/translate/kitten4_vocab.rs`)⇒ 写出阶段必须剔除/清空 + 逐类报告(rounds/34 §4nonies、36)。
+4. **表(`REVERSE_TYPES`/`KITTEN_TO_KN`)是 Kitten3 口径** ⇒ 凡是要往 Kitten4 写名字的地方(块、影子,
+   以及将来任何新写出点)**都要过词汇判据**:候选认识取候选;否则 KN 名认识就保留 KN 名;否则照旧剔除并报告。
+   反例(已修):KN `text` 的候选只有 `get_split_options`,而平台 40 件 Kitten4 语料里 `get_split_options`
+   出现 **0** 次、`text` **1338** 次(rounds/36)。
+
+**判据与证据来源**(都可复用):
+
+| 判据 | 怎么做 |
+| ---- | ------ |
+| 名字/字段是否合法 | 对着**平台真实文件**(`download/compile/*.bcm4`)做**归一化 schema 差集**(id 段折掉、块字段聚合),看"平台有、我们没有"的字段路径 |
+| 名字该叫什么 | **平台语料计数**(某名字在 40 件真作品里出现几次)比"表里怎么写的"更权威 |
+| 产物能不能用 | **无头 Chromium + 线上编辑器的「打开本地作品」**(隐藏 `input[accept=".bcm, .bcm4"]`)⇒ 数画布积木 + 看角色列表;**必须带一个已知能读的对照组**(见 `docs/rounds/35` 的方法留档) |
 
 ## 6. 硬门与不变量(实现任何新方向都必须满足)
 
@@ -77,6 +100,8 @@ NEMO → KN 是另一条前端(`hI.parseBlocksXML`),官方管线共 12 步(`main
 | 确定性 | `IdSource` + `TranslateOptions::deterministic_ids`;并发 1 与并发 N 产物 **SHA256 相同** |
 | 往返守恒 | KN→Kitten4→KN 的积木类型**多重集**一致(差异仅白名单降级项 + 预算断言) |
 | 有损记账 | 一切有损进 `TranslateReport`;官方重传资源不算有损(`ReuploadedOnImport`) |
+| **编辑器能否打开** | 实机硬门:无头 Chromium + 线上 Kitten4 的「打开本地作品」,数画布积木并看角色列表(带对照组) |
+| **剔除预算** | 编辑器不认识的块/影子的剔除量必须 ≤ 记录值(只许变小);定义体缺口预算见 §5bis / rounds/36 |
 
 ## 7. 判定"不做"的两项(有证据,别再重开)
 
@@ -96,4 +121,7 @@ NEMO → KN 是另一条前端(`hI.parseBlocksXML`),官方管线共 12 步(`main
 - `docs/rounds/20-kitten-kn-work-conversion-plan.md` §3(官方实现逆向)、§4(反向可行性)、§6.2(设计取舍)、§8(坑)、§9(验证)、§11(实测)、§11.2(真机端到端)。
 - `docs/rounds/27-nemo-to-kn-conversion-plan.md` §9(前端/映射研究)、§11/§12(落地与方向表)。
 - `docs/rounds/28-convert-reverse-fidelity-gaps.md`(缺口)、`docs/rounds/26-convert-rawvalue-single-pass-plan.md` §6(两项判不做)。
+- `docs/rounds/33-corpus-sweeps-and-format-split.md`(两台扫描器 + 编辑格式缺口)、
+  `docs/rounds/34-forward-corpus-and-guard-fixes.md`(§4octies 骨架键、§4nonies 词汇表与实机方法、§4sexies 云/本地收口)、
+  `docs/rounds/35-kitten4-groups-fix.md`(角色不显示)、`docs/rounds/36-editor-vocabulary-single-candidate.md`(块与影子统一判据)。
 - 代码锚点:`src/core/convert/translate/{mapping,nemo_mapping,assembly,neko}.rs`、`tests/convert_*`。

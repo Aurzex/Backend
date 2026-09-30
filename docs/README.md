@@ -32,7 +32,12 @@
 ## 历史记录 `rounds/`(过程)
 
 `rounds/01-websocket-pitfalls.md` … `rounds/36-editor-vocabulary-single-candidate.md` —— 每轮一份的方案/评审/整改记录。
+**入口先看 [`rounds/README.md`](rounds/README.md)**(28–36 轮的索引 + "该看哪几篇"),再看本篇。
 价值在**证据链**(真机实测、抓包、官方 bundle 逆向、逐条评审),以及"为什么当初这么决定"。
 读它们时先看 `knowledge/errata.md`:早期文档里的文件名/类型名/行号多数已经漂移。
 
-**本轮(文档整理)新增**:知识库 7 篇、目标库 5 篇(含本文件)。原 29 篇移入(第三十至三十二轮又新增 3 篇) `rounds/`。
+**文件分布**:知识库 7 篇(`knowledge/`)、目标库 5 篇(`goals/`)、轮次记录 36 篇(`rounds/`,第 33–36 轮是转换域最近的工作)。
+
+> **读老轮次前先做的两件事**:① 查 `knowledge/errata.md`(它集中列出已过时/写错的表述及正确值,
+> 含"第三十三至三十六轮的结论变更"一节);② 转换相关的问题先读 `knowledge/convert-semantics.md` 的
+> **§5bis「Kitten4 编辑器的隐性契约」** —— 那是"产物能不能在编辑器里用"的判据与证据方法。

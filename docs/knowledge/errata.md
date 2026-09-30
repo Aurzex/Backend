@@ -309,3 +309,17 @@ pub struct LocalClientProvider {
 - `XHTML` 常量(唯一化到 `shared.rs`;原先 mapping / nemo_mapping 各一份);
 - nemo_mapping 手抄的 `TEXT_PLACEHOLDERS` 与 `is_text_placeholder`(复用 `tables_gen` / `mapping` 的定义);
 - 两处同构批处理(`translate_works` / `decompile_batch_outcomes` 内的 chunk + `thread::scope`)合并为 `shared::batch_map`。
+
+## 第三十三至三十六轮的结论变更(2026-09-26)
+
+这几轮把反向(KN → Kitten4)的**判据**换了一茬,历史轮次里下列表述**已不成立**;
+正确值与证据都在新轮次里(读老轮次时以本节为准):
+
+| 出处 | 已过时的表述 | 正确值 / 证据 |
+| ---- | ------------ | ------------- |
+| rounds/20–32(多处)、`knowledge/convert-semantics.md` §5 旧版 | "编辑器不认识的类型**保留 KN 原名** + 告警,**不丢积木**" | **不成立**:保留不认识的名字会让编辑器**整份工作区加载失败** ⇒ 现行是**剔除块 + 清空影子** + 逐类报告。见 rounds/34 §4nonies、rounds/36 |
+| rounds/28 §4、rounds/33 §3bis | "定义体侧差异归零,预算收紧到 **0/0**" | **0/0 只在那套口径下成立**;剔块会连带整棵子树 ⇒ 现行是**预算 `≤3193`(只许变小)** + 常显读数。见 rounds/36 |
+| rounds/34 §4nonies 末段 | "**仍未解决**:产品在编辑器里作品名与变量能进,但 3 个角色一个都不出现(⇒ 画布 0 块)" | **已解决**(rounds/35):根因是缺 `theatre.groups` + 场景 `group_order`;KN 侧没有分组概念 ⇒ 反向必须合成"一角色一组" |
+| rounds/34 §4nonies 的挑名描述 | "歧义挑选:候选里编辑器认识的优先 → KN 名本身认识就保留 → 再退非云优先" | 这段只描述**多候选(歧义)**分支;**单候选分支当时完全没做判据** ⇒ KN `text` 被写成 Kitten3 口径的 `get_split_options` 而被剔掉。现块与影子**共用**同一判据。见 rounds/36 |
+| `src/core/convert/translate/assembly.rs` 旧注释 / rounds/31 审计 | "反向没有 groups 概念,写回 `scene.actors` 即可" | **不完整**:`scene.actors` 之外还必须有 `theatre.groups` 与 `group_order`(编辑器靠它们列角色)。见 rounds/35 |
+| 一般印象:"积木数对得上就能打开" | — | **错**:见 `knowledge/convert-semantics.md` §5bis 的四条隐性契约(骨架键 / groups / 词汇表 / 表是 Kitten3 口径) |
