@@ -9,7 +9,7 @@
 | 判断 | 依据(要点) |
 | ---- | ---------- |
 | **分层是干净的,不需要"拆架构"** | `convert/mod.rs`(257 行)= 门面 + 跨子域编排 + 上传编排;`shared.rs` 不对子域反向依赖;`translate/` 与 `decompile/` 互不依赖(规则写在 `convert/mod.rs:5-13`) |
-| **真正的架构问题是"职责错位 + 两处真环"** | ① `translate/mod.rs` 一个文件装了**五件事**(选项/错误、报告层、正/反管线、入口、诊断),导致 5 个兄弟模块 `use super::{TranslateReport,…}` 的**向上依赖**(mapping.rs:52、model.rs:2、assembly.rs:6-8、nemo.rs:3-4、nemo_mapping.rs:1-2);② `model ⇄ mapping` 环(model.rs:1 ↔ mapping.rs:46-47);③ `nemo.rs ⇄ nemo_mapping.rs` 环(nemo.rs:6-11 ↔ nemo_mapping.rs:3-4) |
+| **真正的架构问题是"职责错位 + 两处真环"** | ① `translate/mod.rs` 一个文件装了**五件事**(选项/错误、报告层、正/反管线、入口、诊断),导致兄弟模块的 `use super::{TranslateReport,…}` **向上依赖**(实测:`mapping.rs:52`、`model.rs:2`、`nemo.rs:3-4`、`nemo_mapping.rs:1-2` 是 `use super::{…}` 形态;`assembly.rs` 经另一路径引用);② `model ⇄ mapping` 环(model.rs:1 ↔ mapping.rs:46-47);③ `nemo.rs ⇄ nemo_mapping.rs` 环(nemo.rs:6-11 ↔ nemo_mapping.rs:3-4) |
 | **合并空间不大,但有两处"真职责重叠"** | 正向管线在 `translate/mod.rs:319-680`、反向管线在 `assembly.rs:804-912`,二者共用的**并行机在 assembly.rs:2152-2534 且排在 `assembly_tests`(1678-2168)之后** ⇒ 违反本仓"测试在文件末尾"规则,也是文件超 2500 行的主因 |
 | **死重量/样板可确定删除** | `FileService.config` 字段全仓零读取(shared.rs:1028-1031)+ 它污染的 3 个 `file_service` 字段;`TOP_BLOCKS`/`KN_TYPES`(tables_gen.rs:1203/1216)零生产调用点;5 份 Fetcher 壳 + 3 份 `save_result` + 5 份变体错误分支(editors.rs);11 份 `LazyLock` 索引样板;9 个 `pub(crate)` 读取器(translate/mod.rs:187-247) |
 | **性能上"分配"比"算法"更值得动** | 反向装配有 3~4 次整份积木 JSON 深拷(assembly.rs:847、996/999/1027/1054);`translate_work` 每次白写+删一份与源同量级的 raw JSON(decompile 侧 `save_raw` 默认 true);正向入口有一次**无条件**全文档扫描 + 二次 parse(mod.rs:523/1075-1114) |
@@ -37,21 +37,31 @@
 
 ## 2. 架构目标(`translate/` 的模块图)
 
-### 2.1 改前 → 改后
+### 2.1 改前 → 改后(**行数=生产码,不含内联测试**;测试另计)
+
+现况统计(实测):`translate/` 共 **13** 个 `.rs`(含 `reverse_tests.rs`、`nemo_tests.rs` 两个测试文件),
+`convert/` 共 **14** 个文件;`translate/mod.rs` 2192 = 生产 **1116** + 测试 **1076**(`diff_tests` 456 + `forward_parallel_tests` 620);
+`translate/assembly.rs` 2644 = 生产头段 **1677** + `assembly_tests` **491** + 生产尾段 **366**(并行机 + remint,排在测试之后)+ `remint_tests` **110**。
 
 ```
-改前(13 文件,translate/*.rs 生产 ≈ 9.3k 行)          改后(14 文件,行数全部回到 ≤2500)
-mod.rs        2192  ← 选项/错误 + 报告 + 正反管线 + 入口 + 诊断    mod.rs        ≈ 460  仅保留:模块声明 + 入口/门面(translate_value/file、源引用、detect_editor)
-assembly.rs   2644  ← 装配器 + 反向管线 + 并行机 + remint + 测试    options.rs    ≈ 255  公开面(TargetEditor/StageOrientation/TranslateOptions/Outcome/Error)
-mapping.rs    2092                                                  report.rs     ≈ 200  横切(TranslateWarning/TranslateReport)
-model.rs      2195                                                  pipeline.rs   ≈ 720  正/反文档级编排 + 并行机 + 临时 id 改写(remap_*)
-nemo.rs       2575                                                  mapping.rs    ≈ 1990 语义表 + 双向映射
-nemo_mapping  2669                                                  model.rs      ≈ 2100 中核模型 + id + 编解码 + 程序集
-assembly.rs …                                                       assembly.rs   ≈ 2200 装配器(正/反实体与资源字典)
-                                                                    xml.rs        ≈ 950  XML DOM + 字符串手术 + 影子渲染/转义(断两个环)
-                                                                    nemo.rs       ≈ 1180 NEMO 管线 + 版本迁移 + 前置改写
-                                                                    nemo_mapping  ≈ 2580 NEMO 解析 + 映射 + 表
+改后(新增 4 个文件:options/report/pipeline/xml ⇒ 14 → 18;测试文件数不变)
+options.rs     ≈ 255  公开面:TargetEditor/StageOrientation/TranslateOptions/TranslateOutcome/TranslateError
+report.rs      ≈ 200  横切:TranslateWarning/TranslateReport
+pipeline.rs    ≈ 830  正/反文档级编排(原 mod.rs 生产段 ~362 + assembly 反向段 ~110)+ 并行机(~97)+ remint(~256)
+mod.rs         ≈ 500  仅门面/入口(translate_value/file、源引用、detect_editor、模块声明)+ 测试 456(留)
+mapping.rs     ≈ 1990 语义表 + 双向映射(仅移出 XML 手术)
+model.rs       ≈ 2100 中核模型 + id + 编解码 + 程序集(仅移出 XML 借用)
+assembly.rs    ≈ 1930 装配器(正/反实体与资源字典)+ assembly_tests 491
+xml.rs         ≈ 950  XML DOM + 字符串手术 + 影子渲染/转义(断两个环)
+nemo.rs        ≈ 1180 NEMO 管线 + 版本迁移 + 前置改写(nemo_nxml_tests 371 随 XML 层迁走)
+nemo_mapping   ≈ 2580 NEMO 解析 + 映射 + 表
 ```
+
+> **注意**:`assembly.rs` 只搬并行机(**≈97 行**)仍剩 **2547 > 2500**(仓库软上限)。
+> 要真正回到上限内,必须**连 remint 段(≈256 行)一起搬进 `pipeline.rs`**(2547 − 256 ≈ 2291 ✓)——
+> 这会**重新决定 rounds/31 §3.5(c)\"remint 并入 assembly\"那条**:当时的动因是"少一个文件、且临时 id 改写的唯一调用方就是管线",
+> 而现在 `pipeline.rs` 存在 ⇒ 管线的机器(并行 + 临时 id 兑现 + remap)同处一文件更顺。
+> 这条算**重开已决事项**,所以列为 §9 的 Q2,由你拍板;不拍板则维持 2547(超软上限 47 行,可接受但要在文件头记账)。
 
 ### 2.2 每次搬迁:代价与验证
 
@@ -61,7 +71,7 @@ assembly.rs …                                                       assembly.r
 | 选项/错误 → `options.rs` | mod.rs 从"什么都装"变回门面;与 `DecompileOptions` 同层同义 | `mod.rs` 必须 `pub use options::{…}` 再导出(**公开路径不变**) | `tests/convert_live.rs`、`convert_bench.rs` 用的就是公开路径 ⇒ 编译即证 |
 | 正/反管线 + 并行机 → `pipeline.rs` | **本次唯一"真职责重叠"的修复**:正/反编排同层可对照;`assembly.rs` 恢复单一职责且测试回到末尾 | `assembly.rs` 内 9 处引用(`assembly::workers/run_items/IdRemap/remap_*/merge_report`,translate/mod.rs:531/546/568/622/595/616/623/649/652)+ 2 条 doc 注释 | 编译 + `forward_parallel_tests`(不依赖 download/)+ `convert_bench` 1 vs 8 同 SHA |
 | XML 层 → `xml.rs`(两处环) | 断 `model ⇄ mapping` 与 `nemo ⇄ nemo_mapping`;**这是分层修复,不是省行数**(净增 1 文件) | `mapping.rs` 的字符串手术(467-582)+ 影子构造(587/667)+ `nemo.rs:1452-2204` DOM 与 `:2205-2575` XML 单测整体搬;`model.rs:1071` 的 `VALUE_SHADOW_XML` 是**逐字节照搬官方**形态(含换行缩进)⇒ 不得与 `math_number_shadow` 统一格式化 | 逐字节比 5 处影子模板产物 + `nemo_tests` 的 `value_slot_keeps_shadow_xml_and_override_block` |
-| 通用调度器 → `pipeline.rs` | `assembly.rs` 2644 → ≤2500(回到仓库上限内);调度是管线原语,放装配文件里职责不顺 | `workers`(2179)/`run_items`(2191)+ 3 条调度用例;`remap_*`(**留在 assembly**,守住 rounds/31"remint 并入 assembly"的结论) | 同上 |
+| 通用调度器 → `pipeline.rs` | 2644 → **2547**(仍超软上限;要 ≤2500 必须连 remint 段一起搬 ⇒ 见 §2.1 注与 Q2) | `workers`(2179-2190)/`run_items`(2191-2275)≈97 行 + 3 条调度用例 | 同上 |
 
 **不做**:按方向把 `assembly.rs`/`mapping.rs` 切成两份 —— 双向共用工具集中在一处是**防漂移设计**(assembly.rs:60-62 注释),
 且 rounds/32 的 `pure_list_get` 影子 bug 正是"正向漏了、反向有"的不对称 ⇒ 同居是刻意保留的可对照性。
@@ -80,7 +90,7 @@ assembly.rs …                                                       assembly.r
 | M4 | `NemoResourceConfig`(772-780)与 `WoodResourceConfig`(1430-1438)→ 一个 `ResourceConfig`(顺带删死字段) | ≈ −9 行 | 低:字段逐项相同 |
 | M5 | **删 `FileService` 的死 `config` 字段 + 3 个 `file_service` 字段**(shared.rs:1028-1031、decompile/mod.rs:490/731、editors.rs:774/835/1432/1480、nemo_tests.rs:814) | 删掉一个 Arc 深拷贝链与 4 个死字段 | 低:全仓**零读取点**(已 grep 确认)。改动只在 `pub(crate)` 面 |
 | M6 | 11 份 `LazyLock<HashMap>` 索引样板(mapping.rs:288-376、nemo_mapping.rs:128-184)→ `flat_index/nested_index` 两个泛型自由函数 | ≈ −55 行 | 低:不用宏、语义(首命中优先)逐键等价 |
-| M7 | `tables_gen.rs` 删 `TOP_BLOCKS`(1203-1213)+ `KN_TYPES`(1216-1426),**并同步改生成器** `src/bin/gen_translate_tables.rs` | ≈ −234 行死数据 | 低:零生产调用点;必须改生成器否则下次重跑复活;顺带改写 2 条提到 `KN_TYPES` 的注释(translate/mod.rs:33、mapping.rs:909) |
+| M7 | `tables_gen.rs` 删 `TOP_BLOCKS`(1203-1213)+ `KN_TYPES`(1216-1426),**并同步改生成器** `src/bin/gen_translate_tables.rs` | ≈ −234 行死数据 | 低:零生产调用点;必须改生成器否则下次重跑复活;顺带改写 2 条提到 `KN_TYPES` 的注释(**实测锚点**:`translate/mod.rs:33`、`mapping.rs:916`) |
 | M8 | `ParsedEntity`(model.rs:570-573)单字段 newtype → 直接返回 `BlockTree` | ≈ −3 行 + 消噪声 | 低:全部调用点都立刻 `.tree` 拆包 |
 | M9 | `parse_int_prefix` 两份(nemo.rs:1260 / nemo_mapping.rs:495)→ `xml.rs`;整数化助手按 rounds/31 D5 合一 | ≈ −60 行 | 低:`parse_int_prefix` 两份逐字同构 |
 
@@ -94,6 +104,8 @@ assembly.rs …                                                       assembly.r
 | Q4 | `tree_to_json` 两份(nemo.rs:1445 vs model.rs:1779) | **不合并**:model 那份会补 `shield:false`(官方有、我们 NEMO 产物没有)⇒ 合并 = 改字节,而 NEMO 现在**没有 SHA 门**。先做两件低风险事:nemo 那份 `filter_map(ok())` 改成进报告;`fill_shield` 显式化为 `ShieldMode` 参数 | Phase 0.5 之后 |
 | Q5 | `escape_text`(nemo_mapping.rs:2098)在**属性位置**漏转 `"` | **本轮不改**:补转义 = 改产物字节,须先确认是"照抄官方"还是疏漏(bundle 锚点)+ NEMO SHA 门 | 作为**独立裁决**记录,不塞进重构 |
 
+| Q6 ✅ **已核实(2026-09-26):不合并** | **两套批处理执行器**是否同构:`assembly::run_items`(assembly.rs:2191)与 `shared::batch_map`(shared.rs:1100) | 逐行比对后**四项语义不同**:① 装箱方式 —— `run_items` 是**加权贪心装箱**(LPT,重活优先)vs `batch_map` 是**按并发等分 chunk**;② panic —— `run_items` 让 worker panic **冒泡**(`thread::scope` 默认)vs `batch_map` 用 `on_panic` **折成调用方错误**;③ 入参所有权 —— `Vec<I>` 按值 vs `&[T]` 借用;④ 返回 —— 直接 `Vec<T>` vs `Vec<Result<R,E>>`。合并只能二选一丢功能(丢掉装箱均衡会伤大作品并行度)⇒ 违"不过度抽象"约定 | **不做**(结论已记入 §3.3) |
+
 ### 3.3 明确不做(防重开,已决/已论证)
 
 - `mapping.rs` + `model.rs` 整体合一(4287 行,超上限 71%)、`model|assembly`(4839)、`nemo+nemo_mapping`(5244);
@@ -105,6 +117,8 @@ assembly.rs …                                                       assembly.r
 - `decompile::download_resources_parallel` 并入 `shared::batch_map`(语义不同:带预过滤 + 失败重试);
 - `nemo_tests.rs` 与其它测试归并(rounds/31 §2.2 已否决:要包一层 mod、`super::` 语义会变);
 - 两套 options 合并(破坏公开面;`upload` vs `upload_to_account` 语义不同)。
+- **两套批处理执行器**(`assembly::run_items` vs `shared::batch_map`)合并 —— 本轮已逐行核实**四项语义不同**(加权贪心装箱 / panic 折叠 vs 冒泡 / 所有权 / 返回类型),
+  合并必丢功能(见 §3.2 Q6);同理 `decompile::download_resources_parallel` 也不并入(带预过滤 + 失败重试)。
 
 ---
 
@@ -119,8 +133,8 @@ assembly.rs …                                                       assembly.r
 | **P2** | `KnEntity.source` 不再深拷 `nekoBlockJsonList` | `assembly.rs:847` `entity.as_object().cloned()`,而装配侧读 `source` 的位置(1135-1146、1336-1373、1376-1445、1476-1515)**从不读这个键** | 反向最大的一笔分配(9.4 MB 样本 ≈10⁵ 节点) | convert_bench `core` 列 + SHA | 低:过滤式克隆或改借用 `&'a Map` |
 | **P3** | `strip_unknown_blocks` 改就地消费 | assembly.rs:996 `cloned()`、999 `blocks.cloned()`、1027 `connections.cloned()`、1054/1057 逐块 `shadows` 双拷(即使无未知类型) | 同一份积木数据**3~4 次深拷 → 0** | 同上 | 低:`root.remove` 取所有权;**保持 BTreeMap 键序** ⇒ 字节不变 |
 | **P4** | `find_object_shadow` 惰性化 | `translate/mod.rs:523` **无条件**全文档扫描 + 字符串形态再做一次 `from_str`(:1080-1082);触发形态实测只 1 例(:518-521) | 正向入口省 3–10% e2e(≈ 一次 read+parse 量级) | SHA 不变 + 错误消息文本兼容(有测试引用) | 中:错误**触发时机**变化,需 grep 引用该文本的断言 |
-| **P5** | 逐块线性扫描 → `LazyLock` 索引 | `rc_plain`(mapping.rs:418)在**每个块**上扫 180 条且未命中走满(:730);`is_kitten_side`(:971-983)扫 367×2 | 正向 ~2.5M、反向 ~3.8M 次短串比较 ⇒ 换成哈希(≈ core 的 1–3%) | bench `core` 列(必须超出噪声才算) | 低:`or_insert` 保持"首命中优先" |
-| **P6** | `#[serde(flatten)] extra` 手写 | model.rs:94-97 的 `extra` 被 `from_value`/`to_value` **逐节点**调用(:133/146,调用点 translate/mod.rs:428、model.rs:796/1783) | 逐节点 serde 成本 **1.5–3×** ⇒ `core` 的大头 | 先跑 `model_tests/null_tolerance_tests` + 四样本 SHA | **中高**:`extra` 键序与 null 容错必须逐字节复现 |
+| **P5** | 逐块线性扫描 → `LazyLock` 索引 | `rc_plain`(mapping.rs:418)在**每个块**上扫 180 条且未命中走满(:730);`is_kitten_side`(:971-983)扫 367×2(表长实测:`KITTEN_TO_KN` ≈367、`KITTEN_MUTATION_TEXT` ≈180、`_SELECT` 粗计 ≈41 —— 侦察报 17,动手前精确数一次) | 正向 ~2.5M、反向 ~3.8M 次短串比较 ⇒ 换成哈希(≈ core 的 1–3%) | bench `core` 列(必须超出噪声才算) | 低:`or_insert` 保持"首命中优先" |
+| **P6** | `#[serde(flatten)] extra` 手写 | model.rs:94-97 的 `extra` 被 `from_value`/`to_value` **逐节点**调用(:133/146,调用点 translate/mod.rs:428、model.rs:796/1783) | 逐节点 serde 成本 **1.5–3×** ⇒ `core` 的大头 | 先跑 `model_tests/null_tolerance_tests` + 四样本 SHA | **中高**:`extra` 键序与 null 容错必须逐字节复现;且 `extra` 有**生产消费者**——`model.rs:1184/1751`(`def.extra.insert`/`body.extra`)与 **`assembly.rs:2445`**(remint 的 `remap_object(&mut node.extra)`)必须原样可用(只换反序列化机制,field 语义不动) |
 | **P7** | 正向装配解构移动 + `duplicate_ids` 借用 + `count()` 复用 | `assembly.rs:128` `entity.source.clone()`(按值收却仍克隆,与 :1110-1113 注释自相矛盾);:914-926 每节点 `to_string()`;:841/884 同一棵树数两遍 | 每实体一次深拷 + ~5k 次 String + 一趟 DFS | SHA 不变 | 低(注意 `blocks_total` 取点在映射**前**、`converted` 在编码后,语义不可互换) |
 | **P8** | 告警 String 延迟构造 | 反向 5235 块产 1817 条告警(rounds/23 §2 F);产生点 13 处(mapping.rs:735/1332/1350/1427-1430…;assembly.rs:347/374/878/890/1082/1091…) | 反向 `core` 的 5–15% | 告警**逐条同序**断言(procedure_library) | 低:不改公开枚举形状 |
 | **P9** | NEMO:去重复解析 + 分配 | `nemo.rs:624`/`nemo_mapping.rs:709` 用 `format!("<root>{xml}</root>")` 再解析;`has_return_blocks`(:738-742)把同一段**再包一次再解析**;含返回的条目共 3 次解析 + 1 次深拷;`text_content`(:1570)每次 2 次堆分配(万级 `<field>`);三趟 `replace_*` 递归(:641-646) | NEMO 前端解析时间**可省一半到三分之二** | **先补 NEMO SHA 门**(Phase 0.5) | 中:畸形输入下 `<root>` 包装与裸 `Parser::run` 行为不同 ⇒ 必须保持同样严格 |
@@ -205,7 +219,38 @@ assembly.rs …                                                       assembly.r
 
 ---
 
-## 8. 待你拍板的三点
+## 8. 自检记录(方案结论的逐条复核)
+
+**复核方式**:本轮在代码里逐条对照(不依赖侦察报告),命令 = grep/读锚点;`⚖️` 标记的是"未能证实、只能推断"的项。
+
+| 方案结论 | 复核证据 | 结果 |
+| -------- | -------- | ---- |
+| `save_raw` 默认 true,且 `translate_work` 没关它 | `decompile/mod.rs:35/63/476`、`convert/mod.rs:82`(无 `.save_raw(false)`)、`:48` 写完即 `remove_dir_all` | ✅ 成立(P1 有效) |
+| 反向 `KnEntity.source` 连 `nekoBlockJsonList` 一起深拷,装配侧不读它 | `assembly.rs:847` + 全仓 `nekoBlockJsonList` 读点(只 `:840` 的 parse 与测试) | ✅ 成立(P2 有效) |
+| `strip_unknown_blocks` 3~4 次深拷 | `assembly.rs:996/999/1027` 三处 `cloned()` + `:1054` 逐块 `shadows` 克隆 | ✅ 成立(P3 有效) |
+| 正向入口**无条件**扫全文档 + 二次 parse | `translate/mod.rs:523`(调用即条件)+ 实现 `:1075`;罕见形态实测只 1 例 | ✅ 成立(P4 有效) |
+| 逐块线性扫描 | `mapping.rs:418`(`rc_plain`)、`:730`(逐块两扫)、`is_kitten_side:971-983`(367×2) | ✅ 成立(P5 有效) |
+| `#[serde(flatten)] extra` 逐节点生效 | `model.rs:96-97`;调用点 `:133/146` | ✅ 成立;**并新增风险**:`extra` 有生产消费者(`model.rs:1184/1751`、`assembly.rs:2445` remint 的 `remap_object`) |
+| `FileService.config` 全仓零读取 | grep `.file_service`:只有 `editors.rs:835/1480` 把字段**转发**给别人,无人读 `.config` | ✅ 成立(M5 有效) |
+| `decompile/` 零内联测试 | grep `#[cfg(test)]`:`decompile/mod.rs`、`editors.rs` 均**无** | ✅ 成立(Phase 0.4 必要) |
+| `TranslateOptions` 有 9 个 `pub(crate)` 读取器 | 逐行数 `translate/mod.rs:187/191/195/199/203/207/211/240/245` | ✅ 成立(恰好 9 个) |
+| 报告层被兄弟模块向上依赖 | grep `use super::{TranslateReport`:mapping.rs:52、model.rs:2、nemo.rs:3-4、nemo_mapping.rs:1-2(assembly 经另一路径) | ✅ 成立 |
+| `TOP_BLOCKS`/`KN_TYPES` 零生产调用 | 全仓 grep:只有生成器 + 定义 + 2 条注释 | ✅ 成立(注释锚点实测是 `mapping.rs:916`,侦察给的 909 已修正) |
+| `assembly.rs` 有生产代码排在测试之后 | `assembly_tests` 1678-2168、生产 2169-2534、`remint_tests` 2536 | ✅ 成立(⇒ 并修正了"搬到 ≤2500"的算术) |
+| `kitten4_editor_knows` 不在热点(≈1.3×10⁵ 次比较) | 调用点量级估算 | ⚖️ **推断**,无 profile ⇒ 方案里已按"无数据不做"处理 |
+| P5 的收益(1~3% core) | 无 profile | ⚖️ **推断** ⇒ 必须靠同轮 A/B 的数 |
+| P9 的收益(NEMO 省 1/2~2/3 解析) | 无 profile(NEMO 连 `elapsed_ms` 都没有) | ⚖️ **推断** ⇒ Phase 0.5 补仪器后再量 |
+| `KITTEN_MUTATION_TEXT_SELECT` 表长 | 粗计 ≈41 vs 侦察报 17,**不一致** | ⚖️ 未定 ⇒ 动手前精算(不影响方向) |
+| `BlockJson::walk` 零生产调用 | grep 只命中**同名局部函数**,未精确区分方法 | ⚖️ 未定 ⇒ Phase 4 用 dead_code 复核 |
+| Q6 两套批处理执行器是否同构 | 逐行读 `assembly.rs:2191-2250` 与 `shared.rs:1100-1131` | ✅ **不同构**(装箱/panic/所有权/返回四点都不同)⇒ 结论"不合并" |
+
+**本轮复核改正的三处**:
+
+1. **`assembly.rs` 的算术错了**:只搬并行机(≈97 行)⇒ 2547,仍超 2500 软上限;要回到上限内必须**连 remint 段(≈256 行)一起搬** ⇒ 已改正,并把"重开 rounds/31 remint 合并决策"单列为 **Q2**;
+2. **文件数错了**:现 `convert/` 共 **14** 个 `.rs`(含 2 个测试文件),改后 **18**(原写"13→14");
+3. 锚点/口径:注释锚点 `mapping.rs:909` → **916**;`_SELECT` 表长待精算;`extra` 的消费者(assembly.rs:2445)补进 P6 风险。
+
+## 9. 待你拍板的三点(Q6 已核实并关闭)
 
 1. **是否按本方案执行**(Phase 0 → 1 → 2 → 3 → 4),还是只做其中某几段(例如"只要性能,不要搬迁")?
 2. **Q2**:`assembly.rs` 的调度器搬到 `pipeline.rs`(让文件回到 2500 行上限内)—— 做 or 不做?
