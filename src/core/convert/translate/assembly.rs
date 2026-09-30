@@ -866,41 +866,46 @@ fn strip_unknown_blocks(
     report: &mut TranslateReport,
 ) -> serde_json::Value {
     use serde_json::{Map, Value};
+    use std::collections::BTreeMap;
 
-    let Some(mut root) = blocks.as_object().cloned() else {
+    let knows = super::kitten4_vocab::kitten4_editor_knows;
+
+    // 就地消费(**rounds/37 P3**):入参本来就按值给到,原先却又 `as_object().cloned()` 整份拷一遍,
+    // 再单独拷 `blocks`/`connections` 表、逐块拷 `shadows` —— 一份 9 MB 级文档因此被深拷 3~4 次。
+    // 现在:拿走所有权 → `remove` 取字段 → 原地改。`serde_json::Map` 是 BTreeMap(按键排序),
+    // 重建与插入顺序都不影响产物字节。
+    let Value::Object(mut root) = blocks else {
         return blocks;
     };
-    let Some(table) = root.get("blocks").and_then(Value::as_object).cloned() else {
+    let Some(Value::Object(table)) = root.remove("blocks") else {
         return Value::Object(root);
     };
 
     let mut kept = Map::new();
-    let mut dropped: Map<String, Value> = Map::new();
+    // 计数用 `BTreeMap<String, u64>`(键序与原先的 `Map<String, Value>` 一致 ⇒ 告警顺序不变)
+    let mut dropped: BTreeMap<String, u64> = BTreeMap::new();
     for (id, block) in table {
-        let unknown = block
-            .get("type")
-            .and_then(Value::as_str)
-            .is_some_and(|kind| !super::kitten4_vocab::kitten4_editor_knows(kind));
-        if unknown {
-            let kind = block
-                .get("type")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string();
-            let count = dropped.get(&kind).and_then(Value::as_u64).unwrap_or(0);
-            dropped.insert(kind, json!(count + 1));
-        } else {
-            kept.insert(id, block);
+        let kind = block.get("type").and_then(Value::as_str);
+        match kind {
+            Some(kind) if !knows(kind) => *dropped.entry(kind.to_string()).or_insert(0) += 1,
+            _ => {
+                kept.insert(id, block);
+            }
         }
     }
+    // 一个都不认识才剔除:整表原样放回(内容与键序都与原来一致)
+    root.insert("blocks".into(), Value::Object(kept));
     if dropped.is_empty() {
         return Value::Object(root);
     }
 
     // 被剔掉的块不能再出现在任何父子关系里(否则编辑器照样解析失败)
-    if let Some(connections) = root.get("connections").and_then(Value::as_object).cloned() {
+    if let Some(Value::Object(connections)) = root.remove("connections") {
         let mut rebuilt = Map::new();
         for (parent, children) in connections {
+            let Some(Value::Object(kept)) = root.get("blocks") else {
+                break;
+            };
             if !kept.contains_key(&parent) {
                 continue;
             }
@@ -920,55 +925,63 @@ fn strip_unknown_blocks(
     // 影子 XML 里也可能写着编辑器不认识的类型(它是**字符串**,清积木表时扫不到)。
     // 实测某作品 9696 条影子里 174 条如此(`get_split_options` 占 158)⇒ 一并清成空串
     // (库里既有的占位写法),并逐类计入报告。**必须在把 `kept` 交给 root 之前就地改**。
-    let mut shadow_fixed: Map<String, Value> = Map::new();
-    for block in kept.values_mut() {
-        let Some(map) = block.as_object_mut() else {
-            continue;
-        };
-        let Some(shadows) = map.get("shadows").and_then(Value::as_object).cloned() else {
-            continue;
-        };
-        let mut new_shadows = shadows.clone();
-        let mut changed = false;
-        for (slot, xml) in shadows {
-            let Some(text) = xml.as_str() else { continue };
-            let Some(start) = text.find("type=\"") else {
+    // 先探测"这一块到底有没有不认识的影子",没有就整块跳过(原先无条件 `shadows.clone()` 两遍)。
+    let mut shadow_fixed: BTreeMap<String, u64> = BTreeMap::new();
+    if let Some(Value::Object(blocks)) = root.get_mut("blocks") {
+        for block in blocks.values_mut() {
+            let Some(map) = block.as_object_mut() else {
                 continue;
             };
-            let rest = &text[start + 6..];
-            let Some(end) = rest.find('"') else { continue };
-            let kind = &rest[..end];
-            if !super::kitten4_vocab::kitten4_editor_knows(kind) {
-                new_shadows.insert(slot.clone(), Value::String(String::new()));
-                changed = true;
-                let count = shadow_fixed.get(kind).and_then(Value::as_u64).unwrap_or(0);
-                shadow_fixed.insert(kind.to_string(), json!(count + 1));
+            let needs_fix = map
+                .get("shadows")
+                .and_then(Value::as_object)
+                .is_some_and(|shadows| {
+                    shadows
+                        .values()
+                        .any(|xml| shadow_type(xml).is_some_and(|kind| !knows(kind)))
+                });
+            if !needs_fix {
+                continue;
             }
-        }
-        if changed {
+            let Some(Value::Object(shadows)) = map.remove("shadows") else {
+                continue;
+            };
+            let mut new_shadows = Map::new();
+            for (slot, xml) in shadows {
+                match shadow_type(&xml) {
+                    Some(kind) if !knows(kind) => {
+                        *shadow_fixed.entry(kind.to_string()).or_insert(0) += 1;
+                        new_shadows.insert(slot, Value::String(String::new()));
+                    }
+                    _ => {
+                        new_shadows.insert(slot, xml);
+                    }
+                }
+            }
             map.insert("shadows".into(), Value::Object(new_shadows));
         }
     }
 
-    root.insert("blocks".into(), Value::Object(kept));
     for (kind, count) in shadow_fixed {
         report.warn(TranslateWarning::UnmappedBlock {
-            kind: format!(
-                "{kind}(Kitten4 编辑器不认识,已清空 {} 条影子)",
-                count.as_u64().unwrap_or(0)
-            ),
+            kind: format!("{kind}(Kitten4 编辑器不认识,已清空 {count} 条影子)"),
         });
     }
-
     for (kind, count) in dropped {
         report.warn(TranslateWarning::UnmappedBlock {
-            kind: format!(
-                "{kind}(Kitten4 编辑器不认识,已剔除 {} 块)",
-                count.as_u64().unwrap_or(0)
-            ),
+            kind: format!("{kind}(Kitten4 编辑器不认识,已剔除 {count} 块)"),
         });
     }
     Value::Object(root)
+}
+
+/// 影子 XML 串里的 `type="…"` 取值(没有则 `None`)
+fn shadow_type(xml: &serde_json::Value) -> Option<&str> {
+    let text = xml.as_str()?;
+    let start = text.find("type=\"")? + 6;
+    let rest = &text[start..];
+    let end = rest.find('"')?;
+    Some(&rest[..end])
 }
 
 /// 装配阶段需要的舞台口径(打包传参:横竖屏 + 画布尺寸 + KN 舞台尺寸)

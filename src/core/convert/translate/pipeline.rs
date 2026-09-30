@@ -467,11 +467,22 @@ pub(crate) fn convert_kn_document(
                 model::parse_kn_entity(entity.get("nekoBlockJsonList").unwrap_or(&Value::Null))?;
             report.blocks_total += tree.count();
             mapping::translate_kn_to_kitten(&mut tree, landscape, report);
+            // P2(rounds/37):实体对象里最大的键是 `nekoBlockJsonList`(上一步已解析成 `tree`),
+            // 而装配侧读 `source` 只取标量/小数组(名字、坐标、造型、`actorIds`…),**从不读它**
+            // ⇒ 克隆时跳过,省下整份 KN 积木 JSON 的第二次深拷(9 MB 级作品 ≈10⁵ 个节点)。
+            let mut source = serde_json::Map::new();
+            if let Some(object) = entity.as_object() {
+                for (key, value) in object {
+                    if key != "nekoBlockJsonList" {
+                        source.insert(key.clone(), value.clone());
+                    }
+                }
+            }
             entities.push(assembly::KnEntity {
                 source_id: id.clone(),
                 is_scene,
                 tree,
-                source: entity.as_object().cloned().unwrap_or_default(),
+                source,
             });
         }
     }
