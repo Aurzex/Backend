@@ -8,6 +8,7 @@ mod reverse_tests_inner {
     //! 以及「KN → Kitten4 → KN 类型多重集守恒」(docs/rounds/20 §7 Phase 4 验收)。
 
     use super::assembly::*;
+    use super::pipeline::*;
     use super::*;
     use crate::core::convert::translate::model::{BlockJson, BlockTree};
     use crate::core::convert::translate::{mapping, model};
@@ -769,6 +770,10 @@ mod reverse_tests_inner {
     ];
 
     /// 反向报告的"剔除量":(被剔除的块数, 被清空的影子数)。
+    ///
+    /// ⚠️ **冻结协议(rounds/37 §1 0.3)**:本函数**反解中文告警文案**(`已剔除 N` / `已清空 N`)。
+    /// ⇒ `assembly.rs::strip_unknown_blocks` 里那两个 marker 文案**不得改动**;
+    /// 要改文案必须先改这里(或把计数改成结构化字段),否则读数会静默变 0、预算门变成"永远通过"。
     ///
     /// 编辑器不认识的类型**必须**剔除/清空(否则编辑器加载整份工作区失败,rounds/34 §4nonies),
     /// `strip_unknown_blocks` 把它们记成 [`TranslateWarning::UnmappedBlock`],

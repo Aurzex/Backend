@@ -1,7 +1,6 @@
-use super::TranslateReport;
-use super::TranslateWarning;
 use super::model::{BlockJson, BlockTree, IdSource};
-use super::nemo::XmlNode;
+use super::report::{TranslateReport, TranslateWarning};
+use super::xml::XmlNode;
 use crate::core::convert::shared::XHTML;
 // 文本占位积木集合的唯一定义在生成物 `tables_gen`(原先此处手抄了一份逐字节相同的副本,
 // 见 `docs/rounds/31` §3.6 N1);谓词复用 `mapping` 的那一份
@@ -23,7 +22,7 @@ use std::sync::LazyLock;
 // —— 槽位名要看子积木的**映射后**类型、影子字段名要用**映射后**类型去查 `SHADOW_FIELD_NAME_MAP`,
 // 拆成两段就必然把同一个状态机复制一遍。所以本模块就是 NEMO 的"前端 + 映射"一体件,入口是
 // [`translate_nemo_to_kn`](与 Kitten 侧 `mapping::translate_kitten_to_kn` 同层同义):输入是
-// **已解析、已过前置改写**的积木 XML 节点(解析/序列化在 [`super::nemo_xml`]),输出 KN 的
+// **已解析、已过前置改写**的积木 XML 节点(解析/序列化在 [`super::xml`]),输出 KN 的
 // [`BlockTree`];文档级管线(骨架、版本迁移、资源 url、变量/舞台归一)在 [`super::nemo`]。
 // ## 语义要点(对应 docs/rounds/27 §9.2/§9.3)
 // - **槽位覆盖语义**:`<value name="A"><shadow …/><block …/></value>` → `inputs["A"]` = 那个块、
@@ -561,7 +560,7 @@ fn select_text(map: &[(&str, &str)], key: &str) -> String {
 
 /// 一份积木 XML(已解析 + 已过前置改写)→ KN 的 [`BlockTree`]
 ///
-/// `roots` 来自 [`super::nemo::parse_fragment`](`<root>` 包装的直接子元素);
+/// `roots` 来自 [`super::xml::parse_fragment`](`<root>` 包装的直接子元素);
 /// `subject` 决定 `currentActor` / `currentProcedure`(官方 `parseBlocksXML` 的第二参)。
 pub(crate) fn translate_nemo_to_kn(
     roots: &[XmlNode],
@@ -706,9 +705,9 @@ pub(crate) fn nemo_parse_procedures(
     let mut out = Vec::with_capacity(plan.len());
     for (entry, params) in plan {
         let mut tree = match &entry.blocks_xml {
-            Some(xml) => match super::nemo::parse_fragment(&format!("<root>{xml}</root>")) {
+            Some(xml) => match super::xml::parse_fragment(&format!("<root>{xml}</root>")) {
                 Ok(roots) => {
-                    report.blocks_total += super::nemo::count_source_elements(&roots);
+                    report.blocks_total += super::xml::count_source_elements(&roots);
                     translate_nemo_to_kn(&roots, NemoSubject::Params(&params), ctx, ids, report)
                 }
                 Err(error) => {
@@ -736,7 +735,7 @@ pub(crate) fn nemo_parse_procedures(
 }
 
 fn has_return_blocks(xml: &str) -> bool {
-    super::nemo::parse_fragment(&format!("<root>{xml}</root>"))
+    super::xml::parse_fragment(&format!("<root>{xml}</root>"))
         .map(|roots| contains_return_block(&roots))
         .unwrap_or(false)
 }

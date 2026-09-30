@@ -39,17 +39,20 @@
 use crate::core::convert::shared::XHTML;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
-use std::ops::Range;
 
 use serde_json::{Value, json};
 
 use super::model::IdSource;
 use super::model::{BlockJson, BlockTree};
+use super::report::{TranslateReport, TranslateWarning};
 use super::tables_gen::{
     KITTEN_MUTATION_TEXT, KITTEN_MUTATION_TEXT_SELECT, KITTEN_TO_KN, SHADOW_XML,
     TEXT_PLACEHOLDER_BLOCKS, ZH_NAME_BY_TYPE,
 };
-use super::{TranslateReport, TranslateWarning};
+use super::xml::{
+    attr_span, attr_value, decrement_items, js_text, math_number_node, math_number_shadow,
+    mutation_body, pure_list_shadow, set_attr_value, start_tag_end,
+};
 
 #[rustfmt::skip]
 const PLACEHOLDERS_STATEMENT: &[&str] = &["bcm_translator_text_execution_block", "bcm_translator_text_event_block"];
@@ -301,18 +304,6 @@ fn shadow_xml(kind: &str, slot: &str) -> Option<&'static str> {
 
 // ---------------------------------------------------------------- 查表
 
-/// JS 属性访问 / `String(v)` / 模板拼接的等价物(缺失 → `undefined`)
-fn js_text(value: Option<&Value>) -> String {
-    match value {
-        None => "undefined".to_string(),
-        Some(Value::String(s)) => s.clone(),
-        Some(Value::Null) => "null".to_string(),
-        Some(Value::Number(n)) => n.to_string(),
-        Some(Value::Bool(b)) => b.to_string(),
-        Some(other) => other.to_string(),
-    }
-}
-
 /// JS 对象取键:字符串/数字/布尔都能当键
 fn value_key(value: &Value) -> Option<Cow<'_, str>> {
     match value {
@@ -462,55 +453,6 @@ fn mutation_xml(text: &str) -> String {
 
 // ---------------------------------------------------------------- 影子 / mutation 的字符串级 XML 手术
 
-/// 从整段 XML 取开始标签里 `attr="…"` 的值(先按引号感知找标签尾,再取属性)
-/// 唯一的 XML 属性读取实现:本模块与 `neko.rs` 的 mutation 改写共用
-pub(crate) fn xml_attr_value<'a>(xml: &'a str, attr: &str) -> Option<&'a str> {
-    attr_value(&xml[..start_tag_end(xml)?], attr)
-}
-
-/// 开始标签里 `attr="…"` 的值区间(只认双引号属性;属性名前须是空白,避免 `xname=` 误命中)
-fn attr_span(tag: &str, attr: &str) -> Option<Range<usize>> {
-    let bytes = tag.as_bytes();
-    let mut from = 0;
-    loop {
-        let at = from + tag[from..].find(attr)?;
-        let name_end = at + attr.len();
-        if (at == 0 || bytes[at - 1].is_ascii_whitespace())
-            && bytes.get(name_end) == Some(&b'=')
-            && bytes.get(name_end + 1) == Some(&b'"')
-        {
-            let start = name_end + 2;
-            return Some(start..start + tag[start..].find('"')?);
-        }
-        from = name_end;
-    }
-}
-
-fn attr_value<'a>(tag: &'a str, attr: &str) -> Option<&'a str> {
-    attr_span(tag, attr).map(|span| &tag[span])
-}
-
-/// 替换开始标签里某个属性的值(其余字节原样保留)
-fn set_attr_value(tag: &str, attr: &str, value: &str) -> String {
-    match attr_span(tag, attr) {
-        Some(span) => format!("{}{}{}", &tag[..span.start], value, &tag[span.end..]),
-        None => tag.to_string(),
-    }
-}
-
-/// `<` 到开始标签结束(跳过引号里的 `>`)
-fn start_tag_end(xml: &str) -> Option<usize> {
-    let mut quoted = false;
-    for (i, b) in xml.as_bytes().iter().enumerate().skip(1) {
-        match b {
-            b'"' => quoted = !quoted,
-            b'>' if !quoted => return Some(i + 1),
-            _ => {}
-        }
-    }
-    None
-}
-
 /// `transformShadowXml`(77830):影子 XML 的 `type`、每个 `<field>` 的 `name` 与文本一起过映射表
 ///
 /// 入参 `xml` **按值**收:调用方手里本来就是从节点里搬出来的 `String`,不需要改写时
@@ -569,43 +511,6 @@ fn transform_shadow_xml(block_type: &str, xml: String) -> String {
     out
 }
 
-/// 官方 `text_select_changeable` 修补:`items` 属性减一(解析失败则原样保留)
-fn decrement_items(xml: &str) -> String {
-    match attr_span(xml, "items").and_then(|span| {
-        xml[span.clone()]
-            .trim()
-            .parse::<i64>()
-            .ok()
-            .map(|n| (span, n))
-    }) {
-        Some((span, n)) => format!("{}{}{}", &xml[..span.start], n - 1, &xml[span.end..]),
-        None => xml.to_string(),
-    }
-}
-
-/// 官方两个算术包装里共用的 `math_number` 影子串(默认值恒为 `1`)
-pub(crate) fn math_number_shadow(id: &str, num: &str) -> String {
-    format!(
-        "<shadow xmlns=\"{XHTML}\" type=\"math_number\" id=\"{id}\" visible=\"visible\"><field constraints=\"-Infinity,Infinity,0,\" name=\"NUM\">{num}</field></shadow>"
-    )
-}
-
-/// `math_number` 子积木
-pub(crate) fn math_number_node(id: String, num: &str, parent_id: Option<String>) -> BlockJson {
-    BlockJson {
-        kind: "math_number".to_string(),
-        id: Some(id),
-        is_shadow: true,
-        fields: BTreeMap::from([(String::from("NUM"), Value::String(num.to_string()))]),
-        field_constraints: Some(
-            json!({"NUM": {"min": null, "max": null, "precision": 0, "mod": null}}),
-        ),
-        is_output: true,
-        parent_id,
-        ..Default::default()
-    }
-}
-
 /// 官方 `GC` 的两个算术包装:`原值 op 常量`(横屏坐标 `/1.3`;`set_camera_alpha` 是 `100 - x`)
 fn wrap_arithmetic(
     ctx: &mut Ctx,
@@ -661,13 +566,6 @@ fn pure_list_get(list: Value, parent_id: Option<String>, shadow_id: String) -> B
         parent_id,
         ..Default::default()
     }
-}
-
-fn pure_list_shadow(id: &str, list: &Value) -> String {
-    format!(
-        "<shadow xmlns=\"{XHTML}\" type=\"pure_list_get\" id=\"{id}\" visible=\"visible\" inline=\"true\"><field name=\"list\">{}</field></shadow>",
-        js_text(Some(list))
-    )
 }
 
 // ---------------------------------------------------------------- 逐积木变换(parseBlock)
@@ -1207,16 +1105,6 @@ fn increment_items(xml: &str) -> String {
     }) {
         Some((span, n)) => format!("{}{}{}", &xml[..span.start], n + 1, &xml[span.end..]),
         None => xml.to_string(),
-    }
-}
-
-/// `<mutation …>正文</mutation>` 的正文(占位积木的降级文本就存在这里)
-fn mutation_body(xml: &str) -> &str {
-    let Some(open) = xml.find('>') else { return "" };
-    let rest = &xml[open + 1..];
-    match rest.rfind("</mutation>") {
-        Some(close) => &rest[..close],
-        None => rest,
     }
 }
 
@@ -1768,17 +1656,6 @@ fn disable_audio_in_chain(node: &mut BlockJson) {
 
 #[cfg(test)]
 mod tests {
-    /// P0-3 回归:标签里前一个属性值含 `>` 时,标签尾必须按引号感知找。
-    /// 旧实现(neko.rs 的 `xml.find('>')`)会把标签截断在引号内的 `>`,导致后面的属性读不到。
-    #[test]
-    fn xml_attr_value_is_quote_aware_about_tag_end() {
-        let xml = r#"<mutation items="2" def_id="a>b" name="x">"#;
-        assert_eq!(xml_attr_value(xml, "name"), Some("x"));
-        assert_eq!(xml_attr_value(xml, "def_id"), Some("a>b"));
-        assert_eq!(xml_attr_value(xml, "items"), Some("2"));
-        assert_eq!(xml_attr_value(xml, "missing"), None);
-    }
-
     use super::*;
     use crate::core::convert::shared::EditorType;
     use crate::core::convert::translate::TargetEditor;

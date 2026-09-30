@@ -1,5 +1,5 @@
-use super::mapping::{math_number_node, math_number_shadow, xml_attr_value};
-use super::{TranslateReport, TranslateWarning};
+use super::report::{TranslateReport, TranslateWarning};
+use super::xml::{math_number_node, math_number_shadow, xml_attr_value};
 use crate::core::convert::shared::XHTML;
 use crate::core::convert::shared::{DecompilerError, IdGenerator, Result};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -435,6 +435,10 @@ impl IdSource {
     }
 
     /// UUID v4 形态(实体 / 程序集 / KN 影子块)
+    ///
+    /// ⚠️ **冻结协议(rounds/37 §1 0.3)**:确定性模式下产物里的 id 是"第几次铸造"的纯函数
+    /// (`{counter:012x}`)⇒ **铸造顺序就是产物的一部分**:任何调整铸造次数/次序的重构
+    /// (含合并两次插入、延迟到需要时才铸)都会整体偏移 id,**必须先解释再接受 SHA 变化**。
     pub(crate) fn uuid(&mut self) -> String {
         if self.record.is_some() {
             return self.temp(MintKind::Uuid);
