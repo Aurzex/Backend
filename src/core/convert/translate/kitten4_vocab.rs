@@ -116,3 +116,35 @@ pub(crate) const KITTEN4_EDITOR_TYPES: &[&str] = &[
 pub(crate) fn kitten4_editor_knows(kind: &str) -> bool {
     KITTEN4_EDITOR_TYPES.binary_search(&kind).is_ok()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{KITTEN4_EDITOR_TYPES, kitten4_editor_knows};
+
+    /// 表必须**严格升序无重复** —— [`kitten4_editor_knows`] 走 `binary_search`,表一旦无序,
+    /// 查询会**静默**答错:该认识的答"不认识" ⇒ 积木被写出阶段剔掉;不认识的答"认识" ⇒
+    /// 产物让编辑器**整份加载失败**(`docs/rounds/34` §4nonies)。
+    /// 重导词表(文件头的流程)最容易犯这个错,所以钉一条断言。
+    #[test]
+    fn editor_type_list_is_sorted_and_queryable() {
+        assert!(
+            KITTEN4_EDITOR_TYPES
+                .windows(2)
+                .all(|pair| pair[0] < pair[1]),
+            "KITTEN4_EDITOR_TYPES 必须严格升序且无重复(重导后记得 sort)"
+        );
+        // 二分查找在**首尾与中间**都要真能命中(只查几个点就够:有序性由上面那条守)
+        for probe in [
+            KITTEN4_EDITOR_TYPES[0],
+            KITTEN4_EDITOR_TYPES[KITTEN4_EDITOR_TYPES.len() / 2],
+            KITTEN4_EDITOR_TYPES[KITTEN4_EDITOR_TYPES.len() - 1],
+            "math_number",
+            "get_midis",
+            // 反向"还原不出原类型"时的兜底标记(rounds/38),它们必须编辑器认识
+            "incompatible_block",
+            "incompatible_output_block",
+        ] {
+            assert!(kitten4_editor_knows(probe), "查不到 `{probe}`");
+        }
+    }
+}
