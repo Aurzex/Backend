@@ -1,6 +1,10 @@
 {
   "kitten4-0.3MB-kn": "d653a8a5f8dd224433c08e628328917ace9868cb9263b202c8a62a2fd660047f",
   "kitten4-0.3MB-kn#meta": {
+    "alloc_bytes_parallel": 10436880,
+    "alloc_bytes_serial": 10431224,
+    "alloc_count_parallel": 68750,
+    "alloc_count_serial": 68665,
     "blocks_converted": 439,
     "blocks_total": 374,
     "output_bytes": 308057,
@@ -10,6 +14,10 @@
   },
   "kitten4-10.8MB-kn": "bafeb50c0a8e4eeb13c41019d17f72eb6cda64657aa69c66bd0099b7141f0d77",
   "kitten4-10.8MB-kn#meta": {
+    "alloc_bytes_parallel": 324548989,
+    "alloc_bytes_serial": 324403213,
+    "alloc_count_parallel": 2125977,
+    "alloc_count_serial": 2125796,
     "blocks_converted": 14024,
     "blocks_total": 12764,
     "output_bytes": 9661640,
@@ -19,6 +27,10 @@
   },
   "kn-3.7MB-kitten4": "0d3cf2e328fe2d2272c8cbb7a5cdd4fa17d2cdb5165b5ec79c0753e7dc36327b",
   "kn-3.7MB-kitten4#meta": {
+    "alloc_bytes_parallel": 64556062,
+    "alloc_bytes_serial": 64556062,
+    "alloc_count_parallel": 264400,
+    "alloc_count_serial": 264400,
     "blocks_converted": 1597,
     "blocks_total": 1597,
     "output_bytes": 4117977,
@@ -28,6 +40,10 @@
   },
   "kn-9.4MB-kitten4": "dac08917730d597136ccfc02cf005dfb0baa3f6ccd3481ff2789d2554ba4bdfe",
   "kn-9.4MB-kitten4#meta": {
+    "alloc_bytes_parallel": 192871996,
+    "alloc_bytes_serial": 192871996,
+    "alloc_count_parallel": 995799,
+    "alloc_count_serial": 995799,
     "blocks_converted": 4624,
     "blocks_total": 5235,
     "output_bytes": 9775778,
@@ -37,6 +53,10 @@
   },
   "nemo-3.4MB-kn": "67641a0a6193148287fb25146516681e6b50afff441bd72a14006b3d95a13b4f",
   "nemo-3.4MB-kn#meta": {
+    "alloc_bytes_parallel": 214586067,
+    "alloc_bytes_serial": 214586067,
+    "alloc_count_parallel": 1629387,
+    "alloc_count_serial": 1629387,
     "blocks_converted": 13637,
     "blocks_total": 15482,
     "output_bytes": 7733684,
@@ -47,6 +67,10 @@
   },
   "nemo-old-1.5MB-kn": "4b6038f95aa76e1575f07a8c1b0b53bb59258054cb24b714a16939efa794ce4f",
   "nemo-old-1.5MB-kn#meta": {
+    "alloc_bytes_parallel": 70484092,
+    "alloc_bytes_serial": 70484092,
+    "alloc_count_parallel": 506399,
+    "alloc_count_serial": 506399,
     "blocks_converted": 4421,
     "blocks_total": 4862,
     "output_bytes": 2383376,

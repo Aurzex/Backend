@@ -45,18 +45,108 @@
 //! 逐样本透传,并作为 `#meta.source_version` 记进基线。不传就把"未迁移"的产物锁成基线:
 //! 门是绿的,证的东西却是错的。
 //!
+//! **分配计数(W7)**:本二进制挂了一个**只统计**的 `CountingAllocator`(见文件内定义),把每个样本
+//! 的分配读数写进 `#meta` 并打印。计量窗口与口径(**数字没有窗口就无意义**):
+//!
+//! - **窗口** = **一次** `translate_file` 调用。参数构造在快照**之前**,读产物算 SHA256 / 打印 / 样本
+//!   元信息都在快照**之后**;取值轮次 = `RUNS` 轮的**最后一轮**(warmup 与其余轮**不计入**);
+//! - 窗口**包含**:读源文件 + `serde_json` 解析 + 转化内核 + 序列化 + 流式写盘(≈ `e2e` 那一列);
+//!   窗口**不含**:读产物算 SHA256、`std::fs::metadata`、报告打印、测试框架自身;
+//! - **串行腿与并行腿分开记**(`alloc_*_serial` / `alloc_*_parallel`):`thread::scope` 的线程、
+//!   任务包、排队本身也要分配,并发 1 与 8 本来就不是一回事;
+//! - 读数是**全进程累计的两点差**(不是"窗口内独占"),所以快照之间的**其它线程**若也在分配会计进来
+//!   —— 并行腿的快照取在 `translate_file` 返回之后(此时工作线程已 join),故抖动**只可能**来自
+//!   测试框架的旁观线程;实测同机连跑 4 次、6 个样本 × 2 条腿的读数**逐位相同**(证据见提交信息),
+//!   所以并行腿也一并进基线;若将来出现抖动,就把不稳定的那条腿去掉,只留串行腿;
+//! - **活性自检**(一次性,已复原):临时在 `translate_file` 入口插一次 `black_box(vec![0u8; 1<<20])`,
+//!   6 个样本 × 2 条腿**全部**恰好 +1 次 / +1.0 MiB,产物 SHA 门仍绿;撤掉后读数逐位回到上表
+//!   —— 证明计数器数的是真分配、窗口真的罩住被测调用;
+//! - **跨机不可比**(分配器版本、核数、线程数、地址空间布局都会变)⇒ 这两组键**只作本地判据**,
+//!   **先不当门**:它们写进 `#meta`(基线里看得见、能 diff),但默认模式的 `#meta` 断言会**跳过**
+//!   这几个键(见 [`META_RECORD_ONLY`])。跑稳之后再考虑升级成"只许变小"。
+//!
 //! 测量纪律:这台机器(笔记本/CPU 调频)上**绝对毫秒会漂**(同一二进制两次跑
 //! `core` 差 20–40% 是常事),所以:
 //! - 每个样本取 `RUNS` 次的**最小值**(≈最少干扰);
 //! - 判断"新旧谁快"要在**同一轮内并排比**(见 `convert_facade_flow_bench`),
 //!   跨轮比绝对值只能看量级,不能当结论。
 
+use std::alloc::{GlobalAlloc, Layout, System};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use backend::core::convert::EditorType;
 use backend::core::convert::translate::{TargetEditor, TranslateOptions, translate_file};
 use sha2::{Digest, Sha256};
+
+// ---------------------------------------------------------------------------
+// 分配计数(W7)
+// ---------------------------------------------------------------------------
+
+/// 只统计、不改分配行为的全局分配器:数**次数**与**请求字节**(`layout.size()`)。
+///
+/// 唯一的 `unsafe`:实现 `GlobalAlloc` 必须 `unsafe impl`,两个方法内部各自直接转发给
+/// [`System`](系统分配器),不碰指针算术、不加任何逻辑 ⇒ 除计数外与默认分配器逐字节同行为。
+/// `realloc` / `alloc_zeroed` **不覆写**:std 的默认实现分别落在 `alloc` + `dealloc` 与 `alloc` 上
+/// ⇒ 重分配算 1 次、清零分配算 1 次,口径统一且与实现无关。
+struct CountingAllocator;
+
+static ALLOC_COUNT: AtomicU64 = AtomicU64::new(0);
+static ALLOC_BYTES: AtomicU64 = AtomicU64::new(0);
+
+unsafe impl GlobalAlloc for CountingAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        ALLOC_COUNT.fetch_add(1, Ordering::Relaxed);
+        ALLOC_BYTES.fetch_add(layout.size() as u64, Ordering::Relaxed);
+        // SAFETY:本分配器的契约就是"原样转发给 System";`layout` 由调用方按其契约给出。
+        unsafe { System.alloc(layout) }
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        // SAFETY:同 `alloc`(`ptr` 由上面对 `System.alloc` 的转发产出,且 `layout` 与之一致)。
+        unsafe { System.dealloc(ptr, layout) }
+    }
+}
+
+#[global_allocator]
+static ALLOCATOR: CountingAllocator = CountingAllocator;
+
+/// 取一次分配快照:`(次数, 累计请求字节)`
+///
+/// `Relaxed` 够用:并行腿的快照取在 `translate_file` 返回**之后**,此时 `thread::scope` 已经
+/// join 过所有工作线程(join 建立 happens-before),它们的 `fetch_add` 必然可见。
+fn alloc_snapshot() -> (u64, u64) {
+    (
+        ALLOC_COUNT.load(Ordering::Relaxed),
+        ALLOC_BYTES.load(Ordering::Relaxed),
+    )
+}
+
+/// 快照差(窗口内的分配)
+fn alloc_delta(before: (u64, u64)) -> (u64, u64) {
+    let now = alloc_snapshot();
+    (now.0 - before.0, now.1 - before.1)
+}
+
+/// `#meta` 里**只记录、不作门**的键:跨机不可比,先只作本地判据(见模块文档的"分配计数"一节)
+const META_RECORD_ONLY: &[&str] = &[
+    "alloc_count_serial",
+    "alloc_bytes_serial",
+    "alloc_count_parallel",
+    "alloc_bytes_parallel",
+];
+
+/// 去掉 [`META_RECORD_ONLY`] 之后的 `#meta`,用于与基线比较(那些键写进基线但**不参与断言**)
+fn meta_for_assert(meta: &serde_json::Value) -> serde_json::Value {
+    let mut meta = meta.clone();
+    if let Some(object) = meta.as_object_mut() {
+        for key in META_RECORD_ONLY {
+            object.remove(*key);
+        }
+    }
+    meta
+}
 
 /// 每个样本重复次数(取**最小值**:CPU 基准里最小值≈最少干扰,比中位数稳)
 const RUNS: usize = 5;
@@ -202,6 +292,9 @@ struct Measured {
     blocks_converted: usize,
     warnings: usize,
     sha256: String,
+    /// 分配计数窗口读数(见模块文档"分配计数"):窗口 = 一轮 `translate_file`
+    alloc_count: u64,
+    alloc_bytes: u64,
 }
 
 fn measure(sample: &Sample, dir: &Path, entity_concurrency: usize) -> Measured {
@@ -214,8 +307,9 @@ fn measure(sample: &Sample, dir: &Path, entity_concurrency: usize) -> Measured {
     let mut ser = Vec::new();
     let mut e2e = Vec::new();
     let mut last: Option<(std::path::PathBuf, String, usize, usize, usize, u64, usize)> = None;
+    let mut alloc = (0u64, 0u64);
 
-    for _ in 0..RUNS {
+    for run in 0..RUNS {
         let t = Instant::now();
         let text = std::fs::read_to_string(sample.path).expect("读样本失败");
         read.push(ms(t.elapsed()));
@@ -225,13 +319,18 @@ fn measure(sample: &Sample, dir: &Path, entity_concurrency: usize) -> Measured {
         parse.push(ms(t.elapsed()));
         drop(value);
 
+        // 分配窗口(W7,见模块文档):**只**包住这一轮 `translate_file`。
+        // - 参数构造(`sample_options` 会 clone 版本号等)提到快照**之前**;
+        // - 读数取**最后一轮**(前 `RUNS-1` 轮 + warmup 已经把一次性铺垫吃完);
+        // - `Instant::now()` 自身不分配,放在快照之后也不影响 `e2e` 的口径。
+        let options = sample_options(sample, dir, entity_concurrency);
+        let alloc_before = (run == RUNS - 1).then(alloc_snapshot);
         let t = Instant::now();
-        let outcome = translate_file(
-            Path::new(sample.path),
-            sample.target,
-            sample_options(sample, dir, entity_concurrency),
-        )
-        .expect("转化失败");
+        let outcome =
+            translate_file(Path::new(sample.path), sample.target, options).expect("转化失败");
+        if let Some(before) = alloc_before {
+            alloc = alloc_delta(before);
+        }
         // 声明的 `source_editor` 由内容判定(`detect_editor`)复核:样本被换成别的格式/编辑器时,
         // 下面那条"正向 Kitten4 样本的并发必须真的开起来"的空门守卫就不再成立(它按本字段判)
         assert_eq!(
@@ -273,6 +372,8 @@ fn measure(sample: &Sample, dir: &Path, entity_concurrency: usize) -> Measured {
         blocks_converted,
         warnings,
         sha256,
+        alloc_count: alloc.0,
+        alloc_bytes: alloc.1,
     }
 }
 
@@ -426,6 +527,16 @@ fn convert_bench() {
             },
         );
 
+        // 分配读数(W7):**只打印 + 记进 `#meta`**,不参与断言(跨机不可比,见模块文档)
+        println!(
+            "└ {} 分配(窗口 = 一轮 translate_file;串行腿 / 并发 {PARALLEL_FACTOR} 腿):{} 次 / {:.1} MiB  ·  {} 次 / {:.1} MiB",
+            sample.label,
+            m.alloc_count,
+            m.alloc_bytes as f64 / (1024.0 * 1024.0),
+            p.alloc_count,
+            p.alloc_bytes as f64 / (1024.0 * 1024.0),
+        );
+
         // 空门守卫:若本机可用核数 ≥ 2,则**正向 Kitten4→KN** 样本的"实体并发=8"必须真的开起
         // 多线程,否则这一行只是"串行 vs 串行",SHA 相同毫无意义(`taskset -c 2` 就会这样:
         // `available_parallelism` 按亲和掩码算,单核下会被折成 1)。
@@ -455,6 +566,13 @@ fn convert_bench() {
             "blocks_total": m.blocks_total,
             "blocks_converted": m.blocks_converted,
             "warnings": m.warnings,
+            // 分配计数(W7):窗口 = 那一腿的一轮 `translate_file`(定义见模块文档)。
+            // 串行/并行两腿分开记;这两组键属于 [`META_RECORD_ONLY`] ⇒ **写进基线但不参与断言**
+            // (跨机不可比,先只作本地判据)。
+            "alloc_count_serial": m.alloc_count,
+            "alloc_bytes_serial": m.alloc_bytes,
+            "alloc_count_parallel": p.alloc_count,
+            "alloc_bytes_parallel": p.alloc_bytes,
         });
         // NEMO 的口径进基线:该样本是靠 `source_version` 驱动迁移的,不记下来就分不清
         // "这份 SHA 是迁移后的产物"还是"参数没接上、被锁成未迁移"(只给有版本的样本加键 ⇒
@@ -462,9 +580,10 @@ fn convert_bench() {
         if let Some(version) = sample.source_version {
             meta["source_version"] = serde_json::Value::String(version.to_string());
         }
-        // 元信息也参与断言:字节没变但块数/告警退化、或输入被换掉,都要抓
+        // 元信息也参与断言:字节没变但块数/告警退化、或输入被换掉,都要抓。
+        // **但**分配计数那几个键要先剔除 —— 它们是"只记录不判"(跨机不可比,作门会假红)。
         if let Some(old) = baseline.get(&format!("{key}#meta"))
-            && old != &meta
+            && meta_for_assert(old) != meta_for_assert(&meta)
         {
             meta_mismatched.push((key.clone(), old.clone(), meta.clone()));
         }
