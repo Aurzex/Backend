@@ -149,12 +149,12 @@ pub(super) fn count_source_elements(nodes: &[XmlNode]) -> usize {
 // 回写,再用 `getAttribute`/`setAttribute`/`removeAttribute`/`textContent` 做改写。
 // 官方 `blockly` 侧的惯例是给一段积木 XML 套一层 `<root>` 再解析(包装根
 // `<variables></variables>` 那种也是同一用法),所以这里同时提供
-// [`parse`](整份文档)与 [`parse_fragment`](单根包装取直接子元素)。
+// [`parse`](整份文档)与 [`parse_fragment`](整段输入 = 虚拟包装根的内容,取直接子元素)。
 // Rust 侧没有 DOM,本文件把同一套语义**最小可用**地移植过来:
 // | 浏览器 | 本文件 |
 // | --- | --- |
 // | `DOMParser.parseFromString(xml, "text/xml")` | [`parse`] |
-// | `parseFromString("<root>" + blocksXML + "</root>", …)` 取 `root.childNodes` | [`parse_fragment`] |
+// | `parseFromString("<root>" + blocksXML + "</root>", …)` 取 `root.childNodes` | [`parse_fragment`](语义同上,但**不构造**包装串) |
 // | `XMLSerializer.serializeToString(node)` | [`XmlNode::serialize`] |
 // | `getAttribute` / `setAttribute` / `removeAttribute` | [`XmlNode::attr`] / [`XmlNode::set_attr`] / [`XmlNode::remove_attr`] |
 // | `textContent` | [`XmlNode::text_content`] |
@@ -182,7 +182,8 @@ pub(super) fn count_source_elements(nodes: &[XmlNode]) -> usize {
 // 文本里含 `]]>` 等次要良构约束不校验;
 // - **严格处**:根元素之外出现文本、无匹配的结束标签或非法 `<!` 开头标记一律报错(与
 // `text/xml` 下的 `DOMParser` 一致);[`parse`] 允许顶层有多个元素(取第一个,编辑器
-// 会把 `<variables></variables>` 与各根积木并排存),而 [`parse_fragment`] 要求唯一根包装;
+// 会把 `<variables></variables>` 与各根积木并排存),[`parse_fragment`] 则把整段输入当成
+// **虚拟包装根的内容**(顶层元素全部返回,"唯一根"的要求随包装串一起去掉);
 // - **嵌套上限**:元素嵌套超过 `MAX_DEPTH` 层直接报错(真实作品只有几十层)。
 // 解析/序列化/取文本都是**迭代**实现(显式栈),不依赖调用方线程的栈大小;
 // 唯一与嵌套深度相关的递归是 `XmlNode` 自身的析构,上限就是为了兜住它。
@@ -381,24 +382,20 @@ pub(super) fn parse(xml: &str) -> Result<XmlNode, DecompilerError> {
     }
 }
 
-/// 解析 `<root>…</root>` 这种**单根包装**,返回该根的直接子元素
-/// (官方 `parseFromString("<root>" + blocksXML + "</root>", "text/xml")` 的用法)。
-/// 整份文档的根不是唯一元素 → `Err`。
+/// 解析一段**片段**(NEMO/KittenN 的 `blocksXML`),返回它的顶层元素
+///
+/// 等价于官方 `parseFromString("<root>" + blocksXML + "</root>", "text/xml")` 之后取
+/// `root.childNodes`,但**不构造**那个包装串:整段输入被当成一个**虚拟包装根**的内容 ⇒
+/// 顶层文本/空白的落点、嵌套深度计数、报错位置都与套了 `<root>` 的写法逐字一致,而
+/// "每个实体一次整串 `format!`" 没了(3.4 MB 的 NEMO 作品有 847 个实体 ⇒ 省 847 次整串拷贝,
+/// 见 `docs/rounds/39` §W8)。
+///
+/// 唯一的差别:输入在元素**未闭合**时结束 → 这里报"元素 `<x>` 未闭合"(真包装版会被末尾那个
+/// `</root>` 撞成"开闭不匹配");两者都是 `Err`、都进同一条 `DroppedField` 报告,只有文案不同。
 pub(super) fn parse_fragment(xml: &str) -> Result<Vec<XmlNode>, DecompilerError> {
     let mut parser = Parser::new(xml);
-    let roots = parser.run()?;
-    let count = roots.len();
-    let mut iter = roots.into_iter();
-    match (iter.next(), iter.next()) {
-        (Some(root), None) => Ok(root.children),
-        (first, _) => Err(DecompilerError::Decompile(format!(
-            "积木 XML 片段解析失败:期望唯一根包装,实际解析出 {count} 个顶层元素{}",
-            match first {
-                Some(node) => format!("(首个是 <{}>)", node.tag),
-                None => String::new(),
-            }
-        ))),
-    }
+    let root = parser.run_wrapped("root")?;
+    Ok(root.children)
 }
 
 /// 名称首字符:字母 / `_` / `:`(允许 `:` 只是为了让 `<a:b>` 这类名字别被误判,不做命名空间)
@@ -545,9 +542,34 @@ impl<'a> Parser<'a> {
 
     /// 解析整份文档,返回所有**顶层**元素(调用方决定取第一个还是要求唯一)
     fn run(&mut self) -> Result<Vec<XmlNode>, DecompilerError> {
+        self.run_inner(None)
+    }
+
+    /// 把整份输入当成**某个包装根的内容**来解析,返回那个包装根
+    ///
+    /// 与 `parse(&format!("<{tag}>{xml}</{tag}>"))` 等价,但**不构造**包装串(见 [`parse_fragment`])。
+    fn run_wrapped(&mut self, tag: &str) -> Result<XmlNode, DecompilerError> {
+        let roots = self.run_inner(Some(tag))?;
+        match roots.into_iter().next() {
+            Some(root) => Ok(root),
+            // `virtual_root = Some` 时必然产出一个根;真走到这里就是解析器坏了,报错不 panic
+            None => Err(DecompilerError::Decompile(
+                "积木 XML 片段解析失败:虚拟包装根缺失".to_string(),
+            )),
+        }
+    }
+
+    /// [`run`](Self::run) / [`run_wrapped`](Self::run_wrapped) 的共同实现:
+    /// `virtual_root = Some(tag)` 时先压入那个**合成**的包装根。
+    fn run_inner(&mut self, virtual_root: Option<&str>) -> Result<Vec<XmlNode>, DecompilerError> {
         let mut roots: Vec<XmlNode> = Vec::new();
         // 未闭合元素栈:栈顶就是当前正在收文本/子元素的元素
         let mut open: Vec<XmlNode> = Vec::new();
+        // 虚拟包装根:让整段输入从头到尾都处在"元素内容级"—— 顶层文本/空白的落点、嵌套深度
+        // 计数、报错位置都与真套一层 `<root>` 的写法一致(唯一差别是元素未闭合时的错误文案)。
+        if let Some(tag) = virtual_root {
+            open.push(XmlNode::new(tag));
+        }
         loop {
             if open.is_empty() {
                 // 文档级:先跳过空白/注释/处理指令/DOCTYPE;
@@ -575,6 +597,10 @@ impl<'a> Parser<'a> {
             } else {
                 // 元素内容级:这里的空白属于**文本**,必须原样收进父节点,不能跳过
                 if self.eof() {
+                    // 虚拟包装根:输入结束就是它的 `</root>`(真包装版在这里同样收尾)
+                    if virtual_root.is_some() && open.len() == 1 {
+                        break;
+                    }
                     let tag = open.last().map(|n| n.tag.as_str()).unwrap_or("");
                     let end = self.src.len();
                     return Err(self.err_at(end, format!("元素 <{tag}> 未闭合(缺少 </{tag}>)")));
@@ -645,6 +671,12 @@ impl<'a> Parser<'a> {
             } else {
                 open.push(node);
             }
+        }
+        // 虚拟包装根出栈:它与"真套一层 `<root>` 后解析出的那个唯一顶层元素"同形
+        if virtual_root.is_some()
+            && let Some(root) = open.pop()
+        {
+            roots.push(root);
         }
         Ok(roots)
     }
@@ -1098,15 +1130,16 @@ mod nemo_xml_tests {
         );
     }
 
-    /// `<root>` 包装取直接子元素:只返回直接子元素,包装根自己的文本丢掉,
-    /// 与官方 `parseFromString("<root>"+blocksXML+"</root>")` 后取 `root.children` 一致。
+    /// 片段解析:整段输入 = 虚拟包装根的内容,返回它的顶层元素;
+    /// 包装根自己收到的空白文本**不**聚合进子元素(与官方
+    /// `parseFromString("<root>"+blocksXML+"</root>")` 后取 `root.children` 同义)。
     #[test]
     fn parse_fragment_returns_direct_children() {
         let children = parse_fragment(
-            r#"<root><block type="math_number" id="b1"/><value name="A"><shadow type="math_number" id="s1"/></value></root>"#,
+            r#"<block type="math_number" id="b1"/><value name="A"><shadow type="math_number" id="s1"/></value>"#,
         )
-        .expect("单根包装应能解析");
-        assert_eq!(children.len(), 2, "应返回 2 个直接子元素");
+        .expect("片段应能解析");
+        assert_eq!(children.len(), 2, "应返回 2 个顶层元素");
         assert_eq!(children[0].tag, "block");
         assert_eq!(children[0].attr("type"), Some("math_number"));
         assert_eq!(children[1].tag, "value");
@@ -1114,21 +1147,58 @@ mod nemo_xml_tests {
         assert_eq!(
             children[1].child("shadow").and_then(|s| s.attr("id")),
             Some("s1"),
-            "直接子元素的子树应完整保留"
+            "顶层元素的子树应完整保留"
         );
 
-        // 包装根的空白文本不聚合进子元素
-        let padded =
-            parse_fragment("<root>\n  <block/>\n  <block/>\n</root>").expect("带空白的包装");
-        assert_eq!(padded.len(), 2, "包装根的直接子元素仍是 2 个");
-        assert_eq!(padded[0].text, "", "空白归包装根,不归子元素");
+        // 顶层元素之间的空白归虚拟包装根,不聚合进子元素
+        let padded = parse_fragment("\n  <block/>\n  <block/>\n").expect("带空白的片段");
+        assert_eq!(padded.len(), 2, "顶层元素仍是 2 个");
+        assert_eq!(padded[0].text, "", "空白归虚拟包装根,不归子元素");
 
-        // 顶层多根 → 契约要求报错
-        assert!(
-            parse_fragment("<a/><b/>").is_err(),
-            "顶层不是唯一根时 parse_fragment 必须报错"
+        // 顶层多元素是**正常**输入(包装串已经不存在,"唯一根"的要求随之取消)
+        assert_eq!(
+            parse_fragment("<a/><b/>").expect("多顶层元素").len(),
+            2,
+            "顶层可以有多个元素"
         );
-        assert!(parse_fragment("").is_err(), "空的包装也必须报错");
+        // 空片段 = 没有顶层元素(与 `"<root></root>"` 的旧写法一致)
+        assert!(parse_fragment("").expect("空片段").is_empty());
+    }
+
+    /// **等价性**:新的"虚拟包装根"实现与老的"真套一层 `<root>` 再取子元素"逐字段同结果
+    ///
+    /// (老写法是 `docs/rounds/39` §W8 去掉的那次整串 `format!`;这条测试就是它的替身,
+    /// 防止将来改解析器时把两者悄悄改岔。错误只比"是否 Err" —— 元素未闭合时的文案按设计不同。)
+    #[test]
+    fn parse_fragment_equals_wrapped_parse() {
+        let cases = [
+            r#"<block type="a" id="b1"/>"#,
+            r#"<block a="1"><value name="V"><shadow type="math_number" id="s"/></value></block>"#,
+            "<block/>\n  <block/>",
+            "  ",
+            "",
+            r#"<variables></variables><block type="a"/>"#,
+            r#"<block type="a">文本 &amp; 实体</block>"#,
+            // 畸形:两边都必须 Err(文案可以不同)
+            r#"<block>"#,
+            r#"<block></value>"#,
+            r#"<block a=1/>"#,
+            r#"根之外有文本"#,
+            r#"<block>&nbsp;</block>"#,
+        ];
+        for case in cases {
+            let mine = parse_fragment(case);
+            let reference = parse(&format!("<root>{case}</root>")).map(|root| root.children);
+            match (&mine, &reference) {
+                (Ok(left), Ok(right)) => {
+                    assert_eq!(left, right, "输入 {case:?} 的子元素应逐字段相同")
+                }
+                (Err(_), Err(_)) => {}
+                _ => {
+                    panic!("输入 {case:?}:新实现 {mine:?} 与包装版 {reference:?} 的成功/失败不一致")
+                }
+            }
+        }
     }
 
     /// `text_content` 深度优先聚合:`<field name="NUM">1</field>` → `"1"`;

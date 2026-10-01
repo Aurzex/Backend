@@ -507,7 +507,7 @@ fn select_text(map: &[(&str, &str)], key: &str) -> String {
 
 /// 一份积木 XML(已解析 + 已过前置改写)→ KN 的 [`BlockTree`]
 ///
-/// `roots` 来自 [`super::xml::parse_fragment`](`<root>` 包装的直接子元素);
+/// `roots` 来自 [`super::xml::parse_fragment`](片段里各顶层元素);
 /// `subject` 决定 `currentActor` / `currentProcedure`(官方 `parseBlocksXML` 的第二参)。
 pub(super) fn translate_nemo_to_kn(
     roots: &[XmlNode],
@@ -652,7 +652,7 @@ pub(super) fn nemo_parse_procedures(
     let mut out = Vec::with_capacity(plan.len());
     for (entry, params) in plan {
         let mut tree = match &entry.blocks_xml {
-            Some(xml) => match super::xml::parse_fragment(&format!("<root>{xml}</root>")) {
+            Some(xml) => match super::xml::parse_fragment(xml) {
                 Ok(roots) => {
                     report.blocks_total += super::xml::count_source_elements(&roots);
                     translate_nemo_to_kn(&roots, NemoSubject::Params(&params), ctx, ids, report)
@@ -682,7 +682,7 @@ pub(super) fn nemo_parse_procedures(
 }
 
 fn has_return_blocks(xml: &str) -> bool {
-    super::xml::parse_fragment(&format!("<root>{xml}</root>"))
+    super::xml::parse_fragment(xml)
         .map(|roots| contains_return_block(&roots))
         .unwrap_or(false)
 }

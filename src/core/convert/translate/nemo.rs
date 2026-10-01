@@ -623,7 +623,7 @@ fn prepare_blocks_xml(
     scenes_order: &[String],
     ids: &mut IdSource,
 ) -> Result<(Vec<XmlNode>, usize, Option<String>), crate::core::convert::shared::DecompilerError> {
-    let mut roots = parse_fragment(&format!("<root>{xml}</root>"))?;
+    let mut roots = parse_fragment(xml)?;
     let source_elements = count_source_elements(&roots);
     if qc {
         qc_audio_blocks(&mut roots, ids);
