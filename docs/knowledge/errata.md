@@ -344,3 +344,4 @@ W10 落地(`66c0b6b`)后,**"内联对象形态影子 ⇒ 拒收该作品"这条�
 | ---- | ------------ | ------------- |
 | rounds/34 §1、§2 | `A28社区-开幕_174408420.bcm4` 报 `invalid type: map, expected a string` ⇒「**前置拦截**,报"内联影子是对象形态…暂不支持该作品"」,并把"支持对象形态影子"**列入待办**;§2 记"实测 **21/22** 件正向吃得下(Kitten3 一件、对象影子一件按形态跳过)" | **待办已做**(W10,`66c0b6b`):正向入口把对象影子就地改写成平台同款影子 XML,**不再拒收**。该件转换成功(源积木 6029 / 告警 19 / `validateBcm` = VALID),该语料 **`[跳过]` 归零**;Kitten2/3(`.bcm` + `blocksXML`)仍按形态守卫跳过。见 `rounds/39` §W10 落地段、`knowledge/convert-semantics.md` §3 |
 | rounds/33 §1 表 ① | 上传格式(`download/compile/*.bcm4`)⇒ 正向「**报错** `invalid type: map, expected a string`」 | **不再成立**:那条报错的根因正是对象形态影子,已由 `66c0b6b` 容错 |
+| rounds/17(错误收敛一节第 2 条) | 「保留 `Crypto`/`Decompile`/**`UnsupportedType`**/`InvalidResponse`/…(反编译专属变体)」 | **`UnsupportedType` 已不存在**:它是全仓零调用点的死变体,已于 `fef30e7`(2026-10-02,W5②)删除(破坏性公共面变更、已授权);其它变体未动。见 `rounds/39` §W5②、`knowledge/repo-conventions.md` §4 |

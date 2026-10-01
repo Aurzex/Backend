@@ -178,7 +178,7 @@
 (`incompatible_block` / `incompatible_output_block`)已落地并实机验证 —— 它不是 D1 的语义降级(不声称等价、
 不冒充可用),而是"把丢失变成可看见的损失"。**该问句已关闭,不再挂起**。
 
-**拍板处不在本节,而在 `docs/rounds/39` §5 —— 已在 2026-10-02 按证据全部拍板**:
-`C1`(W4 动公共枚举 `TranslateWarning` 加字段)= **做**、`C2`(`nemo_mapping.rs` 的表是否拆文件)= **不拆**、
-`C3`(`shared.rs` 重划线)= **做**;另 **W5② 删 `UnsupportedType` 已授权**、**W13 暂缓并登记**。
-⇒ W2 / W4 / W5② 的 `src/` 落地位已放开(**落地中,提交号待回填**,逐项状态见 `docs/rounds/39` §0.3)。
+**拍板处不在本节,而在 `docs/rounds/39` §5 —— 已在 2026-10-02 按证据全部拍板并落地**:
+`C1`(W4 动公共枚举 `TranslateWarning` 加字段)= **做**(✅ `eea82bf`)、`C2`(`nemo_mapping.rs` 的表是否拆文件)= **不拆**、
+`C3`(`shared.rs` 重划线)= **做**(✅ `6027b18` W2a + `fb799b6` W2b);另 **W5② 删 `UnsupportedType` 已完成**(`fef30e7`)、
+**W13 暂缓并登记**(待立项)。逐项状态见 `docs/rounds/39` §0.3。

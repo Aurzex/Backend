@@ -61,7 +61,7 @@
 ## 4. 错误类型
 
 - 统一 `MewError` / `MewResult<T>`(`src/utils/requests.rs`);HTTP 状态码枚举已改名为 `StatusCode`(`HTTPStatus` 已不存在)。
-- `ProcessorError`/`DataQueryError` 已包装 `MewError`。`DecompilerError` 现只有 `Mew(#[from] MewError)` 加域内变体(`Crypto`/`Decompile`/`UnsupportedType`/`InvalidResponse`/`MissingField`/`TypeMismatch`/`Other`),`io::Error`/`serde_json::Error` 经 `From` 折进 `Mew` —— 原先记的"仍自带 `Io/Json/Http`、与 `MewError` 重复**待改**"**已不存在**(2026-10-01 核实,见 `docs/rounds/39` §1.3/§W12d)。唯一残留是零调用死变体 `UnsupportedType`;删它 = 动公共枚举,需授权(`rounds/39` §W5②)。
+- `ProcessorError`/`DataQueryError` 已包装 `MewError`。`DecompilerError` 现只有 `Mew(#[from] MewError)` 加域内变体(`Crypto`/`Decompile`/`InvalidResponse`/`MissingField`/`TypeMismatch`/`Other`),`io::Error`/`serde_json::Error` 经 `From` 折进 `Mew`。原先记的两条**都不再成立**:"仍自带 `Io/Json/Http`、与 `MewError` 重复**待改**"已于 2026-10-01 核实消除(见 `docs/rounds/39` §1.3/§W12d);零调用的死变体 `UnsupportedType` **已于 `fef30e7`(2026-10-02)删除**(破坏性公共面变更,已授权,见 `rounds/39` §W5②)。
 - 破坏性 API 变更**不留兼容别名**(已授权的前提下直接删)。
 
 ## 5. 命名与文件组织
@@ -72,7 +72,7 @@
 - **域内文件组织(以 `docs/rounds/31-convert-layout-consolidation-plan.md` §2.1 为准)**:一个文件一个职责;
   生成物单独一处(`translate/tables_gen.rs`,**不可与手写表混放**);测试默认内联在被测文件末尾,
   「本体 + 测试 > 3 000 行」时才独立成 `*_tests.rs`;**单文件上限 ≈ 2 500 行**。
-  当前布局:`mod.rs` + `shared.rs` + `decompile/{mod,editors}.rs` + `translate/{mod,model,mapping,assembly,pipeline,options,report,xml,nemo,nemo_mapping,tables_gen,kitten4_vocab,reverse_tests,nemo_tests}.rs`(**18 文件**;权威清单见 `docs/rounds/39` §1.1;`options`/`report`/`pipeline`/`xml` 与 `kitten4_vocab` 是 rounds/34–37 加进来的)。
+  当前布局:`mod.rs` + `shared.rs` + `upload.rs` + `decompile/{mod,editors,config,shadow,work}.rs` + `translate/{mod,model,mapping,assembly,pipeline,options,report,xml,nemo,nemo_mapping,tables_gen,kitten4_vocab,reverse_tests,nemo_tests}.rs`(**22 文件**;W2 后新增 4 个:`upload.rs` 是**域级工具层**(与门面同级,`shared.rs` 零反向依赖),`decompile/{config,shadow,work}.rs` 是反编译**私有件**。权威清单见 `docs/rounds/39` §W2 落地段;其 §1.1 的表是 W2 之前的快照)。
 - 分层纪律:`translate` 子域**不碰网络**;需要网络(上传/建作品)的编排放 `core/convert/mod.rs` 门面
   (反编译侧的可选「上传到账号」同理,见 `docs/rounds/30`)。
 - 文档:记录放 `docs/`;**历史轮次不改写**(保真),勘误集中到本库 `errata.md`。

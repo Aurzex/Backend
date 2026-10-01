@@ -32,7 +32,7 @@
 | # | 项 | 建议 | 说明 |
 | - | -- | ---- | ---- |
 | C1 | 49 处**非锁 `unwrap`** 硬化(`time_difference` / `active.as_mut` / 模板 `unwrap` / 10 处 `write!().unwrap()`) | 做 | 机械改动,零行为变化 |
-| C2 ✅ **已不成立(2026-10-01 核实)** | `DecompilerError` **包装 `MewError`**(原记"消除自带 `Io/Json/Http` 重复") | — | **该重复已不存在**:`DecompilerError` 已无 `Io`/`Json`/`Http` 变体,改成 `From<io::Error>`/`From<serde_json::Error>` 折进 `Mew`(见 `docs/rounds/39` §1.3 与 §W12d);只剩"删死变体 `UnsupportedType`"那一件事(`rounds/39` §W5②,🔴 动公共枚举、需授权) |
+| C2 ✅ **已不成立(2026-10-01 核实)** | `DecompilerError` **包装 `MewError`**(原记"消除自带 `Io/Json/Http` 重复") | — | **该重复已不存在**:`DecompilerError` 已无 `Io`/`Json`/`Http` 变体,改成 `From<io::Error>`/`From<serde_json::Error>` 折进 `Mew`(见 `docs/rounds/39` §1.3 与 §W12d);剩的那一件事已办:**死变体 `UnsupportedType` 已删(2026-10-02,`fef30e7`)** —— 破坏性公共面变更,已授权(`rounds/39` §W5②) |
 | C3 | P2 死代码/收尾:`simple.rs` 的 `Arc::clone`、`nemo.rs::get_sha` 的 64 字节 clone、`cloudvar` flush 的 100 ms 轮询改 `Condvar` | 做 | 都是局部小改,**删除前需零调用点证据** |
 | C4 | `auth.rs::AccountStatus` 与 `requests.rs::Identity` 平行枚举合并 | 做(不紧急) | 易漂移,合并前先确认无外部依赖 |
 | C5 | `MessageHandler` / `ChatEventHandler` 两个 trait 改自由函数 | 做 | 可读性收尾,非必须 |

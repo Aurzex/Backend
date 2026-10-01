@@ -39,11 +39,10 @@
 | W10 | 容错:内联对象形态的影子 | 功能 | P2 | 1 天 | 🟡 | G-pipeline |
 | W11 | 资源下载:失败清单结构化(承接 rounds/29 P3) | 架构健壮性 | P2 | 3 h | 🟠 | G-decompile |
 | W12 | 结构小节:测试位置 / 失效注释家族 / 文件体量记账 / 文档勘误 | 架构 | P2 | 半天 | — | 多组 |
-| W13 | 保真:`wrap_arithmetic` 移动不重铸(**待授权**,rounds/38 §8 残留) | 保真 | 待授权 | 1–2 天 | 🔴🟡 | G-model |
+| W13 | 保真:`wrap_arithmetic` 移动不重铸(**暂缓并登记**,待立项;rounds/38 §8 残留) | 保真 | 暂缓 | 1–2 天 | 🔴🟡 | G-model |
 
-> **落地状态(以 §0.3 为准)** —— ✅ W1 / W3a / W3b / W3c / W3d / W3e / W6 / W7 / W10 / W11 / W12b / W12c / W12d;
-> ◐ W5(可见性收窄;`UnsupportedType` **2026-10-02 已授权删除**、落地中)、W8(只做②);❌ W9(2026-10-02 实测判不做,见 §W9 落地段);
-> 🚧 W2 / W4(2026-10-02 已拍板**做**,`src/` 落地中);⏸ W13(暂缓并登记)。
+> **落地状态(以 §0.3 为准)** —— ✅ W1 / W2 / W3a / W3b / W3c / W3d / W3e / W4 / W5 / W6 / W7 / W10 / W11 / W12b / W12c / W12d;
+> ◐ W8(只做②);❌ W9(2026-10-02 实测判不做,见 §W9 落地段);⏸ W13(暂缓并登记)。
 
 ### 0.2 需你拍板(详见 §5)
 
@@ -68,7 +67,7 @@
 | W3c 删死 allow-list 副本(**不**新增集合门) | ✅ | `e8e19d6` |
 | W3d 反向 id 台账 `LOST_ID_BUDGET_REVERSE` | ✅ | `d10d0cb`(首版)、`ef37978`(口径收窄到真正的积木节点) |
 | W3e `BACKEND_BENCH_REFRESH=1` 拒绝丢键 | ✅ | `f62aec7` |
-| W5 可见性收窄 + 死重量 | ◐ | `6fe2ee0`:156 处收窄(136 `pub(super)` / 10 `pub(in crate::core::convert)` / 10 私有)、删 4 个零调用点 helper、`is_name_char` 改名;🔴 `UnsupportedType` **已授权删除(2026-10-02)** ⇒ `src/` 落地进行中(提交号待回填);`unused` 维持 `allow`(试跑 943 条,一轮清不完 ⇒ 清单进 `docs/goals/infra-backlog.md` §1) |
+| W5 可见性收窄 + 死重量 | ✅ | `6fe2ee0`:156 处收窄(136 `pub(super)` / 10 `pub(in crate::core::convert)` / 10 私有)、删 4 个零调用点 helper、`is_name_char` 改名;② 的 `UnsupportedType` ✅ 已删(`fef30e7`,公共面破坏性变更,已授权)。④ `unused` **维持 `allow`**(试跑 943 条,一轮清不完 ⇒ 清单进 `docs/goals/infra-backlog.md` §1) |
 | W6 NEMO 进门(带 `source_version`)+ 不再静默吞错 | ✅ | `cc320f0`、`c7c40d5`(老版本迁移样本)、`0103d7c`(编码失败进报告、计有损) |
 | W7 分配计数门(**只记不判**) | ✅ | `22897ef`:只统计的 `#[global_allocator]` + `#meta` 四个 `alloc_*` 键(窗口 = 一次 `translate_file`);同机 4 跑读数逐位相同;跨机不可比 ⇒ 断言时剔除 |
 | W8 NEMO 前端去重复解析 | ◐ | `6057a88`:**② 做**(虚拟包装根 ⇒ 每实体省一次整串拷贝:NEMO 样本 −0.19%/0.21% 次数、−3.37%/3.11% 字节),**① 不做**(上界仅 −0.11% 次数、−0.05% 字节,且要换峰值内存);详见 §W8 落地段 |
@@ -78,14 +77,15 @@
 | W12c 失效注释 / 断链清理 | ✅ | 两条断链 rustdoc(`e8e19d6`);面包屑家族按"**只改指向不存在模块 / 自相矛盾**的、保留有意溯源标注"复核(`f01a6a8`):改 3 处(`api/auth.rs` 的 `editors/simple.rs`、`decompile/editors.rs` 头部的"本目录…"旧布局、`xml.rs` 的 `neko.rs`)、**保留**约 30 处"来自 src/…"/"原 x.rs"溯源 |
 | W12d `repo-conventions.md` §4 勘误 | ✅ | 本次文档巡检(§1.3 的"已无 `Io/Json/Http`") |
 | W9 编码端少一趟全树遍历(`fill_shield`) | ❌ **判不做** | 2026-10-02 三探针实测(§W9 落地段):**整趟删掉**的上界只 −1.37%/−1.40% 分配(且仅 2/6 样本);**合并能省的那部分(遍历)实测 0 分配**;不写序列化器的唯一路线(去 `skip_serializing_if`)还会改 4/6 样本字节 ⇒ 判不做,`src/` 零改动 |
-| W2 地基重划线(C3 已拍板**做**) | 🚧 **进行中** | 2026-10-02 授权;画法 = 按实际消费者划线 + `bcm_version` 兜底走"域级工具层"(见 §5-C3)。`src/` 落地中,提交号待回填 |
-| W4 报告类型化(C1 已拍板**做**) | 🚧 **进行中** | 2026-10-02 授权;同批改生产端 + 消费端(见 §5-C1)。`src/` 落地中,提交号待回填 |
+| W2 地基重划线(C3 已拍板**做**) | ✅ | W2a `6027b18`(上传编排 → 新 `upload.rs`)+ W2b `fb799b6`(反编译私有件 → `decompile/{config,shadow,work}.rs`);**`shared.rs` 1372 → 503 行**;两处 grep 归零。详见 §W2 落地段 |
+| W4 报告类型化(C1 已拍板**做**) | ✅ | `eea82bf`:`UnmappedBlock { kind, marked, cleared_shadows }`;`marker_counts` 改读结构字段(不再反解中文);改前/改后 `[标记量]` 读数逐行相同、活性自检(**人为 +1 ⇒ 门变红**)已做。详见 §W4 落地段 |
 | W13 `wrap_arithmetic` 移动不重铸 | ⏸ **暂缓并登记** | 2026-10-02 拍板:**不列入执行队列**。收益主要是"我们自己的往返 id 台账更干净 / 往返 id 更稳",**不是用户可见差异**;代价是**偏离官方实现 + 改产物字节 + 需重做实体机与刷基线** ⇒ 待重新立项。证据:`rounds/38 §8`、§W13 |
 
-> 相应地把 §0.1 的 ✅ 项(W1/W3a/W3b/W3c/W3d/W3e/W6/W7/W10/W11/W12b/W12c/W12d)视为**已交付**,W5/W8 为**部分交付**(◐);§1.5 里"反向 id 台账 = 缺""NEMO 字节门 = 缺""基线缺失静默重建""`allowed_entity` 死副本"四条已被上述提交消解。
+> 相应地把 §0.1 的 ✅ 项(W1/W2/W3a/W3b/W3c/W3d/W3e/W4/W5/W6/W7/W10/W11/W12b/W12c/W12d)视为**已交付**,W8 为**部分交付**(◐);§1.5 里"反向 id 台账 = 缺""NEMO 字节门 = 缺""基线缺失静默重建""`allowed_entity` 死副本"四条已被上述提交消解。
 > 2026-10-01 第二批(本轮):W5 `6fe2ee0`、W7 `22897ef`、W8 `6057a88`、清理(W3b 域内余量 / W12c 复核)`f01a6a8`。
 > 2026-10-02:W9 **判不做**(`06036a7`,见 §W9 落地段)、**W10 落地**(`66c0b6b`,见 §W10 落地段);
-> **C1/C2/C3 与 W5②/W13 已拍板**(见 §5):W2 / W4 / W5② 开工(`src/` 落地中,提交号待回填)、C2 不拆(文件头已加体量记账)、W13 暂缓并登记。
+> **C1/C2/C3 与 W5②/W13 已拍板并全部落地**(见 §5):W2(`6027b18`+`fb799b6`)、W4(`eea82bf`)、W5②(`fef30e7`)均 ✅;
+> C2 不拆(文件头已加体量记账)、W13 暂缓并登记。另 G4 的收尾(`d3f617e`,词表新鲜度读数 + 导出基准单一事实源,只打印不判)也已落地。
 
 ---
 
@@ -208,6 +208,26 @@
 **工作量**:半天。
 **评审处置**:⚠️ **部分采纳** —— 采纳"保留集判据错了"的更正与 `batch_map`/`CryptoService`/`HttpClient`/`ValueExt`/`ResultExt` 的去处;保留方案的搬迁范围与验证方式。收益口径按评审统一为"W2a 去掉两条反向依赖 + W2b 修一处职责错位",不把 W2b 说成分层反转。
 
+**落地(2026-10-02,两个提交)** —— `shared.rs` **1372 → 503 行**(W2a 后 1128 行、W2b 后 505 行、W5② 再删 2 行),两处分层反转归零:
+
+- **W2a(`6027b18`):上传编排出地基 → 新 `src/core/convert/upload.rs`(`pub(crate)`,253 行)**。搬走 `DraftUpload` /
+  `supports_account_upload` / `draft_name` / `channel_for` / `SINGLE_PACKAGE_LIMIT` / `ensure_single_package_fits` /
+  `create_draft` + `upload_tests`;两个调用点(`convert/mod.rs` 门面、`decompile/mod.rs` 反编译侧上传)语义不变。
+  - **为什么选"域级工具层"而不是"调用方各传"**:`DraftUpload.bcm_version` 的"空串 ⇒ 用本库常量兜底"是**刻意语义**
+    (`rounds/30 §4`),而反编译侧的"上传到账号"是它的**第二个调用点**;若改成"调用方必须传",要么给
+    `decompile → translate` 造一条**新的跨子域依赖**(比原来更坏),要么在**两处复制常量**。⇒ 把 `upload.rs` 定位为
+    与域门面 `mod.rs` **同级**的工具层,允许它依赖 `translate::tables_gen`(单一定义源);地基 `shared.rs` 保持**零反向依赖**。
+- **W2b(`fb799b6`):反编译私有件搬回 `decompile/`** —— `DecompilerConfig` + `ShadowTemplate` → `decompile/config.rs`、
+  `ShadowBuilder` → `decompile/shadow.rs`、`WorkInfo`/`RawWorkData`/`WorkFetcher` → `decompile/work.rs`。保留集按
+  **实际消费者**划线(留地基的:`EditorType`/`WorkId`/`XHTML`/`DecompilerError`/`Result`/`ResultExt`/`ValueExt`/
+  `FileService`/`CryptoService`/`HttpClient`/`CodeMaoHttpClient`/`batch_map`/`IdGenerator`);顺带把 `nemo_tests.rs` 里
+  那个其实是 decompile 侧的用例随件迁走(`rounds/37 §0.4` 的建议)。
+- **搬迁做了逐字节比对**:四块(`work`/`config`/`shadow`/`upload`)与搬迁前原文 **verbatim 命中**,只新增模块文档与 import
+  ⇒ 产物字节无关,由 6 样本 SHA256 + `#meta` 门复核。
+- **验收**:`cargo fmt --check` / `cargo clippy --all-targets -- -D warnings` / `cargo test` 全绿;
+  `grep -rn "crate::api::" src/core/convert/shared.rs` **无输出**、`grep -rn "translate::" src/core/convert/shared.rs`
+  **无输出**(两处分层反转归零);`BACKEND_REQUIRE_BENCH=1 … convert_bench --ignored` 通过(SHA256 与 `#meta` 同基线)。
+
 ---
 
 ### W3【架构+仪器·P0】门与仪器加固 🟡
@@ -253,6 +273,21 @@
 **工作量**:1 天。
 **评审处置**:✅ **采纳原设计**(C1),并按评审要求**删掉原方案的 `to_json()` 加料**(`counts()`/`to_markdown()` 已够)。
 
+**落地(2026-10-02,`eea82bf`)** —— 报告不再把中文文案当协议:
+
+- **做法**:`TranslateWarning::UnmappedBlock { kind: String, marked: u64, cleared_shadows: u64 }`(`kind` 回归**纯类型名**);
+  生产端同批改(`assembly.rs::mark_unknown_blocks` 两处直接填字段、`pipeline.rs::remap_warning` 透传两个字段、
+  `mapping.rs` 两处纯类型名发射点填 `0`);消费端同批改(`reverse_tests.rs::marker_counts` 改成**读字段**、
+  `tests/convert_live.rs` 的类别聚合取 `kind`);`report.rs` 把"冻结协议"注释改写成新协议说明(**保留**那条教训)、
+  `category()` 从语义相反的"未映射积木(**保留原类型名**)"改成对的说法;**未加**方案里被评审否掉的
+  `TranslateReport::to_json()`。
+- **读数不变(证据)**:改前/改后各跑一遍 `cargo test --lib -- kn_corpus_round_trip_sweep --nocapture`,10 件语料的
+  `[标记量] {label}: 块 X / 影子 Y` **逐行完全相同**(块合计 1237 / 影子合计 83)—— 变的只是取值来源
+  (读结构字段取代反解中文)。
+- **活性自检**:临时把某类型的 `marked` 人为 +1 ⇒ 读数升高且 `MARKER_BUDGET` **变红**(exit 101);复原后恢复 passed
+  ⇒ 门读的是真字段,不是死数据。
+- **兼容性**:`TranslateWarning` 是 `pub`,加字段会让下游穷尽 `match` 编译错(**有意**,预 1.0 可接受);本仓所有消费点已同批改完。
+
 ---
 
 ### W5【架构·P0】可见性收窄 + 死重量清理 🔴🟠
@@ -267,6 +302,11 @@
 **验证**:`cargo build/clippy/test` 全绿 + 四样本 SHA 不变。
 **工作量**:半天。
 **评审处置**:⚠️ **部分采纳** —— 采纳②的 🔴 标注与"删变体 = 动公共枚举"的更正、采纳①的落点更正、采纳④的替代做法(改用 lint 开关,不手写审计);保留③。
+
+**落地(2026-10-02)**:①③ 在 `6fe2ee0`(156 处可见性收窄、删 4 个零调用点 helper、`is_name_char` 改名);
+② 的 `DecompilerError::UnsupportedType` **已删(`fef30e7`)** —— 公共面**破坏性**变更(下游穷尽 `match` 会失败),已授权,
+除该变体外 `DecompilerError` 的形状与其余变体未动(删前零调用点证据:`grep -rn UnsupportedType src tests` 只有声明处本身);
+④ **维持 `unused = "allow"`**(临时改 `warn` 试跑 943 条、一轮清不完 ⇒ 清单进 `docs/goals/infra-backlog.md` §1)。
 
 ---
 
@@ -472,13 +512,14 @@
 
 ## 5. 待拍板:C1 / C2 / C3
 
-> **状态(2026-10-02,已按证据拍板)**:C1 = **做**、C2 = **不拆**、C3 = **做**;另 **W5② 删公共枚举变体 = 已授权**、**W13 = 暂缓并登记**。⇒ W2 / W4 / W5② 均已开工(`src/` 落地中,提交号待回填);逐项状态见 §0.3。
+> **状态(2026-10-02,已按证据拍板并落地)**:C1 = **做**(✅ `eea82bf`)、C2 = **不拆**(✅ 文件头体量记账)、C3 = **做**(✅ `6027b18`+`fb799b6`);
+> 另 **W5② 删公共枚举变体 = 已授权**(✅ `fef30e7`)、**W13 = 暂缓并登记**。逐项状态见 §0.3。
 
 ### C1 —— W4 动公共枚举(`TranslateWarning` 加字段)
 - **支持(作者 + 评审一致)**:① `report.rs:24-26` 的"冻结协议"注释**并未禁止**这次改动 —— 它原文是"要改先改那边",W4 正是同批改生产端 + 消费端;要做的是**把注释改写成新协议说明**。② 退化为"只改 `category()` 标签 + `marker_counts` 读数为 0 即 fail"**不解决问题**(文案再变哪怕只是空格,自检的判据同样静默失效)。
 - **反对面(已考虑)**:`TranslateWarning` 是 `pub`,加字段会破坏下游穷尽 `match`;集成测试与 `tests/convert_live.rs` 的类别聚合要同步。
 - **建议**:**照原设计做**(同批改消费端,并删掉原方案的 `to_json()` 加料)。消费端清单:`assembly.rs:881/1003-1010`、`pipeline.rs:772-808`、`mapping.rs:1322/1349`、`report.rs:53/65`、`reverse_tests.rs:89/99/138/797`、`convert_live.rs:257/274/280/367`。
-- **已决(2026-10-02,按证据拍板):做**。理由:不改成结构字段,门的读数就得**反解中文文案**,一次改文案就会让 `MARKER_BUDGET` 静默变 0;预 1.0 给 `TranslateWarning` 加两个字段可接受;同批改消费端。落地:**W4**,`src/` 落地进行中,提交号待回填(状态见 §0.3)。
+- **已决(2026-10-02,按证据拍板):做**。理由:不改成结构字段,门的读数就得**反解中文文案**,一次改文案就会让 `MARKER_BUDGET` 静默变 0;预 1.0 给 `TranslateWarning` 加两个字段可接受;同批改消费端。落地:**W4** ✅ `eea82bf`(C1 由该提交完成;详见 §W4 落地段)。
 
 ### C2 —— W12a 是否把 `nemo_mapping.rs` 的 551 行表拆成新文件
 - **支持拆分(原方案)**:2616 > ≈2500 软上限;`repo-conventions` §5 有"生成物单独一处"的规则。
@@ -490,13 +531,13 @@
 - **支持(作者 + 评审)**:两条**硬性**分层反转是事实(`shared → api::work`、`shared → translate::tables_gen`),与 `convert/mod.rs` 文档里"`shared` 是两子域共用的地基"直接冲突,不是风格偏好。
 - **反对面**:与 rounds/31 的"合并"方向相反(那次把 `shared/{mod,error,model,config,infra,upload}.rs` 合成一个文件),文件数会回增。
 - **建议**:**做**,但按 §2 的两处修正:① W2a 里 `bcm_version` 的兜底语义**不动**(避免新增 `decompile → translate` 跨子域依赖或复制常量)——把 `upload.rs` 定位为**域级工具层**;② W2b 的保留集按**实际消费者**重定(评审已给出实测表)。若你更看重文件数,W2a 可退化为"`shared.rs` 内分段 + api 依赖改参数注入"。
-- **已决(2026-10-02,按证据拍板):做**。理由:两处**硬性**分层反转是事实(`shared → api::work`、`shared → translate::tables_gen`),与"`shared` 是两子域共用的地基"直接冲突。按评审修正后的画法落地:① **以实际消费者划线**定保留集;② `bcm_version` 的兜底走**域级工具层**路线(`upload.rs` 与门面同级、允许依赖 `translate::tables_gen`,地基 `shared.rs` 保持零反向依赖)。落地:**W2**,`src/` 落地进行中,提交号待回填(状态见 §0.3)。
+- **已决(2026-10-02,按证据拍板):做**。理由:两处**硬性**分层反转是事实(`shared → api::work`、`shared → translate::tables_gen`),与"`shared` 是两子域共用的地基"直接冲突。按评审修正后的画法落地:① **以实际消费者划线**定保留集;② `bcm_version` 的兜底走**域级工具层**路线(`upload.rs` 与门面同级、允许依赖 `translate::tables_gen`,地基 `shared.rs` 保持零反向依赖)。落地:**W2** ✅ `6027b18`(W2a)+ `fb799b6`(W2b);详见 §W2 落地段。
 
 ---
 
 ## 6. 实施顺序、并行性与验证矩阵
 
-> **状态(2026-10-02)**:阶段 1 除 W5 的死重量收尾外均已交付(W1 `b0af619`、W3a/W3e `f62aec7`、W3b `305a108`、W3c `e8e19d6`、W5 `6fe2ee0`(还剩已授权的删变体)、W12b `e8e19d6`、W12c 部分、W12d 本次);阶段 2 的 W3d(`d10d0cb`/`ef37978`)、W6(`cc320f0`/`c7c40d5`/`0103d7c`)、W11(`2d61959`)已交付;阶段 3 判 W9 不做、W8 只做②;阶段 4 的 W10 已交付(`66c0b6b`)、W2(`6fe2ee0` 后按 C3 继续)/W4 已开工、W12a 按 C2 不拆;阶段 5 的 W13 **暂缓并登记**。详见 §0.3。
+> **状态(2026-10-02,已全部拍板并落地)**:阶段 1 全部交付(W1 `b0af619`、W3a/W3e `f62aec7`、W3b `305a108`、W3c `e8e19d6`、W5 `6fe2ee0`+`fef30e7`、W12b `e8e19d6`、W12c 部分、W12d 本次);阶段 2:W3d(`d10d0cb`/`ef37978`)、W6(`cc320f0`/`c7c40d5`/`0103d7c`)、W11(`2d61959`)、W2(`6027b18`+`fb799b6`)均已交付;阶段 3:W7 ✅ `22897ef`、W8 只做②(`6057a88`)、W9 判不做(`06036a7`);阶段 4:W10 ✅ `66c0b6b`、W4 ✅ `eea82bf`、W12a 按 C2 **不拆**;阶段 5:W13 **暂缓并登记**。详见 §0.3。
 
 ```
 阶段 1(零风险,1 天内):W1 | W3a/W3b/W3c/W3e | W5 | W12b/W12c/W12d
@@ -504,8 +545,8 @@
 阶段 2(边界收口,1~2 天):W2a → W2b | W6 | W3d | W11
         └─ W2a/W2b 同动 shared.rs ⇒ 串行;W6 与 W3 同动 tests/reverse_tests ⇒ 串行
 阶段 3(可证性,1 天):W7 →(W8 | W9)
-阶段 4(2026-10-02 已全部拍板):W4(动公共 API,**做**,落地中) | W10 ✅ | W12a(按 C2 **不拆**)
-阶段 5(待立项):W13(**暂缓并登记**)
+阶段 4 ✅(2026-10-02 全部拍板并落地):W4 ✅ `eea82bf` | W10 ✅ `66c0b6b` | W12a(按 C2 **不拆**)
+阶段 5:W13 **暂缓并登记**(待立项)
 ```
 
 **并行性**:`G-model`(W1/W9/W12b)与 `G-shared`(W2)、`G-decompile`(W11)、`G-nemo`(W8)动**不同文件**,可并行;
