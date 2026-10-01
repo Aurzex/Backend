@@ -18,7 +18,7 @@
 | [36](36-editor-vocabulary-single-candidate.md) | 块与影子的取名**统一过编辑器词汇判据**;剔除量 942→715 / 398→50 | 已落地 |
 | [37](37-convert-architecture-refactor-plan.md) | **convert 域重构**:架构归位(`options`/`report`/`pipeline`/`xml`)、样板/死重量清理、性能 P1–P10 与实测结论、**抓到平台原始编辑格式语料**、差异口径与"三个块数口径"方法教训 | 已实施(Phase 0–4);性能收益实测 ≈0,结构与安全是真收益 |
 | [38](38-convert-fidelity-id-caliber.md) | **保真:id 口径**定案 rounds/37 §13 的两条悬案(`lists_get` 大减 = 归一化;`get_midis` 整块消失 = **真缺陷**);反向对"反查不到原类型的占位块"改**保留**(「未收录积木」`incompatible_*`);正向扫描器加 **id 台账门**(只许变小) | 已落地 |
-| [39](39-convert-architecture-refinement-plan.md) | **convert 域架构精进方案**(只读调研 + 独立评审):职责错位收口(`model ⇄ xml` 环、地基里的上传编排/影子大表)、门与仪器补洞(**基线缺失/部分样本缺失/REFRESH 丢键**/中文文案协议/反向 id 台账)、NEMO 进门(带 `source_version`)与**分配计数门**;含 W1–W13、不做清单、**C1/C2/C3 待拍板**、评审与修订记录 | **部分落地**(2026-10-01):W1/W3a/W3c/W3d/W3e/W6/W11/W12b/W12d 已交付(W3b 未提交);W2/W4/W5/W7–W10/W13 未做;**C1/C3 仍待拍板**(C2 已定"不拆")。逐项状态见其 §0.3 |
+| [39](39-convert-architecture-refinement-plan.md) | **convert 域架构精进方案**(只读调研 + 独立评审):职责错位收口(`model ⇄ xml` 环、地基里的上传编排/影子大表)、门与仪器补洞(**基线缺失/部分样本缺失/REFRESH 丢键**/中文文案协议/反向 id 台账)、NEMO 进门(带 `source_version`)与**分配计数门**;含 W1–W13、不做清单、**C1/C2/C3 待拍板**、评审与修订记录 | **部分落地**(2026-10-01):W1/W3a/W3b/W3c/W3d/W3e/W6/W11/W12b/W12d 已交付;W2/W4/W5/W7–W10/W13 未做;**C1/C3 仍待拍板**(C2 已定"不拆")。逐项状态见其 §0.3 |
 
 ## 更早的轮次(01–27)
 

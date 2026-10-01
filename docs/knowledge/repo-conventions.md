@@ -49,6 +49,7 @@
 | ---- | ---- |
 | `BACKEND_REQUIRE_LIVE=1` | 真机测试严格模式:缺配置/登录失败**一律失败**,不再静默 pass |
 | `BACKEND_REQUIRE_BENCH=1` | **基准**严格模式:debug 构建、样本缺失一律失败(默认这两条是"打印后 return **显示 pass**",干净检出上等于没有这条门)。**基线例外**:`NotFound`/解析失败在**默认模式下也直接失败**(`f62aec7`,W3a;此前"NotFound ⇒ 返回空 map + 首跑自动写盘"会让门在「基线被删 / 全新检出」时静默消失)——建基线的**唯一**通道是显式 `BACKEND_BENCH_REFRESH=1` |
+| `BACKEND_REQUIRE_FIXTURES=1` | **夹具**严格模式:跑测试要用的夹具(语料 / 真作品样例)缺失时**失败并点名缺了什么**(默认只打印一行 `跳过:` 后 return —— 干净检出上等于**显示 pass**)。与 `BACKEND_REQUIRE_BENCH` 分工:后者管基准自身(debug 构建 / 样本 / 基线),它只管"夹具缺了";`convert_work_bench` 另认历史的 `BACKEND_REQUIRE_BENCH` 作别名(别让已有环境悄悄变松)。覆盖:`reverse_tests` 的 10 处缺夹具出口 + `convert_facade_bench`(原先**静默** `continue`)|
 | `BACKEND_BENCH_REFRESH=1` | **有据刷新**基线:写出新基线并**逐键打印**变化(产物字节/块数/告警数/源文件 SHA256);不用它时基线损坏/缺失**一律炸**,绝不静默重建 |
 
 **验证纪律(踩了三次总结出来的)**:
