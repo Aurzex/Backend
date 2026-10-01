@@ -614,11 +614,19 @@ pub(crate) struct ResourceTask {
 const RESOURCE_DOWNLOAD_BUDGET: usize = 16;
 
 /// `concurrency` 来自 [`DecompileOptions::resource_concurrency`]。
+///
+/// 返回值 = **失败清单**,每项是 `(url, 错误)` 的**成对结构**。
+///
+/// 为什么是元组(承接 `docs/rounds/29` §2 的 P3,rounds/39 W11):旧实现把失败拼成
+/// `"{url}: {error}"` 再在重试时 `split(": ").next()` 反解 url —— 只要 URL 里含 `": "`
+/// (查询串/路径里的说明文字等)就会**切错**,于是重试时找不到对应任务、**这个文件不会被重试**
+/// (调用方对每条失败仍会 `warn!`,所以它不是"静默丢文件",而是"重试漏了它")。
+/// 现在重试与断言都直接用元组里的 url。
 pub(crate) fn download_resources_parallel(
     client: &dyn HttpClient,
     tasks: Vec<ResourceTask>,
     concurrency: usize,
-) -> Vec<String> {
+) -> Vec<(String, String)> {
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -645,7 +653,7 @@ pub(crate) fn download_resources_parallel(
     }
 
     let cursor = AtomicUsize::new(0);
-    let failures: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    let failures: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
     let done = AtomicUsize::new(0);
     let workers = concurrency.min(pending.len().max(1));
     std::thread::scope(|scope| {
@@ -662,14 +670,14 @@ pub(crate) fn download_resources_parallel(
                                 failures
                                     .lock()
                                     .unwrap()
-                                    .push(format!("{}: {}", task.url, error));
+                                    .push((task.url.clone(), error.to_string()));
                             }
                         }
                         Err(error) => {
                             failures
                                 .lock()
                                 .unwrap()
-                                .push(format!("{}: {}", task.url, error));
+                                .push((task.url.clone(), error.to_string()));
                         }
                     }
                     let finished = done.fetch_add(1, Ordering::Relaxed) + 1;
@@ -690,19 +698,20 @@ pub(crate) fn download_resources_parallel(
     if !failures.is_empty() {
         warn!("资源下载失败 {} 个,串行重试", failures.len());
         let mut retried = Vec::new();
-        for line in &failures {
-            let url = line.split(": ").next().unwrap_or_default();
-            let Some(task) = pending.iter().find(|task| task.url == url) else {
-                retried.push(line.clone());
+        for (url, error) in &failures {
+            // 直接用记录里的 url —— **不再从"{url}: {error}"反解**(含 ": " 的 url 会被切错)
+            let Some(task) = pending.iter().find(|task| &task.url == url) else {
+                // 不该发生(url 就来自 pending);保底原样带回,不静默吞
+                retried.push((url.clone(), error.clone()));
                 continue;
             };
             match client.get_binary(&task.url) {
                 Ok(data) => {
                     if let Err(error) = FileService::write_binary(&task.dest, &data) {
-                        retried.push(format!("{}: {}", task.url, error));
+                        retried.push((task.url.clone(), error.to_string()));
                     }
                 }
-                Err(error) => retried.push(format!("{}: {}", task.url, error)),
+                Err(error) => retried.push((task.url.clone(), error.to_string())),
             }
         }
         failures = retried;
@@ -1946,5 +1955,162 @@ mod block_helper_tests {
                 "错误信息应点名出错的字段 {field},实际:{msg}"
             );
         }
+    }
+}
+
+// ===========================================================================
+// 资源下载的失败清单与重试(rounds/29 §2 P3 / rounds/39 W11)
+// ===========================================================================
+#[cfg(test)]
+mod download_tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    /// 某些 url **前 N 次**返回错误、之后成功的桩(按 url 计数),
+    /// 并按时序记录被请求过的 url —— 用来断言"重试打的到底是不是原文 url"。
+    #[derive(Clone)]
+    struct FlakyHttp {
+        fail_first: Arc<Mutex<HashMap<String, usize>>>,
+        seen: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl FlakyHttp {
+        fn new(fail_first: &[(&str, usize)]) -> Self {
+            let mut map = HashMap::new();
+            for (url, times) in fail_first {
+                map.insert((*url).to_string(), *times);
+            }
+            Self {
+                fail_first: Arc::new(Mutex::new(map)),
+                seen: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+
+        fn seen(&self) -> Vec<String> {
+            self.seen.lock().unwrap().clone()
+        }
+    }
+
+    impl HttpClient for FlakyHttp {
+        fn get_json(&self, _url: &str, _headers: Option<Vec<(String, String)>>) -> Result<Value> {
+            Err(DecompilerError::InvalidResponse(
+                "测试桩:只用 get_binary".into(),
+            ))
+        }
+
+        fn get_binary(&self, url: &str) -> Result<Vec<u8>> {
+            self.seen.lock().unwrap().push(url.to_string());
+            let mut remaining = self.fail_first.lock().unwrap();
+            let count = remaining.entry(url.to_string()).or_insert(0);
+            if *count > 0 {
+                *count -= 1;
+                return Err(DecompilerError::InvalidResponse("测试桩:首发失败".into()));
+            }
+            Ok(url.as_bytes().to_vec())
+        }
+
+        fn get_text(&self, _url: &str) -> Result<String> {
+            Err(DecompilerError::InvalidResponse(
+                "测试桩:只用 get_binary".into(),
+            ))
+        }
+
+        fn box_clone(&self) -> Box<dyn HttpClient> {
+            Box::new(self.clone())
+        }
+    }
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "backend-download-{tag}-{}-{:08x}",
+            std::process::id(),
+            fastrand::u32(..)
+        ));
+        std::fs::create_dir_all(&dir).expect("建临时目录");
+        dir
+    }
+
+    fn wrote(path: &Path) -> bool {
+        path.metadata()
+            .map(|m| m.is_file() && m.len() > 0)
+            .unwrap_or(false)
+    }
+
+    /// 含 `": "` 的 url:旧实现把失败拼成 `"{url}: {error}"`、重试时 `split(": ").next()` 反解,
+    /// 于是切出 `https://cdn.example.com/a?note=hello` ⇒ **找不到任务、这个文件不会被重试**。
+    /// 这条 url 是本项的真正动机,单独命名以便一眼看出它在测什么。
+    const TRICKY_URL: &str = "https://cdn.example.com/a?note=hello: world";
+
+    /// 首发失败 ⇒ 串行重试成功:清单空、文件落盘,且**每个 url 恰好被请求两次**
+    /// (重试打的是记录里的原文 url,不是从拼串里反解出来的前缀)。
+    #[test]
+    fn retry_recovers_files_and_retry_uses_recorded_url() {
+        let dir = temp_dir("retry");
+        let plain = "https://cdn.example.com/plain.bin";
+        let http = FlakyHttp::new(&[(plain, 1), (TRICKY_URL, 1)]);
+        let tasks = vec![
+            ResourceTask {
+                url: plain.to_string(),
+                dest: dir.join("plain.bin"),
+            },
+            ResourceTask {
+                url: TRICKY_URL.to_string(),
+                dest: dir.join("tricky.bin"),
+            },
+        ];
+
+        let failures = download_resources_parallel(&http, tasks, 1);
+
+        assert!(
+            failures.is_empty(),
+            "两个文件都应在重试里补回,实际:{failures:?}"
+        );
+        assert!(
+            wrote(&dir.join("plain.bin")) && wrote(&dir.join("tricky.bin")),
+            "重试成功的文件必须落盘"
+        );
+        let seen = http.seen();
+        assert_eq!(
+            seen.iter().filter(|u| u.as_str() == plain).count(),
+            2,
+            "首发 + 重试各一次:{seen:?}"
+        );
+        assert_eq!(
+            seen.iter().filter(|u| u.as_str() == TRICKY_URL).count(),
+            2,
+            "含 \": \" 的 url 同样要被重试:{seen:?}"
+        );
+        assert!(
+            !seen.iter().any(|u| u != plain && u != TRICKY_URL),
+            "重试不得请求别的 url(反解出的前缀就是这里露馅):{seen:?}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// 重试**仍失败**时:失败清单必须**原样成对**带回 —— url 是完整原文、错误文本单独一段,
+    /// 调用方拿它直接 warn 或断言,不需要再去拆字符串。
+    #[test]
+    fn failures_stay_paired_when_retry_fails_too() {
+        let dir = temp_dir("still-fail");
+        let http = FlakyHttp::new(&[(TRICKY_URL, 2)]); // 首发与重试都失败
+        let tasks = vec![ResourceTask {
+            url: TRICKY_URL.to_string(),
+            dest: dir.join("tricky.bin"),
+        }];
+
+        let failures = download_resources_parallel(&http, tasks, 1);
+
+        assert_eq!(failures.len(), 1, "两次都失败 ⇒ 清单留一条:{failures:?}");
+        assert_eq!(
+            failures[0].0, TRICKY_URL,
+            "url 必须是**完整原文**(旧实现只能给 `: ` 反解后的片段)"
+        );
+        assert!(
+            failures[0].1.contains("首发失败"),
+            "错误文本单独成段:{}",
+            failures[0].1
+        );
+        assert!(!wrote(&dir.join("tricky.bin")), "失败时不该留下产物");
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

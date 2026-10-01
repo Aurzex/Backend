@@ -1138,12 +1138,12 @@ impl<'a> NemoResourceManager<'a> {
                 });
             }
         }
-        for failure in download_resources_parallel(
+        for (url, error) in download_resources_parallel(
             self.config.http_client,
             tasks,
             self.config.resource_concurrency,
         ) {
-            warn!("资源下载失败 {failure}");
+            warn!("资源下载失败 {url}: {error}");
         }
         Ok(())
     }
@@ -1656,12 +1656,12 @@ impl<'a> WoodResourceManager<'a> {
                 dest: images_dir.join(name),
             });
         }
-        for failure in download_resources_parallel(
+        for (url, error) in download_resources_parallel(
             self.config.http_client,
             tasks,
             self.config.resource_concurrency,
         ) {
-            warn!("图片下载失败 {failure}");
+            warn!("图片下载失败 {url}: {error}");
         }
         Ok(())
     }
