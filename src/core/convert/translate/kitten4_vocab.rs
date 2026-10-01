@@ -1,8 +1,9 @@
 //! Kitten4 **编辑器**认识的积木类型清单(**实测导出**,不是推断)。
 //!
 //! 来源:线上 Kitten4 编辑器(`https://kitten4.codemao.cn/`)页面里
-//! `Object.keys(window.Blockly.Blocks).sort()`,共 349 条(2026-09-26)。
-//! 编辑器升级后重导一次、整体替换这个数组即可。
+//! `Object.keys(window.Blockly.Blocks).sort()`;条目数与最近一次导出的日期见
+//! [`KITTEN4_VOCAB_EXPORTED`](**单一事实源**,本文件不再另抄一份数字)。
+//! 编辑器升级后重导一次、整体替换这个数组并更新它即可。
 //!
 //! **为什么需要它**:反向(KN → Kitten4)遇到"一个 KN 名对应多个 Kitten 原类型"的歧义时
 //! (如 `change_variables` ← `change_variable` | `change_cloud_variable`),必须挑一个
@@ -13,12 +14,20 @@
 ///
 /// ① 无头浏览器打开 `https://kitten4.codemao.cn/` 并等编辑器就绪(页面有 `window.Blockly`);
 /// ② 在页面里取 `Object.keys(window.Blockly.Blocks).sort()`;
-/// ③ 用结果**整体替换**下面的数组,并更新本节末尾的"最近一次导出"。
+/// ③ 用结果**整体替换**下面的数组,并更新 [`KITTEN4_VOCAB_EXPORTED`]。
 ///
 /// 判据:产物里出现的类型名(含影子 XML 的 `type`)必须都在这个数组里 ——
 /// 少一个,编辑器加载**整份工作区**就会失败(见 `docs/knowledge/convert-semantics.md` §5bis)。
-/// 最近一次导出:**2026-09-26,349 条**。
 ///
+/// 词表**最近一次导出**的单一事实源:`(日期, 条目数)` —— 文件头、[`KITTEN4_EDITOR_TYPES`] 的说明
+/// 与新鲜度读数(`tests` 里的 `editor_type_list_freshness_is_reported_not_enforced`)都引用它,
+/// 不在注释里另抄一份数字。
+///
+/// 非测试构建里它只被文档引用(没有代码读它)⇒ 显式 `allow(dead_code)`:仓库的
+/// `[lints.rust] unused` 现在是 `allow`,但它迟早会被收紧(见 `docs/rounds/39` §W5④)。
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) const KITTEN4_VOCAB_EXPORTED: (&str, usize) = ("2026-09-26", 349);
+
 /// 编辑器认识的积木类型(已排序,二分查找用)
 #[rustfmt::skip]
 pub(super) const KITTEN4_EDITOR_TYPES: &[&str] = &[
@@ -119,7 +128,7 @@ pub(super) fn kitten4_editor_knows(kind: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{KITTEN4_EDITOR_TYPES, kitten4_editor_knows};
+    use super::{KITTEN4_EDITOR_TYPES, KITTEN4_VOCAB_EXPORTED, kitten4_editor_knows};
 
     /// 表必须**严格升序无重复** —— [`kitten4_editor_knows`] 走 `binary_search`,表一旦无序,
     /// 查询会**静默**答错:该认识的答"不认识" ⇒ 积木被写出阶段剔掉;不认识的答"认识" ⇒
@@ -146,5 +155,76 @@ mod tests {
         ] {
             assert!(kitten4_editor_knows(probe), "查不到 `{probe}`");
         }
+    }
+
+    /// 新鲜度提醒阈值(天):超过就打印"该重导了"。**只影响打印**,不参与断言。
+    const FRESHNESS_WARN_DAYS: u64 = 180;
+
+    /// 词表**新鲜度读数**(`docs/goals/convert-backlog.md` §6.3 的 G4):打印条目数、导出日期与
+    /// 距今天数;条目数与 [`KITTEN4_VOCAB_EXPORTED`] 对不上、或导出已超过
+    /// [`FRESHNESS_WARN_DAYS`] 天时,**醒目提醒**该重导了(流程见文件头)。
+    ///
+    /// **刻意只打印、不失败**:按挂钟时间失败的测试会在某个日期之后**自动变红** —— 门就变成噪音、
+    /// 人人开始忽略它(仓库的门是 `-D warnings` + 全绿,不能被时间弄红)。所以这里允许它随日期
+    /// 改变**打印内容**,但**永远不 panic / assert**;"该重导了"由人读到提醒后按流程处理。
+    /// 同理,条目数与记录对不上也**只提醒**:那通常正是"换了语料 / 手工改过数组"的信号,
+    /// 但它是给人看的,不是给 CI 判的。
+    #[test]
+    fn editor_type_list_freshness_is_reported_not_enforced() {
+        let (exported_on, exported_count) = KITTEN4_VOCAB_EXPORTED;
+        let actual = KITTEN4_EDITOR_TYPES.len();
+        let days = days_since(exported_on);
+        eprintln!(
+            "[词表新鲜度] 条目数 {actual}(导出时记录 {exported_count});最近导出 {exported_on}(距今 {days} 天)"
+        );
+        if actual != exported_count {
+            eprintln!(
+                "⚠ [词表新鲜度] 条目数与导出记录**不一致**({actual} vs {exported_count})—— \
+                 要么重导后忘了更新 KITTEN4_VOCAB_EXPORTED、要么手工改过数组;重导流程见本文件头"
+            );
+        }
+        if days > FRESHNESS_WARN_DAYS {
+            eprintln!(
+                "⚠ [词表新鲜度] 导出已 **{days} 天**(> {FRESHNESS_WARN_DAYS})—— 编辑器可能已升级,\
+                 **该重导了**(流程见本文件头:`Object.keys(window.Blockly.Blocks).sort()`)"
+            );
+        }
+    }
+
+    /// `YYYY-MM-DD` → 距"现在"的天数(按 **UTC 日界**算,故与本地日历可能差 1 天)。
+    /// 用 [`std::time::SystemTime`] ⇒ 返回值随日期变化,但**只用于打印**(见上一条测试的说明)。
+    fn days_since(date: &str) -> u64 {
+        let mut parts = date.split('-');
+        let year: i64 = parts
+            .next()
+            .expect("导出日期缺 年")
+            .parse()
+            .expect("年不是数字");
+        let month: i64 = parts
+            .next()
+            .expect("导出日期缺 月")
+            .parse()
+            .expect("月不是数字");
+        let day: i64 = parts
+            .next()
+            .expect("导出日期缺 日")
+            .parse()
+            .expect("日不是数字");
+        let now_days = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("系统时钟早于 1970-01-01")
+            .as_secs() as i64
+            / 86_400;
+        (now_days - civil_to_days(year, month, day)).max(0) as u64
+    }
+
+    /// `YYYY-MM-DD` → 自 1970-01-01 起的天数(Howard Hinnant 的 `days_from_civil`)。
+    /// 手写而不是引依赖:仓库约定**不引入新第三方依赖**,而标准库没有日历。
+    fn civil_to_days(year: i64, month: i64, day: i64) -> i64 {
+        let y = year - i64::from(month <= 2);
+        let era = y.div_euclid(400);
+        let yoe = y - era * 400; // [0, 399]
+        let doy = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
+        era * 146_097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719_468
     }
 }
