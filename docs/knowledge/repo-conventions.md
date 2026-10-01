@@ -48,7 +48,7 @@
 | 开关 | 作用 |
 | ---- | ---- |
 | `BACKEND_REQUIRE_LIVE=1` | 真机测试严格模式:缺配置/登录失败**一律失败**,不再静默 pass |
-| `BACKEND_REQUIRE_BENCH=1` | **基准**严格模式:debug 构建、样本缺失、基线缺失一律失败(默认这些情况是"打印后 return **显示 pass**") |
+| `BACKEND_REQUIRE_BENCH=1` | **基准**严格模式:debug 构建、样本缺失一律失败(默认这两条是"打印后 return **显示 pass**",干净检出上等于没有这条门)。**基线例外**:`NotFound`/解析失败在**默认模式下也直接失败**(`f62aec7`,W3a;此前"NotFound ⇒ 返回空 map + 首跑自动写盘"会让门在「基线被删 / 全新检出」时静默消失)——建基线的**唯一**通道是显式 `BACKEND_BENCH_REFRESH=1` |
 | `BACKEND_BENCH_REFRESH=1` | **有据刷新**基线:写出新基线并**逐键打印**变化(产物字节/块数/告警数/源文件 SHA256);不用它时基线损坏/缺失**一律炸**,绝不静默重建 |
 
 **验证纪律(踩了三次总结出来的)**:
@@ -60,7 +60,7 @@
 ## 4. 错误类型
 
 - 统一 `MewError` / `MewResult<T>`(`src/utils/requests.rs`);HTTP 状态码枚举已改名为 `StatusCode`(`HTTPStatus` 已不存在)。
-- `ProcessorError`/`DataQueryError` 已包装 `MewError`;**`DecompilerError` 仍自带 `Io/Json/Http`**,与 `MewError` 重复(待改)。
+- `ProcessorError`/`DataQueryError` 已包装 `MewError`。`DecompilerError` 现只有 `Mew(#[from] MewError)` 加域内变体(`Crypto`/`Decompile`/`UnsupportedType`/`InvalidResponse`/`MissingField`/`TypeMismatch`/`Other`),`io::Error`/`serde_json::Error` 经 `From` 折进 `Mew` —— 原先记的"仍自带 `Io/Json/Http`、与 `MewError` 重复**待改**"**已不存在**(2026-10-01 核实,见 `docs/rounds/39` §1.3/§W12d)。唯一残留是零调用死变体 `UnsupportedType`;删它 = 动公共枚举,需授权(`rounds/39` §W5②)。
 - 破坏性 API 变更**不留兼容别名**(已授权的前提下直接删)。
 
 ## 5. 命名与文件组织
@@ -71,7 +71,7 @@
 - **域内文件组织(以 `docs/rounds/31-convert-layout-consolidation-plan.md` §2.1 为准)**:一个文件一个职责;
   生成物单独一处(`translate/tables_gen.rs`,**不可与手写表混放**);测试默认内联在被测文件末尾,
   「本体 + 测试 > 3 000 行」时才独立成 `*_tests.rs`;**单文件上限 ≈ 2 500 行**。
-  当前布局:`mod.rs` + `shared.rs` + `decompile/{mod,editors}.rs` + `translate/{mod,model,mapping,assembly,nemo,nemo_mapping,tables_gen,reverse_tests,nemo_tests}.rs`(13 文件)。
+  当前布局:`mod.rs` + `shared.rs` + `decompile/{mod,editors}.rs` + `translate/{mod,model,mapping,assembly,pipeline,options,report,xml,nemo,nemo_mapping,tables_gen,kitten4_vocab,reverse_tests,nemo_tests}.rs`(**18 文件**;权威清单见 `docs/rounds/39` §1.1;`options`/`report`/`pipeline`/`xml` 与 `kitten4_vocab` 是 rounds/34–37 加进来的)。
 - 分层纪律:`translate` 子域**不碰网络**;需要网络(上传/建作品)的编排放 `core/convert/mod.rs` 门面
   (反编译侧的可选「上传到账号」同理,见 `docs/rounds/30`)。
 - 分层纪律:`translate` 子域**不碰网络**;需要网络(上传/建作品)的编排放 `core/convert/mod.rs` 门面。

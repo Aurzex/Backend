@@ -334,3 +334,4 @@ pub struct LocalClientProvider {
 | 一般印象:"积木数对了就没丢" | — | **判"丢没丢"只用 id 口径**(id 是否出现在产物里);且要分清**节点 id / XML 里的 id / 只是 `connections` 键上出现** —— 混了会同时造出"幻影丢失"和"漏报" |
 | `knowledge/convert-semantics.md` §5/§5bis、rounds/34–37 多处 | "编辑器不认识的类型**被剔除/清空**(宁可少几块)" | **只对了一半**:块现在**不再剔除**,而是**就地改成「未收录积木」标记**(`incompatible_block` / `incompatible_output_block`)—— 剔除会让积木真的消失(id 口径)。**影子**仍是清空 |
 | `assembly.rs` 旧实现的 `if dropped.is_empty() { return }`(rounds/37 P3 的"省一次遍历") | 被当成纯性能优化 | **不是**:它是**按实体**提前返回,顺带**跳过影子扫描** ⇒ "没有任何未知块的实体"里的未知影子**从来没被清过**(直接留在产物里,正是会让编辑器整份加载失败的东西)。rounds/38 去掉早退后,某作品影子清空量 52 → **62**(这 10 条是补上的漏清,不是回归) |
+| rounds/38 §8 | "**反向侧没有 id 台账**(正向那条已建);反向"认不出"的量由 `MARKER_BUDGET` 守" | **已不成立**(2026-10-01):反向台账 **`LOST_ID_BUDGET_REVERSE`** 已建(`d10d0cb` 首版、`ef37978` 把口径收窄到真正的积木节点;逐件打印 `[id台账·反向]`,只许变小),与正向 `LOST_ID_BUDGET` 同口径。原因与基线读数见 `rounds/39` §W3d/§0.3 与 `goals/convert-backlog.md` §6.3 G3 |
