@@ -18,7 +18,7 @@ use serde_json::{Map, Value, json};
 // | -- | ------------ | --------- |
 // | 前端 | [`super::model::parse_block_data_json`] | [`parse_blocks_xml`](本文件,`<root>` 包装 → 节点) |
 // | 语义 | [`super::mapping::translate_kitten_to_kn`] | [`super::nemo_mapping::translate_nemo_to_kn`] |
-// | 后端 | [`super::neko`] 三件套 | 不需要:NEMO 的程序集在官方解析器内就位(见 `nemo_mapping`) |
+// | 后端 | [`super::model`] 三件套 | 不需要:NEMO 的程序集在官方解析器内就位(见 `nemo_mapping`) |
 // | 装配 | [`super::assembly::build_document`] | [`convert_nemo_document`](本文件) |
 // 官方管线(`gI`,bundle 偏移 ~6000071)顺序,逐步对应:
 // 1. **版本迁移**(可选):`bcm_version < 0.9.4` → QC(角色 rotation 取反 + 旧音频块 XML 重写 +

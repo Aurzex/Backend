@@ -9,7 +9,6 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-// 来自 src/core/convert/translate/model.rs
 // 中核数据模型:积木节点/树(两种编辑器归一到它)+ id 生成。
 // 设计要点(见 `docs/rounds/20-kitten-kn-work-conversion-plan.md` §6.2):
 // - **不做语义 IR**:节点就是编辑器自己的 JSON 形状(KN 的 `nekoBlockJsonList` 元素),
@@ -234,104 +233,6 @@ pub(crate) fn type_name(v: &Value) -> &'static str {
     }
 }
 
-#[cfg(test)]
-mod model_tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn value_round_trips_through_block_json() {
-        let value = json!({
-            "type": "repeat_n_times",
-            "id": "b1",
-            "location": [334.4444580078125, -12.5],
-            "shadows": { "times": "<shadow type=\"math_number\"/>", "DO": "" },
-            "fields": { "sprite": "--self" },
-            "collapsed": false
-        });
-        let node = BlockJson::from_value(&value).expect("解析");
-        let back = node.to_value().expect("序列化");
-        assert_eq!(back["type"], value["type"]);
-        assert_eq!(back["location"], value["location"]);
-        assert_eq!(back["shadows"], value["shadows"]);
-        assert_eq!(back["collapsed"], value["collapsed"], "未知键经 extra 保真");
-    }
-
-    /// 依赖 `serde_json` 的 `float_roundtrip` feature:
-    /// 关掉它时 `240.88868713378906` 会解析成 240.88868713378903(差 1 ULP),
-    /// 于是与官方 JS 产物做逐字节对齐时,`location` 这类浮点会假报差异。
-    #[test]
-    fn floats_are_parsed_with_correct_rounding() {
-        let parsed: f64 = serde_json::from_str("240.88868713378906").expect("解析浮点");
-        assert_eq!(parsed, 240.88868713378906_f64);
-        assert_eq!(
-            serde_json::to_string(&parsed).unwrap(),
-            "240.88868713378906",
-            "往返后必须逐字一致"
-        );
-    }
-
-    #[test]
-    fn tree_utilities_walk_and_count() {
-        let root = json!({
-            "type": "root", "id": "r",
-            "inputs": { "A": { "type": "mid", "id": "m", "inputs": { "A": { "type": "leaf", "id": "l" } } } },
-            "next": { "type": "second", "id": "s" }
-        });
-        let tree = BlockTree::new(vec![BlockJson::from_value(&root).unwrap()]);
-        assert_eq!(tree.count(), 4);
-        let mut ids = std::collections::HashSet::new();
-        tree.walk(&mut |b| {
-            if let Some(id) = &b.id {
-                ids.insert(id.clone());
-            }
-        });
-        assert_eq!(ids.len(), 4);
-        let types = tree.count_types();
-        assert_eq!(types.get("mid"), Some(&1));
-        assert_eq!(types.get("leaf"), Some(&1));
-    }
-}
-
-#[cfg(test)]
-mod null_tolerance_tests {
-    use super::*;
-    use serde_json::json;
-
-    /// 真作品里这些键可能是显式 null:不能被一个 null 拖垮整份作品的解析。
-    #[test]
-    fn explicit_nulls_do_not_break_parsing() {
-        let value = json!({
-            "type": "repeat_n_times",
-            "id": "b1",
-            "is_shadow": null,
-            "is_output": null,
-            "shield": null,
-            "disabled": null,
-            "mutation": null,
-            "location": null,
-            "inputs": null,
-            "statements": null,
-            "fields": null,
-            "shadows": null,
-            "field_constraints": null,
-            "parent_id": null
-        });
-        let node = BlockJson::from_value(&value).expect("null 容错");
-        assert_eq!(node.kind, "repeat_n_times");
-        assert!(!node.is_shadow && !node.is_output && !node.shield && !node.disabled);
-        assert!(node.inputs.is_empty() && node.statements.is_empty());
-        assert!(node.fields.is_empty() && node.shadows.is_empty());
-        assert!(node.mutation.is_none() && node.location.is_none());
-    }
-
-    #[test]
-    fn null_type_becomes_empty_kind() {
-        let node = BlockJson::from_value(&json!({ "type": null, "id": "x" })).expect("解析");
-        assert_eq!(node.kind, "");
-    }
-}
-
 // ===========================================================================
 // id 生成:KN 侧实体/程序集用 UUID 形态,影子和块 id 用小写短 id。
 //
@@ -491,81 +392,6 @@ impl IdSource {
             return format!("{:0>22}", format!("{:x}", self.counter));
         }
         self.chars.generate(22)
-    }
-}
-
-#[cfg(test)]
-mod id_tests {
-    use super::*;
-    use std::collections::HashSet;
-
-    #[test]
-    fn deterministic_ids_are_stable_and_unique() {
-        let mut a = IdSource::new(true);
-        let mut b = IdSource::new(true);
-        let left: Vec<String> = (0..5).map(|_| a.uuid()).collect();
-        let right: Vec<String> = (0..5).map(|_| b.uuid()).collect();
-        assert_eq!(left, right, "同一序号序列必须一致");
-        assert_eq!(left.len(), left.iter().collect::<HashSet<_>>().len());
-        assert!(
-            left.iter().all(|id| id.len() == 36),
-            "UUID 形态:{}",
-            left[0]
-        );
-    }
-
-    #[test]
-    fn random_ids_look_like_uuid_v4() {
-        let mut src = IdSource::new(false);
-        let id = src.uuid();
-        let parts: Vec<&str> = id.split('-').collect();
-        assert_eq!(
-            parts.iter().map(|p| p.len()).collect::<Vec<_>>(),
-            vec![8, 4, 4, 4, 12]
-        );
-        assert!(parts[2].starts_with('4'));
-        assert!(id.chars().all(|c| c == '-' || c.is_ascii_hexdigit()));
-    }
-
-    #[test]
-    fn short_ids_have_fixed_length() {
-        let mut src = IdSource::new(false);
-        assert_eq!(src.short().len(), 22);
-        let mut det = IdSource::new(true);
-        assert_eq!(det.short().len(), 22);
-    }
-
-    /// 记录模式(实体级并行):产出带哨兵的临时 id、按铸造顺序记账、不推进全局计数;
-    /// 账本按顺序交给串行源兑现后,结果与"同一序列直接在串行源上铸造"逐个相同。
-    #[test]
-    fn recording_mode_logs_mints_and_replays_identically() {
-        let mut recorded = IdSource::recording(7);
-        let temps: Vec<String> = vec![recorded.uuid(), recorded.short(), recorded.uuid()];
-        assert!(
-            temps.iter().all(|id| id.starts_with(TEMP_ID_PREFIX)),
-            "记录模式必须产出临时 id:{temps:?}"
-        );
-        assert_eq!(
-            temps,
-            vec![
-                format!("{TEMP_ID_PREFIX}prov:7:0:u"),
-                format!("{TEMP_ID_PREFIX}prov:7:1:s"),
-                format!("{TEMP_ID_PREFIX}prov:7:2:u"),
-            ]
-        );
-        let log = recorded.into_log();
-        assert_eq!(log.len(), 3);
-        assert_eq!(
-            log.iter().map(|(_, kind)| *kind).collect::<Vec<_>>(),
-            vec![MintKind::Uuid, MintKind::Short, MintKind::Uuid]
-        );
-
-        // 兑现:与"直接串行铸造"逐字节一致(确定性模式下 id 是第几次铸造的纯函数)
-        let mut replay = IdSource::new(true);
-        let finals: Vec<String> = log.iter().map(|(_, kind)| kind.mint(&mut replay)).collect();
-        let mut direct = IdSource::new(true);
-        let expected = vec![direct.uuid(), direct.short(), direct.uuid()];
-        assert_eq!(finals, expected);
     }
 }
 
@@ -833,173 +659,6 @@ const KITTEN4_DEFAULTS: &[(&str, DefaultFactory)] = &[
     ("is_output", || Value::Bool(false)), ("fields", || Value::Object(Map::new())),
     ("shadows", || Value::Object(Map::new())), ("field_extra_attr", || Value::Object(Map::new())),
 ];
-
-#[cfg(test)]
-mod kitten_tests {
-    use super::*;
-    use serde_json::json;
-
-    fn bdj(blocks: Value, connections: Value) -> Value {
-        json!({ "blocks": blocks, "connections": connections, "comments": {} })
-    }
-
-    #[test]
-    fn parses_next_chain_and_roots() {
-        let value = bdj(
-            json!({
-                "a": { "type": "start_on_click", "id": "a", "location": [0, 0] },
-                "b": { "type": "repeat_forever", "id": "b", "shadows": { "DO": "" } },
-                "c": { "type": "self_appear", "id": "c" }
-            }),
-            json!({
-                "a": { "b": { "type": "next" } },
-                "b": { "c": { "type": "next" } },
-                "c": {}
-            }),
-        );
-        let parsed = parse_block_data_json(&value).expect("parse");
-        assert_eq!(parsed.roots.len(), 1);
-        let root = &parsed.roots[0];
-        assert_eq!(root.kind, "start_on_click");
-        assert_eq!(root.next.as_ref().unwrap().kind, "repeat_forever");
-        assert_eq!(
-            root.next.as_ref().unwrap().next.as_ref().unwrap().kind,
-            "self_appear"
-        );
-        assert_eq!(parsed.count(), 3);
-    }
-
-    #[test]
-    fn routes_value_and_statement_inputs() {
-        let value = bdj(
-            json!({
-                "p": { "type": "repeat_n_times", "id": "p" },
-                "v": { "type": "math_number", "id": "v", "is_shadow": true, "fields": { "NUM": "10" } },
-                "s": { "type": "self_go_forward", "id": "s" }
-            }),
-            json!({
-                "p": {
-                    "v": { "type": "input", "input_type": "value", "input_name": "times" },
-                    "s": { "type": "input", "input_type": "statement", "input_name": "DO" }
-                }
-            }),
-        );
-        let parsed = parse_block_data_json(&value).expect("parse");
-        let root = &parsed.roots[0];
-        assert_eq!(
-            root.inputs.get("times").map(|b| b.kind.as_str()),
-            Some("math_number")
-        );
-        assert_eq!(
-            root.statements.get("DO").map(|b| b.kind.as_str()),
-            Some("self_go_forward")
-        );
-        assert_eq!(parsed.roots.len(), 1);
-    }
-
-    #[test]
-    fn keeps_shadows_fields_and_unknown_keys() {
-        let value = bdj(
-            json!({
-                "b": {
-                    "type": "repeat_n_times", "id": "b",
-                    "shadows": { "times": "<shadow type=\"math_number\"/>", "DO": "" },
-                    "fields": { "sprite": "--self" },
-                    "field_constraints": { "NUM": { "min": 1 } },
-                    "collapsed": false, "movable": true, "visible": "visible",
-                    "mutation": "", "deletable": true
-                }
-            }),
-            json!({ "b": {} }),
-        );
-        let parsed = parse_block_data_json(&value).expect("parse");
-        let node = &parsed.roots[0];
-        assert_eq!(
-            node.shadows.get("times").map(String::as_str),
-            Some("<shadow type=\"math_number\"/>")
-        );
-        assert_eq!(node.shadows.get("DO").map(String::as_str), Some(""));
-        assert_eq!(node.fields.get("sprite"), Some(&json!("--self")));
-        assert!(node.field_constraints.is_some());
-        assert_eq!(node.extra.get("collapsed"), Some(&json!(false)));
-        assert_eq!(node.extra.get("movable"), Some(&json!(true)));
-        assert_eq!(node.extra.get("visible"), Some(&json!("visible")));
-        assert_eq!(node.mutation.as_deref(), Some(""));
-    }
-
-    #[test]
-    fn accepts_legacy_stringified_blocks() {
-        let inner = json!({
-            "blocks": { "a": { "type": "start_on_click", "id": "a" } },
-            "connections": { "a": {} }
-        });
-        let value = json!({ "blocks": inner.to_string(), "connections": {}, "comments": {} });
-        let parsed = parse_block_data_json(&value).expect("parse");
-        assert_eq!(parsed.roots.len(), 1);
-        assert_eq!(parsed.roots[0].kind, "start_on_click");
-    }
-
-    #[test]
-    fn rejects_cycles_dangling_children_and_missing_blocks() {
-        // 可达环:r → r2 → r(有根,靠祖先链检测)
-        let reachable_cycle = bdj(
-            json!({
-                "r": { "type": "x", "id": "r" },
-                "r2": { "type": "y", "id": "r2" }
-            }),
-            json!({
-                "r": { "r2": { "type": "next" } },
-                "r2": { "r": { "type": "next" } }
-            }),
-        );
-        assert!(parse_block_data_json(&reachable_cycle).is_err());
-
-        // 纯环(无根):每个 id 都当过别人的子节点
-        let rootless = bdj(
-            json!({ "a": { "type": "x", "id": "a" } }),
-            json!({ "a": { "a": { "type": "next" } } }),
-        );
-        assert!(parse_block_data_json(&rootless).is_err());
-
-        let dangling = bdj(
-            json!({ "a": { "type": "x", "id": "a" } }),
-            json!({ "a": { "gone": { "type": "next" } } }),
-        );
-        assert!(parse_block_data_json(&dangling).is_err());
-
-        assert!(parse_block_data_json(&json!({ "connections": {} })).is_err());
-
-        // 空 blocks 合法(空实体)
-        let empty =
-            parse_block_data_json(&json!({ "blocks": {}, "connections": {}, "comments": {} }))
-                .expect("空实体解析为空树");
-        assert_eq!(empty.roots.len(), 0);
-    }
-
-    #[test]
-    fn diamond_children_are_expanded_twice() {
-        // 官方逐边递归:同一子积木被两个槽引用时,两边各展开一份(不共享节点)
-        let diamond = json!({
-            "blocks": {
-                "r": { "type": "root", "id": "r" },
-                "mid": { "type": "mid", "id": "mid" },
-                "s": { "type": "shared", "id": "s" }
-            },
-            "connections": {
-                "r": {
-                    "mid": { "type": "input", "input_type": "value", "input_name": "A" },
-                    "s": { "type": "input", "input_type": "value", "input_name": "B" }
-                },
-                "mid": { "s": { "type": "input", "input_type": "value", "input_name": "A" } },
-                "s": {}
-            },
-            "comments": {}
-        });
-        let parsed = parse_block_data_json(&diamond).expect("parse");
-        assert_eq!(parsed.roots.len(), 1);
-        assert_eq!(parsed.count(), 4, "s 在两个槽下各展开一份");
-    }
-}
 
 // 来自 src/core/convert/translate/neko.rs
 // KN 侧积木 adapter(前端 + 后端)。
@@ -2233,5 +1892,345 @@ mod neko_tests {
         assert_eq!(params_index("PARAMS07"), 7);
         assert_eq!(params_index("PARAMS"), 0, "取不到数字按 0 记(官方是 NaN)");
         assert_eq!(params_index("PARAMSX"), 0);
+    }
+}
+
+#[cfg(test)]
+mod model_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn value_round_trips_through_block_json() {
+        let value = json!({
+            "type": "repeat_n_times",
+            "id": "b1",
+            "location": [334.4444580078125, -12.5],
+            "shadows": { "times": "<shadow type=\"math_number\"/>", "DO": "" },
+            "fields": { "sprite": "--self" },
+            "collapsed": false
+        });
+        let node = BlockJson::from_value(&value).expect("解析");
+        let back = node.to_value().expect("序列化");
+        assert_eq!(back["type"], value["type"]);
+        assert_eq!(back["location"], value["location"]);
+        assert_eq!(back["shadows"], value["shadows"]);
+        assert_eq!(back["collapsed"], value["collapsed"], "未知键经 extra 保真");
+    }
+
+    /// 依赖 `serde_json` 的 `float_roundtrip` feature:
+    /// 关掉它时 `240.88868713378906` 会解析成 240.88868713378903(差 1 ULP),
+    /// 于是与官方 JS 产物做逐字节对齐时,`location` 这类浮点会假报差异。
+    #[test]
+    fn floats_are_parsed_with_correct_rounding() {
+        let parsed: f64 = serde_json::from_str("240.88868713378906").expect("解析浮点");
+        assert_eq!(parsed, 240.88868713378906_f64);
+        assert_eq!(
+            serde_json::to_string(&parsed).unwrap(),
+            "240.88868713378906",
+            "往返后必须逐字一致"
+        );
+    }
+
+    #[test]
+    fn tree_utilities_walk_and_count() {
+        let root = json!({
+            "type": "root", "id": "r",
+            "inputs": { "A": { "type": "mid", "id": "m", "inputs": { "A": { "type": "leaf", "id": "l" } } } },
+            "next": { "type": "second", "id": "s" }
+        });
+        let tree = BlockTree::new(vec![BlockJson::from_value(&root).unwrap()]);
+        assert_eq!(tree.count(), 4);
+        let mut ids = std::collections::HashSet::new();
+        tree.walk(&mut |b| {
+            if let Some(id) = &b.id {
+                ids.insert(id.clone());
+            }
+        });
+        assert_eq!(ids.len(), 4);
+        let types = tree.count_types();
+        assert_eq!(types.get("mid"), Some(&1));
+        assert_eq!(types.get("leaf"), Some(&1));
+    }
+}
+
+#[cfg(test)]
+mod null_tolerance_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// 真作品里这些键可能是显式 null:不能被一个 null 拖垮整份作品的解析。
+    #[test]
+    fn explicit_nulls_do_not_break_parsing() {
+        let value = json!({
+            "type": "repeat_n_times",
+            "id": "b1",
+            "is_shadow": null,
+            "is_output": null,
+            "shield": null,
+            "disabled": null,
+            "mutation": null,
+            "location": null,
+            "inputs": null,
+            "statements": null,
+            "fields": null,
+            "shadows": null,
+            "field_constraints": null,
+            "parent_id": null
+        });
+        let node = BlockJson::from_value(&value).expect("null 容错");
+        assert_eq!(node.kind, "repeat_n_times");
+        assert!(!node.is_shadow && !node.is_output && !node.shield && !node.disabled);
+        assert!(node.inputs.is_empty() && node.statements.is_empty());
+        assert!(node.fields.is_empty() && node.shadows.is_empty());
+        assert!(node.mutation.is_none() && node.location.is_none());
+    }
+
+    #[test]
+    fn null_type_becomes_empty_kind() {
+        let node = BlockJson::from_value(&json!({ "type": null, "id": "x" })).expect("解析");
+        assert_eq!(node.kind, "");
+    }
+}
+
+#[cfg(test)]
+mod id_tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn deterministic_ids_are_stable_and_unique() {
+        let mut a = IdSource::new(true);
+        let mut b = IdSource::new(true);
+        let left: Vec<String> = (0..5).map(|_| a.uuid()).collect();
+        let right: Vec<String> = (0..5).map(|_| b.uuid()).collect();
+        assert_eq!(left, right, "同一序号序列必须一致");
+        assert_eq!(left.len(), left.iter().collect::<HashSet<_>>().len());
+        assert!(
+            left.iter().all(|id| id.len() == 36),
+            "UUID 形态:{}",
+            left[0]
+        );
+    }
+
+    #[test]
+    fn random_ids_look_like_uuid_v4() {
+        let mut src = IdSource::new(false);
+        let id = src.uuid();
+        let parts: Vec<&str> = id.split('-').collect();
+        assert_eq!(
+            parts.iter().map(|p| p.len()).collect::<Vec<_>>(),
+            vec![8, 4, 4, 4, 12]
+        );
+        assert!(parts[2].starts_with('4'));
+        assert!(id.chars().all(|c| c == '-' || c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn short_ids_have_fixed_length() {
+        let mut src = IdSource::new(false);
+        assert_eq!(src.short().len(), 22);
+        let mut det = IdSource::new(true);
+        assert_eq!(det.short().len(), 22);
+    }
+
+    /// 记录模式(实体级并行):产出带哨兵的临时 id、按铸造顺序记账、不推进全局计数;
+    /// 账本按顺序交给串行源兑现后,结果与"同一序列直接在串行源上铸造"逐个相同。
+    #[test]
+    fn recording_mode_logs_mints_and_replays_identically() {
+        let mut recorded = IdSource::recording(7);
+        let temps: Vec<String> = vec![recorded.uuid(), recorded.short(), recorded.uuid()];
+        assert!(
+            temps.iter().all(|id| id.starts_with(TEMP_ID_PREFIX)),
+            "记录模式必须产出临时 id:{temps:?}"
+        );
+        assert_eq!(
+            temps,
+            vec![
+                format!("{TEMP_ID_PREFIX}prov:7:0:u"),
+                format!("{TEMP_ID_PREFIX}prov:7:1:s"),
+                format!("{TEMP_ID_PREFIX}prov:7:2:u"),
+            ]
+        );
+        let log = recorded.into_log();
+        assert_eq!(log.len(), 3);
+        assert_eq!(
+            log.iter().map(|(_, kind)| *kind).collect::<Vec<_>>(),
+            vec![MintKind::Uuid, MintKind::Short, MintKind::Uuid]
+        );
+
+        // 兑现:与"直接串行铸造"逐字节一致(确定性模式下 id 是第几次铸造的纯函数)
+        let mut replay = IdSource::new(true);
+        let finals: Vec<String> = log.iter().map(|(_, kind)| kind.mint(&mut replay)).collect();
+        let mut direct = IdSource::new(true);
+        let expected = vec![direct.uuid(), direct.short(), direct.uuid()];
+        assert_eq!(finals, expected);
+    }
+}
+
+#[cfg(test)]
+mod kitten_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn bdj(blocks: Value, connections: Value) -> Value {
+        json!({ "blocks": blocks, "connections": connections, "comments": {} })
+    }
+
+    #[test]
+    fn parses_next_chain_and_roots() {
+        let value = bdj(
+            json!({
+                "a": { "type": "start_on_click", "id": "a", "location": [0, 0] },
+                "b": { "type": "repeat_forever", "id": "b", "shadows": { "DO": "" } },
+                "c": { "type": "self_appear", "id": "c" }
+            }),
+            json!({
+                "a": { "b": { "type": "next" } },
+                "b": { "c": { "type": "next" } },
+                "c": {}
+            }),
+        );
+        let parsed = parse_block_data_json(&value).expect("parse");
+        assert_eq!(parsed.roots.len(), 1);
+        let root = &parsed.roots[0];
+        assert_eq!(root.kind, "start_on_click");
+        assert_eq!(root.next.as_ref().unwrap().kind, "repeat_forever");
+        assert_eq!(
+            root.next.as_ref().unwrap().next.as_ref().unwrap().kind,
+            "self_appear"
+        );
+        assert_eq!(parsed.count(), 3);
+    }
+
+    #[test]
+    fn routes_value_and_statement_inputs() {
+        let value = bdj(
+            json!({
+                "p": { "type": "repeat_n_times", "id": "p" },
+                "v": { "type": "math_number", "id": "v", "is_shadow": true, "fields": { "NUM": "10" } },
+                "s": { "type": "self_go_forward", "id": "s" }
+            }),
+            json!({
+                "p": {
+                    "v": { "type": "input", "input_type": "value", "input_name": "times" },
+                    "s": { "type": "input", "input_type": "statement", "input_name": "DO" }
+                }
+            }),
+        );
+        let parsed = parse_block_data_json(&value).expect("parse");
+        let root = &parsed.roots[0];
+        assert_eq!(
+            root.inputs.get("times").map(|b| b.kind.as_str()),
+            Some("math_number")
+        );
+        assert_eq!(
+            root.statements.get("DO").map(|b| b.kind.as_str()),
+            Some("self_go_forward")
+        );
+        assert_eq!(parsed.roots.len(), 1);
+    }
+
+    #[test]
+    fn keeps_shadows_fields_and_unknown_keys() {
+        let value = bdj(
+            json!({
+                "b": {
+                    "type": "repeat_n_times", "id": "b",
+                    "shadows": { "times": "<shadow type=\"math_number\"/>", "DO": "" },
+                    "fields": { "sprite": "--self" },
+                    "field_constraints": { "NUM": { "min": 1 } },
+                    "collapsed": false, "movable": true, "visible": "visible",
+                    "mutation": "", "deletable": true
+                }
+            }),
+            json!({ "b": {} }),
+        );
+        let parsed = parse_block_data_json(&value).expect("parse");
+        let node = &parsed.roots[0];
+        assert_eq!(
+            node.shadows.get("times").map(String::as_str),
+            Some("<shadow type=\"math_number\"/>")
+        );
+        assert_eq!(node.shadows.get("DO").map(String::as_str), Some(""));
+        assert_eq!(node.fields.get("sprite"), Some(&json!("--self")));
+        assert!(node.field_constraints.is_some());
+        assert_eq!(node.extra.get("collapsed"), Some(&json!(false)));
+        assert_eq!(node.extra.get("movable"), Some(&json!(true)));
+        assert_eq!(node.extra.get("visible"), Some(&json!("visible")));
+        assert_eq!(node.mutation.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn accepts_legacy_stringified_blocks() {
+        let inner = json!({
+            "blocks": { "a": { "type": "start_on_click", "id": "a" } },
+            "connections": { "a": {} }
+        });
+        let value = json!({ "blocks": inner.to_string(), "connections": {}, "comments": {} });
+        let parsed = parse_block_data_json(&value).expect("parse");
+        assert_eq!(parsed.roots.len(), 1);
+        assert_eq!(parsed.roots[0].kind, "start_on_click");
+    }
+
+    #[test]
+    fn rejects_cycles_dangling_children_and_missing_blocks() {
+        // 可达环:r → r2 → r(有根,靠祖先链检测)
+        let reachable_cycle = bdj(
+            json!({
+                "r": { "type": "x", "id": "r" },
+                "r2": { "type": "y", "id": "r2" }
+            }),
+            json!({
+                "r": { "r2": { "type": "next" } },
+                "r2": { "r": { "type": "next" } }
+            }),
+        );
+        assert!(parse_block_data_json(&reachable_cycle).is_err());
+
+        // 纯环(无根):每个 id 都当过别人的子节点
+        let rootless = bdj(
+            json!({ "a": { "type": "x", "id": "a" } }),
+            json!({ "a": { "a": { "type": "next" } } }),
+        );
+        assert!(parse_block_data_json(&rootless).is_err());
+
+        let dangling = bdj(
+            json!({ "a": { "type": "x", "id": "a" } }),
+            json!({ "a": { "gone": { "type": "next" } } }),
+        );
+        assert!(parse_block_data_json(&dangling).is_err());
+
+        assert!(parse_block_data_json(&json!({ "connections": {} })).is_err());
+
+        // 空 blocks 合法(空实体)
+        let empty =
+            parse_block_data_json(&json!({ "blocks": {}, "connections": {}, "comments": {} }))
+                .expect("空实体解析为空树");
+        assert_eq!(empty.roots.len(), 0);
+    }
+
+    #[test]
+    fn diamond_children_are_expanded_twice() {
+        // 官方逐边递归:同一子积木被两个槽引用时,两边各展开一份(不共享节点)
+        let diamond = json!({
+            "blocks": {
+                "r": { "type": "root", "id": "r" },
+                "mid": { "type": "mid", "id": "mid" },
+                "s": { "type": "shared", "id": "s" }
+            },
+            "connections": {
+                "r": {
+                    "mid": { "type": "input", "input_type": "value", "input_name": "A" },
+                    "s": { "type": "input", "input_type": "value", "input_name": "B" }
+                },
+                "mid": { "s": { "type": "input", "input_type": "value", "input_name": "A" } },
+                "s": {}
+            },
+            "comments": {}
+        });
+        let parsed = parse_block_data_json(&diamond).expect("parse");
+        assert_eq!(parsed.roots.len(), 1);
+        assert_eq!(parsed.count(), 4, "s 在两个槽下各展开一份");
     }
 }

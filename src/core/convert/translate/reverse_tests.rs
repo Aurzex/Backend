@@ -1822,14 +1822,7 @@ mod reverse_tests_inner {
                 // 实体侧差异逐条打印(allow-list 之外才是问题;打印有助于判断"是丢失还是形态差异")
                 eprintln!("[实体侧差异] {label}: {}", entity_diffs.join("; "));
             }
-            let allowed_entity = [
-                "math_arithmetic:",
-                "math_number:",
-                "calculate:",
-                "bcm_translator_text_return_value_block:",
-            ];
             // 实体侧**类型名**差异只报告(名字按目标编辑器词汇挑,系统性不同;内容由实体 id 门守)
-            let _ = &allowed_entity;
             let delta = |kind: &str| -> i64 {
                 after.get(kind).copied().unwrap_or(0) as i64
                     - before.get(kind).copied().unwrap_or(0) as i64

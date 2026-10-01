@@ -14,7 +14,7 @@ use std::sync::LazyLock;
 // NEMO → KN 的语义映射(官方 `nemoBcmToNekoBcmUtils` 内层类 `hI` 的忠实移植)。
 // 官方 bundle:`temp/web/main-vendors.9b801394.js` 模块 41888,类 `hI` 位于偏移
 // ~5960458–5999640;表(`sI` 类型映射、`getMappedName` 内联槽位表、`specialFieldValueMap`、
-// `SHADOW_FIELD_NAME_MAP`、`oI` 占位标题)转录在 [`super::tables_gen_nemo`]。
+// `SHADOW_FIELD_NAME_MAP`、`oI` 占位标题)转录在 [`super::tables_gen`]。
 // 研究结论见 `docs/rounds/27-nemo-to-kn-conversion-plan.md` §9。
 // ## 为什么"前端"和"映射"在同一个模块里
 // Kitten 侧是"前端(`model::parse_block_data_json` 出纯图)→ 映射(`mapping::translate_kitten_to_kn`
