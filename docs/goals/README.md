@@ -14,7 +14,10 @@
    - `convert-backlog.md` §2:反向保真缺口的历史研究路线(已收口到"只剩语义降级"这一步,见 §2 第 0 条);
    - `platform-backlog.md` §1/§2:C9 两项真机实测 + 三条待核验(便宜、能消掉假设);
    - `infra-backlog.md` §2:小改批量(49 处 `unwrap` 硬化、P2 收尾;原先列的 `DecompilerError` 包装已不成立,见 `pending-decisions.md` C2)。
-3. **要立轮的大方向**:`pending-decisions.md` B 组(DTO 类型化、kn→nemo、断线退避重连、`unused` 告警恢复)。
+3. **要立轮的大方向**:`pending-decisions.md` B 组(DTO 类型化、kn→nemo、断线退避重连、`unused` 告警恢复);
+   **`src/main.rs` 改成 `use backend::…`(走库 crate)= 立轮**(2026-10-02 拍板;证据:898 条 bin 侧 dead-code 噪声 + 整棵树被重复编译;只读结论:**不需要动公共 API**,见 `infra-backlog.md` §1)。
+4. **已决但暂缓(登记,待重新立项)**:`convert-backlog.md` §5 的 **W13**(`wrap_arithmetic` 移动不重铸)——
+   收益是"我们自己的往返 id 台账更干净 / 往返 id 更稳",**不是用户可见差异**;代价是偏离官方 + 改产物字节 + 需重做实体机与刷基线(证据:`rounds/38 §8`、`rounds/39` §W13)。
 
 ## 文件
 

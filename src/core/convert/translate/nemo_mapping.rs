@@ -11,6 +11,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::LazyLock;
 
 // 来自 src/core/convert/translate/nemo_mapping.rs
+// 体量:**2617 行(含本行)**,超过 `repo-conventions` §5 的 ≈2500 行软上限 —— **intentional,不拆**(rounds/31 §3.5② 已评审执行:表并入本模块、不进生成物文件;rounds/39 §5-C2 复核后维持)。
 // NEMO → KN 的语义映射(官方 `nemoBcmToNekoBcmUtils` 内层类 `hI` 的忠实移植)。
 // 官方 bundle:`temp/web/main-vendors.9b801394.js` 模块 41888,类 `hI` 位于偏移
 // ~5960458–5999640;表(`sI` 类型映射、`getMappedName` 内联槽位表、`specialFieldValueMap`、

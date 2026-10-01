@@ -86,6 +86,7 @@
 | 真机门 | `tests/live_features.rs`(登录 + AI + 云变量)、`tests/compile_live.rs`(7 种反编译)、`tests/convert_live.rs`(转换 + 写平台) |
 | **严格模式** | `BACKEND_REQUIRE_LIVE=1` —— 缺配置/登录失败**必须失败**,不再"静默 pass" |
 | 转换专项 | 官方校验器(`validateBcm`)硬门 + 语义 diff + `deterministic_ids` 字节一致 + 往返多重集守恒 |
+| 词表新鲜度 | `kitten4_vocab::tests::editor_type_list_freshness_is_reported_not_enforced` —— **只打印读数**(条目数 / 导出日期 / 距今天数;超过 180 天、或条目数与单一事实源 `KITTEN4_VOCAB_EXPORTED` 不一致时醒目提醒)。**刻意不做按挂钟时间失败**:那会让门在某个日期之后**自动变红**、沦为噪音;允许随日期改变**打印内容**,不允许让测试失败 |
 | 必备前置 | 大改先出方案文档 → 子代理评审 → 再动 Rust 代码 |
 
 配置与代码分离:真机配置从 `tests/fixtures/test-config.example.json` 复制到 `data/test-config.json`(`data/` 已 gitignore);`temp/` 放临时产物并及时清理。
