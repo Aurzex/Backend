@@ -10,7 +10,7 @@
 | 文件 | 内容 |
 | ---- | ---- |
 | `work-file-formats.md` | `.bcm` / `.bcm4` / `.bcmkn` 三种作品文件的顶层结构、积木 JSON 模型、程序集、加密矩阵、实现陷阱 |
-| `convert-semantics.md` | 编辑器间转换做了什么:支持矩阵、官方两阶段管线、改名/影子/程序集语义、官方自带的坑、硬门与不变量、判定"不做"的两项 |
+| `convert-semantics.md` | 编辑器间转换做了什么:支持矩阵、官方两阶段管线、改名/影子/程序集语义、官方自带的坑、硬门与不变量、**Kitten4 编辑器的隐性契约(§5bis)**、**编辑格式的读写端点(§9)** |
 | `convert-performance.md` | 实测基线、瓶颈归因(请求数 × RTT)、已落地优化与数字、判定不做的优化、基准方法 |
 | `nemo-runtime-and-upload.md` | NEMO 作品如何被创建/存储:建作品不需要资源字节、Qiniu 上传、两条路线的现实形态 |
 | `platform-and-protocol.md` | 身份/鉴权归因、WebSocket 连接参数矩阵、帧格式与 `41` 语义、tungstenite 三限制与对策、并发与回调铁律、端点族 |

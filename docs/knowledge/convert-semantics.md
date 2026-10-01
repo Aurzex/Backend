@@ -124,6 +124,40 @@ NEMO → KN 是另一条前端(`hI.parseBlocksXML`),官方管线共 12 步(`main
 - 实测 3.7 MB 作品 → 4.86M 字符,1.4 s;**全树积木 359 → 359,55 种类型多重集完全一致**(差异仅元数据/XML 归一化/新 UUID)。
 - 大文件要有大小上限;文本层不是产物的必需环节,是**人工校验**手段。
 
+## 9. **编辑格式**在平台上的读写端点(逆向编辑器 bundle 得到,2026-09-26)
+
+平台对外只给**编译态**(`/kitten/r2/work/player/load/{id}`),**编辑格式只存在于"编辑器读写的那份文件"里**。
+端点写在编辑器的 bundle(`creation.codemao.cn/kitten/build/kitten.*.js`,逐字见 `docs/rounds/37` §12):
+
+| 用途 | 端点 | 备注 |
+| ---- | ---- | ---- |
+| **读编辑格式** | `GET {creation_api}/kitten/work/ide/load/{work_id}` | 返回 `{name, ide_type, preview, source_urls:[…/*.bcm4], …}`;`source_urls` 是**编辑器亲手写出的文件**(通常 10 个历史版本)⇒ 这就是正向语料的来源。按**权限**给源文件(无权限 ⇒ `source_urls` 空) |
+| 写/保存 | 先上传 JSON 到 CDN,再 `POST {creation_api}/kitten/r2/work` | 载荷:`work_id`/`name`/**`work_url`**/`preview`/`orientation`/`sample_id`/`version`/`work_source_label`/`parent_id`/`save_type` |
+| 服务端翻译 | `POST /kitten/work/translate` | 官方那条 Kitten→KN |
+| 历史存档 | `GET /kitten/work/archive/{id}` | 版本列表(含 `archive_id`/`date_desc`/`save_type`) |
+| `.bcm` 解码 | `POST /kitten/work/bcm/decode` | 载荷 `{code}` |
+
+`creation_api` 是运行时注入的;本库对应 `BaseKey::Creation`(`https://api-creation.codemao.cn`)。
+采集工具:`tests/convert_edit_harvest.rs`(落盘 `download/compile/k4edit/`)。
+
+**为什么值得**:拿它喂正向扫描器就**打破了"自产自测"** —— 转换器的输入不再是"我们反编译器的产物",
+而是编辑器亲手写的东西(我们归一化掉的形态才会暴露)。
+
+## 9bis. 数"块数"有三个互不相等的口径(方法纪律)
+
+同一份文档,"有多少块"至少有三种口径,答案**不相等**,混用就会造出**幻影缺陷**:
+
+| 口径 | 含义 | 什么时候用 |
+| ---- | ---- | ---------- |
+| **(a) 原始 JSON 遍历** | 数与连接形态无关(census/扫描器用的就是这个) | 判"形态差异",但**不能**当"有没有丢" |
+| **(b) 从根可达的树计数** | `parse_*_entity` + `tree.count()`:转换器实际处理的那棵树 | 判"转换器搬了多少" |
+| **(c) id 是否出现在文档里** | 判"这块有没有被搬过去" | 判"丢没丢"的**唯一**直接证据 |
+
+> 实例(rounds/37 §13.5–13.8):一次扫描报 `get_midis: 4 -> 0`,我先后用 (a)/(b) 的差值下了三次结论,
+> 全被推翻;最后 (c) 证明"源场景 20 块的 id 在产物里 20/20 都在" ⇒ **块没丢**。
+> **纪律**:跨口径比较前先声明口径;定案优先用**真 API 的最小复现**(把一个块喂进真函数看它变成什么),
+> 而不是自己写的遍历。
+
 ## 依据
 
 - `docs/rounds/20-kitten-kn-work-conversion-plan.md` §3(官方实现逆向)、§4(反向可行性)、§6.2(设计取舍)、§8(坑)、§9(验证)、§11(实测)、§11.2(真机端到端)。

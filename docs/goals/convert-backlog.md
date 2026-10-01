@@ -46,7 +46,10 @@
    - **仪器**:`kn_corpus_round_trip_sweep`(反向,吃任意 `download/compile/*.bcmkn`)、
      `k4_corpus_round_trip_sweep`(正向,吃 **`download/compile/*.bcm4`** —— 早前文档写的 `k4raw/*.json` 是漂移)、采集器
      `tests/convert_corpus_harvest.rs`(`#[ignore]`)。
-   - **仍然卡住的一步**:正向扫描器要的**编辑格式**平台拿不到 —— `player/load` 是编译态(喂进去会静默产出空 KN,
+   - ✅ **已解决(2026-09-26,rounds/37 §12)**:正向扫描器要的**编辑格式**已能拿到 ——
+  逆向编辑器 bundle 得读端点 `GET /kitten/work/ide/load/{id}`,其 `source_urls` 就是编辑器写出的编辑格式文件;
+  采集工具 `tests/convert_edit_harvest.rs`,语料落 `download/compile/k4edit/`,扫描器已并入该目录。
+  原记录(卡住的一步):正向扫描器要的**编辑格式**平台拿不到 —— `player/load` 是编译态(喂进去会静默产出空 KN,
      实测 654→13),`kitten/r2/work/edit/load/*` 与 `kitten/work/ide/load/*` 都 404,`source/public` 对 Kitten 报 422;
      编辑格式只存在于**编辑器保存时的载荷**里 ⇒ 需要浏览器会话抓包(形态与两次误判见 rounds/33 §2;
      扫描器已加"缺 `block_data_json` 即跳过"的形态守卫)。
@@ -108,3 +111,14 @@
 - **实机门(最强)**:无头 Chromium + 线上 Kitten4 的「打开本地作品」—— 数画布积木 + 看角色列表,
   必须带一个已知能读的对照组(方法留档见 `docs/rounds/35`;配方也可从 `docs/knowledge/convert-semantics.md` §5bis 反查)。
 - 官方校验器 `BcmHelpers.validateBcm`(headless 可跑)是"产物能否被编辑器加载"的硬门。
+
+---
+
+## 5. rounds/37 之后的下一步
+
+| # | 候选 | 前置条件 | 说明 |
+| - | ---- | -------- | ---- |
+| 1 | **把两条扫描器的"差异类别"升级成基线门(只许变少)** | ✅ 已满足:口径已稳(代表固定 + 差异全部归类) | 此前坚持"口径不稳不冻结" ⇒ 现在可以:差异类别集合与一份记录基线比,变多即红灯(与 `STRIP_BUDGET` 同一思路) |
+| 2 | 性能:P8–P11 | — | **实测判定不再做**:P2/P3/P5/P6 同轮 A/B 都落在噪声内(±2%,rounds/37 §6.2bis/§10.6);要真收益只有"少建中间 `Value` 树"那条重写装配层的路,风险极高,除非有硬性指标 |
+| 3 | NEMO 方向:补 SHA 基线 + 采一次 perf | — | NEMO 有 6 条内存单测但没有字节门;它已知有重复解析(同一段 XML 包 `<root>` 解析 3 次) |
+| 4 | 实机门进 CI | — | 离线替身:官方 `validateBcm` 可 headless 跑 |

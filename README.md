@@ -259,20 +259,24 @@ for group in session.leftover_groups() {
 │   │   └── gen_translate_tables.rs  # 生成 translate/tables_gen.rs(整文件覆盖,勿与手写表混放)
 │   ├── api/                   # 业务域(见「模块一览」)
 │   ├── core/
-│   │   ├── convert/           # 作品文件转换域(读写作品文件的唯一边界,13 个文件)
-│   │   │   ├── mod.rs         #   域门面:子域声明 + 跨子域类型 + 单作品/批量编排 + 上传建草稿编排
-│   │   │   ├── shared.rs      #   共用地基:错误 / 领域模型 / 配置(含影子模板表)/ 加密·HTTP·文件·JSON / 上传到账号 / 批量执行
+│   │   ├── convert/           # 作品文件转换域(读写作品文件的唯一边界,14 个文件)
+│   │   │   ├── mod.rs         #   域门面:子域声明 + 单作品/批量编排 + 上传建草稿编排
+│   │   │   ├── shared.rs      #   共用地基:错误/领域模型/配置/加密·HTTP·文件·JSON/上传/批量执行
 │   │   │   ├── decompile/
 │   │   │   │   ├── mod.rs     #   反编译门面:选项 + 上下文 + 契约 + 编译版积木层
 │   │   │   │   └── editors.rs #   七种编辑器的抓取与重建(Kitten / Neko / Nemo / Coco / Wood)
 │   │   │   └── translate/
-│   │   │       ├── mod.rs     #   转化门面:公开类型 + 双向管线 + 报告
-│   │   │       ├── model.rs   #   节点/树模型 + Kitten/KN 适配器 + id 策略
+│   │   │       ├── mod.rs     #   转化门面:入口/路径/源引用(公开类型从 options/report 再导出)
+│   │   │       ├── options.rs #   公开配置面(TargetEditor / StageOrientation / TranslateOptions / 错误)
+│   │   │       ├── report.rs  #   报告层(TranslateWarning / TranslateReport)
+│   │   │       ├── pipeline.rs#   正/反文档级编排 + 工作项并行调度 + 临时 id 改写
+│   │   │       ├── model.rs   #   节点/树模型 + Kitten/KN 适配器 + id 策略 + 程序集
 │   │   │       ├── mapping.rs #   语义映射(双向)
-│   │   │       ├── assembly.rs#   文档装配(双向)+ id 重铸
-│   │   │       ├── nemo.rs    #   NEMO → KN(NEMO XML 解析 + 引擎)
+│   │   │       ├── assembly.rs#   文档装配(双向)
+│   │   │       ├── xml.rs     #   XML 层:最小 DOM + 字符串手术 + 影子渲染/转义
+│   │   │       ├── nemo.rs    #   NEMO → KN(NEMO 管线 + 版本迁移 + 前置改写)
 │   │   │       ├── nemo_mapping.rs # NEMO 映射表(含人工转录的官方表)
-│   │   │       ├── tables_gen.rs   # 生成物,勿手改(生成器见下)
+│   │   │       ├── tables_gen.rs   # 生成物,勿手改(生成器见 src/bin/gen_translate_tables.rs)
 │   │   │       └── {reverse,nemo}_tests.rs
 │   │   ├── cloudvar.rs        # 云变量 WS 客户端:连接状态机/断线重连/命令批量合并/变量列表排行榜回调
 │   │   ├── converse.rs        # AI 对话 WS 客户端:流式回复/历史记录/超时断连检测
@@ -288,6 +292,12 @@ for group in session.leftover_groups() {
 ├── tests/
 │   ├── live_features.rs       # 真机集成测试(登录 + AI 对话 + 云变量 + 反编译)
 │   ├── compile_live.rs        # 反编译真机集成测试(NEMO 用例 #[ignore])
+│   ├── convert_bench.rs       # 转化基准:4 份真作品的分阶段耗时 + 产物 SHA256 基线(§测试的门)
+│   ├── convert_facade_bench.rs# 门面路径对照(盘→盘 vs 内存直通),断言两条路径同 SHA256
+│   ├── convert_work_bench.rs  # `translate_work` 端到端基准 + `save_raw` 本地探针(#[ignore])
+│   ├── convert_corpus_harvest.rs # 采集真作品(公开发现流)到 download/compile(#[ignore])
+│   ├── convert_edit_harvest.rs   # 采集**平台原始编辑格式**(`/kitten/work/ide/load`)到 k4edit/(#[ignore])
+│   ├── convert_work.rs        # 单件作品按类型自动选方向转换(#[ignore])
 │   └── fixtures/test-config.example.json
 └── docs/                      # 文档:知识库 / 目标库 / 轮次记录(入口 docs/README.md)
 ```
@@ -301,7 +311,19 @@ cargo test --test compile_live -- --ignored   # 含 NEMO 反编译(约 5 分钟)
 cargo test --test convert_live               # 转化真机(离线用例)
 cargo test --test convert_live -- --ignored  # 含上传建草稿(会写平台,用例自清理)
 BACKEND_REQUIRE_LIVE=1 cargo test            # 严格模式:缺配置 / 登录失败一律失败,不再静默跳过
+
+# 转化域基准与语料(都需 download/ 下的真作品;见 docs/rounds/37)
+cargo test --profile bench_perf --test convert_bench -- --ignored --nocapture   # 分阶段耗时 + SHA256 基线
+BACKEND_REQUIRE_BENCH=1 cargo test --profile bench_perf --test convert_bench -- --ignored  # 严格:缺样本/缺基线一律失败
+BACKEND_BENCH_REFRESH=1 cargo test --profile bench_perf --test convert_bench -- --ignored  # **有据刷新**基线(逐键打印变化)
+cargo test --test convert_corpus_harvest -- --ignored   # 抓真作品(公开发现流)⇒ download/compile/
+cargo test --test convert_edit_harvest   -- --ignored   # 抓**平台原始编辑格式** ⇒ download/compile/k4edit/
+WORK_ID=273988379 cargo test --test convert_work -- --ignored --nocapture      # 单件按类型自动选方向
 ```
+
+**产物不变**是转化域的第一职责:上面 `convert_bench` 会把 4 份产物的 **SHA256 与 `#meta`**(源文件 SHA/字节/块数/告警数)
+与 `tests/fixtures/translate/convert_bench_baseline.json` 逐项比对;`deterministic_ids(true)` 下同输入两次必须逐字节相同。
+产物**有意**变化时用 `BACKEND_BENCH_REFRESH=1` 重刷,并在提交信息里写清原因。
 
 - 库单测覆盖:`AdminInfo::from_details` 固定字段提取(正常 / 缺失字段)、`manager_new_with_client_uses_injected_client`(客户端注入契约)、`header_override_is_case_insensitive`(请求头大小写覆盖)、分块迭代器终止性(数据量超过 chunk 大小不重复、不丢失)。
 - 转化/反编译的**产物级门**:官方 `validateBcm` 校验器(产物能否被编辑器加载)、KN→Kitten4→KN 往返积木类型多重集守恒、`deterministic_ids` 下并发 1 与并发 N 产物**逐字节一致**、与官方产物/串行参考的语义 diff。
@@ -317,4 +339,4 @@ GitHub Actions(`.github/workflows/CI.yml`):main/master 推送、tag、PR 和手�
 - `docs/README.md` — 文档总入口(知识库 / 目标库 / 轮次记录)
 - `docs/knowledge/` — **知识库**:平台接口与实时协议、作品文件格式、转换语义、性能基线、仓库约定、历史勘误
 - `docs/goals/` — **目标库**:待决策、待实现、待核验、已决不做
-- `docs/rounds/` — 历史轮次记录(31 篇:方案/评审/真机实测证据;读前先看 `docs/knowledge/errata.md`)
+- `docs/rounds/` — 历史轮次记录(37 轮:方案/评审/真机实测证据;索引见 `docs/rounds/README.md`,读前先看 `docs/knowledge/errata.md`)
