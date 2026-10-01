@@ -24,7 +24,10 @@
 ```
 
 - `blocks` 是 **id → 积木对象** 字典;`connections` 是父子邻接表,**根积木 = 从未作为子键出现的 id**。
-- `shadows` 的值仍是 **XML 字符串**(Kitten4 沿用 XML shadow,KN 亦然 ⇒ 双向搬运可直接复用)。
+- `shadows` 的值仍然是 **XML 字符串**(Kitten4 沿用 XML shadow,KN 亦然 ⇒ 双向搬运可直接复用)。
+  ⚠️ **例外(老形态)**:平台上还有作品把槽值写成**内联对象**(`{type, id, visible, editable, fields}`;全语料仅一件)。
+  正向入口会把它就地改写成平台同款影子 XML 再解析(`pipeline::normalize_object_shadows`,只改解析副本);
+  形态依据、只作必要条件的理由与残留,见 `convert-semantics.md` §3(**此处不重复**)。
 - 实测:188 个积木 ↔ 188 个 `connections` 条目(86 个非空),叶子节点是空对象 `{}`。
 - 反向写 `.bcm4` 时 `blocks`/`connections`/`parent_id`/`location` **都要重建**。
 - **编译版**(`compiled_block_map`)与编辑版不同:编译版引用**恒为内联对象**,字符串 id 只出现在编辑版的 `connections`(实测 2236 处采样,字符串 0 处)。见 `src/core/convert/decompile/mod.rs`(编译版积木层,原 `blocks.rs`)。
