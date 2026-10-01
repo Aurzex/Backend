@@ -960,8 +960,12 @@ mod reverse_tests_inner {
         }
     }
 
-    /// **源里"带类型的块节点"**:id → 是否影子(只收节点,不收影子 XML 串里的 —— 那些正向会重铸)。
-    fn block_node_ids(doc: &Value) -> BTreeMap<String, bool> {
+    /// **一个积木容器子树里的块节点**:id → 是否影子。
+    ///
+    /// 判据与旧口径一致:对象带字符串 `id` + `type`(非空、只含 ASCII 字母数字下划线)才算节点,
+    /// `is_shadow` 记影子;字符串节点按 JSON 再解一层(容器内部也会套字符串或影子 XML 串)。
+    /// **不收影子 XML 串里的 `id="…"`** —— 那是产物侧 [`collect_ids`] 的活,节点侧只认真节点。
+    fn block_nodes_in(root: &Value, out: &mut BTreeMap<String, bool>) {
         fn walk(node: &Value, out: &mut BTreeMap<String, bool>, depth: usize) {
             match node {
                 Value::Object(map) => {
@@ -993,12 +997,92 @@ mod reverse_tests_inner {
                 _ => {}
             }
         }
+        walk(root, out, 0);
+    }
+
+    /// **Kitten4 文档里的积木节点**(源侧口径):只认积木容器
+    /// `theatre.(actors|scenes).<uuid>.block_data_json`(`blocks`/`connections`/`comments` 那棵树),
+    /// 容器内仍是 [`block_nodes_in`] 的形状判据。
+    ///
+    /// 为什么不再"全文档扫 id + type"(rounds/39 收窄):Kitten4 文档里还有**带 id+type 的元对象**
+    /// —— 实测 `variables.<id>`(`{id,type:"any"|"list",value,position…}`;`原气骑士` 154 件、
+    /// `几何对战` 2 件)与 `cloud_variables.<id>`(`type:"public"|"private"|"public_list"`)是
+    /// **变量描述符**,不是积木。旧口径把它们当块收(读数未变:往返按 id 原样保留,且
+    /// `connections` 那层没有 `id` 早被形状判据挡掉);但口径本身是错的 ——
+    /// 变量/列表/实体的**引用关系**由 [`referenced_entity_ids`] 那条门守。
+    fn kitten4_block_node_ids(doc: &Value) -> BTreeMap<String, bool> {
         let mut out = BTreeMap::new();
-        walk(doc, &mut out, 0);
+        for container in ["actors", "scenes"] {
+            let Some(entities) = doc
+                .get("theatre")
+                .and_then(|theatre| theatre.get(container))
+                .and_then(Value::as_object)
+            else {
+                continue;
+            };
+            for entity in entities.values() {
+                if let Some(blocks) = entity.get("block_data_json") {
+                    block_nodes_in(blocks, &mut out);
+                }
+            }
+        }
+        out
+    }
+
+    /// **KN 文档里的积木节点**(源侧口径):只认实体
+    /// `(scenes.scenesDict|actors.actorsDict).<uuid>.nekoBlockJsonList` 与程序集定义体
+    /// `procedures.proceduresDict.<uuid>.nekoBlockJsonList`(容器枚举与 [`kn_entities`] /
+    /// [`def_census`] 一致),容器内仍是 [`block_nodes_in`] 的形状判据。
+    ///
+    /// 为什么不再"全文档扫 id + type"(rounds/39 收窄):KN 文档里带 id+type 的**元对象**有三类 ——
+    /// ① `proceduresDict.<uuid>.params[]` 的形参描述符(`{id,name,type:"Label"|"String"}`;
+    /// 实测 `FjDQB` 139、`FjSw` 182、`HEX Editor` 56 …);② 定义条目自身
+    /// `proceduresDict.<uuid>`(`type:"NORMAL"`);③ `variables.variablesDict.<uuid>`(变量描述符)。
+    /// 它们都不是积木,单是 `params[]` 一项就占旧台账"真块丢"的 **131/241**(54%)⇒ 既挡不住真回归,
+    /// 又会在参数处理一有风吹草动时假红。
+    fn kn_block_node_ids(doc: &Value) -> BTreeMap<String, bool> {
+        let mut out = BTreeMap::new();
+        for (container, dict) in [("scenes", "scenesDict"), ("actors", "actorsDict")] {
+            let Some(entities) = doc
+                .get(container)
+                .and_then(Value::as_object)
+                .and_then(|outer| outer.get(dict))
+                .and_then(Value::as_object)
+            else {
+                continue;
+            };
+            for entity in entities.values() {
+                if let Some(blocks) = entity.get("nekoBlockJsonList") {
+                    block_nodes_in(blocks, &mut out);
+                }
+            }
+        }
+        if let Some(entries) = doc
+            .get("procedures")
+            .and_then(|procedures| procedures.get("proceduresDict"))
+            .and_then(Value::as_object)
+        {
+            for entry in entries.values() {
+                if let Some(blocks) = entry.get("nekoBlockJsonList") {
+                    block_nodes_in(blocks, &mut out);
+                }
+            }
+        }
         out
     }
 
     /// 源块 id 在往返产物里"没出现"的**基线**(只许变小),`(文件名, 真块, 影子)`。
+    ///
+    /// **口径(rounds/39 收窄)**:源侧只认**积木容器**里的节点 —— [`kitten4_block_node_ids`]
+    /// (`theatre.(actors|scenes).<uuid>.block_data_json` 那棵树);产物侧用 [`collect_ids`] 在
+    /// **整份产物**里找(找得到就算没丢:宽松侧只影响严格性,不会造幻影缺陷)。
+    ///
+    /// Kitten4 文档里另有**带 id+type 的元对象**:`variables.<id>`(`{id,type:"any"|"list",value,
+    /// position…}`;`原气骑士` 154 件、`几何对战` 2 件)与 `cloud_variables.<id>`
+    /// (`type:"public"|"private"|"public_list"`)是**变量描述符**,不是积木。旧口径(全文档扫
+    /// id+type)把它们当块收 —— 实测它们的 id 在往返产物里原样保留 ⇒ **全语料读数逐件不变**
+    /// (本表无需重刷),但口径本身是错的:变量/列表/实体的**引用关系**由
+    /// [`referenced_entity_ids`] 那条门守,不该混进积木口径。
     ///
     /// 为什么不是"绝对 0":有几条**已定性的 id 改铸**机制会改 id 而不丢内容 ——
     /// ① 横屏坐标的 `GC` 算术壳(`wrap_arithmetic` 照官方"给原节点重铸 id 并挂到包装块",
@@ -1051,21 +1135,25 @@ mod reverse_tests_inner {
     ];
 
     /// **反向**的同一口径台账:`(文件名, 真块, 影子)` —— 源(KN)块节点 id 在**反向那一腿的
-    /// Kitten4 产物**里缺失的件数。口径与 [`LOST_ID_BUDGET`] **逐字一致**:同一对
-    /// [`collect_ids`] / [`block_node_ids`],真块/影子的判定也照旧,只是"产物"换成
-    /// `convert_kn_document` 的输出(`kn_corpus_round_trip_sweep` 里那次的中间态)。
+    /// Kitten4 产物**里缺失的件数。口径与 [`LOST_ID_BUDGET`] 一致:源侧各自只认**积木容器**里的节点
+    /// (这里 = [`kn_block_node_ids`]:实体 `(scenes.scenesDict|actors.actorsDict).<uuid>.nekoBlockJsonList`
+    /// 与定义体 `procedures.proceduresDict.<uuid>.nekoBlockJsonList`),产物侧同为 [`collect_ids`],只是
+    /// "产物"取 `convert_kn_document` 的输出(`kn_corpus_round_trip_sweep` 里那次的中间态)。
     /// 只许变小;表外新语料按"已记录的最大值"守(同 `MARKER_BUDGET` 的约定)。
     ///
-    /// 为什么不是"绝对 0"(2026-10-01 全语料实测,构成已逐类查过)——三类都是"**换了容器 /
-    /// 换了形态**",不是块没了:
-    /// ① **KN 的 `proceduresDict[*].params[]` 里那批 `Label` 条目**:KN 把程序集形参摆成
-    ///    `{"id","name","type":"Label"}` 的数组,而 Kitten4 把形参名写进定义块的原型/mutation、
-    ///    **没有独立对象** ⇒ 这批 id 按本口径必然"丢"。它是真块侧读数的大头(131/241:
-    ///    `FjDQB 49`、`FjSw 48`、`HEX Editor 32`、两件各 1)。
-    /// ② **定义/调用点的形态改写**:KN 侧把"形参/返回值"摆成独立积木(`procedures_2_parameter 43`、
-    ///    `procedures_2_callreturn 16`、`procedures_2_callnoreturn 6`、`temporary_list 8`…),
-    ///    反向要把它们折回定义块与调用点。
-    /// ③ **影子侧**:反向**按设计拆掉** KN 源里那层算术壳(`unwrap_arithmetic_wrappers`:横屏坐标的
+    /// **口径收窄(rounds/39)**:旧口径是"全文档扫 id + type",把 KN 的**元对象**也当块 ——
+    /// `proceduresDict.<uuid>.params[]` 的形参描述符(`{id,name,type:"Label"|"String"}`)、定义条目自身
+    /// (`type:"NORMAL"`)、`variables.variablesDict.<uuid>`(变量描述符)。它们是**参数/元数据**不是积木
+    /// (形参在 Kitten4 里没有独立对象:名字写进定义块的原型/mutation),实测光是 `params[]` 一项就占旧
+    /// "真块丢"的 **131/241**(`FjDQB 49`、`FjSw 48`、`HEX Editor 32`、两件各 1)⇒ 收窄后逐件读数恰好
+    /// 少这么多(49/48/32/1/1),**影子侧一个不差**;另两类元对象的 id 在产物里本来就在 ⇒ 从未计入。
+    ///
+    /// 为什么收窄后仍不是"绝对 0"(2026-10-01 全语料实测,构成已逐类查过)——两类都是"**换了形态**",
+    /// 不是块没了:
+    /// ① **定义/调用点的形态改写**(`FjSw` 真块 110 的大头):`procedures_2_parameter 43`、
+    ///    `procedures_2_callreturn 16`、`list_item 11`、`temporary_list 8`、`procedures_2_callnoreturn 6`…
+    ///    —— KN 侧把"形参/返回值/临时表"摆成独立积木,反向要把它们折回定义块的原型/mutation 与调用点。
+    /// ② **影子侧**:反向**按设计拆掉** KN 源里那层算术壳(`unwrap_arithmetic_wrappers`:横屏坐标的
     ///    `math_arithmetic divide 1.3` 与它的 `math_number 1.3`)⇒ 壳的 id 就不在产物里
     ///    (`FjSw` 影子 32 里 29 个正是 `math_number`);`pure_list_get` 影子折回 `fields.list`
     ///    (`FjDQB` 的 120 个全是它)。
@@ -1073,15 +1161,12 @@ mod reverse_tests_inner {
     /// 但它照样能拦住"反向真把块弄丢"(rounds/38 那类缺陷在反向侧会直接 +N),并且是反向保真的
     /// 第一份**直接证据**:读数每次都打印(`[id台账·反向]`),便于逐件分诊。
     ///
-    /// 基线值 = 2026-10-01 全语料实测(`cargo test --lib kn_corpus_round_trip_sweep -- --nocapture`,
-    /// 10 件里 5 件非零);沿用 [`LOST_ID_BUDGET`] 的惯例,只列非零件(其余 5 件恒为 `0/0`)。
+    /// 基线值 = 2026-10-01 全语料实测(收窄口径后 `cargo test --lib kn_corpus_round_trip_sweep
+    /// -- --nocapture`,10 件里 2 件非零);沿用 [`LOST_ID_BUDGET`] 的惯例,只列非零件。
     #[rustfmt::skip]
     const LOST_ID_BUDGET_REVERSE: &[(&str, usize, usize)] = &[
-        ("FjDQB0v0geuG4y9BaTVyi_WcZ1jc.bcmkn", 49, 120),
-        ("FjSwU2iKY6bLe6fexZJTvsX3X7AI.bcmkn", 158, 32),
-        ("HEX Editor_317683843.bcmkn", 32, 0),
-        ("P0-准备课_297852982.bcmkn", 1, 0),
-        ("飞机大战20_297979992.bcmkn", 1, 0),
+        ("FjDQB0v0geuG4y9BaTVyi_WcZ1jc.bcmkn", 0, 120),
+        ("FjSwU2iKY6bLe6fexZJTvsX3X7AI.bcmkn", 110, 32),
     ];
 
     fn census_kitten4_blocks(doc: &Value) -> BTreeMap<String, usize> {
@@ -1411,7 +1496,7 @@ mod reverse_tests_inner {
                 let mut product_ids = std::collections::BTreeSet::new();
                 collect_ids(&back1, &mut product_ids, 0);
                 let (mut real, mut shadow) = (0usize, 0usize);
-                for (id, is_shadow) in block_node_ids(&source) {
+                for (id, is_shadow) in kitten4_block_node_ids(&source) {
                     if product_ids.contains(&id) {
                         continue;
                     }
@@ -1684,15 +1769,16 @@ mod reverse_tests_inner {
                 "{label}:往返必须确定性(两遍逐字节一致)"
             );
 
-            // **id 口径台账(反向)**:口径与正向 `k4_corpus_round_trip_sweep` 的 [`LOST_ID_BUDGET`]
-            // **逐字一致**(同一对 `collect_ids` / `block_node_ids`),只是这里的"产物"是**反向那一腿**
-            // 的输出(源是 KN,产物是 Kitten4)。真块与影子分开记:影子侧的差异多数是槽默认影子
+            // **id 口径台账(反向)**:与正向 `k4_corpus_round_trip_sweep` 的 [`LOST_ID_BUDGET`]
+            // **同一口径**(产物侧同用 [`collect_ids`];源侧各自只认**积木容器**里的节点:
+            // 这里用 [`kn_block_node_ids`]),只是"产物"是**反向那一腿**的输出
+            // (源是 KN,产物是 Kitten4)。真块与影子分开记:影子侧的差异多数是槽默认影子
             // 不回写 / 影子重铸,真块侧才是"块没了"。读数每次都打印,便于逐件分诊。
             {
                 let mut product_ids = std::collections::BTreeSet::new();
                 collect_ids(&k4_product, &mut product_ids, 0);
                 let (mut real, mut shadow) = (0usize, 0usize);
-                for (id, is_shadow) in block_node_ids(&source) {
+                for (id, is_shadow) in kn_block_node_ids(&source) {
                     if product_ids.contains(&id) {
                         continue;
                     }
