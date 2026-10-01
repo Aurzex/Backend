@@ -153,7 +153,7 @@ pub(crate) fn convert_nemo_document(
             );
             entry.insert(
                 "nekoBlockJsonList".to_string(),
-                Value::Array(tree_to_json(&procedure.tree)),
+                Value::Array(tree_to_json(&procedure.tree, report)),
             );
             entry.insert(
                 "workspaceScrollXy".to_string(),
@@ -218,7 +218,7 @@ pub(crate) fn convert_nemo_document(
             insert_if_present(&mut entry, "currentStyleId", actor.get("current_style_id"));
             entry.insert(
                 "nekoBlockJsonList".to_string(),
-                Value::Array(tree_to_json(&tree)),
+                Value::Array(tree_to_json(&tree, report)),
             );
             entry.insert(
                 "workspaceScrollXy".to_string(),
@@ -267,7 +267,7 @@ pub(crate) fn convert_nemo_document(
             entry.insert("currentStyleId".to_string(), Value::String(String::new()));
             entry.insert(
                 "nekoBlockJsonList".to_string(),
-                Value::Array(tree_to_json(&tree)),
+                Value::Array(tree_to_json(&tree, report)),
             );
             entry.insert(
                 "workspaceScrollXy".to_string(),
@@ -1413,9 +1413,34 @@ fn split_option_names(source: &Value) -> Map<String, Value> {
 }
 
 /// [`super::model::BlockTree`] → KN 的 `nekoBlockJsonList` 数组
-pub(crate) fn tree_to_json(tree: &super::model::BlockTree) -> Vec<Value> {
-    tree.roots
-        .iter()
-        .filter_map(|root| root.to_value().ok())
-        .collect()
+///
+/// **不静默丢块**:单根 `to_value` 失败时不再 `filter_map(ok())` 吞掉 —— 记一条
+/// [`TranslateWarning::DroppedField`] 进报告(产物会少一块,必须可见;`DroppedField`
+/// 不在 `is_lossy` 的白名单里 ⇒ 该次转换因此**算有损**)。
+pub(crate) fn tree_to_json(
+    tree: &super::model::BlockTree,
+    report: &mut TranslateReport,
+) -> Vec<Value> {
+    let mut roots = Vec::with_capacity(tree.roots.len());
+    for root in &tree.roots {
+        push_root(&mut roots, root.to_value(), report);
+    }
+    roots
+}
+
+/// 单根编码结果并入产物:失败**记进报告**并跳过该根(见 [`tree_to_json`])。
+///
+/// 独立成函数是为了让失败分支可测:`BlockJson` 的字段(字符串 / `Value` / 子节点)全都可序列化,
+/// 正常数据构造不出 `Err`(`nemo_tests` 里直接投喂一个真实的 `serde_json` 编码错误来守这条)。
+pub(crate) fn push_root(
+    out: &mut Vec<Value>,
+    encoded: Result<Value, DecompilerError>,
+    report: &mut TranslateReport,
+) {
+    match encoded {
+        Ok(value) => out.push(value),
+        Err(error) => report.warn(TranslateWarning::DroppedField {
+            path: format!("nekoBlockJsonList: {error}"),
+        }),
+    }
 }

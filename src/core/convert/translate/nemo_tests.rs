@@ -830,3 +830,45 @@ fn nemo_decompiler_offers_in_memory_editable_document() {
     let wrong = RawWorkData::Wood(Arc::new(json!({})));
     assert!(NemoDecompiler.editable_document(&wrong, &context).is_err());
 }
+
+// ===========================================================================
+// 编码失败不再静默丢块(W6②:`filter_map(ok())` 已删)
+// ===========================================================================
+
+/// 单根编码失败**进报告**(而不是被吞掉):成功的根照常进产物、失败的根不进产物且必须可见
+///
+/// 说明:`BlockJson` 的字段(字符串 / `Value` / 子节点)全都可序列化,**正常数据构造不出**
+/// `to_value` 失败 ⇒ 这条防御分支直接投喂一个**真实的** `serde_json` 编码错误
+/// (非字符串 map 键报的就是它;与 `BlockJson::to_value` 走同一个 `serde_json::to_value`
+/// → `DecompilerError` 通道),断言生产分支"记报告 + 跳过该根 + 算有损"。
+#[test]
+fn encode_failure_enters_report_instead_of_being_dropped() {
+    use crate::core::convert::shared::DecompilerError;
+    use crate::core::convert::translate::{TranslateReport, TranslateWarning, nemo};
+
+    // 非字符串 map 键:serde_json 报 `key must be a string`(真实编码错误,非手搓)
+    let bad: std::collections::BTreeMap<(i32, i32), i32> =
+        std::collections::BTreeMap::from([((1, 2), 3)]);
+    let error =
+        DecompilerError::from(serde_json::to_value(&bad).expect_err("非字符串 map 键必须编码失败"));
+
+    let mut report = TranslateReport::new(EditorType::Nemo, TargetEditor::KittenN);
+    let mut roots = Vec::new();
+    nemo::push_root(&mut roots, Ok(json!({ "type": "wait" })), &mut report);
+    assert_eq!(roots.len(), 1, "成功的根照常进产物");
+    assert!(report.warnings().is_empty(), "成功的根不该产生告警");
+
+    nemo::push_root(&mut roots, Err(error), &mut report);
+    assert_eq!(roots.len(), 1, "失败的根不进产物(块确实少了)");
+    match report.warnings() {
+        [TranslateWarning::DroppedField { path }] => {
+            assert!(
+                path.starts_with("nekoBlockJsonList: "),
+                "路径要指认失败的编码面:{path}"
+            );
+        }
+        other => panic!("编码失败必须进报告:{other:?}"),
+    }
+    assert!(report.is_lossy(), "编码失败 = 丢块 ⇒ 必须计入有损");
+    assert_eq!(report.blocks_total, 0);
+}
