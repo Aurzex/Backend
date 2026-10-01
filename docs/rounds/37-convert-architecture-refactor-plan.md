@@ -571,9 +571,23 @@ String/Value ⇒ 省下的只是"未匹配键的缓冲机制"这一小块。
 | `lists_get` **单向大减** | `768 → 490`(原气骑士)、`201 → 101`(Plactions)、`144 → 90`(烂)、`1 → 0`(跑酷_70) | 此前(rounds/34 §4quinquies)的结论是"槽的默认影子不回写 + 计算型列表槽 ⇒ 表示差异、引用零丢失",但那基于**代理指标**;这里幅度更大、且出现 `1 → 0`(单例直接归零) |
 | `WIDGET_LVMI_lightSensorGet` **单向归零** | `4 → 0`(P1拓展任务1音乐顺序) | 该类型在 `KITTEN_TO_KN` 里是**恒等映射** ⇒ 正向应原样保留;归零说明它根本没进产物 |
 
-**第一件要核的事(本轮发现的口径缺口)**:我在源文件里 `grep WIDGET_LVMI_lightSensorGet` 得 **0 次**(文件确认是明文 JSON),
-而 census 报"源侧有 4" ⇒ 说明 `census_kitten4_blocks` 的计数口径与我以为的不同(大概率**还解析了 `shadows` 里的影子 XML 串**)
-⇒ **下一轮先把这个口径读准**,再谈"是不是丢了"。
+**本轮已核清的口径(`census_kitten4_blocks` / `census_diff`,reverse_tests.rs:902/1267)**:
+
+- 只走 `theatre.{actors,scenes}[*].block_data_json`;只数**带字符串 `id`** 的 `type`(挡掉 `connections` 连接描述符与影子串噪声);
+- 会**递归进字符串里的 JSON**(`is_string` → `from_str`,深度 < 4)—— 所以"编辑格式里把 `block_data_json` 存成字符串"的形态也数得到;
+- 键走 `canonical_kind`(等价类代表:传递闭包 + 取类内字典序最小,抵消改名);
+- **方向**:`census_diff(before, after)` 打印 `before -> after`,而调用点是 `before = 源 Kitten4`、`after = 往返后的 Kitten4`。
+
+**⚠️ 我上一版在这里写错了两条,撤回**:
+
+1. 我说"`P1拓展任务1音乐顺序…bcm4` 其实是 KN 文档 ⇒ 方向判错" —— **不成立**:扫描器**本来就有**方向守卫
+   (`is_editor_format_kitten4(&source)`,reverse_tests.rs:1160),那件作品通过守卫 ⇒ 它确实是 Kitten4 编辑格式;
+   腿日志里的"KN 顶层键"是**KN 腿**的键(标签写的就是 KN),不是源文件的键。;
+2. 我用 Python 逐字复刻同一口径,对**源文件**数 `WIDGET_LVMI_lightSensorGet` 得 **0 个**(文件确认明文 JSON),
+   而 census 报"源侧 4" ⇒ **两者仍对不上**。⇒ 这条**没有查清**,不能当成"丢块"、也不能当成"测量假象"。
+
+**⇒ 下一轮的第一步(已明确)**:给扫描器加一次**一次性打印**(或写个小单测),把该文件 `before` 侧 census 里
+**实际命中的 block 类型与所在路径**打出来 —— 先看 census 到底"看见"了什么,再谈丢没丢。
 
 ### 13.3 下一轮的做法(按我的逻辑)
 
