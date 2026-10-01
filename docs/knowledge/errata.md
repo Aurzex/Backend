@@ -317,7 +317,7 @@ pub struct LocalClientProvider {
 
 | 出处 | 已过时的表述 | 正确值 / 证据 |
 | ---- | ------------ | ------------- |
-| rounds/20–32(多处)、`knowledge/convert-semantics.md` §5 旧版 | "编辑器不认识的类型**保留 KN 原名** + 告警,**不丢积木**" | **不成立**:保留不认识的名字会让编辑器**整份工作区加载失败** ⇒ 现行是**剔除块 + 清空影子** + 逐类报告。见 rounds/34 §4nonies、rounds/36 |
+| rounds/20–32(多处)、`knowledge/convert-semantics.md` §5 旧版 | "编辑器不认识的类型**保留 KN 原名** + 告警,**不丢积木**" | **不成立**:保留不认识的名字会让编辑器**整份工作区加载失败** ⇒ 现行是**块就地改成「未收录积木」标记(`incompatible_block`/`incompatible_output_block`)+ 清空影子** + 逐类报告(`rounds/38` §7bis 起;**`rounds/34–36` 当时是"整块剔除块",那会让积木真的消失**)。见 rounds/34 §4nonies、rounds/36、rounds/38 |
 | rounds/28 §4、rounds/33 §3bis | "定义体侧差异归零,预算收紧到 **0/0**" | **0/0 只在那套口径下成立**;剔块会连带整棵子树 ⇒ 现行是**预算 `≤3193`(只许变小)** + 常显读数。见 rounds/36 |
 | rounds/34 §4nonies 末段 | "**仍未解决**:产品在编辑器里作品名与变量能进,但 3 个角色一个都不出现(⇒ 画布 0 块)" | **已解决**(rounds/35):根因是缺 `theatre.groups` + 场景 `group_order`;KN 侧没有分组概念 ⇒ 反向必须合成"一角色一组" |
 | rounds/34 §4nonies 的挑名描述 | "歧义挑选:候选里编辑器认识的优先 → KN 名本身认识就保留 → 再退非云优先" | 这段只描述**多候选(歧义)**分支;**单候选分支当时完全没做判据** ⇒ KN `text` 被写成 Kitten3 口径的 `get_split_options` 而被剔掉。现块与影子**共用**同一判据。见 rounds/36 |

@@ -29,10 +29,11 @@
 ## 2. 待做(有方案,不等决策)
 
 0. **反向(KN → Kitten4)保真的量化口径(现行,2026-09-26)**:
-   - 编辑器不认识的类型**必须剔除/清空**(否则整份工作区加载失败,rounds/34 §4nonies)⇒
-     "未映射/不认识"现在是**真的少了**;两个真作品实测(rounds/36):`Node VM v3` 剔块 429 / 清影子 4、
-     `now` 剔块 286 / 清影子 46;
-   - 定义体侧现行门是**预算 `≤3193`**(rounds/36;此前 0/0 的口径已被剔块机制推翻);
+   - 编辑器不认识的类型**必须落成编辑器认识的形态**:块**就地改成「未收录积木」标记**、影子**清空**
+     (否则整份工作区加载失败,rounds/34 §4nonies;**rounds/38 §7bis 起块不再被剔除**)⇒
+     "未映射/不认识"现在的含义是**内容恢复不出来**(块本身还在画布上);
+     两个真作品实测(rounds/36 **当时的口径是"剔块"**):`Node VM v3` 429 / 清影子 4、`now` 286 / 清影子 46;
+   - 定义体侧现行门是**预算 `≤3193`**(rounds/36;此前 0/0 的口径已被"剔除/标记"机制推翻);
    - 实体侧 `pure_list_get` 影子丢失**已修**(rounds/32 §3.4);列表影子那 86+192 是代理指标造成的假象
      (rounds/34 §4ter/§4quinquies,引用零丢失);
    - ⇒ 剩下的减损空间**只剩"语义降级"**这一条路(见 `pending-decisions.md` D1)。
@@ -41,7 +42,7 @@
    - **口径三次修正**:① 旧口径把 `proceduresDict` 里的**调用树**当定义体比 ⇒ 凭空 118 块假缺口(rounds/32 §3.2);
      ② 残块(没人挂的 `callreturn`/`repeat_n_times`/`script_variables`/`callnoreturn` 簇)会在反向重建树时自然消失,
      属**正确行为** ⇒ `def_census` 改成只数**定义根子树**,预算一度 `≤6/≤21 → 0/0`(rounds/33 §3bis);
-     ③ rounds/34 起"编辑器不认识的类型必须剔除"⇒ 0/0 不再成立,现行预算 `≤3193`(rounds/36)。
+     ③ rounds/34 起"编辑器不认识的类型必须剔除"⇒ 0/0 不再成立,现行预算 `≤3193`(rounds/36;**rounds/38 §7bis 起机制为"就地改成「未收录积木」标记",预算口径不变**)。
    - **实体侧的两处"看着像 bug"都已定性**:inline `pure_list_get` 影子**真丢 −24**(`now` 186→162)已修
      (根因在**正向**的列表影子步骤写在子块循环体内,只处理有连接的块;rounds/32 §3.4 提交 `0dce9d6`);
      列表影子 86+192 是代理指标 + id 重铸造成的假象,列表 id 三态一致 24/24/24 ⇒ **引用零丢失**
@@ -89,9 +90,9 @@
    编辑器升级后名字会漂移(名字认错 = 整份打不开)。待做:把"重导 + 整体替换"写成一个可复跑的小流程
    (浏览器一句 `Object.keys(window.Blockly.Blocks).sort()`,方法见 §5bis 的"判据与证据来源"),
    并在注释里记下导出日期与命令(现状只记了日期)。
-0c. ✅ **已落地(2026-09-26)**:剔除量的预算门:目前只有定义体侧有预算断言;块/影子的剔除量还没有门
-   (rounds/36 的 942 → 715 / 398 → 50 是靠 A/B 人工比出来的)。待做:把"每件作品的剔除块数与影子数
-   ≤ 记录值"写成断言(先对 `download/compile/*.bcmkn` 全语料测一遍记录基线)。
+0c. ✅ **已落地(2026-09-26;rounds/38 起由"剔除量门"改成 `MARKER_BUDGET`)**:标记量的预算门:原先只有定义体侧有预算断言;
+   块/影子的"剔除量"没有门(rounds/36 的 942 → 715 / 398 → 50 是靠 A/B 人工比出来的)。现行口径:守"每件作品
+   **改成「未收录积木」标记的块数 + 清空影子数**"(只许变小,已对 `download/compile/*.bcmkn` 全语料记基线)。
 11. **剩余重复项的定性结论已归档**(`docs/rounds/31` §3.6):`D2` 族 JS 值强转、`N3` Fetcher/ResourceManager 样板、
     `N4` 布局常量属**不可合并或需先核实**;`D3`/`N1` 已合并。今后不要重新提"把这些也合一"。
 
@@ -140,24 +141,26 @@
 
 **从「能打开」推进到「打开后与原作品对得上,且这份一致性由可复跑的门守住」。**
 三步走:① 用 **(c) 口径(id 是否出现在产物)** 把两台扫描器上剩余的每一条差异**定案**(真丢 vs 归一化);
-② 对定案为真丢的项做「**保留**而非剔除」的减损(以实机加载门为界,**不做语义降级** —— D1 结论不变);
-③ 把差异集合 / 剔除预算 / 词汇表 / 加载门**固化成只许变小的基线门**,让效果只能变好、不会悄悄退化。
+② 对定案为真丢的项做减损:能保住的**保住**(rounds/38 §7bis 起:不认识的块**就地改成「未收录积木」标记**,不再剔除;
+以实机加载门为界,**不做语义降级** —— D1 结论不变);
+③ 把差异类别 / **标记量预算**(`MARKER_BUDGET`)/ id 台账(`LOST_ID_BUDGET`)/ 词汇表 / 加载门固化成"只许变小、只能变好"的门
+(差异类别按 `docs/rounds/39` §W3c 判**不做**门:增量语料下会假红)。
 
 ### 6.2 现状(证据,2026-10-01 复核)
 
 | 面 | 状态 | 出处 |
 | -- | ---- | ---- |
 | 正向 Kitten4→KN | 真原件语料 24 条差异**全部**归因于改名/等价类 + 已文档化降级与包装 + 槽默认影子不回写 ⇒ **无已确认缺陷** | `docs/rounds/37` §13.4/§13.8 |
-| 反向 KN→Kitten4 | 自建、有损;实机门已过(角色列表 + 画布块数);损失已量化 = 剔除编辑器不认识的名字 + 槽默认影子不回写 + 类型歧义 + id 重铸 | `docs/rounds/34/35/36`、`knowledge/convert-semantics.md` §5bis |
-| 既有门 | 定义体缺口预算 `≤3193`;`STRIP_BUDGET`(块/影子剔除量只许变小);`convert_bench` SHA + `#meta` 基线(Phase 0 已重刷加固,`ae41361`);往返多重集守恒 | `reverse_tests.rs:1368/1801`、`tests/convert_bench.rs` |
-| 仪器 | `kn_corpus_round_trip_sweep` / `k4_corpus_round_trip_sweep`(默认跑,读 `download/compile/`,缺语料则跳过)+ 平台真原件编辑格式语料 `download/compile/k4edit/`(2 件作品 × 10 版)+ 实机门(手动) | `reverse_tests.rs:1105/1382`、`tests/convert_edit_harvest.rs` |
+| 反向 KN→Kitten4 | 自建、有损;实机门已过(角色列表 + 画布块数);损失已量化 = **改成「未收录积木」标记**(位置与存在保住、内容不可恢复)+ 槽默认影子不回写 + 类型歧义 + id 重铸 | `docs/rounds/34/35/36/38`、`knowledge/convert-semantics.md` §5bis |
+| 既有门 | 定义体缺口预算 `≤3193`;**两处预算门(都只许变小)**:id 台账门 `LOST_ID_BUDGET`(正向扫描器,`reverse_tests` 的 `k4_corpus_round_trip_sweep`)+ 标记量门 `MARKER_BUDGET`(反向扫描器,`kn_corpus_round_trip_sweep`;**"改成「未收录积木」标记的块数 + 清空影子数"**,rounds/38 起由"剔除量门"改名改语义);`convert_bench` SHA + `#meta` 基线(Phase 0 已重刷加固,`ae41361`);往返多重集守恒 | `reverse_tests` 的扫描器/预算函数(按名引用;行号会漂)、`tests/convert_bench.rs` |
+| 仪器 | `kn_corpus_round_trip_sweep` / `k4_corpus_round_trip_sweep`(默认跑,读 `download/compile/`,缺语料则跳过)+ 平台真原件编辑格式语料 `download/compile/k4edit/`(2 件作品 × 10 版)+ 实机门(手动) | `reverse_tests` 的同名扫描器、`tests/convert_edit_harvest.rs` |
 | NEMO | 与官方逐数一致,但**无 SHA 字节门**、`report.elapsed_ms` **恒 0** | `docs/rounds/37` §1 0.5 |
 
 ### 6.3 目标
 
 | # | 目标 | 验收(可观测) | 前置/成本 |
 | - | ---- | ------------ | --------- |
-| **G0** | 先把门跑绿并留读数 | `cargo test --lib`(含两台语料扫描器)与 `BACKEND_REQUIRE_BENCH=1 cargo test --profile bench_perf --test convert_bench -- --ignored` 全绿;记下 `[预算]`/`[剔除量]` 当前读数 | 无;~5 min |
+| **G0** | 先把门跑绿并留读数 | `cargo test --lib`(含两台语料扫描器)与 `BACKEND_REQUIRE_BENCH=1 cargo test --profile bench_perf --test convert_bench -- --ignored` 全绿;记下 `[预算]`/`[id台账]`/`[标记量]` 当前读数 | 无;~5 min |
 | **G1** ✅ **已完成(2026-10-01,rounds/38)** | **反向腿 id 口径定案**:两条悬案判「真丢 / 归一化」,各附 (c) 口径证据或最小复现 | ① `lists_get`(等价类代表 `pure_list_get`)大减 = **归一化**(丢的逐个都是 KN 侧 `is_shadow` 的 `pure_list_get`,折回父块 `fields`);② `bcm_translator_text_return_value_block: 4 → 0` = **真缺陷**(187 个占位映射里 43 个没有 `RC` 标题 ⇒ 正向不写 mutation ⇒ 反向反查失败 ⇒ 被写出阶段整块剔除) | 已出结论 + 证据(`rounds/38` §3) |
 | **G2** ✅ **已完成(2026-10-01,rounds/38 §7bis)** | **减损:把「不认识就剔除」在信息层降级为「保留为编辑器认识的不可用标记」** | 写出阶段统一处理:**所有**编辑器不认识的块就地改成 `incompatible_block`(语句位)/ `incompatible_output_block`(值位),位置与连接保持、字段/影子/变异清空;影子仍是清空。覆盖占位积木(43 类型)+ D1 的 Neko 专有块族(`temporary_list`/`script_variables*` …)。正向补了 `incompatible_* → bcm_translator_text_*` 的手工映射,往返稳定 | 已落地 + 单测 + 全语料 + 实机(`HEX Editor` 182 个标记,角色 `raw` 4/4 对上) |
 | **G3** ◐ **部分落地(2026-10-01;口径与后续见 `docs/rounds/39` §W3c/§W3d)** | **差异类别门**:两台扫描器的"差异类别集合"从"只打印"升格为基线门(只许变少) | ✅ 正向扫描器已加 **id 台账门**(`LOST_ID_BUDGET`,只许变小,每次打印 `[id台账]`;基线 = 59 件里 33 件非零,构成已逐类查过)。**差异类别集合门已改判不做**(gitignored 增量语料 ⇒ 必然假红,`rounds/39` §W3c);**反向 id 台账仍未建**(`rounds/39` §W3d:按正向同口径新增 `LOST_ID_BUDGET_REVERSE`) | 便宜;口径已稳 |

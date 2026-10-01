@@ -32,7 +32,7 @@
 | # | 项 | 建议 | 说明 |
 | - | -- | ---- | ---- |
 | C1 | 49 处**非锁 `unwrap`** 硬化(`time_difference` / `active.as_mut` / 模板 `unwrap` / 10 处 `write!().unwrap()`) | 做 | 机械改动,零行为变化 |
-| C2 | `DecompilerError` **包装 `MewError`**(消除自带 `Io/Json/Http` 重复) | 做 | 与 `ProcessorError`/`DataQueryError` 对齐 |
+| C2 ✅ **已不成立(2026-10-01 核实)** | `DecompilerError` **包装 `MewError`**(原记"消除自带 `Io/Json/Http` 重复") | — | **该重复已不存在**:`DecompilerError` 已无 `Io`/`Json`/`Http` 变体,改成 `From<io::Error>`/`From<serde_json::Error>` 折进 `Mew`(见 `docs/rounds/39` §1.3 与 §W12d);只剩"删死变体 `UnsupportedType`"那一件事(`rounds/39` §W5②,🔴 动公共枚举、需授权) |
 | C3 | P2 死代码/收尾:`simple.rs` 的 `Arc::clone`、`nemo.rs::get_sha` 的 64 字节 clone、`cloudvar` flush 的 100 ms 轮询改 `Condvar` | 做 | 都是局部小改,**删除前需零调用点证据** |
 | C4 | `auth.rs::AccountStatus` 与 `requests.rs::Identity` 平行枚举合并 | 做(不紧急) | 易漂移,合并前先确认无外部依赖 |
 | C5 | `MessageHandler` / `ChatEventHandler` 两个 trait 改自由函数 | 做 | 可读性收尾,非必须 |
@@ -49,16 +49,16 @@
 
 | # | 问题 | 选项 | 建议 | 不定的后果 |
 | - | ---- | ---- | ---- | ---------- |
-| D1 ✅ **已决(2026-09-26):方案①,不做降级** | **Neko 专有块族要不要做"语义降级"** —— 反向现在把 Kitten4 没有对应概念的块**剔除 + 逐类报告**:`temporary_list`(临时列表)、`script_variables`/`_param`/`_value`(脚本变量)、`traverse_number*`、`self_listen*`/`self_broadcast_with_param`、`procedure_boolean`、`self_text_effect_color`、`color_size_slider`。两个真作品里合计约占剔除量的一半(`Node VM v3` 285+97+21+19 …;`now` 90+36+33…) | ① **不做**(维持剔除 + 报告) ② 做全量降级 ③ 只做低风险子集(先逐类列出候选映射再挑) | **①**:平台 40 件 Kitten4 语料里这些名字**0 次出现**、编辑器注册表 349 条里也没有 ⇒ 没有可信的等价物;硬做等于**改语义**(例如用列表变量模拟临时列表),而"降级后行为等价"目前没有判据 | 用这些功能的 KN 作品转成 Kitten4 后会**少掉这部分积木**(编辑器能打开、其余功能正常) |
+| D1 ✅ **已决(2026-09-26):方案①,不做降级** | **Neko 专有块族要不要做"语义降级"** —— 反向现在把 Kitten4 没有对应概念的块**剔除 + 逐类报告**:`temporary_list`(临时列表)、`script_variables`/`_param`/`_value`(脚本变量)、`traverse_number*`、`self_listen*`/`self_broadcast_with_param`、`procedure_boolean`、`self_text_effect_color`、`color_size_slider`。两个真作品里合计约占剔除量的一半(`Node VM v3` 285+97+21+19 …;`now` 90+36+33…)。**注:`rounds/38 §7bis` 起块不再被剔除 —— 就地改成「未收录积木」标记(内容不可恢复,但块与位置保住);影子仍清空** | ① **不做**(维持剔除 + 报告) ② 做全量降级 ③ 只做低风险子集(先逐类列出候选映射再挑) | **①**:平台 40 件 Kitten4 语料里这些名字**0 次出现**、编辑器注册表 349 条里也没有 ⇒ 没有可信的等价物;硬做等于**改语义**(例如用列表变量模拟临时列表),而"降级后行为等价"目前没有判据 | 用这些功能的 KN 作品转成 Kitten4 后会**少掉这部分积木**(编辑器能打开、其余功能正常) |
 | D2 ✅ **已决(2026-09-26):方案①,不做** | **槽默认影子回写**(可选打磨):源在同一槽里同时保留「槽的默认影子」与真子块,我们只留真子块 ⇒ 编辑器里那个槽显示**空白**而不是默认值(功能无差、不丢引用) | ① 不做 ② 做 | **①**:纯视觉差异,量级 ~86+192(rounds/34 §4quinquies) | 少数槽在编辑器里显示空白 |
 | D3 ✅ **已决(2026-09-26):方案①,维持手动** | **"编辑器能打开"这条门要不要进 CI**:现在是我按轮次手动跑(无头 Chromium + 线上 Kitten4 + 对照组) | ① 维持手动 ② 进 CI | **①**:依赖真编辑器与网络,CI 里容易 flaky;进 CI 需要先做"离线可复现"的替身(例如把 `validateBcm` 硬门接进 CI,那条已经 headless 可跑) | 编辑器回归只能靠轮次里的人工实机验证兜 |
-| D4 ✅ **已落地(2026-09-26)** | **剔除量的预算门**:现在只有**定义体侧**有预算断言(`≤3193`);**块/影子的剔除量**还没有门(rounds/36 的 942→715 / 398→50 是人工 A/B 比的) | ① 做(对全语料测一遍记基线,写进 `reverse_tests`) ② 不做 | **①**:便宜且能防"悄悄又剔多了";口径可复用现成的扫描器 | 剔除量回退时没人拦 |
+| D4 ✅ **已落地(2026-09-26;rounds/38 起由"剔除量门"改成 `MARKER_BUDGET`)** | **标记量的预算门**:现在只有**定义体侧**有预算断言(`≤3193`);**块/影子的标记量**另有门(rounds/36 的 942→715 / 398→50 是人工 A/B 比的,rounds/38 起口径为"改成「未收录积木」标记的块数 + 清空影子数") | ① 做(对全语料测一遍记基线,写进 `reverse_tests`) ② 不做 | **①**:便宜且能防"悄悄又标记多了";口径可复用现成的扫描器 | 标记量回退时没人拦 |
 | D5 ✅ **已完成(2026-09-26)** | **单包上传上限**(原 A5)是否继续:30 MB 单包被 qiniu 拒 **413**,平台自己 9.3 MB 产物写入成功 ⇒ 上限落在 9.3~30 MB 之间 | ① 做便宜实验定位上限归属(取凭证带 `fsize`;或试 KN 官方口径 `projectName=neko` + `insertOnly=true`) ② 分片上传 ③ 标注上限并接受 | 已按 ① 收尾(上限 20~24 MB + 提前报错) | 无(超出上限的作品现在是**明确报错**而不是白等后 413) |
 
 ## 已决(不用再问)
 
 - `MewError`/`MewResult` **品牌名保留**;`terminal.rs` 留在库内;`HttpClient` trait 不公开;类型级 WS 状态机(`CloudConnection<Connected>`)不做;god file 不拆、不加宏(`impl_api_manager!` 类)。
 - 转换域:**不对齐官方字节**(只语义 diff + 官方 `validateBcm` 硬门);`RawValue` 透传与单遍遍历**判不做**;反向(KN→Kitten4)实体级并行**判不做**。
-- 转换域(rounds/34–36 既定原则):**"产物能在真编辑器里打开"优先于"少剔几块"**;因此编辑器不认识的类型一律剔除 + 逐类报告;
+- 转换域(rounds/34–38 既定原则):**"产物能在真编辑器里打开"优先于"少丢几块"**;因此编辑器不认识的**块**一律就地改成「未收录积木」标记(`incompatible_block` / `incompatible_output_block`:内容不可恢复,但块与位置保住)、**影子**清空,并逐类报告(rounds/38 §7bis 起;`rounds/34–36` 当时是"整块剔除",那会让积木真的消失);
   表是 **Kitten3 口径** ⇒ 凡往 Kitten4 写名字的地方(块、影子)都必须过编辑器词汇判据;KN 侧没有分组概念 ⇒ `theatre.groups` 由反向**合成**。
 - 未改动项按"记录理由即可"处理:flush 回退重放风险、`block_xml` 字符串 `next`、`with_page`/`with_limit` 统一等(见 `docs/knowledge/errata.md` 与各轮次「不做」表)。
