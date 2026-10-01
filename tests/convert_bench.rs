@@ -44,7 +44,7 @@
 //!
 //! **NEMO 样本(W6)**:`SAMPLES` 里有两件 NEMO 真作品(源编辑器按**内容**判定),目标都是 KN:
 //! `nemo-3.4MB`(在 `download/compile/`,`bcm_version` 0.16.2 = 迁移目标版本 ⇒ 迁移 no-op)与
-//! `nemo-old-1.5MB`(在 `temp/harness/`,**非**语料目录,见该条注释;0.11.0 < 0.15.0 ⇒ YC 迁移生效)。
+//! `nemo-old-1.5MB`(在 `download/compile/`(R2 前在 `temp/harness/`,已挪进语料目录);0.11.0 < 0.15.0 ⇒ YC 迁移生效)。
 //! NEMO 的版本迁移只由 `TranslateOptions::source_version` 驱动,而 `translate_file`
 //! **不会**自动带上它(那是域门面 `translate_work` 的行为)⇒ 该参数经 [`Sample::source_version`]
 //! 逐样本透传,并作为 `#meta.source_version` 记进基线。不传就把"未迁移"的产物锁成基线:
@@ -229,13 +229,14 @@ const SAMPLES: &[Sample] = &[
         // 补 `else="1"`),把上面那件(0.16.2 = 迁移目标版本 ⇒ 迁移是 no-op)证不到的"迁移这段路"
         // 也纳进字节基线。
         label: "nemo-old-1.5MB",
-        // ⚠️ 这条路径在 `temp/harness/`(**非**语料目录):它是 `temp/harness/fetch_nemo.js` 从
-        // **公开**作品 API(`GET /creation-tools/v1/works/103791894/source/public` → `work_urls[0]`)
-        // 拉下来的原始 NEMO 编辑版(与 `download/` 那两件同形态:`actors.actors_dict`,不含 `bcm_version`),
-        // 官方 harness 门(`nemo_tests::nemo_real_samples_match_official_products`)用的也是它。
-        // `temp/` 一旦被清掉,本样本只是"缺失":默认与严格模式都只打印一行警告并跳过(**不会假红**),
-        // 而 `BACKEND_BENCH_REFRESH=1` 会**拒绝写盘**并列出将被删掉的键(W3e)⇒ 覆盖面缩水看得见。
-        path: "temp/harness/nemo-103791894.bcm",
+        // 这条路径原先在 `temp/harness/`(**非**语料目录),已按 R2 挪进 `download/`(与其它样本同处):
+        // `temp/` 的约定是"及时清理",而它一旦被清,`W3e` 的"重刷拒写盘"会让**所有**基线键都刷不了。
+        // 它是 `temp/harness/fetch_nemo.js` 从**公开**作品 API
+        // (`GET /creation-tools/v1/works/103791894/source/public` → `work_urls[0]`)拉下来的原始 NEMO
+        // 编辑版(与另一件同形态:`actors.actors_dict`,不含 `bcm_version`);官方 harness 门
+        // (`nemo_tests::nemo_real_samples_match_official_products`)用的也是同一个文件。
+        // 挪位置不改内容 ⇒ 基线里该样本的 SHA 与 `#meta` 一字不变(由本文件的 SHA 断言守)。
+        path: "download/compile/nemo-103791894.bcm",
         source_editor: EditorType::Nemo,
         target: TargetEditor::KittenN,
         slug: "kn",

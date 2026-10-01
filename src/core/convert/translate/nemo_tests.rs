@@ -326,7 +326,9 @@ const REAL_SAMPLES: &[(&str, &str, &str)] = &[
         "0.16.2",
     ),
     (
-        "temp/harness/nemo-103791894.bcm",
+        // 输入在语料目录 `download/`(R2 前在 `temp/harness/`,已挪位置);官方产物夹具仍留在
+        // `temp/harness/`(它是可再生的对照物,不属于"采下来的语料")。
+        "download/compile/nemo-103791894.bcm",
         "temp/harness/out-wuxian-103791894.json",
         "0.11.0",
     ),
