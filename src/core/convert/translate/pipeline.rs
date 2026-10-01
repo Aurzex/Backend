@@ -407,7 +407,7 @@ pub(super) fn convert_kitten4_document(
 /// 对象表达不了的**渲染属性**(`inline`/`deletable`:平台侧由块定义/实例状态决定)会丢。
 /// 另外平台在**字符串**形态里对"空槽"写 `""`,而仅凭对象分不出该写 `""` 还是 `<empty>` ⇒
 /// 统一按 `editable=false` 写平台的 `<empty … editable="false">`(保住 id 与 `editable`
-/// 两个事实;写 `""` 会把这类占位影子的 id 全丢,`[id台账]` 立刻可见)。
+/// 两个事实;`""` 里没有 id ⇒ 占位影子的 id 会整批丢。量法与读数见 [`object_shadow_xml`])。
 ///
 /// 只返回**副本**:调用方(见 [`parse_forward_item`])拿它去解析,源文档一字不动。
 fn normalize_object_shadows(block_data_json: &Value) -> Option<Value> {
@@ -477,7 +477,13 @@ fn object_shadow_xml(shadow: &Map<String, Value>) -> Option<String> {
         .and_then(Value::as_bool)
         .unwrap_or(true);
 
-    // 平台在 `editable=false` 的占位影子上写 `<empty … editable="false">`(不是 `<shadow>`)
+    // 平台在 `editable=false` 的占位影子上写 `<empty … editable="false">`(不是 `<shadow>`)。
+    //
+    // 也**必须**写出带 id 的元素:`""`(平台**字符串**形态对空槽的写法)里没有 id ⇒ 占位影子的 id 整批丢。
+    // 实测(唯一一件对象形态语料 `A28社区-开幕_174408420`,它带 515 个 `logic_empty` 占位对象):
+    // 把本分支临时改成 `String::new()` 再跑 `cargo test --lib k4_corpus_round_trip_sweep -- --nocapture`,
+    // 该作品的 `[id台账]` 影子列 **603 → 943**(+340);改回 `<empty …>` 仍是 603
+    // ⇒ 比 `""` 多保住 **340** 条占位影子 id(其余 515−340=175 条的槽本来就被正向映射重写,两种写法都保不住)。
     let mut node = xml::XmlNode::new(if editable { "shadow" } else { "empty" });
     node.set_attr("xmlns", XHTML);
     node.set_attr("type", kind);
