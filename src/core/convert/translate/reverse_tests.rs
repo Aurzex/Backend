@@ -1073,11 +1073,18 @@ mod reverse_tests_inner {
         (lists, vars)
     }
 
-    /// 通用语料往返扫描(**正向**方向):`download/compile/*.bcm4` 里每一件真 Kitten4 作品都跑
-    /// Kitten4 → KN → Kitten4,逐条打印类型多重集差异。
+    /// 通用语料往返扫描(**正向**方向):两种情况都吃 ——
     ///
-    /// 为什么两个方向都要扫:反向扫描里"正向"只是回程腿,它的真实输入语料(平台上的 Kitten4 作品,
-    /// 由官方编辑器产出)从没被这样过一遍;官方基线差分门 `diff_tests` 用的是夹具,覆盖面靠人挑。
+    /// 1. `download/compile/*.bcm4`(真作品的**反编译产物**;实测 22 件里 20 件正向吃得下);
+    /// 2. `download/compile/k4edit/*.bcm4`(**平台原始编辑格式**,由 `tests/convert_edit_harvest.rs`
+    ///    抓自 `GET /kitten/work/ide/load/{id}` 的 `source_urls`)。
+    ///
+    /// 第 2 类是 rounds/33 §2 卡住的那一块:平台只给编译态,编辑格式只存在于编辑器读写的那份文件里。
+    /// 拿它跑正向的价值是**打破"自产自测"** —— 转换器的输入不再是"我们反编译器的产物",
+    /// 而是编辑器亲手写的东西;我们归一化掉的形态(内联对象影子、字段/槽位写法差异)才会暴露。
+    ///
+    /// 为什么两个方向都要扫:反向扫描里"正向"只是回程腿,它的真实输入语料从没被这样过一遍;
+    /// 官方基线差分门 `diff_tests` 用的是夹具,覆盖面靠人挑。
     ///
     /// 口径与反向扫描一致:不设保真断言(差异先分诊),只守"每件都转换得动"+"往返确定性"。
     #[test]
@@ -1100,6 +1107,15 @@ mod reverse_tests_inner {
             .map(|e| e.path())
             .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("bcm4"))
             .collect();
+        // 平台原始编辑格式(`k4edit/`,由 `tests/convert_edit_harvest.rs` 抓取)一并纳入
+        if let Ok(entries) = std::fs::read_dir(root.join("k4edit")) {
+            files.extend(
+                entries
+                    .flatten()
+                    .map(|e| e.path())
+                    .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("bcm4")),
+            );
+        }
         files.sort();
         if files.is_empty() {
             eprintln!("跳过:{} 下没有 .bcm4", root.display());

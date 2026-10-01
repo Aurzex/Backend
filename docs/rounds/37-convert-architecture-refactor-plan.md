@@ -512,3 +512,38 @@ String/Value ⇒ 省下的只是"未匹配键的缓冲机制"这一小块。
 **教训(第三次同类)**:profiler 给的是"哪一族在做工",不是"改哪一处能省多少";
 **任何优化都必须以同轮 A/B 收尾** —— 这一轮再次验证了这条纪律的价值(P2/P3、P5、P6 全部落空 ⇒
 剩下的 P8–P11 同属这一量级,**建议不再做**;要真有收益,只能在 §10.5 指出的"少建中间 `Value` 树"(§11.1 #2)那条大改上)。
+
+---
+
+## 12. 编辑格式语料:抓到了(rounds/33 §2 卡住的那一块)
+
+**怎么破的**:不猜端点,直接**逆向编辑器自己的 bundle**(`creation.codemao.cn/kitten/build/kitten.*.js`,仓库既有手法)。
+里面写着编辑器的读写路径:
+
+| 用途 | 端点(bundle 原文) |
+| ---- | ------------------ |
+| **读编辑格式** | `GET {creation_api}/kitten/work/ide/load/{work_id}` ⇒ `{ name, ide_type, preview, source_urls: [ …/*.bcm4 ], … }` |
+| 写/保存 | 先把 JSON 传到 CDN,再 `POST {creation_api}/kitten/r2/work`(`work_id`/`name`/**`work_url`**/`preview`/`orientation`/`sample_id`/`version:"4.11.20"`/`work_source_label`/`parent_id`/`save_type`) |
+| 服务端翻译 | `POST /kitten/work/translate`(官方那条 Kitten→KN 的转换) |
+| 存档(历史) | `GET /kitten/work/archive/{id}` |
+| `.bcm` 解码 | `POST /kitten/work/bcm/decode`(`{code}`) |
+
+`creation_api` 是运行时注入的 ⇒ 用本库的 `BaseKey::Creation`(`https://api-creation.codemao.cn`)。
+
+**关键结论**:`source_urls` 里就是**编辑器亲手写出去的编辑格式文件**(每件作品通常 10 个历史版本)。
+拿它喂正向扫描器,就打破了"自产自测"—— 输入不再是"我们反编译器的产物"。
+
+**已落地**:
+- 工具 `tests/convert_edit_harvest.rs`(`#[ignore]`,需账号):登录 → 逐作品拉 `ide/load` → 把 `source_urls`
+  落盘到 `download/compile/k4edit/<id>-<版本>.bcm4`(gitignored);默认 id 取自语料文件名,可用 `WORK_IDS=` 指定;
+  无权限的作品(元信息为空)会被跳过并列出;
+- 扫描器 `k4_corpus_round_trip_sweep` 已把该目录并入语料;
+- 实测:抓 `174408420` / `215246857` 两件各 10 版 ⇒ **20 份平台原件**;正向扫描**全部转换得动**、
+  往返确定性 + 实体 id 覆盖门全绿(整个 forward sweep 1 passed,209 s)。
+
+**顺手验证了反编译保真**:同一件作品(215246857)对比**平台原件 vs 我们反编译的产物** ——
+顶层键只差 `painter`(已知项 `docs/rounds/34` §4octies),`theatre` 键、actor 键、`block_data_json` 键**完全一致**。
+⇒ 反编译侧的结构保真是真的。
+
+**还没做的**:正向扫描器目前只**打印**类型差(按既定口径),拿这批真原件看到的新差异(如
+`cloud_lists_delete: 9 -> 12`、`WIDGET_LVMI_lightSensorGet: 4 -> 0`)值得逐条分诊 —— 这是下一轮的事。
