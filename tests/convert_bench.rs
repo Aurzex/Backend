@@ -23,12 +23,19 @@
 //!
 //! 性能可以变,产物不能变 —— 所以基准的第一职责是守住 SHA256。
 //!
-//! **两个环境开关**(默认都关,行为与历史一致):
-//! - `BACKEND_REQUIRE_BENCH=1`:**严格模式** —— debug 构建、样本缺失、基线缺失都**直接失败**
-//!   (默认这些情况是"打印后 return 显示 pass",CI/干净检出上等于没有这条门);
+//! **两个环境开关**:
+//! - `BACKEND_REQUIRE_BENCH=1`:**严格模式** —— debug 构建、样本缺失**直接失败**
+//!   (默认这两条是"打印后 return 显示 pass",CI/干净检出上等于没有这条门);
 //! - `BACKEND_BENCH_REFRESH=1`:**有据刷新基线** —— 写出新的基线文件,并**逐键打印变化**
-//!   (产物/元信息),让"为什么变"在提交信息里可审计;不使用它时基线损坏/缺失一律炸,
-//!   绝不静默重建。
+//!   (产物/元信息),让"为什么变"在提交信息里可审计。
+//!
+//! **基线缺失(W3a)**:默认模式下也**直接失败** —— 曾经的"NotFound ⇒ 返回空 map + 首次运行
+//! 自动写盘"让门在「基线被删 / 全新检出」这两种它必须挡住的情形下静默消失。建基线的唯一通道
+//! 是显式 `BACKEND_BENCH_REFRESH=1`(四条路径见 [`load_baseline`])。
+//!
+//! **重刷不许丢键(W3e)**:`REFRESH` 写出的 `fresh` 只由**存在的**样本构成 ⇒ 样本缺失时重刷会
+//! 把缺样本的基线键**永久删掉**(而默认模式下样本缺失只是打印一行警告)⇒ 门的覆盖面会静默缩水。
+//! 所以样本缺失时**拒绝写盘**并逐键列出"将被删掉的键"。
 //!
 //! 测量纪律:这台机器(笔记本/CPU 调频)上**绝对毫秒会漂**(同一二进制两次跑
 //! `core` 差 20–40% 是常事),所以:
@@ -257,6 +264,30 @@ fn convert_bench() {
     );
 
     let baseline = load_baseline();
+    // **不许静默丢键(W3e)**:重刷写出的 `fresh` 只由**存在的**样本构成 ⇒ 样本缺失时重刷会把
+    // 缺样本的基线键**永久删掉**,事后从基线文件本身看不出来(而默认模式下样本缺失只是打印一行
+    // 警告)⇒ 门的覆盖面静默缩水。所以在量测**之前**就拒绝(连同下面列出的键,别白跑一遍)。
+    if refresh_mode() && !missing.is_empty() {
+        let mut would_drop: Vec<String> = Vec::new();
+        for sample in SAMPLES {
+            if Path::new(sample.path).exists() {
+                continue;
+            }
+            let key = format!("{}-{}", sample.label, sample.slug);
+            for candidate in [key.clone(), format!("{key}#meta")] {
+                if baseline.contains_key(&candidate) {
+                    would_drop.push(candidate);
+                }
+            }
+        }
+        panic!(
+            "BACKEND_BENCH_REFRESH=1 被拒绝:样本缺失 ⇒ 重刷写出的基线只含跑过的样本,\
+             会把下列 {} 个基线键**永久删掉**(覆盖面静默缩水,事后看不出来)。\
+             先让样本回到磁盘(反编译/转换);若该样本确实要移除,请在同一个提交里手工删掉\
+             它的键并写明原因。\n  缺样本:{missing:#?}\n  将被删:{would_drop:#?}",
+            would_drop.len()
+        );
+    }
     let mut fresh = serde_json::Map::new();
     let mut mismatched = Vec::new();
     let mut parallel_mismatched = Vec::new();
@@ -368,7 +399,8 @@ fn convert_bench() {
         panic!("convert 基准:实体级并发改变了产物");
     }
 
-    // 有据重刷:显式开关才写,并逐键打印变化(让"为什么变"可审计)
+    // 有据重刷:显式开关才写,并逐键打印变化(让"为什么变"可审计)。
+    // (样本缺失时根本到不了这里 —— 上面 W3e 的守卫已经拒绝写盘并列出会被删的键)
     if refresh_mode() {
         eprintln!("\n[convert_bench] BACKEND_BENCH_REFRESH=1:**重刷基线** —— 变化逐键列出:");
         for key in fresh.keys() {
@@ -392,19 +424,6 @@ fn convert_bench() {
         panic!("convert 基准:元信息(source SHA/块数/告警/字节)与基线不一致");
     }
 
-    if mismatched.is_empty() && !fresh.is_empty() {
-        if baseline.is_empty() {
-            std::fs::write(BASELINE, serde_json::to_string_pretty(&fresh).unwrap())
-                .expect("写基线失败");
-            println!("\n[convert_bench] 首次运行:基线已写入 {BASELINE}");
-        } else {
-            println!(
-                "\n[convert_bench] 产物 SHA256 与元信息都与基线一致 ✅;实体级并发 1 vs {PARALLEL_FACTOR} 同 SHA256 ✅"
-            );
-        }
-        return;
-    }
-
     if !mismatched.is_empty() {
         eprintln!("\n[convert_bench] 产物与基线不一致(性能改了但产物变了 = 失败):");
         for (key, old, new) in &mismatched {
@@ -412,26 +431,45 @@ fn convert_bench() {
         }
         panic!("convert 基准:产物 SHA256 与基线不一致");
     }
+
+    // 走到这里基线必然非空且对得上:缺失在 `load_baseline` 就炸了(W3a),`REFRESH` 已在上面的分支
+    // 写完并 return。原先这里的"首次运行 ⇒ 自动写基线"分支已删 —— 那是默认模式下的静默重建。
+    println!(
+        "\n[convert_bench] 产物 SHA256 与元信息都与基线一致 ✅;实体级并发 1 vs {PARALLEL_FACTOR} 同 SHA256 ✅"
+    );
 }
 
+/// 读基线。**四条路径(W3a)**:
+/// 1. 存在且能解析 ⇒ 正常返回(门照常比);
+/// 2. 存在但解析失败 ⇒ **一律炸**(不因 `REFRESH` 放宽:被手改坏的基线不该被"顺手重刷"掩盖;
+///    真要从头重建就**先删文件**再 `BACKEND_BENCH_REFRESH=1`,让"重建"在 diff 里看得见);
+/// 3. `NotFound` + `BACKEND_BENCH_REFRESH=1` ⇒ 返回空 map —— "从零建基线"的**唯一合法通道**
+///    (必须放在这里判:`load_baseline` 在 REFRESH 分支之前调用,无条件炸会把首跑自己堵死);
+/// 4. `NotFound` + 其它(默认 / 严格模式)⇒ **炸**。原先这里是"返回空 map,再由后半段
+///    `baseline.is_empty()` 分支静默写盘" —— 那等于把门在「基线被删 / 全新检出」时关掉。
 fn load_baseline() -> serde_json::Map<String, serde_json::Value> {
     let text = match std::fs::read_to_string(BASELINE) {
         Ok(text) => text,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            if strict_mode() {
-                panic!(
-                    "严格模式:基线 {BASELINE} 缺失 —— 先不带 BACKEND_REQUIRE_BENCH 跑一次建立基线"
-                );
+            if refresh_mode() {
+                return serde_json::Map::new();
             }
-            return serde_json::Map::new();
+            panic!(
+                "基线 {BASELINE} 缺失(严格模式 = {})—— 建基线请显式跑一次 BACKEND_BENCH_REFRESH=1;\
+                 默认模式不再静默重建(那会让门在「基线被删 / 全新检出」时消失)",
+                strict_mode()
+            );
         }
         Err(e) => panic!("读基线 {BASELINE} 失败:{e}"),
     };
     // 基线损坏必须炸:静默 `unwrap_or_default()` 会把"基线被删/弄坏"变成"悄悄重建基线",
-    // 第一职责门就白设了。要重刷请显式用 BACKEND_BENCH_REFRESH=1。
+    // 第一职责门就白设了。注意这条**不因 `BACKEND_BENCH_REFRESH=1` 放宽** —— 要重建就先删文件
+    // 再重刷,让"重建"这件事在 diff 里看得见。
     match serde_json::from_str(&text) {
         Ok(map) => map,
-        Err(e) => panic!("基线 {BASELINE} 解析失败(不要手改;重刷用 BACKEND_BENCH_REFRESH=1):{e}"),
+        Err(e) => panic!(
+            "基线 {BASELINE} 解析失败(不要手改;确要重建请先删掉该文件再用 BACKEND_BENCH_REFRESH=1 跑一次):{e}"
+        ),
     }
 }
 
