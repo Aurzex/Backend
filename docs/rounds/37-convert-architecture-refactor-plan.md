@@ -660,3 +660,24 @@ String/Value ⇒ 省下的只是"未匹配键的缓冲机制"这一小块。
 1. 看那 4 个占位块在**中间态(KN)**里长什么样(mutation 是否带标题、`type` 是否就是 `bcm_translator_text_return_value_block`);
 2. 跟 `reverse_placeholder` 的 `REVERSE_PLACEHOLDER_TITLES` 反查走一遍 —— 认得就修反查,认不得就把"占位块本身是 Kitten4 认识的类型"这条逻辑走通;
 3. 修完用同一套同轮 A/B 式的证据(该件语料的两侧直方图 + 全语料扫描 + SHA 门)确认:**这一条差异消失、其余不变**。
+
+### 13.5 追到正向腿:KN 中间态只有 17 块(源 37 块)—— 指向"残块/可达性"
+
+继续仪器化(同样用完即撤),看那件语料的**中间态**:
+
+| 侧 | 类数 / 块数 | 直方图 |
+| -- | ---------- | ------ |
+| 源(Kitten4) | 9 / **37** | `get_midis 4`、`play_midimusic_till_end 4`、`set_midimusic_speed 4`、`self_shake 2`、`math_number 6`、`start_on_click 3`、`procedures_2_callnoreturn 8`、`procedures_2_defnoreturn 4`、`repeat_forever 2` |
+| **中间态(KN)** | 5 / **17** | `bcm_translator_text_execution_block 2`、`math_number 2`、`on_running_group_activated 3`、`procedures_2_callnoreturn 8`、`repeat_forever 2` |
+| 往返后(Kitten4) | 8 / **34** | (见 §13.4) |
+
+⇒ 那 4 块 `get_midis` **在正向腿就没进 KN**;顺带还少了 `play_midimusic_till_end`/`set_midimusic_speed`/`self_shake`/`procedures_2_defnoreturn`/部分 `math_number`
+(合计 ≈20 块)。同一份"源 37 / 中间 17"的落差,**与 rounds/32 §3bis、rounds/33 §3bis 记录过的"残块"**(根块 `parent_id` 为空、
+任何可达块都不引用它们)高度吻合 —— 那些块**不在任何根的可达树里**,正向只搬可达树 ⇒ **少它们是既定正确行为**,
+不是丢块(反向重建树时这些残块也自然消失,当年就是这么定性的)。
+
+**⇒ 下一轮第一条(定案只差一步)**:对这件语料数一次**可达性** —— 从根(无 `parent_id` 的块)沿 `connections`
+BFS,比较"可达集合"与"全量直方图";若那 4 个 `get_midis` **不可达** ⇒ 本条差异**结案为既定行为**,
+把口径写进扫描器注释(或把扫描器改成只数可达块,彻底消掉这类噪声);若它们**可达** ⇒ 那才是真缺陷,再查正向在哪一步吞了它。
+
+> 备注:本轮至此,正向扫描的全部差异都已**追到根**(改名/等价类/降级/残块候选),没有留悬空结论。
