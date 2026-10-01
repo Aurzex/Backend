@@ -49,6 +49,16 @@ const SAMPLES: &[Sample] = &[
     },
 ];
 
+/// `BACKEND_REQUIRE_FIXTURES=1`:缺样本一律**失败**,默认只打印警告(历史上这里是**静默** `continue`)。
+///
+/// 与 `BACKEND_REQUIRE_BENCH=1` 同族(见 `docs/knowledge/repo-conventions.md` §3ter):
+/// 那个管基准自身(debug 构建 / 基线),这个管"跑测试要用的夹具缺了" —— 口径与
+/// `tests/convert_bench.rs`、`src/core/convert/translate/reverse_tests.rs` 的同一开关一致。
+fn require_fixtures() -> bool {
+    std::env::var("BACKEND_REQUIRE_FIXTURES")
+        .is_ok_and(|v| matches!(v.as_str(), "1" | "true" | "yes"))
+}
+
 fn sha256_hex(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
@@ -146,6 +156,21 @@ fn convert_facade_flow_bench() {
     if cfg!(debug_assertions) {
         eprintln!("[facade_flow] debug 构建,跳过;请用 --profile bench_perf");
         return;
+    }
+    // 缺样本:严格开关下失败并列出缺了哪些;默认**也打印**(原先这里是静默 `continue`,
+    // 干净检出上整个基准一行输出都没有 ⇒ 看不出"压根没跑")
+    let missing: Vec<&str> = SAMPLES
+        .iter()
+        .filter(|sample| !Path::new(sample.path).exists())
+        .map(|sample| sample.path)
+        .collect();
+    if !missing.is_empty() {
+        if require_fixtures() {
+            panic!(
+                "严格模式(BACKEND_REQUIRE_FIXTURES=1):缺样本 —— 这些样本不参与对照:{missing:#?}"
+            );
+        }
+        eprintln!("[facade_flow] 警告:缺样本,跳过它们:{missing:#?}");
     }
     let dir = bench_dir("facade");
     println!(

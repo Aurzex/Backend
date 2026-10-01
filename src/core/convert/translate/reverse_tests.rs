@@ -15,6 +15,28 @@ mod reverse_tests_inner {
     use serde_json::{Value, json};
     use std::collections::BTreeMap;
 
+    /// `BACKEND_REQUIRE_FIXTURES=1`:缺夹具(语料/真作品样例)一律**失败**,默认只打印跳过。
+    ///
+    /// 为什么需要:真作品样例在 gitignored 的 `download/`(采集器**增量**写入),干净检出上
+    /// 这些测试本来全是"打印一行 `跳过:` 后 return —— **显示 pass**" ⇒ 等于没有这条门。
+    /// 开关家族见 `docs/knowledge/repo-conventions.md` §3ter;与 `BACKEND_REQUIRE_BENCH` 的分工:
+    /// 后者管基准自身(debug 构建 / 样本 / 基线),这个只管"跑测试要用的夹具缺了"。
+    fn require_fixtures() -> bool {
+        std::env::var("BACKEND_REQUIRE_FIXTURES")
+            .is_ok_and(|v| matches!(v.as_str(), "1" | "true" | "yes"))
+    }
+
+    /// 缺夹具的统一出口:严格开关下 panic 并**点名缺了什么**,否则打印跳过 —— 调用方紧随 `return`。
+    fn missing_fixture(what: &str) {
+        if require_fixtures() {
+            panic!(
+                "严格模式(BACKEND_REQUIRE_FIXTURES=1):缺夹具 —— {what}。\
+                 真作品样例在 gitignored 的 download/(先跑对应的 harvest 测试抓语料)"
+            );
+        }
+        eprintln!("跳过:{what}");
+    }
+
     fn reverse(block: Value, landscape: bool) -> (BlockJson, TranslateReport) {
         let mut tree = BlockTree::new(vec![BlockJson::from_value(&block).expect("块 JSON")]);
         let mut ids = model::IdSource::new(true);
@@ -489,7 +511,7 @@ mod reverse_tests_inner {
     #[test]
     fn block_data_json_round_trips_real_bcmkn() {
         let Some(doc) = real_bcmkn() else {
-            eprintln!("跳过:缺少真作品样例");
+            missing_fixture("真作品样例 download/compile/HEX Editor_317683843.bcmkn");
             return;
         };
         let mut ids = model::IdSource::new(false);
@@ -1366,10 +1388,7 @@ mod reverse_tests_inner {
         // `.bcm`(Kitten3,积木在 blocksXML)、影子是内联对象形态的作品。
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("download/compile");
         let Ok(entries) = std::fs::read_dir(&root) else {
-            eprintln!(
-                "跳过:没有 {}(先跑 `cargo test --test convert_corpus_harvest -- --ignored`)",
-                root.display()
-            );
+            missing_fixture(&format!("语料目录 {}", root.display()));
             return;
         };
         let mut files: Vec<std::path::PathBuf> = entries
@@ -1388,7 +1407,7 @@ mod reverse_tests_inner {
         }
         files.sort();
         if files.is_empty() {
-            eprintln!("跳过:{} 下没有 .bcm4", root.display());
+            missing_fixture(&format!("{} 下没有任何 .bcm4", root.display()));
             return;
         }
         let options = TranslateOptions::new().deterministic_ids(true);
@@ -1701,7 +1720,7 @@ mod reverse_tests_inner {
     fn kn_corpus_round_trip_sweep() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("download/compile");
         let Ok(entries) = std::fs::read_dir(&root) else {
-            eprintln!("跳过:没有 {}", root.display());
+            missing_fixture(&format!("语料目录 {}", root.display()));
             return;
         };
         let mut files: Vec<std::path::PathBuf> = entries
@@ -1711,7 +1730,7 @@ mod reverse_tests_inner {
             .collect();
         files.sort();
         if files.is_empty() {
-            eprintln!("跳过:{} 下没有 .bcmkn", root.display());
+            missing_fixture(&format!("{} 下没有任何 .bcmkn", root.display()));
             return;
         }
         let options = TranslateOptions::new().deterministic_ids(true);
@@ -1915,7 +1934,9 @@ mod reverse_tests_inner {
     fn procedure_library_reverses_to_kitten4_and_is_deterministic() {
         let libs = procedure_libraries();
         if libs.is_empty() {
-            eprintln!("跳过:缺少真作品样例(纯程序集库)");
+            missing_fixture(
+                "真作品样例(纯程序集库 download/compile/FjSw…/FjDQB…/HEX Editor….bcmkn)",
+            );
             return;
         }
         let options = TranslateOptions::new().deterministic_ids(true);
@@ -2319,7 +2340,7 @@ mod reverse_tests_inner {
     #[test]
     fn real_bcmkn_round_trip_multiset_diff_is_documented() {
         let Some(source) = real_bcmkn() else {
-            eprintln!("跳过:缺少真作品样例");
+            missing_fixture("真作品样例 download/compile/HEX Editor_317683843.bcmkn");
             return;
         };
         let options = TranslateOptions::new().deterministic_ids(true);
@@ -2431,7 +2452,7 @@ mod reverse_tests_inner {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("download/compile/raw/几何对战-联机.bcm4");
         if !path.exists() {
-            eprintln!("跳过:缺少真作品样例 {}", path.display());
+            missing_fixture(&format!("真作品样例 {}", path.display()));
             return;
         }
         let mut source: Value =
@@ -2484,7 +2505,7 @@ mod reverse_tests_inner {
     #[test]
     fn real_bcmkn_reverses_to_kitten4_document() {
         let Some(source) = real_bcmkn() else {
-            eprintln!("跳过:缺少真作品样例");
+            missing_fixture("真作品样例 download/compile/HEX Editor_317683843.bcmkn");
             return;
         };
         let options = TranslateOptions::new().deterministic_ids(true);
@@ -2695,7 +2716,7 @@ mod reverse_tests_inner {
                 .join("download/compile/HEX Editor_317683843.bcmkn");
             path.exists().then_some(path)
         }) else {
-            eprintln!("跳过:缺少真作品样例");
+            missing_fixture("真作品样例 download/compile/HEX Editor_317683843.bcmkn");
             return;
         };
         // 写系统临时目录:不往仓库里落盘(仓库 temp/ 是要清理干净的工作区);

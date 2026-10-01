@@ -11,7 +11,8 @@
 //! 判读纪律与 `convert_bench` 相同:绝对毫秒会漂(20–40%),**只能同一轮内并排比**
 //! (本文件打印每轮的耗时与产物 SHA256,配合 `git worktree` 做"改动前/后交替跑")。
 //!
-//! 需要网络 + `data/test-config.json`(账号);缺配置时**跳过**(`BACKEND_REQUIRE_BENCH=1` 下改为失败)。
+//! 需要网络 + `data/test-config.json`(账号);缺配置时**跳过**
+//! (`BACKEND_REQUIRE_FIXTURES=1` 或 `BACKEND_REQUIRE_BENCH=1` 下改为失败)。
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -36,8 +37,15 @@ fn sha256_hex(bytes: &[u8]) -> String {
         })
 }
 
+/// 缺夹具/配置时**失败**而不是跳过:`BACKEND_REQUIRE_FIXTURES=1`(统一开关 —— 与
+/// `tests/convert_bench.rs`、`tests/convert_facade_bench.rs`、
+/// `src/core/convert/translate/reverse_tests.rs` 同一口径,见 `docs/knowledge/repo-conventions.md` §3ter)
+/// 或本文件历史上用的 `BACKEND_REQUIRE_BENCH=1`(保留,别让已有环境悄悄变松)。
 fn strict_mode() -> bool {
-    std::env::var("BACKEND_REQUIRE_BENCH").is_ok_and(|v| matches!(v.as_str(), "1" | "true" | "yes"))
+    fn env_flag(name: &str) -> bool {
+        std::env::var(name).is_ok_and(|v| matches!(v.as_str(), "1" | "true" | "yes"))
+    }
+    env_flag("BACKEND_REQUIRE_FIXTURES") || env_flag("BACKEND_REQUIRE_BENCH")
 }
 
 /// 登录(与其它真机测试同一份配置;失败时按严格模式决定跳过还是炸)
