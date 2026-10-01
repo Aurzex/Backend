@@ -314,6 +314,11 @@ fn unmapped_blocks_become_placeholders_and_are_reported() {
 // ===========================================================================
 
 /// 官方产物夹具 + 输入(路径,`bcm_version`),与 `temp/harness/out-*.json` 一一对应
+///
+/// 与 `reverse_tests` / `pipeline` 那些"缺夹具就打印跳过"的真机测试**不同**:本测试是
+/// `#[ignore]`(要显式 `--ignored` 才跑)且缺件走**硬 `assert!`**,本来就没有"静默 pass"的出口
+/// ⇒ 不需要 `BACKEND_REQUIRE_FIXTURES`(开关家族见 `docs/knowledge/repo-conventions.md` §3ter);
+/// 这里只标注这条差别,不改口径。
 const REAL_SAMPLES: &[(&str, &str, &str)] = &[
     (
         "download/compile/蛋仔派对2-奥姆返场新盲盒生存赛重做_194684070/user_works/194684070/194684070.bcm",

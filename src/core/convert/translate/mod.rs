@@ -286,6 +286,31 @@ pub(in crate::core::convert) fn detect_editor(
     None
 }
 
+/// `BACKEND_REQUIRE_FIXTURES=1`:缺夹具(语料 / 真作品样例 / 官方 harness)一律**失败**,
+/// 默认只打印一行并跳过。
+///
+/// 为什么需要:真作品样例在 gitignored 的 `download/`(采集器**增量**写入),干净检出上这些测试
+/// 本来全是"打印一行 `跳过:` 后 return —— **显示 pass**" ⇒ 等于没有这条门。
+/// 开关家族见 `docs/knowledge/repo-conventions.md` §3ter;这是**域内唯一的定义处**
+/// (`reverse_tests` 原先那份已改用它,别再抄第四份)。
+#[cfg(test)]
+fn require_fixtures() -> bool {
+    std::env::var("BACKEND_REQUIRE_FIXTURES")
+        .is_ok_and(|v| matches!(v.as_str(), "1" | "true" | "yes"))
+}
+
+/// 缺夹具的统一出口:严格开关下 panic 并**点名缺了什么**,否则打印跳过 —— 调用方紧随 `return`。
+#[cfg(test)]
+fn missing_fixture(what: &str) {
+    if require_fixtures() {
+        panic!(
+            "严格模式(BACKEND_REQUIRE_FIXTURES=1):缺夹具 —— {what}。\
+             真作品样例在 gitignored 的 download/(先跑对应的 harvest 测试抓语料)"
+        );
+    }
+    eprintln!("跳过:{what}");
+}
+
 /// 测试用临时目录:**每次调用唯一**(进程 + 随机后缀),避免并行测试/跨运行互相覆盖
 ///
 /// 只服务 `translate` 子树自己的测试(本文件 `diff_tests` 与 `reverse_tests`)⇒ 私有。
@@ -622,7 +647,7 @@ mod diff_tests {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("download/compile/raw/几何对战-联机.bcm4");
         if !path.exists() {
-            eprintln!("跳过:缺少真作品样本 {}", path.display());
+            missing_fixture(&format!("真作品样本 {}", path.display()));
             return;
         }
         let mut source: Value =
@@ -679,12 +704,12 @@ mod diff_tests {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let harness = root.join("temp/harness/harness.js");
         if !harness.exists() {
-            eprintln!("跳过:缺少官方 harness({})", harness.display());
+            missing_fixture(&format!("官方 harness({})", harness.display()));
             return;
         }
         let sample = root.join("download/compile/raw/几何对战-联机.bcm4");
         if !sample.exists() {
-            eprintln!("跳过:缺少真作品样本 {}", sample.display());
+            missing_fixture(&format!("真作品样本 {}", sample.display()));
             return;
         }
         let mut source: Value =

@@ -10,7 +10,8 @@ use serde_json::Value;
 use std::ops::Range;
 
 /// 从整段 XML 取开始标签里 `attr="…"` 的值(先按引号感知找标签尾,再取属性)
-/// 唯一的 XML 属性读取实现:本模块与 `neko.rs` 的 mutation 改写共用
+/// 唯一的 XML 属性读取实现:本模块与 `model.rs` 的 mutation 改写共用(那份改写原在 `neko.rs`,
+/// 已随 `41470d9` 并入 `model.rs`)
 pub(super) fn xml_attr_value<'a>(xml: &'a str, attr: &str) -> Option<&'a str> {
     attr_value(&xml[..start_tag_end(xml)?], attr)
 }

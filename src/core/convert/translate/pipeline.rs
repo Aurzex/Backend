@@ -1178,7 +1178,7 @@ mod forward_parallel_tests {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("download/compile/几何对战-联机_215246857.bcm4");
         if !path.exists() {
-            eprintln!("跳过:缺少真作品样本 {}", path.display());
+            super::super::missing_fixture(&format!("真作品样本 {}", path.display()));
             return;
         }
         let source: Value =

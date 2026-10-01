@@ -15,27 +15,10 @@ mod reverse_tests_inner {
     use serde_json::{Value, json};
     use std::collections::BTreeMap;
 
-    /// `BACKEND_REQUIRE_FIXTURES=1`:缺夹具(语料/真作品样例)一律**失败**,默认只打印跳过。
-    ///
-    /// 为什么需要:真作品样例在 gitignored 的 `download/`(采集器**增量**写入),干净检出上
-    /// 这些测试本来全是"打印一行 `跳过:` 后 return —— **显示 pass**" ⇒ 等于没有这条门。
-    /// 开关家族见 `docs/knowledge/repo-conventions.md` §3ter;与 `BACKEND_REQUIRE_BENCH` 的分工:
-    /// 后者管基准自身(debug 构建 / 样本 / 基线),这个只管"跑测试要用的夹具缺了"。
-    fn require_fixtures() -> bool {
-        std::env::var("BACKEND_REQUIRE_FIXTURES")
-            .is_ok_and(|v| matches!(v.as_str(), "1" | "true" | "yes"))
-    }
-
-    /// 缺夹具的统一出口:严格开关下 panic 并**点名缺了什么**,否则打印跳过 —— 调用方紧随 `return`。
-    fn missing_fixture(what: &str) {
-        if require_fixtures() {
-            panic!(
-                "严格模式(BACKEND_REQUIRE_FIXTURES=1):缺夹具 —— {what}。\
-                 真作品样例在 gitignored 的 download/(先跑对应的 harvest 测试抓语料)"
-            );
-        }
-        eprintln!("跳过:{what}");
-    }
+    /// 缺夹具统一走 `translate/mod.rs` 的那一份(`missing_fixture` / `require_fixtures`,
+    /// `BACKEND_REQUIRE_FIXTURES=1`;开关家族见 `docs/knowledge/repo-conventions.md` §3ter)——
+    /// 这里原先各留一份定义,已删,避免同口径三处漂移。
+    use super::super::missing_fixture;
 
     fn reverse(block: Value, landscape: bool) -> (BlockJson, TranslateReport) {
         let mut tree = BlockTree::new(vec![BlockJson::from_value(&block).expect("块 JSON")]);

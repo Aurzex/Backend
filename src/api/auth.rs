@@ -1155,7 +1155,7 @@ impl Default for AuthManager {
 ///
 /// 为什么是进程级:时差只取决于"本机钟 vs 服务端钟",与 `CloudAuthenticator` 实例无关;
 /// 而旧实现把它存在实例字段里,调用方每次云变量重连 / 每份 NEKO 作品取件都新建实例
-/// (见 `core/cloudvar.rs` 与 `core/convert/decompile/editors/simple.rs`),
+/// (见 `core/cloudvar.rs` 与 `core/convert/decompile/editors.rs`),
 /// 于是每次都重新发一次 `currentTime` 请求。
 ///
 /// 为什么带 TTL:休眠唤醒 / NTP 校正会改变本地钟,时差不是永恒常量,所以设一个保守的
