@@ -73,7 +73,9 @@ rounds/37 §13 把"块数"的三种口径踩了个遍,同一件事下了三次�
 
 1. **单测**(`reverse_tests::placeholder_inverts_back_via_mutation_title`):可反查的照旧还原;
    反查不到的 → `incompatible_block`(语句)/ `incompatible_output_block`(值,且仍 `is_output`);
-   影子 → 保持原名。`cargo test` 109 passed / 0 failed。
+   影子 → 保持原名。`cargo test` 全绿(单测 110 passed / 0 failed);另给词表加了一条**有序性断言**
+   (`kitten4_vocab::tests::editor_type_list_is_sorted_and_queryable` —— `binary_search` 在无序表上会
+   静默答错,而词表是"重导后整体替换"的产物)。
 2. **实机**(线上 Kitten4 + 隐藏 `input[accept=".bcm, .bcm4"]`「打开本地作品」,headless Chromium;
    做法同 rounds/35):
    | 文件 | 画布块数 | 渲染 |
@@ -81,6 +83,7 @@ rounds/37 §13 把"块数"的三种口径踩了个遍,同一件事下了三次�
    | 对照(原文件) | 4 | `当开始被点击 → 重复执行 → 移动10步 → 面向鼠标指针` |
    | 语句位换成 `incompatible_block` | **4** | 该位置变成「**未收录积木**」,**仍留在语句链里**,作品名正常 |
    | 值槽换成 `incompatible_output_block` | **5** | 该槽显示为空(0),标记块**以孤立块保留**(平台自己的块定义没有 `output` 连接) |
+   | **真实修后产物**(`P1拓展任务1` 的 KN→Kitten4 产物) | 音符角色 **19** | 其中 **4 块是「未收录积木」** —— 修前这 4 块整块消失;作品名正常、不触发"整份加载失败" |
    ⇒ 不引入"整份工作区加载失败",且丢掉的块**看得见**了。
 3. **id 口径**:修前那 4 个 id 在产物文本里 `False`;**修后 4/4 在,类型 = `incompatible_output_block`**。
    `convert_bench` 四样本 SHA256 + `#meta` 与基线**完全一致** ⇒ 本轮改动对基准样本无字节影响。
