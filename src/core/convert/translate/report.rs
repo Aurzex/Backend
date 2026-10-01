@@ -16,15 +16,25 @@ pub enum TranslateWarning {
     /// 名字会**整份工作区加载失败**(`rounds/34` §4nonies)⇒ 改成**剔除/清空**;
     /// 而"剔除"会让积木**真的消失**(`rounds/38` 用 id 口径定案:某件作品丢了 4 个可达块)
     /// ⇒ 现在写出阶段把它**就地改成「未收录积木」标记**
-    /// (`incompatible_block` / `incompatible_output_block`,见 `assembly.rs::mark_unknown_blocks`),
-    /// 并逐类记进本告警(`kind` 里带 `(Kitten4 编辑器不认识,已改成未收录积木 N 块)` 这样的后缀与计数)。
+    /// (`incompatible_block` / `incompatible_output_block`,见 `assembly.rs::mark_unknown_blocks`)。
     /// ⇒ **这类告警意味着"块还在画布上,但内容恢复不出来"** —— 看得见的损失,不是静默少块。
     /// 判定"哪些类型属此类"见 `mapping.rs` 顶部注释。
     ///
-    /// ⚠️ **冻结协议**:`kind` 里的 `(Kitten4 编辑器不认识,已改成未收录积木 N 块)` /
-    /// `(…已清空 N 条影子)` 两段文案是**标记量预算门**(`reverse_tests::marker_counts`)的解析依据,
-    /// 不得随意改写(要改先改那边,否则读数会静默变 0、门变成"永远通过")。
-    UnmappedBlock { kind: String },
+    /// ⚠️ **计数走结构字段,不走文案(rounds/39 §W4 起)**:此前 `kind` 里拼
+    /// `(Kitten4 编辑器不认识,已改成未收录积木 N 块)` / `(…已清空 N 条影子)`,而"标记量预算门"
+    /// (`reverse_tests::marker_counts`)只能**反解中文**才拿到读数 —— 文案改一个空格(更别说改词)
+    /// 读数就**静默变 0**、`MARKER_BUDGET` 变成"永远通过"。现在拆成 `kind`(**纯类型名**)+
+    /// 下面两个字段,读数直接读字段。**"别把协议塞进给人看的文案"这条教训仍然有效**:
+    /// 要动字段就先动 `marker_counts` 与 `MARKER_BUDGET` 基线,别在 `kind` 里复活计数后缀。
+    UnmappedBlock {
+        /// 类型名(**纯**:不再拼 `(…已改成未收录积木 N 块)` 这类后缀)
+        kind: String,
+        /// 该类型被就地改成「未收录积木」标记的**块数**(写出阶段 `mark_unknown_blocks` 填;
+        /// 只报"这个类型认不出"的发射点填 `0`)
+        marked: u64,
+        /// 该类型在 `shadows` XML 里被清空的**影子条数**(影子是槽位默认值,不换标记块,只清空)
+        cleared_shadows: u64,
+    },
     /// 映射到文本占位积木(`bcm_translator_text_*`),原文进 mutation
     DegradedToText { kind: String },
     /// 结构上无法表达的字段被丢弃(`path` 形如 `actors.<id>.rotation_type`)
@@ -50,7 +60,7 @@ impl TranslateWarning {
     /// 告警类别标签(日志与集成测试按类别统计用)
     pub fn category(&self) -> &'static str {
         match self {
-            TranslateWarning::UnmappedBlock { .. } => "未映射积木(保留原类型名)",
+            TranslateWarning::UnmappedBlock { .. } => "未映射积木(已改成未收录积木 / 清空影子)",
             TranslateWarning::DegradedToText { .. } => "降级为文本占位积木",
             TranslateWarning::DroppedField { .. } => "丢弃字段",
             TranslateWarning::AmbiguousType { .. } => "类型歧义(原类型有多个)",
@@ -62,7 +72,7 @@ impl TranslateWarning {
 
     fn subject(&self) -> &str {
         match self {
-            TranslateWarning::UnmappedBlock { kind }
+            TranslateWarning::UnmappedBlock { kind, .. }
             | TranslateWarning::DegradedToText { kind }
             | TranslateWarning::AmbiguousType { kind, .. } => kind,
             TranslateWarning::DroppedField { path }

@@ -1321,6 +1321,8 @@ fn reverse_kind(
             if is_renamed_lc_key(kn_kind) || !is_kitten_side(kn_kind) {
                 ctx.report.warn(TranslateWarning::UnmappedBlock {
                     kind: kn_kind.to_string(),
+                    marked: 0,
+                    cleared_shadows: 0,
                 });
             }
             (kn_kind.to_string(), None)
@@ -1348,6 +1350,8 @@ fn reverse_placeholder(kn_kind: &str, node: &mut BlockJson, ctx: &mut RevCtx) ->
         None => {
             ctx.report.warn(TranslateWarning::UnmappedBlock {
                 kind: kn_kind.to_string(),
+                marked: 0,
+                cleared_shadows: 0,
             });
             // 占位名照旧留着 —— 写出阶段([`super::assembly`] `mark_unknown_blocks`)会把它
             // 顶替成编辑器认识的「未收录积木」标记。**不能**让它原样写出去:

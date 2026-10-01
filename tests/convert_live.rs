@@ -254,7 +254,7 @@ fn kn_work_to_kitten4_file() {
     // 未映射积木按 KN 侧类型名聚合(判断"缺的是哪些能力"的唯一依据)
     let mut unmapped: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
     for w in out.report.warnings() {
-        if let backend::core::convert::translate::TranslateWarning::UnmappedBlock { kind } = w {
+        if let backend::core::convert::translate::TranslateWarning::UnmappedBlock { kind, .. } = w {
             *unmapped.entry(kind.as_str()).or_default() += 1;
         }
     }

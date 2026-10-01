@@ -92,7 +92,9 @@ mod reverse_tests_inner {
         assert_eq!(
             report.warnings(),
             [TranslateWarning::UnmappedBlock {
-                kind: "temporary_list".into()
+                kind: "temporary_list".into(),
+                marked: 0,
+                cleared_shadows: 0,
             }]
         );
 
@@ -102,7 +104,9 @@ mod reverse_tests_inner {
         assert_eq!(
             report.warnings(),
             [TranslateWarning::UnmappedBlock {
-                kind: "calculate".into()
+                kind: "calculate".into(),
+                marked: 0,
+                cleared_shadows: 0,
             }]
         );
     }
@@ -141,7 +145,9 @@ mod reverse_tests_inner {
         assert_eq!(
             report.warnings(),
             [TranslateWarning::UnmappedBlock {
-                kind: "bcm_translator_text_execution_block".into()
+                kind: "bcm_translator_text_execution_block".into(),
+                marked: 0,
+                cleared_shadows: 0,
             }]
         );
     }
@@ -780,30 +786,28 @@ mod reverse_tests_inner {
 
     /// 反向报告的"标记量":(被改成「未收录积木」的块数, 被清空的影子数)。
     ///
-    /// ⚠️ **冻结协议(rounds/37 §1 0.3,rounds/38 改文案)**:本函数**反解中文告警文案**
-    /// (`已改成未收录积木 N 块` / `已清空 N`)。⇒ `assembly.rs::mark_unknown_blocks` 里那两段
-    /// marker 文案**不得改动**;要改文案必须先改这里(或把计数改成结构化字段),
-    /// 否则读数会静默变 0、预算门变成"永远通过"。
+    /// **读数直接读字段(rounds/39 §W4 起)**:此前本函数**反解中文告警文案**
+    /// (`已改成未收录积木 N 块` / `已清空 N`)—— 那样文案改一个空格,读数就静默变 0、
+    /// 预算门变成"永远通过"。现在读 [`TranslateWarning::UnmappedBlock`] 的 `marked` /
+    /// `cleared_shadows`(写出阶段 `assembly.rs::mark_unknown_blocks` 填的真计数)。
     ///
-    /// 编辑器不认识的类型**必须**处理(否则编辑器加载整份工作区失败,rounds/34 §4nonies),
-    /// `mark_unknown_blocks` 把它们记成 [`TranslateWarning::UnmappedBlock`],
-    /// `kind` 形如 `temporary_list(Kitten4 编辑器不认识,已改成未收录积木 285 块)` /
-    /// `…已清空 170 条影子)`。取出来给"只许变少"的预算门用(rounds/36 起)。
+    /// 编辑器不认识的类型**必须**处理(否则编辑器加载整份工作区失败,rounds/34 §4nonies):
+    /// 块 → 就地改成「未收录积木」标记(`marked`);影子 XML 里的未知类型 → 清成空串
+    /// (`cleared_shadows`;影子是槽位默认值,不换标记块)。取出来给"只许变少"的预算门用(rounds/36 起)。
     fn marker_counts(report: &TranslateReport) -> (u64, u64) {
-        let count_after = |text: &str, marker: &str| -> u64 {
-            text.split_once(marker)
-                .and_then(|(_, tail)| tail.split_whitespace().next())
-                .and_then(|n| n.parse().ok())
-                .unwrap_or(0)
-        };
         let mut blocks = 0u64;
         let mut shadows = 0u64;
         for warning in report.warnings() {
-            let TranslateWarning::UnmappedBlock { kind } = warning else {
+            let TranslateWarning::UnmappedBlock {
+                marked,
+                cleared_shadows,
+                ..
+            } = warning
+            else {
                 continue;
             };
-            blocks += count_after(kind, "已改成未收录积木 ");
-            shadows += count_after(kind, "已清空 ");
+            blocks += marked;
+            shadows += cleared_shadows;
         }
         (blocks, shadows)
     }
@@ -2580,7 +2584,7 @@ mod reverse_tests_inner {
             .warnings()
             .iter()
             .filter_map(|warning| match warning {
-                TranslateWarning::UnmappedBlock { kind } => Some(kind.as_str()),
+                TranslateWarning::UnmappedBlock { kind, .. } => Some(kind.as_str()),
                 _ => None,
             })
             .collect();

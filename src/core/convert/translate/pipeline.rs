@@ -882,8 +882,14 @@ fn remap_warning(
     unmatched: &mut usize,
 ) -> TranslateWarning {
     match warning {
-        TranslateWarning::UnmappedBlock { kind } => TranslateWarning::UnmappedBlock {
+        TranslateWarning::UnmappedBlock {
+            kind,
+            marked,
+            cleared_shadows,
+        } => TranslateWarning::UnmappedBlock {
             kind: remap_owned(map, kind, unmatched),
+            marked,
+            cleared_shadows,
         },
         TranslateWarning::DegradedToText { kind } => TranslateWarning::DegradedToText {
             kind: remap_owned(map, kind, unmatched),

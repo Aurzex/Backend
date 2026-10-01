@@ -1004,12 +1004,16 @@ fn mark_unknown_blocks(
 
     for (kind, count) in shadow_fixed {
         report.warn(TranslateWarning::UnmappedBlock {
-            kind: format!("{kind}(Kitten4 编辑器不认识,已清空 {count} 条影子)"),
+            kind,
+            marked: 0,
+            cleared_shadows: count,
         });
     }
     for (kind, count) in marked {
         report.warn(TranslateWarning::UnmappedBlock {
-            kind: format!("{kind}(Kitten4 编辑器不认识,已改成未收录积木 {count} 块)"),
+            kind,
+            marked: count,
+            cleared_shadows: 0,
         });
     }
     Value::Object(root)
@@ -2091,27 +2095,32 @@ mod assembly_tests {
             assert!(got[id].get("mutation").is_none(), "{id}: 不留变异");
         }
         // 逐类计数(报告按类型排序)
-        let kinds: Vec<&str> = report
+        let kinds: Vec<(&str, u64, u64)> = report
             .warnings()
             .iter()
             .filter_map(|warning| match warning {
-                TranslateWarning::UnmappedBlock { kind } => Some(kind.as_str()),
+                TranslateWarning::UnmappedBlock {
+                    kind,
+                    marked,
+                    cleared_shadows,
+                } => Some((kind.as_str(), *marked, *cleared_shadows)),
                 _ => None,
             })
             .collect();
         assert_eq!(
             kinds,
             [
-                "list_item(Kitten4 编辑器不认识,已改成未收录积木 1 块)",
-                "script_variables(Kitten4 编辑器不认识,已改成未收录积木 1 块)",
-                "temporary_list(Kitten4 编辑器不认识,已改成未收录积木 1 块)",
-            ]
+                ("list_item", 1, 0),
+                ("script_variables", 1, 0),
+                ("temporary_list", 1, 0),
+            ],
+            "(类型名, 标记块数, 清空影子数):轮到的块各 1、没有影子"
         );
     }
 
     /// R3:`mark_unknown_blocks` 的**影子清空**那半边 —— 块**认识**、它的 `shadows` 里写着编辑器
-    /// 不认识类型 ⇒ 该槽变**空串**(影子是槽位默认值,不换标记块),并按类型计一条
-    /// `…已清空 N 条影子` 告警;同一块里**认识**的影子原样保留。
+    /// 不认识类型 ⇒ 该槽变**空串**(影子是槽位默认值,不换标记块),并按类型记一条
+    /// `UnmappedBlock { cleared_shadows: 1, .. }` 告警;同一块里**认识**的影子原样保留。
     /// (语料预算门只覆盖整件作品的那几档,这里把行为本身钉住。)
     #[test]
     fn unknown_shadow_is_cleared_and_reported() {
@@ -2138,18 +2147,22 @@ mod assembly_tests {
             out["blocks"]["b1"]["type"], "math_number",
             "块本身认识 ⇒ 不动"
         );
-        let kinds: Vec<&str> = report
+        let kinds: Vec<(&str, u64, u64)> = report
             .warnings()
             .iter()
             .filter_map(|warning| match warning {
-                TranslateWarning::UnmappedBlock { kind } => Some(kind.as_str()),
+                TranslateWarning::UnmappedBlock {
+                    kind,
+                    marked,
+                    cleared_shadows,
+                } => Some((kind.as_str(), *marked, *cleared_shadows)),
                 _ => None,
             })
             .collect();
         assert_eq!(
             kinds,
-            ["get_split_options(Kitten4 编辑器不认识,已清空 1 条影子)"],
-            "只该有影子那条告警"
+            [("get_split_options", 0, 1)],
+            "只该有影子那条告警(0 个标记块 / 1 条清空影子)"
         );
     }
 
