@@ -896,7 +896,21 @@ mod reverse_tests_inner {
         }
         names.sort();
         names.dedup();
-        names.first().cloned().unwrap_or_default()
+        // **代表必须固定**(rounds/37 §13):原先取"类内字典序最小",而 ASCII 里大写小于小写
+        // ⇒ 代表名取决于"这一轮里哪些名字出现过";往返一旦改变名字集合,同一批块就换到别的代表名下,
+        // 于是报告里冒出 `WIDGET_LVMI_lightSensorGet: 4 -> 0` 这种**幻影差异**(块其实都在)。
+        //
+        // 改成:**优先取"KN 侧名"当代表** —— KN 侧一个概念只有一个名字(KN 原生名或表里的目标名),
+        // 与"哪一侧出现过"无关 ⇒ 往返前后必然相同。类里没有任何 KN 侧名时才退回字典序。
+        let is_kn_side = |name: &str| {
+            !super::mapping::reverse_candidates(name).is_empty()
+                || !super::mapping::kitten_names_for(name).is_empty()
+        };
+        names
+            .iter()
+            .find(|name| is_kn_side(name))
+            .cloned()
+            .unwrap_or_else(|| names.first().cloned().unwrap_or_default())
     }
 
     fn census_kitten4_blocks(doc: &Value) -> BTreeMap<String, usize> {

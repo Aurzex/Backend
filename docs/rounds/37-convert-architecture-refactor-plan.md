@@ -605,3 +605,37 @@ String/Value ⇒ 省下的只是"未匹配键的缓冲机制"这一小块。
 让类代表**与往返无关**;之后 `lists_get: 768 -> 490` 这类也应在同一口径下重新判读(它大概率同样是代表漂移 + 已文档化的"槽默认影子不回写"叠加)。
 
 **教训**:为了抵消"改名"而引入的等价类口径,**自身必须对改名稳定** —— 否则它会把"改名"重新变回"差异"。
+
+### 13.4 口径已修:代表固定(KN 侧名优先)—— 幻影差异消失
+
+**改动**(`reverse_tests.rs::canonical_kind`):等价类代表不再取"类内字典序最小",而是
+**优先取类里的 KN 侧名**(判据:`reverse_candidates` 或 `kitten_names_for` 非空 ⇒ 该名是表里的 KN 目标名),
+类里没有 KN 侧名时才退回字典序。理由:KN 侧一个概念只有一个名字(rounds/34 §4sexies),与"哪一侧出现过"无关
+⇒ 代表**对改名稳定**。
+
+**效果**(正向扫描,同一批语料):
+
+| 之前(不稳定代表) | 现在(固定代表) |
+| --- | --- |
+| `WIDGET_LVMI_lightSensorGet: 4 -> 0`(幻影) | 该条消失;同一批块落到 `bcm_translator_text_return_value_block` 名下,见下 |
+
+修改后差异**全部是 KN 侧稳定名字**,且都落在已文档化的族里:
+
+| 族 | 例 | 依据 |
+| -- | -- | ---- |
+| `stop` ⇄ `terminate` | `stop: 10 -> 0; terminate: 0 -> 10` | 反向 `GC` 特例 |
+| `shadow_number` 拆包 | `shadow_number: 11 -> 0` / `2 -> 0` | `gc_node` 官方降级 |
+| `procedures_2_*` 翻倍 | `defnoreturn`/`parameter`/`return_value`/`stable_parameter` | 正向 `zC` 拆 NORMAL+ROUND |
+| GC 包装 / 云本地合并的连带 | `controls_if`/`default_value`/`bump_into`/`change_variables`/`dispose_clone`/`list_copy`/`list_item`/`delete_list_item` 小幅 +n | rounds/34 §4octies、§4sexies |
+| 槽的默认影子不回写 | `pure_list_get: 768 -> 490`、`201 -> 101` | rounds/34 §4quinquies(引用零丢失) |
+
+**还剩一条没解释**(下一轮第一条):
+
+> `bcm_translator_text_return_value_block: 4 -> 0`(`P1拓展任务1音乐顺序_300981590.bcm4`)
+
+**新假设**:这一对(`calculate` ⇄ `bcm_translator_text_return_value_block`)是**手写的降级特例**
+(`LC` 把 KN 原生 `calculate` 降级成占位文本块,见 `mapping.rs` 的 `HANDLER_BUILT_TEXTS` 一族),
+**不在 `KITTEN_TO_KN` 表里** ⇒ `canonical_kind` 的闭包**连不到它** ⇒ 两侧落到不同类
+⇒ 又是一次口径假象,但来源是"**类闭包没覆盖手写特例对**"。
+**做法**:把这类手写对(`HANDLER_BUILT_TEXTS`/`SELECT_SPEC`/`SHADOW_XML` 等表里的对)也并进闭包,
+或列成显式 allow-list —— **验证方式**:改完这条差异应消失,而其余差异不变。
