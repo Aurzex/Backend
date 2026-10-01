@@ -3,12 +3,10 @@
 //!
 //! 拆出来的动因是打断两条环:`model ⇄ mapping` 与 `nemo ⇄ nemo_mapping`
 //! (拆分前 `model.rs` 从 `mapping` 借影子构造、`nemo_mapping.rs` 从 `nemo` 借 DOM)。
-//! 本模块只依赖 `shared`/`model` 的**类型**,不反向依赖 `mapping`/`nemo`。
+//! 本模块只依赖 `shared` 的**类型**,不反向依赖 `model`/`mapping`/`nemo`。
 
-use super::model::BlockJson;
 use crate::core::convert::shared::{DecompilerError, XHTML};
-use serde_json::{Value, json};
-use std::collections::BTreeMap;
+use serde_json::Value;
 use std::ops::Range;
 
 /// 从整段 XML 取开始标签里 `attr="…"` 的值(先按引号感知找标签尾,再取属性)
@@ -110,22 +108,6 @@ pub(crate) fn math_number_shadow(id: &str, num: &str) -> String {
     format!(
         "<shadow xmlns=\"{XHTML}\" type=\"math_number\" id=\"{id}\" visible=\"visible\"><field constraints=\"-Infinity,Infinity,0,\" name=\"NUM\">{num}</field></shadow>"
     )
-}
-
-/// `math_number` 子积木
-pub(crate) fn math_number_node(id: String, num: &str, parent_id: Option<String>) -> BlockJson {
-    BlockJson {
-        kind: "math_number".to_string(),
-        id: Some(id),
-        is_shadow: true,
-        fields: BTreeMap::from([(String::from("NUM"), Value::String(num.to_string()))]),
-        field_constraints: Some(
-            json!({"NUM": {"min": null, "max": null, "precision": 0, "mod": null}}),
-        ),
-        is_output: true,
-        parent_id,
-        ..Default::default()
-    }
 }
 
 pub(crate) fn pure_list_shadow(id: &str, list: &Value) -> String {

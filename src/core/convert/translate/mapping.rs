@@ -45,15 +45,15 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use serde_json::{Value, json};
 
 use super::model::IdSource;
-use super::model::{BlockJson, BlockTree, flat_index, nested_index};
+use super::model::{BlockJson, BlockTree, flat_index, math_number_node, nested_index};
 use super::report::{TranslateReport, TranslateWarning};
 use super::tables_gen::{
     KITTEN_MUTATION_TEXT, KITTEN_MUTATION_TEXT_SELECT, KITTEN_TO_KN, SHADOW_XML,
     TEXT_PLACEHOLDER_BLOCKS, ZH_NAME_BY_TYPE,
 };
 use super::xml::{
-    attr_span, attr_value, decrement_items, js_text, math_number_node, math_number_shadow,
-    mutation_body, pure_list_shadow, set_attr_value, start_tag_end,
+    attr_span, attr_value, decrement_items, js_text, math_number_shadow, mutation_body,
+    pure_list_shadow, set_attr_value, start_tag_end,
 };
 
 #[rustfmt::skip]

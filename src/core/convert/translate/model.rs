@@ -1,5 +1,5 @@
 use super::report::{TranslateReport, TranslateWarning};
-use super::xml::{math_number_node, math_number_shadow, xml_attr_value};
+use super::xml::{math_number_shadow, xml_attr_value};
 use crate::core::convert::shared::XHTML;
 use crate::core::convert::shared::{DecompilerError, IdGenerator, Result};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -172,6 +172,22 @@ impl BlockJson {
     /// 类型频次统计
     pub(crate) fn count_types(&self, out: &mut BTreeMap<String, usize>) {
         self.walk(&mut |b| *out.entry(b.kind.clone()).or_default() += 1);
+    }
+}
+
+/// `math_number` 子积木
+pub(crate) fn math_number_node(id: String, num: &str, parent_id: Option<String>) -> BlockJson {
+    BlockJson {
+        kind: "math_number".to_string(),
+        id: Some(id),
+        is_shadow: true,
+        fields: BTreeMap::from([(String::from("NUM"), Value::String(num.to_string()))]),
+        field_constraints: Some(
+            json!({"NUM": {"min": null, "max": null, "precision": 0, "mod": null}}),
+        ),
+        is_output: true,
+        parent_id,
+        ..Default::default()
     }
 }
 
