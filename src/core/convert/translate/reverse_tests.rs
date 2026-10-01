@@ -1050,6 +1050,40 @@ mod reverse_tests_inner {
         ("跑酷_70_248857834.bcm4", 8, 1),
     ];
 
+    /// **反向**的同一口径台账:`(文件名, 真块, 影子)` —— 源(KN)块节点 id 在**反向那一腿的
+    /// Kitten4 产物**里缺失的件数。口径与 [`LOST_ID_BUDGET`] **逐字一致**:同一对
+    /// [`collect_ids`] / [`block_node_ids`],真块/影子的判定也照旧,只是"产物"换成
+    /// `convert_kn_document` 的输出(`kn_corpus_round_trip_sweep` 里那次的中间态)。
+    /// 只许变小;表外新语料按"已记录的最大值"守(同 `MARKER_BUDGET` 的约定)。
+    ///
+    /// 为什么不是"绝对 0"(2026-10-01 全语料实测,构成已逐类查过)——三类都是"**换了容器 /
+    /// 换了形态**",不是块没了:
+    /// ① **KN 的 `proceduresDict[*].params[]` 里那批 `Label` 条目**:KN 把程序集形参摆成
+    ///    `{"id","name","type":"Label"}` 的数组,而 Kitten4 把形参名写进定义块的原型/mutation、
+    ///    **没有独立对象** ⇒ 这批 id 按本口径必然"丢"。它是真块侧读数的大头(131/241:
+    ///    `FjDQB 49`、`FjSw 48`、`HEX Editor 32`、两件各 1)。
+    /// ② **定义/调用点的形态改写**:KN 侧把"形参/返回值"摆成独立积木(`procedures_2_parameter 43`、
+    ///    `procedures_2_callreturn 16`、`procedures_2_callnoreturn 6`、`temporary_list 8`…),
+    ///    反向要把它们折回定义块与调用点。
+    /// ③ **影子侧**:反向**按设计拆掉** KN 源里那层算术壳(`unwrap_arithmetic_wrappers`:横屏坐标的
+    ///    `math_arithmetic divide 1.3` 与它的 `math_number 1.3`)⇒ 壳的 id 就不在产物里
+    ///    (`FjSw` 影子 32 里 29 个正是 `math_number`);`pure_list_get` 影子折回 `fields.list`
+    ///    (`FjDQB` 的 120 个全是它)。
+    ///
+    /// 但它照样能拦住"反向真把块弄丢"(rounds/38 那类缺陷在反向侧会直接 +N),并且是反向保真的
+    /// 第一份**直接证据**:读数每次都打印(`[id台账·反向]`),便于逐件分诊。
+    ///
+    /// 基线值 = 2026-10-01 全语料实测(`cargo test --lib kn_corpus_round_trip_sweep -- --nocapture`,
+    /// 10 件里 5 件非零);沿用 [`LOST_ID_BUDGET`] 的惯例,只列非零件(其余 5 件恒为 `0/0`)。
+    #[rustfmt::skip]
+    const LOST_ID_BUDGET_REVERSE: &[(&str, usize, usize)] = &[
+        ("FjDQB0v0geuG4y9BaTVyi_WcZ1jc.bcmkn", 49, 120),
+        ("FjSwU2iKY6bLe6fexZJTvsX3X7AI.bcmkn", 158, 32),
+        ("HEX Editor_317683843.bcmkn", 32, 0),
+        ("P0-准备课_297852982.bcmkn", 1, 0),
+        ("飞机大战20_297979992.bcmkn", 1, 0),
+    ];
+
     fn census_kitten4_blocks(doc: &Value) -> BTreeMap<String, usize> {
         fn count_inside(node: &Value, out: &mut BTreeMap<String, usize>, depth: usize) {
             match node {
@@ -1602,6 +1636,8 @@ mod reverse_tests_inner {
             std::collections::BTreeSet::new();
         // 标记量超基线的项(跑完统一报,不做"第一件就 panic")
         let mut marker_violations: Vec<String> = Vec::new();
+        // 逐件的 id 口径台账(真块 / 影子),基线见 [`LOST_ID_BUDGET_REVERSE`](只许变小)
+        let mut lost_id_ledger_reverse: Vec<(String, usize, usize)> = Vec::new();
 
         for path in &files {
             let label = path
@@ -1615,12 +1651,12 @@ mod reverse_tests_inner {
                 continue;
             };
 
-            let round_trip = |source: &Value| -> (Value, (u64, u64)) {
+            let round_trip = |source: &Value| -> (Value, Value, (u64, u64)) {
                 let mut report = TranslateReport::new(
                     crate::core::convert::EditorType::Neko,
                     TargetEditor::Kitten4,
                 );
-                let k4 =
+                let k4_product =
                     convert_kn_document(source, &options, &mut report).expect("反向 KN→Kitten4");
                 let markers = marker_counts(&report);
                 // 调试:逐条打印这次的分类报告(受环境变量控制,平时不打印)。分诊"标记量为什么变"
@@ -1628,23 +1664,54 @@ mod reverse_tests_inner {
                 if std::env::var("DUMP_REPORT").is_ok() {
                     eprintln!("[报告·反向] {label}:\n{:#?}", report.warnings());
                 }
-                let mut k4: Value = serde_json::from_str(&k4.to_string()).expect("复刻中间态");
+                let mut k4_mid: Value =
+                    serde_json::from_str(&k4_product.to_string()).expect("复刻中间态");
                 let mut back = TranslateReport::new(
                     crate::core::convert::EditorType::Kitten4,
                     TargetEditor::KittenN,
                 );
-                let kn = convert_kitten4_document(&mut k4, &options, &mut back)
+                let kn = convert_kitten4_document(&mut k4_mid, &options, &mut back)
                     .expect("正向 Kitten4→KN");
-                (kn, markers)
+                // 中间态(Kitten4 产物)一并返回:反向的 id 台账要拿它当"产物"
+                (k4_product, kn, markers)
             };
 
-            let (kn2, (marker_blocks, cleared_shadows)) = round_trip(&source);
-            let (kn3, _) = round_trip(&source);
+            let (k4_product, kn2, (marker_blocks, cleared_shadows)) = round_trip(&source);
+            let (_, kn3, _) = round_trip(&source);
             assert_eq!(
                 kn2.to_string(),
                 kn3.to_string(),
                 "{label}:往返必须确定性(两遍逐字节一致)"
             );
+
+            // **id 口径台账(反向)**:口径与正向 `k4_corpus_round_trip_sweep` 的 [`LOST_ID_BUDGET`]
+            // **逐字一致**(同一对 `collect_ids` / `block_node_ids`),只是这里的"产物"是**反向那一腿**
+            // 的输出(源是 KN,产物是 Kitten4)。真块与影子分开记:影子侧的差异多数是槽默认影子
+            // 不回写 / 影子重铸,真块侧才是"块没了"。读数每次都打印,便于逐件分诊。
+            {
+                let mut product_ids = std::collections::BTreeSet::new();
+                collect_ids(&k4_product, &mut product_ids, 0);
+                let (mut real, mut shadow) = (0usize, 0usize);
+                for (id, is_shadow) in block_node_ids(&source) {
+                    if product_ids.contains(&id) {
+                        continue;
+                    }
+                    if is_shadow {
+                        shadow += 1;
+                    } else {
+                        real += 1;
+                    }
+                }
+                eprintln!("[id台账·反向] {label}: 真块丢 {real} / 影子丢 {shadow}");
+                lost_id_ledger_reverse.push((
+                    path.file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or_default()
+                        .to_string(),
+                    real,
+                    shadow,
+                ));
+            }
 
             // 标记量读数 + **预算门**(只许变小)。表外的新语料按"已记录的最大值"守:
             // 要么本来就不超,要么把它补进 [`MARKER_BUDGET`] 并写明是哪类块。
@@ -1699,6 +1766,39 @@ mod reverse_tests_inner {
                 eprintln!("[扫描·定义] {label} {line}");
             }
         }
+        // **id 口径门(反向)**(只许变小;基线表与"为什么不是 0"见 [`LOST_ID_BUDGET_REVERSE`])
+        let mut id_violations_reverse = Vec::new();
+        for (file, real, shadow) in &lost_id_ledger_reverse {
+            let (budget_real, budget_shadow) = LOST_ID_BUDGET_REVERSE
+                .iter()
+                .find(|(name, _, _)| name == file)
+                .map(|(_, real, shadow)| (*real, *shadow))
+                .unwrap_or((
+                    LOST_ID_BUDGET_REVERSE
+                        .iter()
+                        .map(|(_, r, _)| *r)
+                        .max()
+                        .unwrap_or(0),
+                    LOST_ID_BUDGET_REVERSE
+                        .iter()
+                        .map(|(_, _, s)| *s)
+                        .max()
+                        .unwrap_or(0),
+                ));
+            if *real > budget_real || *shadow > budget_shadow {
+                id_violations_reverse.push(format!(
+                    "{file}: 真块 {real} > {budget_real} / 影子 {shadow} > {budget_shadow}"
+                ));
+            }
+        }
+        assert!(
+            id_violations_reverse.is_empty(),
+            "反向产物里丢的源(KN)块 id **变多**了(只许变小)。这是反向保真的直接证据:\
+             源节点 id 没出现在 `convert_kn_document` 的输出里。先看是被反向丢了,\
+             还是被写出口径当'编辑器不认识'剔了(兜底应是「未收录积木」标记,id 保留):\n  {}",
+            id_violations_reverse.join("\n  ")
+        );
+
         // **标记量门**:跑完统一报(只许变小)。变多说明词表/映射退化了,或者出现了新的
         // "编辑器不认识的类型"来源 —— 先看 `[标记量]` 读数与报告里的类别,再决定是修还是重刷基线。
         assert!(
