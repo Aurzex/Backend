@@ -74,7 +74,6 @@
   当前布局:`mod.rs` + `shared.rs` + `decompile/{mod,editors}.rs` + `translate/{mod,model,mapping,assembly,pipeline,options,report,xml,nemo,nemo_mapping,tables_gen,kitten4_vocab,reverse_tests,nemo_tests}.rs`(**18 文件**;权威清单见 `docs/rounds/39` §1.1;`options`/`report`/`pipeline`/`xml` 与 `kitten4_vocab` 是 rounds/34–37 加进来的)。
 - 分层纪律:`translate` 子域**不碰网络**;需要网络(上传/建作品)的编排放 `core/convert/mod.rs` 门面
   (反编译侧的可选「上传到账号」同理,见 `docs/rounds/30`)。
-- 分层纪律:`translate` 子域**不碰网络**;需要网络(上传/建作品)的编排放 `core/convert/mod.rs` 门面。
 - 文档:记录放 `docs/`;**历史轮次不改写**(保真),勘误集中到本库 `errata.md`。
 
 ## 6. 测试与验证门
