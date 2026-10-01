@@ -345,3 +345,13 @@ W10 落地(`66c0b6b`)后,**"内联对象形态影子 ⇒ 拒收该作品"这条�
 | rounds/34 §1、§2 | `A28社区-开幕_174408420.bcm4` 报 `invalid type: map, expected a string` ⇒「**前置拦截**,报"内联影子是对象形态…暂不支持该作品"」,并把"支持对象形态影子"**列入待办**;§2 记"实测 **21/22** 件正向吃得下(Kitten3 一件、对象影子一件按形态跳过)" | **待办已做**(W10,`66c0b6b`):正向入口把对象影子就地改写成平台同款影子 XML,**不再拒收**。该件转换成功(源积木 6029 / 告警 19 / `validateBcm` = VALID),该语料 **`[跳过]` 归零**;Kitten2/3(`.bcm` + `blocksXML`)仍按形态守卫跳过。见 `rounds/39` §W10 落地段、`knowledge/convert-semantics.md` §3 |
 | rounds/33 §1 表 ① | 上传格式(`download/compile/*.bcm4`)⇒ 正向「**报错** `invalid type: map, expected a string`」 | **不再成立**:那条报错的根因正是对象形态影子,已由 `66c0b6b` 容错 |
 | rounds/17(错误收敛一节第 2 条) | 「保留 `Crypto`/`Decompile`/**`UnsupportedType`**/`InvalidResponse`/…(反编译专属变体)」 | **`UnsupportedType` 已不存在**:它是全仓零调用点的死变体,已于 `fef30e7`(2026-10-02,W5②)删除(破坏性公共面变更、已授权);其它变体未动。见 `rounds/39` §W5②、`knowledge/repo-conventions.md` §4 |
+
+## CI 产物口径与 `Cargo.toml` 不符(2026-10-02 实测)
+
+> 这条不是某篇轮次正文写错,而是**仓库里两处配置互相矛盾**,根因出处恰在 `docs/rounds/01`,故记在此。
+
+- **错**:`.github/workflows/CI.yml:28/33/39/44/49` 的 `libname` 列(`libbackend.so` ×2 / `backend.dll` / `libbackend.dylib` ×2)+ 上传步 `:63-67`(`path: target/<target>/release/<libname>`)—— 蕴含"release 会产出动态库"。
+  - **为何错**:`Cargo.toml:8` 是 `crate-type = ["rlib"]`,**只产 rlib,不产 `.so`/`.dll`/`.dylib`** ⇒ 上传步按该路径**找不到文件**;`actions/upload-artifact` 的 `if-no-files-found` **默认 `warn`** ⇒ **job 静默绿,产物其实从未上传**。
+  - **根因线索**:`docs/rounds/01-websocket-pitfalls.md:791`(为让库可被测试引用,把 `"rlib"` **加进** `crate-type`)与 `:809`(「`crate-type = ["cdylib"]` 的库不参与测试…加了 `"rlib"` 后测试才运行」)。此后 `cdylib` 从 `crate-type` 里消失,而 CI 的 `libname` 列表没跟上。
+  - **正确(二选一,待定、本轮不落地)**:① 恢复 `crate-type = ["cdylib","rlib"]` 并让 `[lib]` 与 CI 产物形态对齐;② 若发布物本意就是 rlib(供 Rust 下游用),则改 CI —— 上传 `libbackend.rlib` 或去掉该上传步。
+  - 出处:`.github/workflows/CI.yml`、`Cargo.toml:8`、`docs/rounds/01` 附录「空的 lib」两节;登记在 `docs/goals/infra-backlog.md` §1。

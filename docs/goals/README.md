@@ -15,7 +15,9 @@
    - `platform-backlog.md` §1/§2:C9 两项真机实测 + 三条待核验(便宜、能消掉假设);
    - `infra-backlog.md` §2:小改批量(49 处 `unwrap` 硬化、P2 收尾;原先列的 `DecompilerError` 包装已不成立,见 `pending-decisions.md` C2)。
 3. **要立轮的大方向**:`pending-decisions.md` B 组(DTO 类型化、kn→nemo、断线退避重连、`unused` 告警恢复);
-   **`src/main.rs` 改成 `use backend::…`(走库 crate)= 立轮**(2026-10-02 拍板;证据:898 条 bin 侧 dead-code 噪声 + 整棵树被重复编译;只读结论:**不需要动公共 API**,见 `infra-backlog.md` §1)。
+   ~~**`src/main.rs` 改成 `use backend::…`(走库 crate)= 立轮**~~ —— **已落地(2026-10-02,本轮提交)**:
+   bin 不再自带 `mod api/core/utils`(公共 API 零改动),bin 侧 `unused` 噪声 **896 → 0**、bin 单测目标 **121 tests/214 s → 0 tests/0.00 s**。
+   **`unused` 仍维持 `allow`**:lib 侧还剩 **50 条**(逐条清单与口径见 `infra-backlog.md` §1.1),清完再按族放开(显式 `warn` 挡不住 `clippy -- -D warnings`,已用 rustc 实测)。
 4. **已决但暂缓(登记,待重新立项)**:`convert-backlog.md` §5 的 **W13**(`wrap_arithmetic` 移动不重铸)——
    收益是"我们自己的往返 id 台账更干净 / 往返 id 更稳",**不是用户可见差异**;代价是偏离官方 + 改产物字节 + 需重做实体机与刷基线(证据:`rounds/38 §8`、`rounds/39` §W13)。
 
@@ -26,7 +28,7 @@
 | `pending-decisions.md` | 需要你决策:A 组(剩 A4)+ B 组 8 + C 组 9 + 已决清单(D 组 5 项已全部落定) | **待决 18**(共 28 行;A1–A3/A5、C2、D1–D5 已定) |
 | `convert-backlog.md` | 转换域(格式/语义/性能/NEMO):§1 待决策 4、§2 待做 6、§3 不做 4 | **待决 14**(§2 待做 = 第 2/4/5/6/7/8 条) |
 | `platform-backlog.md` | 平台/接口域:§1 真机实测 5、§2 待核验 3、§3 待方案 5 行(其中 2 项 ✅)、§4 P2 3、§5 公开面 1 | 17 行 |
-| `infra-backlog.md` | 仓库工程:§1 待决策 5、§2 小改 3、§3 待核验 3、§4 已决 6、§5 文档 3 | 20 行 |
+| `infra-backlog.md` | 仓库工程:§1 待决策 5(原「去第二个 crate root」已完成)+ §1.1 `unused` 剩余清单(lib 侧 50)、§2 小改 3、§3 待核验 3、§4 已决 6、§5 文档 3 | 21 行 |
 
 > 统计口径:来自 `docs/rounds/01–19` 的自动抽取(未开始 36 / 进行中 1 / 被阻塞 1 / 已放弃 16)
 > 与 `docs/rounds/20–36` 的手工归并(33–36 轮的结论见 `../knowledge/errata.md` 的"第三十三至三十六轮"节);**已完成的 33 条不再列入**(它们在轮次记录里)。

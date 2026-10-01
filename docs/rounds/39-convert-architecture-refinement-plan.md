@@ -67,7 +67,7 @@
 | W3c 删死 allow-list 副本(**不**新增集合门) | ✅ | `e8e19d6` |
 | W3d 反向 id 台账 `LOST_ID_BUDGET_REVERSE` | ✅ | `d10d0cb`(首版)、`ef37978`(口径收窄到真正的积木节点) |
 | W3e `BACKEND_BENCH_REFRESH=1` 拒绝丢键 | ✅ | `f62aec7` |
-| W5 可见性收窄 + 死重量 | ✅ | `6fe2ee0`:156 处收窄(136 `pub(super)` / 10 `pub(in crate::core::convert)` / 10 私有)、删 4 个零调用点 helper、`is_name_char` 改名;② 的 `UnsupportedType` ✅ 已删(`fef30e7`,公共面破坏性变更,已授权)。④ `unused` **维持 `allow`**(试跑 943 条,一轮清不完 ⇒ 清单进 `docs/goals/infra-backlog.md` §1) |
+| W5 可见性收窄 + 死重量 | ✅ | `6fe2ee0`:156 处收窄(136 `pub(super)` / 10 `pub(in crate::core::convert)` / 10 私有)、删 4 个零调用点 helper、`is_name_char` 改名;② 的 `UnsupportedType` ✅ 已删(`fef30e7`,公共面破坏性变更,已授权)。④ `unused` **维持 `allow`**(试跑 943 条,一轮清不完 ⇒ 清单进 `docs/goals/infra-backlog.md` §1)。**2026-10-02 回填**:④ 的口径已修正并重测(旧「943 = lib 55 + bin 898」不可复现),④ 的前置「bin 去第二个 crate root」已落地 ⇒ bin 侧噪声 **896 → 0**,剩余仅 lib 侧 50 条;见 `docs/goals/infra-backlog.md` §1/§1.1 |
 | W6 NEMO 进门(带 `source_version`)+ 不再静默吞错 | ✅ | `cc320f0`、`c7c40d5`(老版本迁移样本)、`0103d7c`(编码失败进报告、计有损) |
 | W7 分配计数门(**只记不判**) | ✅ | `22897ef`:只统计的 `#[global_allocator]` + `#meta` 四个 `alloc_*` 键(窗口 = 一次 `translate_file`);同机 4 跑读数逐位相同;跨机不可比 ⇒ 断言时剔除 |
 | W8 NEMO 前端去重复解析 | ◐ | `6057a88`:**② 做**(虚拟包装根 ⇒ 每实体省一次整串拷贝:NEMO 样本 −0.19%/0.21% 次数、−3.37%/3.11% 字节),**① 不做**(上界仅 −0.11% 次数、−0.05% 字节,且要换峰值内存);详见 §W8 落地段 |
@@ -307,6 +307,10 @@
 ② 的 `DecompilerError::UnsupportedType` **已删(`fef30e7`)** —— 公共面**破坏性**变更(下游穷尽 `match` 会失败),已授权,
 除该变体外 `DecompilerError` 的形状与其余变体未动(删前零调用点证据:`grep -rn UnsupportedType src tests` 只有声明处本身);
 ④ **维持 `unused = "allow"`**(临时改 `warn` 试跑 943 条、一轮清不完 ⇒ 清单进 `docs/goals/infra-backlog.md` §1)。
+
+**回填(2026-10-02,续测 + 前置落地)**:④ 的**前置**(bin 不再当第二个 crate root)已完成 —— `src/main.rs` 改 `use backend::…`(公共 API 零改动;bin 单元 dep-info 输入 49 → 1、bin 单测目标 121 tests → 0、`unused=warn` 下 bin 侧 896 → 0)。
+- **口径修正**:旧「943 条 = `lib` 55 + `bin "backend"` 898」是用 `--message-format short` 量的,**该格式不带 target 信息**,分不出编译单元 ⇒ 不可复现(且 `943 ≠ 55+898`)。新口径:临时把 `unused` 改 `warn`,按**目标选择**分别跑并读 json —— 改前 `--lib` **50**(全 `src/lib.rs`)/ `--bins` **946**(bin 自身 **896**)/ `--tests` **551**(bin-test 453 + lib-test 98 + 集成测试 0);改后 bin 侧在两个选择里都是 **0**,只剩 lib 侧 50。
+- `unused` **仍为 `allow`**:剩余 lib 侧 50 条的逐条清单在 `docs/goals/infra-backlog.md` §1.1。放开的前提已实测 —— 显式 `warn` **挡不住** `clippy --all-targets -- -D warnings`(rustc 1.98.0:`-D warnings` + `--allow=unused` 退出 0;+ `--warn=unused` 退出 1),而 Cargo 正是把 `[lints.rust]` 以 `--warn/--allow=unused` 传给 rustc(`cargo build -v` 的 rustc 命令行可见)⇒ **先清清单再按族放开**。
 
 ---
 

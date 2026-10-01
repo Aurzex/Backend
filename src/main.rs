@@ -1,14 +1,10 @@
-mod api;
-mod core;
-mod utils;
-
 use log::{LevelFilter, Log, Metadata, Record};
 use serde_json::Value;
 
-use crate::api::auth::{AdminInfo, AuthProcessor, LoginHandler, LoginResult};
-use crate::core::services::ReportProcessor;
-use crate::core::terminal::{ConsoleUi, ProcessorUi, ReportConsole};
-use crate::utils::filedata::PathConfig;
+use backend::api::auth::{AdminInfo, AuthProcessor, LoginHandler, LoginResult};
+use backend::core::services::ReportProcessor;
+use backend::core::terminal::{ConsoleUi, ProcessorUi, ReportConsole};
+use backend::utils::filedata::PathConfig;
 
 struct ConsoleLogger;
 
