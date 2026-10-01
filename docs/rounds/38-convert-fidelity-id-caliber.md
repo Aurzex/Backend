@@ -102,16 +102,60 @@ rounds/37 §13 把"块数"的三种口径踩了个遍,同一件事下了三次�
 
 ⇒ 这些是"编号变了"而不是"块没了"。但**真正丢块**那一类会被拦住:本轮修的缺陷在表上就是 `+4`。
 
-## 7. 残留与下一轮
+## 7bis. 把「标记」推广到**所有**编辑器不认识的块(同日,用户拍板)
+
+§1–§7 只在**占位积木**这条路上改成标记;D1 的 Neko 专有块族(`temporary_list` / `script_variables*` /
+`traverse_number*` …)当时仍是**直接删掉**。用户决定统一,于是把这件事从映射层搬到**写出阶段**。
+
+### 改动
+
+| 位置 | 改动 |
+| ---- | ---- |
+| 写出器 `assembly.rs` | `strip_unknown_blocks` → **`mark_unknown_blocks`**:不认识的块**就地换类型**为 `incompatible_block`(语句位)/ `incompatible_output_block`(值位 —— 判据是 `connections` 里 `input_type == "value"`,或块自己的 `is_output`),清掉 `fields`/`shadows`/`mutation`,**位置与连接保持** ⇒ 原来那段"重建 `connections` 去掉悬空引用"整段删掉(不再有悬空) |
+| 映射层 `mapping.rs` | 反向兜底回到"保留占位名",交给写出阶段(单一机制,不再两处各做一遍);**影子**仍是清空(影子是槽位默认值,换成标记块没有意义) |
+| 正向 `mapping.rs` | 新增**手工映射**(生成表不受影响)`incompatible_block → bcm_translator_text_execution_block`、`incompatible_output_block → bcm_translator_text_return_value_block`。否则把产物再正向一次,KN 文档里会留下 **KittenN 编辑器不认识**的 `incompatible_*`;映射过去后往返稳定(标记 → 占位块无标题 → 反向反查失败 → 又是标记) |
+
+### 顺带修掉一个**漏清**(重要)
+
+老实现里 `if dropped.is_empty() { return }` 被当成"省一次遍历"的性能优化(rounds/37 P3);
+它其实是**按实体**提前返回,顺带**跳过影子扫描** ⇒ "没有任何未知块的实体"里的未知影子
+**从来没被清过,直接留在产物里** —— 而未知影子正是会让编辑器整份工作区加载失败的东西。
+去掉早退后:全语料里有**一件作品**的影子清空量 52 → **62**(这 10 条是补上的漏清,不是回归;
+块数一件没变)。
+
+### 读数与门
+
+- 报告文案:`…(Kitten4 编辑器不认识,已改成未收录积木 N 块)`;影子仍是 `…已清空 N 条影子`;
+- `STRIP_BUDGET` → `MARKER_BUDGET`(同一批块、同一批数值:604 / 429 / 182 / 8 / 4 / 1 …,
+  只有上面那一件的影子列 52 → 62);`kn_corpus_round_trip_sweep` 的门改成"跑完统一报",
+  一次列出所有超 baseline 的项(不再"第一件就 panic")。
+
+### 验证
+
+- 单测:111 passed / 0 failed(新增 `assembly_tests::unknown_blocks_become_incompatible_markers`:
+  语句位 → 语句标记、值槽子块 → 值标记、字段/影子/变异清空、位置与连接保持、逐类计数);
+- 全语料:标记块数与原来的"剔除块数"**逐一相同** ⇒ 同一批块,只是不再删;
+- `convert_bench`:正向两个样本 SHA256 + `#meta` **完全没动**;反向两个样本**按预期变化** ——
+  `kn-9.4MB` 产物 9 780 218 → **9 775 778** B(块变小了)、告警 1817 → **1827**(+10 条影子清空);
+  `kn-3.7MB` 3 963 260 → **4 117 977** B(182 个标记块及其连接留下来)、告警不变。
+  基线已按流程重刷(`BACKEND_BENCH_REFRESH=1`,提交信息里写明原因);
+- **实机**(线上 Kitten4 + 「打开本地作品」,产物 = `HEX Editor_317683843` 的 KN→Kitten4 结果,
+  含 **182** 个标记块):作品正常打开(项目名 `HEX Editor`)、**6 个角色都在角色列表里**、
+  画布把标记块渲染成「未收录积木」;逐角色精确核对:角色 `raw` 文件里 4 个标记、画布上就是 **4** 个
+  (数法:画布 `text` 里**恰好等于**「未收录积木」的标签数 —— 按 `g.blocklyDraggable` 数会把嵌套子块
+  重复计入,先前的 9/8 就是这么来的)。
+
+## 8. 残留与下一轮
 
 - **值型标记是孤立块**:平台自己的 `incompatible_output_block` 没有 `output` 连接 ⇒ 槽位仍空,
   只是块还在(位置 + 存在保住,可被用户看见与手工删除)。要真"填回槽里"得平台改块定义。
-- **43 个类型仍不可逆**:信息(原类型)确实丢了。要真恢复得给正向补 `RC` 标题 —— 但**没有可信来源**
-  (bundle 里那批中文串是"说明文案"不是 `RC` 标题)⇒ **不做**,只保位置。
+- **被标记的类型全部不可逆**:信息(原类型与字段)确实丢了 —— 现在至少**看得见**。
+  要真恢复得给正向补 `RC` 标题,但**没有可信来源**(bundle 里那批中文串是"说明文案"不是 `RC` 标题)⇒ **不做**。
 - **id 改铸可以再压**:把 `wrap_arithmetic` 从"移动 + 重铸"改成"移动不重铸",往返 id 即稳定,
   台账能压到近 0 —— 动的是照官方的那一行,**要单独立项 + 实机/基准验证**。
-- **G3(差异类别门)未做**:本轮的 `[id台账]` 只覆盖"块没了";两台扫描器的**差异类别集合**仍未冻结。
-- 反向侧的对应台账未建(反向**按设计**会剔 Neko 专有块族 D1,由 `STRIP_BUDGET` 守)。
+- **G3(差异类别门)未做**:`[id台账]` 只覆盖"块没了"、`MARKER_BUDGET` 只覆盖"认不出多少块";
+  两台扫描器的**差异类别集合**仍未冻结。
+- 反向侧没有 id 台账(正向那条已建);反向"认不出"的量由 `MARKER_BUDGET` 守。
 
 > **方法教训(第四次同类)**:跨口径比较前先声明口径;**判"丢没丢"只用 id 口径**;
 > 而"id 口径"本身也要分清 **节点 id / XML 里的 id / 只是 `connections` 键上出现** ——
@@ -121,6 +165,7 @@ rounds/37 §13 把"块数"的三种口径踩了个遍,同一件事下了三次�
 
 - `docs/rounds/37` §13(三条悬案与三次改口)、`docs/knowledge/convert-semantics.md` §5bis(隐性契约,本轮加第 5 条)、
   §6(硬门表,本轮加"id 口径台账")。
-- 代码锚点:`src/core/convert/translate/mapping.rs`(`incompatible_marker`/`reverse_placeholder`)、
-  `reverse_tests.rs`(`collect_ids`/`block_node_ids`/`LOST_ID_BUDGET`/`k4_corpus_round_trip_sweep`)。
+- 代码锚点:`src/core/convert/translate/assembly.rs`(`mark_unknown_blocks`,§7bis)、
+  `mapping.rs`(`reverse_placeholder` / `KITTEN_TO_KN_MANUAL`)、`reverse_tests.rs`
+  (`collect_ids` / `block_node_ids` / `LOST_ID_BUDGET` / `MARKER_BUDGET` / 两台扫描器)。
 - 仪器:`DUMP_FWD=1` 三腿落盘;实机门(无头 Chromium + 线上 Kitten4);`convert_bench`(SHA + `#meta`)。

@@ -865,75 +865,104 @@ const KITTEN4_TOOLBOX_ORDER: &[&str] = &[
     "ai", "midimusic",
 ];
 
-/// 剔掉 Kitten4 编辑器不认识的积木(连带清理 `connections` 里的父子引用),逐类记报告。
+/// 把 Kitten4 编辑器**不认识**的积木就地改成「未收录积木」标记,逐类记报告。
 ///
-/// 背景见 [`crate::core::convert::translate::kitten4_vocab`] 与 `docs/rounds/34` §4nonies:
-/// 编辑器遇到未知积木类型会让**整份工作区**加载失败 ⇒ 不剔的后果是"打开什么都看不到"。
-fn strip_unknown_blocks(
+/// 两轮结论叠在一起才定成现在这样:
+/// - `docs/rounds/34` §4nonies:编辑器遇到未知积木类型会让**整份工作区加载失败**
+///   ⇒ 不能把不认识的名字原样写出去;
+/// - `docs/rounds/38`:**但"剔除"会让积木真的消失**(id 口径实测:某件作品丢了 4 个可达块,
+///   且 43 个占位映射因没有标题必然走到这一步)。
+///
+/// ⇒ 改成顶替成平台自己的 `incompatible_block`(语句位)/ `incompatible_output_block`(值位):
+/// 两者都在编辑器注册表里、`args0` 为空、bundle 里的 JS 生成器是 `throw Error()`
+/// (它本来就是"不可执行"的占位块)。位置与存在都保住:语句位**原地**渲染成「未收录积木」并留在链里;
+/// 值位因平台块定义**没有 `output` 连接**而落成孤立块(槽位仍空,但块还在画布上)。
+/// "哪个类型没认出来、有多少块"照旧逐类进报告 —— 效果从"悄悄少几块"变成"看得见的损失"。
+fn mark_unknown_blocks(
     blocks: serde_json::Value,
     report: &mut TranslateReport,
 ) -> serde_json::Value {
     use serde_json::{Map, Value};
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
+
+    /// 编辑器认识的「未收录积木」标记(语句位 / 值位)
+    const MARKER_STATEMENT: &str = "incompatible_block";
+    const MARKER_OUTPUT: &str = "incompatible_output_block";
 
     let knows = super::kitten4_vocab::kitten4_editor_knows;
 
     // 就地消费(**rounds/37 P3**):入参本来就按值给到,原先却又 `as_object().cloned()` 整份拷一遍,
     // 再单独拷 `blocks`/`connections` 表、逐块拷 `shadows` —— 一份 9 MB 级文档因此被深拷 3~4 次。
-    // 现在:拿走所有权 → `remove` 取字段 → 原地改。`serde_json::Map` 是 BTreeMap(按键排序),
+    // 现在:拿走所有权 → 原地改。`serde_json::Map` 是 BTreeMap(按键排序),
     // 重建与插入顺序都不影响产物字节。
     let Value::Object(mut root) = blocks else {
         return blocks;
     };
-    let Some(Value::Object(table)) = root.remove("blocks") else {
-        return Value::Object(root);
-    };
 
-    let mut kept = Map::new();
-    // 计数用 `BTreeMap<String, u64>`(键序与原先的 `Map<String, Value>` 一致 ⇒ 告警顺序不变)
-    let mut dropped: BTreeMap<String, u64> = BTreeMap::new();
-    for (id, block) in table {
-        let kind = block.get("type").and_then(Value::as_str);
-        match kind {
-            Some(kind) if !knows(kind) => *dropped.entry(kind.to_string()).or_insert(0) += 1,
-            _ => {
-                kept.insert(id, block);
-            }
-        }
-    }
-    // 一个都不认识才剔除:整表原样放回(内容与键序都与原来一致)
-    root.insert("blocks".into(), Value::Object(kept));
-    if dropped.is_empty() {
-        return Value::Object(root);
-    }
+    // 值槽里的子块要落成"值型"标记:`connections` 里 `input_type == "value"` 的那些;
+    // 块自己带 `is_output: true` 也算。两处都不认时当语句块(标记块两种都没有连接时,
+    // 编辑器一样会把它画成孤立块,只是形状不同)。
+    let value_children: BTreeSet<String> = root
+        .get("connections")
+        .and_then(Value::as_object)
+        .map(|connections| {
+            connections
+                .values()
+                .filter_map(Value::as_object)
+                .flat_map(|children| children.iter())
+                .filter(|(_, info)| info.get("input_type").and_then(Value::as_str) == Some("value"))
+                .map(|(child, _)| child.clone())
+                .collect()
+        })
+        .unwrap_or_default();
 
-    // 被剔掉的块不能再出现在任何父子关系里(否则编辑器照样解析失败)
-    if let Some(Value::Object(connections)) = root.remove("connections") {
-        let mut rebuilt = Map::new();
-        for (parent, children) in connections {
-            let Some(Value::Object(kept)) = root.get("blocks") else {
-                break;
+    // 计数用 `BTreeMap`(键序稳定 ⇒ 告警顺序稳定)
+    let mut marked: BTreeMap<String, u64> = BTreeMap::new();
+    if let Some(Value::Object(table)) = root.get_mut("blocks") {
+        for (id, block) in table.iter_mut() {
+            let Some(map) = block.as_object_mut() else {
+                continue;
             };
-            if !kept.contains_key(&parent) {
+            let Some(kind) = map.get("type").and_then(Value::as_str).map(str::to_string) else {
+                continue;
+            };
+            if knows(&kind) {
                 continue;
             }
-            let mut kept_children = Map::new();
-            if let Some(map) = children.as_object() {
-                for (child, slot) in map {
-                    if kept.contains_key(child) {
-                        kept_children.insert(child.clone(), slot.clone());
+            let output = map
+                .get("is_output")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+                || value_children.contains(id);
+            *marked.entry(kind).or_insert(0) += 1;
+            map.insert(
+                String::from("type"),
+                Value::String(
+                    if output {
+                        MARKER_OUTPUT
+                    } else {
+                        MARKER_STATEMENT
                     }
-                }
-            }
-            rebuilt.insert(parent, Value::Object(kept_children));
+                    .to_string(),
+                ),
+            );
+            // 标记块 `args0` 为空 ⇒ 字段/影子/变异都不留(形态与平台一致)
+            map.remove("fields");
+            map.remove("shadows");
+            map.remove("mutation");
+            map.insert(String::from("is_output"), Value::Bool(output));
         }
-        root.insert("connections".into(), Value::Object(rebuilt));
     }
+    // 块不再被移除 ⇒ 原来那段"重建 `connections` 去掉悬空引用"可以整段删掉:
+    // 连接表保持原样,换个类型的块仍挂在原位置(值型标记连不上槽,编辑器会自己画成孤立块)。
 
     // 影子 XML 里也可能写着编辑器不认识的类型(它是**字符串**,清积木表时扫不到)。
     // 实测某作品 9696 条影子里 174 条如此(`get_split_options` 占 158)⇒ 一并清成空串
-    // (库里既有的占位写法),并逐类计入报告。**必须在把 `kept` 交给 root 之前就地改**。
+    // (库里既有的占位写法),并逐类计入报告。
     // 先探测"这一块到底有没有不认识的影子",没有就整块跳过(原先无条件 `shadows.clone()` 两遍)。
+    //
+    // 影子**不换标记块**:影子是槽位的默认值,不是用户摆的积木;换成一个"未收录积木"影子没有意义
+    // (它没有字段可表达默认值),所以照旧清空 —— 这是 rounds/34 §4quinquies 记的 D2 行为。
     let mut shadow_fixed: BTreeMap<String, u64> = BTreeMap::new();
     if let Some(Value::Object(blocks)) = root.get_mut("blocks") {
         for block in blocks.values_mut() {
@@ -975,9 +1004,9 @@ fn strip_unknown_blocks(
             kind: format!("{kind}(Kitten4 编辑器不认识,已清空 {count} 条影子)"),
         });
     }
-    for (kind, count) in dropped {
+    for (kind, count) in marked {
         report.warn(TranslateWarning::UnmappedBlock {
-            kind: format!("{kind}(Kitten4 编辑器不认识,已剔除 {count} 块)"),
+            kind: format!("{kind}(Kitten4 编辑器不认识,已改成未收录积木 {count} 块)"),
         });
     }
     Value::Object(root)
@@ -1051,9 +1080,9 @@ pub(crate) fn build_kitten4_document(
         // 移动实体源对象与积木数据(都不再 clone)
         let source = entity.source;
         // 产物是给 Kitten4 **编辑器**读的:编辑器不认识的积木会让它**整份工作区加载失败**
-        // (实机实测:80 种类型里 20 种不认识 ⇒ 画布一块都不显示)。所以先把不认识的块剔掉,
-        // 逐类记进报告 —— 宁可少几块,也要让作品能打开(见 `kitten4_vocab`、rounds/34 §4nonies)。
-        let blocks = strip_unknown_blocks(blocks, report);
+        // (实机实测:80 种类型里 20 种不认识 ⇒ 画布一块都不显示)。所以写出前把不认识的块
+        // 就地改成编辑器认识的「未收录积木」标记(而不是删掉),并逐类记进报告。
+        let blocks = mark_unknown_blocks(blocks, report);
         if entity.is_scene {
             scenes.insert(
                 entity.source_id.clone(),
@@ -2016,6 +2045,65 @@ mod assembly_tests {
         source.as_object_mut().expect("obj").remove("audio_order");
         let doc = build_document(&source, vec![], &[], 0, &mut report).expect("装配");
         assert_eq!(doc["audios"]["sortList"], json!(["audio-1"]));
+    }
+
+    /// 编辑器不认识的块**就地改成「未收录积木」标记**,而不是被删掉(rounds/38):
+    /// 语句位 → `incompatible_block`;值槽子块(看 `connections` 的 `input_type`)→
+    /// `incompatible_output_block`;字段/影子/变异清空;位置与连接保持;逐类计数进报告。
+    #[test]
+    fn unknown_blocks_become_incompatible_markers() {
+        let mut report = report();
+        let blocks = json!({
+            "blocks": {
+                "a": { "id": "a", "type": "temporary_list", "is_output": true,
+                       "fields": { "list": "list-1" },
+                       "shadows": { "list": "<shadow type=\"text\" id=\"s\"/>" },
+                       "mutation": "<mutation xmlns=\"http://www.w3.org/1999/xhtml\" items=\"0\"/>",
+                       "location": [1.0, 2.0] },
+                "b": { "id": "b", "type": "script_variables", "is_output": false, "fields": {} },
+                "c": { "id": "c", "type": "text", "is_output": true, "fields": { "TEXT": "hi" } },
+                "d": { "id": "d", "type": "list_item", "is_output": false }
+            },
+            "connections": {
+                "c": { "d": { "input_name": "value", "input_type": "value", "type": "input" } }
+            }
+        });
+        let out = mark_unknown_blocks(blocks, &mut report);
+        let got = out["blocks"].as_object().expect("blocks");
+        // 认得的原样;不认识的按位置换标记
+        assert_eq!(got["c"]["type"], "text");
+        assert_eq!(got["a"]["type"], "incompatible_output_block", "值型");
+        assert_eq!(got["b"]["type"], "incompatible_block", "语句型");
+        assert_eq!(
+            got["d"]["type"], "incompatible_output_block",
+            "自己没标 is_output,但它在值槽里 ⇒ 值型"
+        );
+        // 位置与连接保持原样(块还在原位,不再有"连接悬空"需要清理)
+        assert_eq!(got["a"]["location"], json!([1.0, 2.0]));
+        assert_eq!(out["connections"]["c"]["d"]["input_name"], "value");
+        // 标记块 `args0` 为空 ⇒ 字段/影子/变异都不留
+        for id in ["a", "b", "d"] {
+            assert!(got[id].get("fields").is_none(), "{id}: 不留字段");
+            assert!(got[id].get("shadows").is_none(), "{id}: 不留影子");
+            assert!(got[id].get("mutation").is_none(), "{id}: 不留变异");
+        }
+        // 逐类计数(报告按类型排序)
+        let kinds: Vec<&str> = report
+            .warnings()
+            .iter()
+            .filter_map(|warning| match warning {
+                TranslateWarning::UnmappedBlock { kind } => Some(kind.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                "list_item(Kitten4 编辑器不认识,已改成未收录积木 1 块)",
+                "script_variables(Kitten4 编辑器不认识,已改成未收录积木 1 块)",
+                "temporary_list(Kitten4 编辑器不认识,已改成未收录积木 1 块)",
+            ]
+        );
     }
 
     #[test]

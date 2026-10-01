@@ -12,14 +12,18 @@ use std::fmt::Write as _;
 pub enum TranslateWarning {
     /// 目标编辑器**没有对应积木**的类型。
     ///
-    /// ⚠️ **行为已变更(rounds/34 §4nonies 起)**:早期是"保留 KN 原类型名 + 告警、不丢积木",
-    /// 但编辑器遇到不认识的名字会**整份工作区加载失败** ⇒ 现在写出阶段把它们
-    /// **剔除/清空**(见 `assembly.rs::strip_unknown_blocks`)并逐类记进本告警
-    /// (`kind` 里带 `(Kitten4 编辑器不认识,已剔除 N 块)` 这样的后缀与计数)。
-    /// ⇒ **这类告警现在意味着真的少了积木**。判定"哪些类型属此类"见 `mapping.rs` 顶部注释。
+    /// ⚠️ **行为已两次变更**:早期是"保留 KN 原类型名 + 告警、不丢积木",但编辑器遇到不认识的
+    /// 名字会**整份工作区加载失败**(`rounds/34` §4nonies)⇒ 改成**剔除/清空**;
+    /// 而"剔除"会让积木**真的消失**(`rounds/38` 用 id 口径定案:某件作品丢了 4 个可达块)
+    /// ⇒ 现在写出阶段把它**就地改成「未收录积木」标记**
+    /// (`incompatible_block` / `incompatible_output_block`,见 `assembly.rs::mark_unknown_blocks`),
+    /// 并逐类记进本告警(`kind` 里带 `(Kitten4 编辑器不认识,已改成未收录积木 N 块)` 这样的后缀与计数)。
+    /// ⇒ **这类告警意味着"块还在画布上,但内容恢复不出来"** —— 看得见的损失,不是静默少块。
+    /// 判定"哪些类型属此类"见 `mapping.rs` 顶部注释。
     ///
-    /// ⚠️ **冻结协议**:`kind` 里的 `(Kitten4 编辑器不认识,已剔除 N 块)` / `(…已清空 N 条影子)`
-    /// 两段文案是**剔除量预算门**(`reverse_tests::strip_counts`)的解析依据,不得随意改写。
+    /// ⚠️ **冻结协议**:`kind` 里的 `(Kitten4 编辑器不认识,已改成未收录积木 N 块)` /
+    /// `(…已清空 N 条影子)` 两段文案是**标记量预算门**(`reverse_tests::marker_counts`)的解析依据,
+    /// 不得随意改写(要改先改那边,否则读数会静默变 0、门变成"永远通过")。
     UnmappedBlock { kind: String },
     /// 映射到文本占位积木(`bcm_translator_text_*`),原文进 mutation
     DegradedToText { kind: String },

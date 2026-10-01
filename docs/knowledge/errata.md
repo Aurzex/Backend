@@ -332,3 +332,5 @@ pub struct LocalClientProvider {
 | rounds/37 §13.4/§13.8 | "`bcm_translator_text_return_value_block: 4 -> 0` … 往返差异全部落在已文档化族里" | **那一条是真缺陷**,不是归一化:4 个 id 在 KN 中间态都在、产物里一个不剩(id 口径)。§13.8 的 id 证明**只覆盖正向腿**。见 `rounds/38` §3.2 |
 | rounds/34 §4quinquies | "槽默认影子不回写 ⇒ 表示差异、引用零丢失(基于代理指标)" | **结论不变**,但**证据换成 id 口径**重证:丢的 278 个 `lists_get` **逐个都是 KN 侧 `is_shadow` 的 `pure_list_get`**(折回父块 `fields`)。见 `rounds/38` §3.1 |
 | 一般印象:"积木数对了就没丢" | — | **判"丢没丢"只用 id 口径**(id 是否出现在产物里);且要分清**节点 id / XML 里的 id / 只是 `connections` 键上出现** —— 混了会同时造出"幻影丢失"和"漏报" |
+| `knowledge/convert-semantics.md` §5/§5bis、rounds/34–37 多处 | "编辑器不认识的类型**被剔除/清空**(宁可少几块)" | **只对了一半**:块现在**不再剔除**,而是**就地改成「未收录积木」标记**(`incompatible_block` / `incompatible_output_block`)—— 剔除会让积木真的消失(id 口径)。**影子**仍是清空 |
+| `assembly.rs` 旧实现的 `if dropped.is_empty() { return }`(rounds/37 P3 的"省一次遍历") | 被当成纯性能优化 | **不是**:它是**按实体**提前返回,顺带**跳过影子扫描** ⇒ "没有任何未知块的实体"里的未知影子**从来没被清过**(直接留在产物里,正是会让编辑器整份加载失败的东西)。rounds/38 去掉早退后,某作品影子清空量 52 → **62**(这 10 条是补上的漏清,不是回归) |

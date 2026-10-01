@@ -30,10 +30,13 @@
 //!
 //! 反向的**近似**(逐条都在报告里可见,详见 [`mapping`] 与 [`assembly::build_kitten4_document`] 的注释):
 //!
-//! - KN 原生、Kitten4 编辑器**不认识**的类型在写出阶段**被剔除/清空**,并逐类记
-//!   `UnmappedBlock` 告警(`kind` 里带 `已剔除 N 块` 计数)——即**产物确实少了积木**,
-//!   往返的类型多重集**不守恒**(rounds/34 §4nonies 起的行为;早期版本曾"保留原类型名 +
-//!   不丢积木",编辑器遇到不认识的名字会整份工作区加载失败,见 `docs/rounds/34`/`docs/rounds/36`);
+//! - KN 原生、Kitten4 编辑器**不认识**的类型在写出阶段被**就地改成「未收录积木」标记**
+//!   (`incompatible_block` / `incompatible_output_block`),并逐类记 `UnmappedBlock` 告警
+//!   (`kind` 里带 `已改成未收录积木 N 块` 计数)。**块不会凭空消失**(rounds/38 起),
+//!   但那个类型的**内容**恢复不出来 ⇒ 往返的类型多重集**不守恒**;
+//!   影子 XML 里的未知类型仍是**清空**(影子是槽位默认值,换成标记块没有意义);
+//!   (rounds/34 §4nonies 起的行为;早期版本曾"保留原类型名 + 不丢积木",
+//!   编辑器遇到不认识的名字会整份工作区加载失败,见 `docs/rounds/34`/`docs/rounds/36`);
 //! - 一个 KN 类型有多个 Kitten 原类型时(云列表/本地列表、`start_on_click`/`on_running_group_activated` 等)
 //!   保留 KN 名 + `DroppedProperty` 告警;
 //! - KN 的舞台坐标只有两种画布,反向按源 `stageSize` 原样给 Kitten4 的 `size`

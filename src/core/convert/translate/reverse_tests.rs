@@ -120,9 +120,10 @@ mod reverse_tests_inner {
         assert!(node.shadows.is_empty(), "TITLE_HEAD 是正向注入的");
         assert!(report.warnings().is_empty(), "可逆的降级不该报损失");
 
-        // 标题对不上(或不在表里)→ **不能**留下占位名(`bcm_translator_text_*` 编辑器不认识,
-        // 写出阶段会整块剔掉 ⇒ 积木真丢),改顶替成编辑器认识的「未收录积木」标记。
-        // 语句型 → `incompatible_block`;值型 → `incompatible_output_block`;影子照旧留名。
+        // 标题对不上(或不在表里)→ 占位名照旧留着,**由写出阶段兜底**:
+        // `assembly::mark_unknown_blocks` 会把它顶替成编辑器认识的「未收录积木」标记
+        // (`incompatible_block` / `incompatible_output_block`)。映射层不该自己换名 ——
+        // 换名要用到"这块是不是值槽子块"这类只有写出阶段手上才有的信息(rounds/38)。
         let (node, report) = reverse(
             json!({
                 "type": "bcm_translator_text_execution_block",
@@ -131,46 +132,13 @@ mod reverse_tests_inner {
             }),
             false,
         );
-        assert_eq!(node.kind, "incompatible_block");
-        assert!(node.fields.is_empty() && node.shadows.is_empty() && node.mutation.is_none());
+        assert_eq!(node.kind, "bcm_translator_text_execution_block");
         assert_eq!(
             report.warnings(),
             [TranslateWarning::UnmappedBlock {
                 kind: "bcm_translator_text_execution_block".into()
             }]
         );
-
-        let (node, report) = reverse(
-            json!({
-                "type": "bcm_translator_text_return_value_block",
-                "id": "c",
-                "is_output": true,
-                "fields": { "midimusic_id": "x" },
-                "mutation": "<mutation items=\"0\">不存在的标题</mutation>"
-            }),
-            false,
-        );
-        assert_eq!(node.kind, "incompatible_output_block");
-        assert!(node.is_output, "值型标记必须仍是输出块");
-        assert!(node.fields.is_empty(), "标记块 args0 为空,不留字段");
-        assert_eq!(
-            report.warnings(),
-            [TranslateWarning::UnmappedBlock {
-                kind: "bcm_translator_text_return_value_block".into()
-            }]
-        );
-
-        // 影子保持原名:它由写出阶段清空(槽位显示差异,引用不丢),不换标记块
-        let (node, _) = reverse(
-            json!({
-                "type": "bcm_translator_text_return_value_block",
-                "id": "d",
-                "is_shadow": true,
-                "mutation": "<mutation items=\"0\">不存在的标题</mutation>"
-            }),
-            false,
-        );
-        assert_eq!(node.kind, "bcm_translator_text_return_value_block");
     }
 
     #[test]
@@ -795,7 +763,8 @@ mod reverse_tests_inner {
     }
 
     /// Kitten4 编辑器**不认识**、但已在 `docs/rounds/34` §4nonies 记录的类型
-    /// (写出阶段由 `strip_unknown_blocks` 剔除并逐类报告 —— "宁可少几块,也要让作品能打开")。
+    /// (写出阶段由 `mark_unknown_blocks` **改成「未收录积木」标记**并逐类报告 ——
+    /// 块留在画布上,内容恢复不出来;曾经是直接剔掉,rounds/38 改的)。
     const KITTEN4_UNKNOWN_BY_DESIGN: &[&str] = &[
         "get_split_options",
         "temporary_list",
@@ -804,17 +773,18 @@ mod reverse_tests_inner {
         "coordinate_of_sprite",
     ];
 
-    /// 反向报告的"剔除量":(被剔除的块数, 被清空的影子数)。
+    /// 反向报告的"标记量":(被改成「未收录积木」的块数, 被清空的影子数)。
     ///
-    /// ⚠️ **冻结协议(rounds/37 §1 0.3)**:本函数**反解中文告警文案**(`已剔除 N` / `已清空 N`)。
-    /// ⇒ `assembly.rs::strip_unknown_blocks` 里那两个 marker 文案**不得改动**;
-    /// 要改文案必须先改这里(或把计数改成结构化字段),否则读数会静默变 0、预算门变成"永远通过"。
+    /// ⚠️ **冻结协议(rounds/37 §1 0.3,rounds/38 改文案)**:本函数**反解中文告警文案**
+    /// (`已改成未收录积木 N 块` / `已清空 N`)。⇒ `assembly.rs::mark_unknown_blocks` 里那两段
+    /// marker 文案**不得改动**;要改文案必须先改这里(或把计数改成结构化字段),
+    /// 否则读数会静默变 0、预算门变成"永远通过"。
     ///
-    /// 编辑器不认识的类型**必须**剔除/清空(否则编辑器加载整份工作区失败,rounds/34 §4nonies),
-    /// `strip_unknown_blocks` 把它们记成 [`TranslateWarning::UnmappedBlock`],
-    /// `kind` 形如 `temporary_list(Kitten4 编辑器不认识,已剔除 285 块)` / `…已清空 170 条影子)`。
-    /// 取出来给"只许变少"的预算门用(rounds/36 起)。
-    fn strip_counts(report: &TranslateReport) -> (u64, u64) {
+    /// 编辑器不认识的类型**必须**处理(否则编辑器加载整份工作区失败,rounds/34 §4nonies),
+    /// `mark_unknown_blocks` 把它们记成 [`TranslateWarning::UnmappedBlock`],
+    /// `kind` 形如 `temporary_list(Kitten4 编辑器不认识,已改成未收录积木 285 块)` /
+    /// `…已清空 170 条影子)`。取出来给"只许变少"的预算门用(rounds/36 起)。
+    fn marker_counts(report: &TranslateReport) -> (u64, u64) {
         let count_after = |text: &str, marker: &str| -> u64 {
             text.split_once(marker)
                 .and_then(|(_, tail)| tail.split_whitespace().next())
@@ -827,7 +797,7 @@ mod reverse_tests_inner {
             let TranslateWarning::UnmappedBlock { kind } = warning else {
                 continue;
             };
-            blocks += count_after(kind, "已剔除 ");
+            blocks += count_after(kind, "已改成未收录积木 ");
             shadows += count_after(kind, "已清空 ");
         }
         (blocks, shadows)
@@ -1583,15 +1553,21 @@ mod reverse_tests_inner {
     /// ② 往返确定性:同一输入跑两遍,产物逐字节一致(任一腿不确定都会被抓住);
     /// ③ **实体 id 覆盖**:源引用过的列表 / 变量 id,产物里必须一个不少(见 [`referenced_entity_ids`] ——
     ///    往返里块**数量**会变:槽的默认影子不回写、云/本地名字合并,但"引用关系"不许丢)。
-    /// **剔除量预算**(rounds/36 起,只许变小)
+    /// **标记量预算**(rounds/36 起为"剔除量";rounds/38 起改为"标记量",只许变小)
     ///
-    /// 编辑器不认识的类型**必须**剔除/清空(否则编辑器加载整份工作区失败),所以"少了几块"是**刻意取舍**;
-    /// 但取舍的量必须看得见、不许悄悄变大 —— 变多说明词表/映射退化了(典型:`text` 又被写成了
-    /// Kitten3 口径的 `get_split_options`)。基线 = **2026-09-26 全语料实测值**:
-    /// `(文件名, 剔除块数, 清空影子数)`。
-    const STRIP_BUDGET: &[(&str, u64, u64)] = &[
+    /// 编辑器不认识的类型**必须**处理(否则编辑器加载整份工作区失败),现在改成「未收录积木」标记
+    /// ⇒ **块不再消失**,但那个类型的内容恢复不出来 ⇒ 标记量就是"这次转换认不出多少块"的读数。
+    /// 读数必须看得见、不许悄悄变大 —— 变多说明词表/映射退化了(典型:`text` 又被写成了
+    /// Kitten3 口径的 `get_split_options`)。基线 = **2026-09-26 全语料实测值**,rounds/38 复核:
+    /// 块数完全不变("标记块"与原来的"剔除块"是**同一批块**);
+    /// 影子侧只有 `FjDQB0v0geuG4y9BaTVyi_WcZ1jc.bcmkn` 从 52 涨到 **62** ——
+    /// 那是**旧实现的漏扫**:老代码里 `if dropped.is_empty() { return }` 是**按实体**提前返回的,
+    /// 于是"没有任何未知块的实体"根本不扫影子 ⇒ 那些未知影子**原样写进产物**(正是会让编辑器
+    /// 整份加载失败的东西)。去掉早退后这 10 条被清并被计数,不是回归。
+    /// `(文件名, 标记块数, 清空影子数)`。
+    const MARKER_BUDGET: &[(&str, u64, u64)] = &[
         ("AI小哪吒_302205776.bcmkn", 8, 0),
-        ("FjDQB0v0geuG4y9BaTVyi_WcZ1jc.bcmkn", 604, 52),
+        ("FjDQB0v0geuG4y9BaTVyi_WcZ1jc.bcmkn", 604, 62),
         ("FjSwU2iKY6bLe6fexZJTvsX3X7AI.bcmkn", 429, 4),
         ("HEX Editor_317683843.bcmkn", 182, 17),
         ("P0-准备课_297852982.bcmkn", 4, 0),
@@ -1624,6 +1600,8 @@ mod reverse_tests_inner {
         // 出现过的**差异类别**(实体侧 + 定义体侧;数量只打印不断言)
         let mut seen_classes: std::collections::BTreeSet<String> =
             std::collections::BTreeSet::new();
+        // 标记量超基线的项(跑完统一报,不做"第一件就 panic")
+        let mut marker_violations: Vec<String> = Vec::new();
 
         for path in &files {
             let label = path
@@ -1644,7 +1622,12 @@ mod reverse_tests_inner {
                 );
                 let k4 =
                     convert_kn_document(source, &options, &mut report).expect("反向 KN→Kitten4");
-                let strip = strip_counts(&report);
+                let markers = marker_counts(&report);
+                // 调试:逐条打印这次的分类报告(受环境变量控制,平时不打印)。分诊"标记量为什么变"
+                // 时比只看 `[标记量]` 总数快得多。
+                if std::env::var("DUMP_REPORT").is_ok() {
+                    eprintln!("[报告·反向] {label}:\n{:#?}", report.warnings());
+                }
                 let mut k4: Value = serde_json::from_str(&k4.to_string()).expect("复刻中间态");
                 let mut back = TranslateReport::new(
                     crate::core::convert::EditorType::Kitten4,
@@ -1652,10 +1635,10 @@ mod reverse_tests_inner {
                 );
                 let kn = convert_kitten4_document(&mut k4, &options, &mut back)
                     .expect("正向 Kitten4→KN");
-                (kn, strip)
+                (kn, markers)
             };
 
-            let (kn2, (stripped_blocks, cleared_shadows)) = round_trip(&source);
+            let (kn2, (marker_blocks, cleared_shadows)) = round_trip(&source);
             let (kn3, _) = round_trip(&source);
             assert_eq!(
                 kn2.to_string(),
@@ -1663,27 +1646,27 @@ mod reverse_tests_inner {
                 "{label}:往返必须确定性(两遍逐字节一致)"
             );
 
-            // 剔除量读数 + **预算门**(只许变小)。表外的新语料按"已记录的最大值"守:
-            // 要么本来就不超,要么把它补进 [`STRIP_BUDGET`] 并写明是哪类块。
-            eprintln!("[剔除量] {label}: 块 {stripped_blocks} / 影子 {cleared_shadows}");
+            // 标记量读数 + **预算门**(只许变小)。表外的新语料按"已记录的最大值"守:
+            // 要么本来就不超,要么把它补进 [`MARKER_BUDGET`] 并写明是哪类块。
+            eprintln!("[标记量] {label}: 块 {marker_blocks} / 影子 {cleared_shadows}");
             let file_name = path
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or_default();
-            let (budget_blocks, budget_shadows) = STRIP_BUDGET
+            let (budget_blocks, budget_shadows) = MARKER_BUDGET
                 .iter()
                 .find(|(name, _, _)| *name == file_name)
                 .map(|(_, blocks, shadows)| (*blocks, *shadows))
                 .unwrap_or((
-                    STRIP_BUDGET.iter().map(|(_, b, _)| *b).max().unwrap_or(0),
-                    STRIP_BUDGET.iter().map(|(_, _, s)| *s).max().unwrap_or(0),
+                    MARKER_BUDGET.iter().map(|(_, b, _)| *b).max().unwrap_or(0),
+                    MARKER_BUDGET.iter().map(|(_, _, s)| *s).max().unwrap_or(0),
                 ));
-            assert!(
-                stripped_blocks <= budget_blocks && cleared_shadows <= budget_shadows,
-                "{label}:剔除量**变大**(块 {stripped_blocks} ≤ {budget_blocks}、\
-                 影子 {cleared_shadows} ≤ {budget_shadows})。\
-                 编辑器不认识的类型必须剔除,但只许变少:变大说明词表/映射退化了(见 rounds/36)"
-            );
+            if marker_blocks > budget_blocks || cleared_shadows > budget_shadows {
+                marker_violations.push(format!(
+                    "{file_name}: 块 {marker_blocks} > {budget_blocks} / \
+                     影子 {cleared_shadows} > {budget_shadows}"
+                ));
+            }
 
             let entity_diffs = census_diff(
                 &census_entities_with(&source, true),
@@ -1716,6 +1699,14 @@ mod reverse_tests_inner {
                 eprintln!("[扫描·定义] {label} {line}");
             }
         }
+        // **标记量门**:跑完统一报(只许变小)。变多说明词表/映射退化了,或者出现了新的
+        // "编辑器不认识的类型"来源 —— 先看 `[标记量]` 读数与报告里的类别,再决定是修还是重刷基线。
+        assert!(
+            marker_violations.is_empty(),
+            "标记量**变大**(只许变小;基线见 MARKER_BUDGET):\n  {}",
+            marker_violations.join("\n  ")
+        );
+
         // 类型名差异**只报告、不断言**:反向现在按"编辑器认识的名字"挑(rounds/34 §4nonies),
         // 往返在**名字**上就系统性不同(实测上百个类)—— 这是刻意行为,且有 `AmbiguousType` 告警逐条报告;
         // **内容**由上面的"实体 id 覆盖"门守。保留计数打印供分诊。
@@ -2199,18 +2190,31 @@ mod reverse_tests_inner {
             after_defs.keys().collect::<std::collections::BTreeSet<_>>(),
             "定义体必须按 id 一一对上(反向用 `fields.NAME` 回填定义名,id 是从 Kitten4 定义根整段搬回来的)"
         );
-        // 唯一允许的差异:KN 原生 `calculate` 换成正向的降级占位积木(1:1)
-        let allowed = ["calculate:", "bcm_translator_text_return_value_block:"];
+        // 允许的差异有两类:
+        // ① KN 原生 `calculate` 换成正向的降级占位积木(1:1);
+        // ② 编辑器不认识的类型(D1 族等)**往返一次后变成文本占位积木** ——
+        //    `script_variables → incompatible_block → bcm_translator_text_execution_block`。
+        //    这是"认不出来"在两侧的官方表示,rounds/38 起**不再整块删掉**,所以这一类会**变多**;
+        //    它不是"凭空造块"(原类型的那一份同时变少了)。
+        let allowed = [
+            "calculate:",
+            "bcm_translator_text_",
+            "incompatible_",
+            "math_arithmetic:",
+            "math_number:",
+        ];
         for (id, before) in &before_defs {
             let after = &after_defs[id];
             let diffs: Vec<String> = census_diff(before, after)
                 .into_iter()
                 .filter(|diff| !allowed.iter().any(|allow| diff.starts_with(allow)))
                 .collect();
-            // §4nonies 的**刻意取舍**:编辑器不认识的类型会被剔掉(整棵子树一起消失),
-            // 所以定义体只可能**变少**;任何**增加**都是实现缺陷(往返凭空造块)。
+            // 除"认不出来"的表示之外,定义体只可能**变少**;任何**增加**都是实现缺陷(往返凭空造块)。
             // 缺口量由 `procedure_library_…` 的预算门 + 扫描器的实体 id 门守。
             for (kind, after_count) in after {
+                if allowed.iter().any(|allow| kind.starts_with(allow)) {
+                    continue;
+                }
                 let before_count = before.get(kind).copied().unwrap_or(0);
                 assert!(
                     *after_count <= before_count,

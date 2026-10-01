@@ -18,8 +18,8 @@
 //!
 //! 文件下半部是**反向**(KN → Kitten4,[`translate_kn_to_kitten`]):`LC`/字段表/槽位表/影子 XML 的
 //! 逐条反转、`GC` 两个算术壳的拆解、列表积木 `pure_list_get` 的折叠、占位积木按 mutation 标题
-//! 还原原类型(**反查不到时顶替成编辑器认识的「未收录积木」标记**,见 `incompatible_marker` ——
-//! 留下占位名会被写出阶段当"编辑器不认识"整块剔掉,积木就真没了);
+//! 还原原类型(**反查不到就交给写出阶段**:`assembly::mark_unknown_blocks` 会把它顶替成编辑器认识的
+//! 「未收录积木」标记 —— 直接剔掉会让这块积木真的消失,原样写出去又会让整份工作区加载失败);
 //! 不可逆处一律进 [`TranslateReport`](见该节的分节说明)。
 //!
 //! ## 与官方的刻意差异(见 docs/rounds/20 §6.2「逃生舱」)
@@ -257,11 +257,35 @@ static KITTEN_SIDE_KINDS: std::sync::LazyLock<HashSet<&'static str>> =
         set
     });
 
+/// **手工补充**的正向映射(生成表 `KITTEN_TO_KN` 之外的条目)。
+///
+/// 为什么放这里:`tables_gen.rs` 是生成器从 `temp/tables/*.json` **整文件**产出的
+/// (见它的头注「手工补充放 `mapping.rs`,不受重跑影响」),往里加条目下次生成就没了。
+///
+/// 目前只有一对:反向写出的「未收录积木」标记 → KN 的**文本占位积木**。
+/// 理由:`translate_type` 对表外类型是**恒等透传**,不加这条的话,把产物再正向一次,
+/// KN 文档里就会出现 **KittenN 编辑器不认识**的 `incompatible_*`;而"认不出来"这件事
+/// 在 KN 侧的官方表示就是 `bcm_translator_text_*`。映射过去之后往返稳定:
+/// 标记 → 占位块(没有标题) → 反向反查失败 → 又是标记(见 `docs/rounds/38`)。
+const KITTEN_TO_KN_MANUAL: &[(&str, &str)] = &[
+    ("incompatible_block", "bcm_translator_text_execution_block"),
+    (
+        "incompatible_output_block",
+        "bcm_translator_text_return_value_block",
+    ),
+];
+
 /// `LC` 查表(`translateBlockType` 77860),表里没有就返回原值
 ///
 /// `pub(super)`:往返扫描(测试)要用同一张表把两侧类型**归一化到同一等价类**,
 /// 否则"有意的改名"(歧义类型保留 KN 名,见 `mod.rs` 顶部说明)会被当成保真差异。
 pub(super) fn translate_type(kind: &str) -> &str {
+    if let Some((_, kn)) = KITTEN_TO_KN_MANUAL
+        .iter()
+        .find(|(kitten, _)| *kitten == kind)
+    {
+        return kn;
+    }
     KITTEN_TO_KN_INDEX.get(kind).copied().unwrap_or(kind)
 }
 
@@ -1158,11 +1182,12 @@ fn reverse_node(mut node: BlockJson, ctx: &mut RevCtx) -> BlockJson {
 ///
 /// 表(`REVERSE_TYPES`)里的 Kitten 侧名字是 **Kitten3 口径**,与 Kitten4 编辑器实际认识的名单
 /// 不一致 —— 实测平台 40 件 Kitten4 语料:`get_split_options` 出现 **0** 次、`text` **1338** 次。
-/// 挑错名字的后果不是"改名",而是写出阶段把它当"编辑器不认识"**剔掉/清空**,内容白丢
-/// (见 `docs/rounds/34` §4nonies 与 `strip_unknown_blocks`)。
+/// 挑错名字的后果不是"改名",而是写出阶段把它当"编辑器不认识"**改成「未收录积木」标记** ——
+/// 块还留在画布上,但内容(原类型与字段)丢了
+/// (见 `docs/rounds/34` §4nonies、`docs/rounds/38` 与 `assembly::mark_unknown_blocks`)。
 ///
 /// 规则:候选编辑器认识 ⇒ 用它;否则 KN 名编辑器认识 ⇒ 保留 KN 名(名字与形状都不用动);
-/// 否则照旧给候选,交给写出阶段剔除并逐类报告。
+/// 否则照旧给候选,交给写出阶段标记成「未收录积木」并逐类报告。
 fn pick_single_reverse_name<'a>(kn_kind: &'a str, candidate: &'a str) -> &'a str {
     let knows = super::kitten4_vocab::kitten4_editor_knows;
     if knows(candidate) {
@@ -1324,43 +1349,13 @@ fn reverse_placeholder(kn_kind: &str, node: &mut BlockJson, ctx: &mut RevCtx) ->
             ctx.report.warn(TranslateWarning::UnmappedBlock {
                 kind: kn_kind.to_string(),
             });
-            if node.is_shadow {
-                // 影子照旧:由写出阶段按"编辑器不认识"清空该影子(槽位显示差异,引用不丢)
-                kn_kind.to_string()
-            } else {
-                incompatible_marker(node, kn_kind)
-            }
+            // 占位名照旧留着 —— 写出阶段([`super::assembly`] `mark_unknown_blocks`)会把它
+            // 顶替成编辑器认识的「未收录积木」标记。**不能**让它原样写出去:
+            // `bcm_translator_text_*` 不在编辑器注册表里,原样写会让整份工作区加载失败
+            // (rounds/34 §4nonies);而"删掉"会让积木真的消失(rounds/38 用 id 口径定案)。
+            kn_kind.to_string()
         }
     }
-}
-
-/// 占位积木反查不到原类型时,顶替成**编辑器认识**的「未收录积木」标记。
-///
-/// **为什么不能保留占位名**:`bcm_translator_text_*` 都不在编辑器注册表里,写出阶段的
-/// [`super::assembly`] `strip_unknown_blocks` 会把整块剔掉 ⇒ 积木**真的消失**。
-/// 实测(`P1拓展任务1音乐顺序_300981590.bcm4`):4 个可达块在 KN 中间态一个不少、
-/// 产物里一个不剩(第 38 轮用 **(c) 口径 = id 是否出现在产物里** 定案)。
-///
-/// **为什么必然走到这里**:`RC` 标题表只覆盖 187 个占位映射里的 144 个,剩下 **43** 个
-/// (`get_midis`/`get_any_midis`/`ai_lab_*`/`auto_player_*`/`microbit_*` …)正向写不出 mutation
-/// 标题 ⇒ 反向没有可反查的键。
-///
-/// 标记形态照平台自己的定义(编辑器注册表里的 `incompatible_block` / `incompatible_output_block`,
-/// `args0` 为空),**实机验证**(线上 Kitten4 + 「打开本地作品」):语句型原地渲染成「未收录积木」
-/// 并留在语句链里;值型因平台自己的块定义**没有 `output` 连接**而以孤立块形式保留
-/// —— 位置与存在都还在,类型信息照样进报告。见 `docs/rounds/38`。
-fn incompatible_marker(node: &mut BlockJson, kn_kind: &str) -> String {
-    let marker = if PLACEHOLDERS_OUTPUT.contains(&kn_kind) {
-        "incompatible_output_block"
-    } else {
-        "incompatible_block"
-    };
-    // 标记块 `args0` 为空 ⇒ 不留字段/影子/变异,形态与平台一致
-    node.fields.clear();
-    node.shadows.clear();
-    node.mutation = None;
-    node.is_output = marker == "incompatible_output_block";
-    marker.to_string()
 }
 
 /// `processAppearanceAttribute`(77313)的反查:`*_of_sprite` + 字段 → `get_3` 的 `attribute` 取值
