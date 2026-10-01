@@ -23,9 +23,14 @@
 //!
 //! 性能可以变,产物不能变 —— 所以基准的第一职责是守住 SHA256。
 //!
-//! **两个环境开关**:
-//! - `BACKEND_REQUIRE_BENCH=1`:**严格模式** —— debug 构建、样本缺失**直接失败**
+//! **三个环境开关**(开关家族见 `docs/knowledge/repo-conventions.md` §3ter):
+//! - `BACKEND_REQUIRE_BENCH=1`:**基准严格模式** —— debug 构建、样本缺失**直接失败**
 //!   (默认这两条是"打印后 return 显示 pass",CI/干净检出上等于没有这条门);
+//! - `BACKEND_REQUIRE_FIXTURES=1`:**夹具严格模式** —— 与 `convert_facade_bench` /
+//!   `convert_work_bench` 同一开关;在本文件里它只管"样本(=夹具)缺了",与 `BACKEND_REQUIRE_BENCH`
+//!   分工。**样本"部分缺失"也算缺**(B1):两个开关**任一**打开时,只要有样本不在磁盘上就直接失败
+//!   并点名 —— 此前只有"全部缺失"才炸、部分缺失只打印一行警告,而缺的那些键既不被断言、
+//!   `W3e` 的重刷守卫又只在 REFRESH 下才拦 ⇒ 默认跑一遍看不出门少守了几档;
 //! - `BACKEND_BENCH_REFRESH=1`:**有据刷新基线** —— 写出新的基线文件,并**逐键打印变化**
 //!   (产物/元信息),让"为什么变"在提交信息里可审计。
 //!
@@ -417,13 +422,29 @@ fn convert_bench() {
         .map(|s| s.path)
         .collect();
     if missing.len() == SAMPLES.len() {
-        if strict_mode() {
-            panic!("严格模式:样本全缺(需先反编译作品到 download/):{missing:#?}");
+        if strict_samples() {
+            panic!(
+                "严格模式(基准开关 = {} / 夹具开关 = {}):样本全缺(需先反编译作品到 download/):{missing:#?}",
+                strict_mode(),
+                require_fixtures()
+            );
         }
         eprintln!("[convert_bench] 缺样本(需先反编译作品到 download/),跳过。缺:{missing:#?}");
         return;
     }
     if !missing.is_empty() {
+        // B1:部分缺失同样是"门静默缩水" —— 缺的那些键既不被断言、`W3e` 的重刷守卫又只在 REFRESH
+        // 下才拦 ⇒ 默认跑一遍看不出覆盖面少了几档。两个严格开关下**任一**样本缺失即失败并点名。
+        if strict_samples() {
+            panic!(
+                "严格模式(基准开关 = {} / 夹具开关 = {}):样本缺 {}/{} 件 —— 缺样本的基线键不参与断言,\
+                 等于门静默缩水:{missing:#?}",
+                strict_mode(),
+                require_fixtures(),
+                missing.len(),
+                SAMPLES.len()
+            );
+        }
         eprintln!("[convert_bench] 警告:部分样本缺失,这些键不参与断言:{missing:#?}");
     }
     let dir = bench_dir("flow");
@@ -677,6 +698,21 @@ fn load_baseline() -> serde_json::Map<String, serde_json::Value> {
 /// `BACKEND_REQUIRE_BENCH=1`:把"静默跳过"变成失败(见模块文档)
 fn strict_mode() -> bool {
     std::env::var("BACKEND_REQUIRE_BENCH").is_ok_and(|v| matches!(v.as_str(), "1" | "true" | "yes"))
+}
+
+/// `BACKEND_REQUIRE_FIXTURES=1`:**夹具**严格模式 —— 与 `convert_facade_bench` / `convert_work_bench`
+/// 同一开关(见 `docs/knowledge/repo-conventions.md` §3ter)。在本文件里它管"样本(=夹具)缺了",
+/// 与 `BACKEND_REQUIRE_BENCH`(基准自身:debug 构建 / 基线)分工;两者**任一**打开都让缺样本直接失败
+/// (B1:此前只有"样本全缺"才炸,**部分缺失只打印一行警告** ⇒ 基线里那些键静默不设防)。
+fn require_fixtures() -> bool {
+    std::env::var("BACKEND_REQUIRE_FIXTURES")
+        .is_ok_and(|v| matches!(v.as_str(), "1" | "true" | "yes"))
+}
+
+/// 缺样本时的统一出口:`strict_mode() || require_fixtures()` 下 panic 并点名缺了谁,否则返回 false
+/// (调用方打印警告后继续用剩下的样本)。
+fn strict_samples() -> bool {
+    strict_mode() || require_fixtures()
 }
 
 /// `BACKEND_BENCH_REFRESH=1`:有据重刷基线(打印逐键变化;不写就永远不写)
