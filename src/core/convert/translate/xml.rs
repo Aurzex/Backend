@@ -386,13 +386,23 @@ pub(super) fn parse(xml: &str) -> Result<XmlNode, DecompilerError> {
 /// 解析一段**片段**(NEMO/KittenN 的 `blocksXML`),返回它的顶层元素
 ///
 /// 等价于官方 `parseFromString("<root>" + blocksXML + "</root>", "text/xml")` 之后取
-/// `root.childNodes`,但**不构造**那个包装串:整段输入被当成一个**虚拟包装根**的内容 ⇒
-/// 顶层文本/空白的落点、嵌套深度计数、报错位置都与套了 `<root>` 的写法逐字一致,而
-/// "每个实体一次整串 `format!`" 没了(3.4 MB 的 NEMO 作品有 847 个实体 ⇒ 省 847 次整串拷贝,
-/// 见 `docs/rounds/39` §W8)。
+/// `root.childNodes`,但**不构造**那个包装串:整段输入被当成一个**虚拟包装根**的内容
+/// (见 [`Parser::run_wrapped`])⇒ 顶层文本/空白的落点、嵌套深度计数、成功结果都与套了
+/// `<root>` 的写法**逐属性相同**,而"每个实体一次整串 `format!`"没了(3.4 MB 的 NEMO 作品有
+/// 847 个实体 ⇒ 省 847 次整串拷贝,见 `docs/rounds/39` §W8)。
 ///
-/// 唯一的差别:输入在元素**未闭合**时结束 → 这里报"元素 `<x>` 未闭合"(真包装版会被末尾那个
-/// `</root>` 撞成"开闭不匹配");两者都是 `Err`、都进同一条 `DroppedField` 报告,只有文案不同。
+/// 与"真套一层 `<root>`"的差异**只在失败路径**,共三处(成功路径由
+/// `nemo_xml_tests::parse_fragment_equals_wrapped_parse` 逐字段对照):
+/// 1. **错误位置整体左移 6 字节**(少掉 `"<root>"` 前缀):`err_at` 里报的 byte/line/col 与
+///    包装写法不同 —— 都是 `Err`,只是坐标不同,不进产物、只进 `DroppedField` 的文案;
+/// 2. 输入在元素**未闭合**时结束 → 这里报"元素 `<x>` 未闭合",包装版被末尾那个 `</root>` 撞成
+///    "开闭不匹配";
+/// 3. 输入里出现能**闭合虚拟根**的 `</root>`(裸的顶层结束标签)→ 这里显式报错
+///    ("与虚拟包装根提前闭合"),包装版则报"根外非法标记/开闭不匹配" —— 两者都是 `Err`,
+///    关键是**都不允许**把它当成"片段结束"而静默丢掉后面的内容。
+///
+/// 契约上另外两处放宽(都与**旧的生产路径**一致,只是不再需要包装串):顶层可以有多个元素
+/// (本来就合法),空片段 = 0 个顶层元素。
 pub(super) fn parse_fragment(xml: &str) -> Result<Vec<XmlNode>, DecompilerError> {
     let mut parser = Parser::new(xml);
     let root = parser.run_wrapped("root")?;
@@ -623,6 +633,15 @@ impl<'a> Parser<'a> {
                         return Err(self.err_at(
                             close_pos,
                             format!("结束标签 </{name}> 与开始标签 <{}> 不匹配", node.tag),
+                        ));
+                    }
+                    // 虚拟包装根(R1②):输入里出现一个能**闭合它**的 `</root>` = 畸形 —— 真包装版
+                    // (`<root>` + 片段 + `</root>`)在这里是"多出一个 </root>"从而撞成开闭不匹配/根外
+                    // 非法标记,都必须 Err;若不拦,虚拟根会提前出栈、后面的内容被静默截断。
+                    if virtual_root.is_some() && open.is_empty() {
+                        return Err(self.err_at(
+                            close_pos,
+                            format!("片段里出现了 </{name}>,与虚拟包装根提前闭合"),
                         ));
                     }
                     match open.last_mut() {
@@ -1169,7 +1188,12 @@ mod nemo_xml_tests {
     /// **等价性**:新的"虚拟包装根"实现与老的"真套一层 `<root>` 再取子元素"逐字段同结果
     ///
     /// (老写法是 `docs/rounds/39` §W8 去掉的那次整串 `format!`;这条测试就是它的替身,
-    /// 防止将来改解析器时把两者悄悄改岔。错误只比"是否 Err" —— 元素未闭合时的文案按设计不同。)
+    /// 防止将来改解析器时把两者悄悄改岔。)
+    ///
+    /// 只比"成功结果逐字段相同"与"失败侧两边都失败" —— **失败路径按设计有三处不同**
+    /// (见 [`parse_fragment`] 的文档:错误位置整体左移 6 字节的 `"<root>"` 前缀;元素未闭合时报
+    /// "元素未闭合"而不是被末尾 `</root>` 撞出的开闭不匹配;裸的顶层 `</root>` 报"与虚拟包装根
+    /// 提前闭合"而不是"根外非法标记"),文案与坐标都不是协议。
     #[test]
     fn parse_fragment_equals_wrapped_parse() {
         let cases = [
@@ -1186,6 +1210,10 @@ mod nemo_xml_tests {
             r#"<block a=1/>"#,
             r#"根之外有文本"#,
             r#"<block>&nbsp;</block>"#,
+            // R1②:裸的顶层 `</root>` 两边都必须 Err —— 不许把"虚拟根被提前闭合"当成片段结束,
+            // 否则后面的内容会被静默截断(第二条就是那种会截断的输入)
+            "</root>",
+            "</root><block type=\"a\"/>",
         ];
         for case in cases {
             let mine = parse_fragment(case);
@@ -1199,6 +1227,14 @@ mod nemo_xml_tests {
                     panic!("输入 {case:?}:新实现 {mine:?} 与包装版 {reference:?} 的成功/失败不一致")
                 }
             }
+        }
+        // R1② 的两条:新实现必须**显式**报"虚拟包装根提前闭合",不能返回 Ok(那会静默截断)
+        for case in ["</root>", "</root><block type=\"a\"/>"] {
+            let error = parse_fragment(case).expect_err("裸的顶层 </root> 必须报错");
+            assert!(
+                format!("{error}").contains("虚拟包装根"),
+                "{case:?} 的错误应点明虚拟包装根提前闭合:{error}"
+            );
         }
     }
 
