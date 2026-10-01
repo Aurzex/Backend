@@ -37,8 +37,10 @@
 //! 把缺样本的基线键**永久删掉**(而默认模式下样本缺失只是打印一行警告)⇒ 门的覆盖面会静默缩水。
 //! 所以样本缺失时**拒绝写盘**并逐键列出"将被删掉的键"。
 //!
-//! **NEMO 样本(W6)**:`SAMPLES` 里的 `nemo-3.4MB` 是 NEMO 真作品(源编辑器按**内容**判定),
-//! 目标是 KN;NEMO 的版本迁移只由 `TranslateOptions::source_version` 驱动,而 `translate_file`
+//! **NEMO 样本(W6)**:`SAMPLES` 里有两件 NEMO 真作品(源编辑器按**内容**判定),目标都是 KN:
+//! `nemo-3.4MB`(在 `download/compile/`,`bcm_version` 0.16.2 = 迁移目标版本 ⇒ 迁移 no-op)与
+//! `nemo-old-1.5MB`(在 `temp/harness/`,**非**语料目录,见该条注释;0.11.0 < 0.15.0 ⇒ YC 迁移生效)。
+//! NEMO 的版本迁移只由 `TranslateOptions::source_version` 驱动,而 `translate_file`
 //! **不会**自动带上它(那是域门面 `translate_work` 的行为)⇒ 该参数经 [`Sample::source_version`]
 //! 逐样本透传,并作为 `#meta.source_version` 记进基线。不传就把"未迁移"的产物锁成基线:
 //! 门是绿的,证的东西却是错的。
@@ -126,6 +128,27 @@ const SAMPLES: &[Sample] = &[
         // 这条仍由本字段**显式固定**(而不是靠"没传"的默认);下一件老版本 NEMO 作品才会让
         // 这个参数在字节上显形(本轮已用临时改成 0.14.0 的 A/B 证明它真的驱动管线)。
         source_version: Some("0.16.2"),
+    },
+    Sample {
+        // 第二件 NEMO 样本:**老版本**(0.11.0 < 0.15.0)⇒ 版本迁移**真的生效**(YC 给 `controls_if`
+        // 补 `else="1"`),把上面那件(0.16.2 = 迁移目标版本 ⇒ 迁移是 no-op)证不到的"迁移这段路"
+        // 也纳进字节基线。
+        label: "nemo-old-1.5MB",
+        // ⚠️ 这条路径在 `temp/harness/`(**非**语料目录):它是 `temp/harness/fetch_nemo.js` 从
+        // **公开**作品 API(`GET /creation-tools/v1/works/103791894/source/public` → `work_urls[0]`)
+        // 拉下来的原始 NEMO 编辑版(与 `download/` 那两件同形态:`actors.actors_dict`,不含 `bcm_version`),
+        // 官方 harness 门(`nemo_tests::nemo_real_samples_match_official_products`)用的也是它。
+        // `temp/` 一旦被清掉,本样本只是"缺失":默认与严格模式都只打印一行警告并跳过(**不会假红**),
+        // 而 `BACKEND_BENCH_REFRESH=1` 会**拒绝写盘**并列出将被删掉的键(W3e)⇒ 覆盖面缩水看得见。
+        path: "temp/harness/nemo-103791894.bcm",
+        source_editor: EditorType::Nemo,
+        target: TargetEditor::KittenN,
+        slug: "kn",
+        // 平台侧该作品的 `bcm_version`(2026-10-01 直连 `…/source/public` 实读 = "0.11.0";
+        // 与 `docs/rounds/27` §9.1 的记载同一值)。0.11.0 < YC 段边界 0.15.0 ⇒ migration_flags
+        // = (false, true):**YC 迁移生效**(本轮已用"改成 None 再跑"的 A/B 证明它会改字节:
+        // 传 0.11.0 的产物 SHA = 4b6038f9…,改成 None = a0dbfb41…)。
+        source_version: Some("0.11.0"),
     },
 ];
 

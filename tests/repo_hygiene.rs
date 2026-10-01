@@ -97,14 +97,21 @@ fn tokens(line: &str) -> Vec<String> {
     .collect()
 }
 
-/// `convert_bench` 的样本键(`kitten4-10.8MB` / `kn-9.4MB` …)会被
-/// `looks_like_password` 误判成口令 —— 它们是仓库自己的基准标签,文档里反复出现,
-/// 明确放行(比在每张表上打 `hygiene-allow` 标记更不容易漏)。
+/// `convert_bench` 的样本键(`kitten4-10.8MB` / `kn-9.4MB` / `nemo-3.4MB` / `nemo-old-1.5MB` …,
+/// 以及带了目标 slug 的基线键 `…-kn` / `…-kitten4`)会被 `looks_like_password` 误判成口令 ——
+/// 它们是仓库自己的基准标签,文档里反复出现,明确放行(比在每张表上打 `hygiene-allow` 标记更不容易漏)。
 fn is_bench_sample_label(token: &str) -> bool {
     let rest = match token.split_once('-') {
-        Some(("kitten4", rest)) | Some(("kn", rest)) => rest,
+        Some(("kitten4", rest)) | Some(("kn", rest)) | Some(("nemo", rest)) => rest,
         _ => return false,
     };
+    // 老版本 NEMO 样本:`nemo-old-1.5MB`
+    let rest = rest.strip_prefix("old-").unwrap_or(rest);
+    // 基线键在样本标签后面还挂目标 slug
+    let rest = rest
+        .strip_suffix("-kn")
+        .or_else(|| rest.strip_suffix("-kitten4"))
+        .unwrap_or(rest);
     let Some(size) = rest.strip_suffix("MB") else {
         return false;
     };
@@ -306,6 +313,11 @@ fn scanner_catches_realistic_leaks_and_ignores_examples() {
         ),
         ("docs/x.md", "密码: 见 `data/test-config.json`"),
         ("README.md", "| `data/password.txt` | 每行 `用户名:密码` |"),
+        // `convert_bench` 的样本键/基线键(含 NEMO 两件)是仓库自己的基准标签,不是口令
+        (
+            "docs/x.md",
+            "| NEMO | `convert_bench` 的 `nemo-3.4MB-kn` / `nemo-old-1.5MB-kn` |",
+        ),
     ] {
         let found = findings_in(path, text);
         assert!(found.is_empty(), "{path} 误报: {found:?} :: {text}");
