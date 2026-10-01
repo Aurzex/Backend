@@ -37,6 +37,12 @@
 //! 把缺样本的基线键**永久删掉**(而默认模式下样本缺失只是打印一行警告)⇒ 门的覆盖面会静默缩水。
 //! 所以样本缺失时**拒绝写盘**并逐键列出"将被删掉的键"。
 //!
+//! **NEMO 样本(W6)**:`SAMPLES` 里的 `nemo-3.4MB` 是 NEMO 真作品(源编辑器按**内容**判定),
+//! 目标是 KN;NEMO 的版本迁移只由 `TranslateOptions::source_version` 驱动,而 `translate_file`
+//! **不会**自动带上它(那是域门面 `translate_work` 的行为)⇒ 该参数经 [`Sample::source_version`]
+//! 逐样本透传,并作为 `#meta.source_version` 记进基线。不传就把"未迁移"的产物锁成基线:
+//! 门是绿的,证的东西却是错的。
+//!
 //! 测量纪律:这台机器(笔记本/CPU 调频)上**绝对毫秒会漂**(同一二进制两次跑
 //! `core` 差 20–40% 是常事),所以:
 //! - 每个样本取 `RUNS` 次的**最小值**(≈最少干扰);
@@ -46,6 +52,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use backend::core::convert::EditorType;
 use backend::core::convert::translate::{TargetEditor, TranslateOptions, translate_file};
 use sha2::{Digest, Sha256};
 
@@ -60,35 +67,65 @@ const PARALLEL_FACTOR: usize = 8;
 struct Sample {
     label: &'static str,
     path: &'static str,
+    /// 源编辑器(`detect_editor` 按**内容**判定;用于"正向 Kitten4→KN 才有实体级并行"的守卫)
+    source_editor: EditorType,
     target: TargetEditor,
     /// 目标编辑器标识(用于产物扩展名/基线键)
     slug: &'static str,
+    /// 源作品的 `bcm_version`(NEMO 版本迁移的**唯一**驱动;`None` = 不迁移)
+    ///
+    /// NEMO 的编辑版文档里没有 `bcm_version`(`translate_file` 也不会自动带上 —— 那是域门面
+    /// `translate_work` 的行为)⇒ 不给这一列,门锁住的就是"未迁移"口径的产物:门是绿的,
+    /// 但证错了东西。值来自作品元信息(`<work_id>.meta` 的 `bcm_version`)。
+    source_version: Option<&'static str>,
 }
 
 const SAMPLES: &[Sample] = &[
     Sample {
         label: "kitten4-10.8MB",
         path: "download/compile/原气骑士 且听风吟_136021231.bcm4",
+        source_editor: EditorType::Kitten4,
         target: TargetEditor::KittenN,
         slug: "kn",
+        source_version: None,
     },
     Sample {
         label: "kitten4-0.3MB",
         path: "download/compile/几何对战-联机_215246857.bcm4",
+        source_editor: EditorType::Kitten4,
         target: TargetEditor::KittenN,
         slug: "kn",
+        source_version: None,
     },
     Sample {
         label: "kn-9.4MB",
         path: "download/convert/Phigros 自制谱模拟器_195038626.kn.bcmkn",
+        source_editor: EditorType::Neko,
         target: TargetEditor::Kitten4,
         slug: "kitten4",
+        source_version: None,
     },
     Sample {
         label: "kn-3.7MB",
         path: "download/compile/HEX Editor_317683843.bcmkn",
+        source_editor: EditorType::Neko,
         target: TargetEditor::Kitten4,
         slug: "kitten4",
+        source_version: None,
+    },
+    Sample {
+        // W6:NEMO 侧此前**没有任何字节基线**(SAMPLES 只有 4 个 Kitten 样本)
+        label: "nemo-3.4MB",
+        path: "download/compile/蛋仔派对2-奥姆返场新盲盒生存赛重做_194684070/user_works/194684070/194684070.bcm",
+        source_editor: EditorType::Nemo,
+        target: TargetEditor::KittenN,
+        slug: "kn",
+        // 作品元信息(`…/194684070.meta`)的 `bcm_version`;与 `nemo_tests::REAL_SAMPLES` 同值。
+        // 它**等于**迁移目标版本(`nemo_mapping::NEMO_BCM_VERSION = "0.16.2"`)且 ≥ YC 段边界
+        // 0.15.0 ⇒ 官方与这里的迁移标志都是 (false, false):产物是"不需要迁移"的官方口径。
+        // 这条仍由本字段**显式固定**(而不是靠"没传"的默认);下一件老版本 NEMO 作品才会让
+        // 这个参数在字节上显形(本轮已用临时改成 0.14.0 的 A/B 证明它真的驱动管线)。
+        source_version: Some("0.16.2"),
     },
 ];
 
@@ -169,13 +206,16 @@ fn measure(sample: &Sample, dir: &Path, entity_concurrency: usize) -> Measured {
         let outcome = translate_file(
             Path::new(sample.path),
             sample.target,
-            TranslateOptions::new()
-                .output_dir(dir)
-                .deterministic_ids(true)
-                .keep_source(false)
-                .entity_concurrency(entity_concurrency),
+            sample_options(sample, dir, entity_concurrency),
         )
         .expect("转化失败");
+        // 声明的 `source_editor` 由内容判定(`detect_editor`)复核:样本被换成别的格式/编辑器时,
+        // 下面那条"正向 Kitten4 样本的并发必须真的开起来"的空门守卫就不再成立(它按本字段判)
+        assert_eq!(
+            outcome.report.from, sample.source_editor,
+            "{}:声明的 source_editor 与 `detect_editor` 的判定不一致(样本被换了?)",
+            sample.label
+        );
         e2e.push(ms(t.elapsed()));
         core.push(outcome.report.elapsed_ms as f64);
 
@@ -218,12 +258,23 @@ fn warmup(sample: &Sample, dir: &Path, entity_concurrency: usize) {
     let _ = translate_file(
         Path::new(sample.path),
         sample.target,
-        TranslateOptions::new()
-            .output_dir(dir)
-            .deterministic_ids(true)
-            .keep_source(false)
-            .entity_concurrency(entity_concurrency),
+        sample_options(sample, dir, entity_concurrency),
     );
+}
+
+/// 样本的转换选项:`source_version` 是 NEMO 版本迁移的**唯一**驱动,必须逐样本透传
+///
+/// 不传就会把"未迁移"的产物锁进基线(门是绿的,证的东西错了,见 [`Sample::source_version`])。
+fn sample_options(sample: &Sample, dir: &Path, entity_concurrency: usize) -> TranslateOptions {
+    let options = TranslateOptions::new()
+        .output_dir(dir)
+        .deterministic_ids(true)
+        .keep_source(false)
+        .entity_concurrency(entity_concurrency);
+    match sample.source_version {
+        Some(version) => options.source_version(version),
+        None => options,
+    }
 }
 
 #[test]
@@ -352,12 +403,14 @@ fn convert_bench() {
             },
         );
 
-        // 空门守卫:若本机可用核数 ≥ 2,则正向样本的"实体并发=8"必须真的开起多线程,
-        // 否则这一行只是"串行 vs 串行",SHA 相同毫无意义(`taskset -c 2` 就会这样:
+        // 空门守卫:若本机可用核数 ≥ 2,则**正向 Kitten4→KN** 样本的"实体并发=8"必须真的开起
+        // 多线程,否则这一行只是"串行 vs 串行",SHA 相同毫无意义(`taskset -c 2` 就会这样:
         // `available_parallelism` 按亲和掩码算,单核下会被折成 1)。
-        if available >= 2 && sample.target == TargetEditor::KittenN && p.entity_workers <= 1 {
+        // 只对 Kitten4 源:实体级并行是正向 Kitten4 路径的实现(NEMO→KN 的管线恒串行,恒 1;
+        // 反向 KN→Kitten4 同样恒 1),按目标编辑器判会把这两类错算成"空门"。
+        if available >= 2 && sample.source_editor == EditorType::Kitten4 && p.entity_workers <= 1 {
             panic!(
-                "{}:实体并发={PARALLEL_FACTOR} 实际只开了 {} 个线程(正向样本应并行)——  并发对照成了空门",
+                "{}:实体并发={PARALLEL_FACTOR} 实际只开了 {} 个线程(正向 Kitten4→KN 样本应并行)——  并发对照成了空门",
                 sample.label, p.entity_workers
             );
         }
@@ -372,7 +425,7 @@ fn convert_bench() {
             mismatched.push((key.clone(), old.to_string(), m.sha256.clone()));
         }
         fresh.insert(key.clone(), serde_json::Value::String(m.sha256.clone()));
-        let meta = serde_json::json!({
+        let mut meta = serde_json::json!({
             "source_sha256": source_sha,
             "source_bytes": src_bytes,
             "output_bytes": m.out_bytes,
@@ -380,6 +433,12 @@ fn convert_bench() {
             "blocks_converted": m.blocks_converted,
             "warnings": m.warnings,
         });
+        // NEMO 的口径进基线:该样本是靠 `source_version` 驱动迁移的,不记下来就分不清
+        // "这份 SHA 是迁移后的产物"还是"参数没接上、被锁成未迁移"(只给有版本的样本加键 ⇒
+        // 既有 Kitten 样本的 `#meta` 一字不变)。
+        if let Some(version) = sample.source_version {
+            meta["source_version"] = serde_json::Value::String(version.to_string());
+        }
         // 元信息也参与断言:字节没变但块数/告警退化、或输入被换掉,都要抓
         if let Some(old) = baseline.get(&format!("{key}#meta"))
             && old != &meta

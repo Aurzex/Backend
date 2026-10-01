@@ -34,5 +34,15 @@
     "source_bytes": 9357732,
     "source_sha256": "b4af1e8312285803b88ccb1f196066f59ebacad6d6d7b9c138d7fbcb4474597a",
     "warnings": 1827
+  },
+  "nemo-3.4MB-kn": "67641a0a6193148287fb25146516681e6b50afff441bd72a14006b3d95a13b4f",
+  "nemo-3.4MB-kn#meta": {
+    "blocks_converted": 13637,
+    "blocks_total": 15482,
+    "output_bytes": 7733684,
+    "source_bytes": 3533410,
+    "source_sha256": "66902bee0815a0a353a22f3eb7ec2fd8aebeb45a5a2ecb508b0b9bf5794ae4a0",
+    "source_version": "0.16.2",
+    "warnings": 11
   }
 }
