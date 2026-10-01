@@ -6,7 +6,8 @@
 
 | 项 | 说明 | 出处 |
 | -- | ---- | ---- |
-| 恢复 `[lints.rust] unused` 告警 | 现在 `unused = "allow"` ⇒ 死代码不报。先跑一次看告警量,再决定本轮清理范围 | `docs/rounds/02` §7 |
+| 恢复 `[lints.rust] unused` 告警 | **2026-10-01 试跑结论:一轮清不完,开关维持 `allow`**。临时改 `warn` 后 `cargo clippy --all-targets --message-format short` 共 **943 条**(其中 913 条是 `never used/constructed/read`):`lib` **55** 条、`bin "backend"` **898** 条。898 条来自 `src/main.rs` 是**第二个 crate root**(见下一行),`--all-targets` 会把它们全算进 `-D warnings` ⇒ 门直接红。**前置**是先让 bin 依赖库 crate(下一行),再分批清 `lib` 那 55 条 | `docs/rounds/39` §W5④ |
+| `src/main.rs` 作第二个 crate root,**把整棵树重复编译一遍** | `src/main.rs:1-3` 的 `mod api; mod core; mod utils;` 让它把同一份源码再编一遍(编译时间 + 体积),也正是上一条 898 条 dead-code 噪声的根因。**只读结论:改成 `use backend::…` 不需要动公共 API** —— 库根已 `pub mod api/core/prelude/utils`(`lib.rs:3-6`),三个子根也全是 `pub mod`(`core.rs:1-8`、`api.rs:1-13`、`utils.rs:1-3`);bin 用到的项全在公开面里且都是 `pub`:`LoginResult`/`AdminInfo`/`AuthProcessor`/`LoginHandler`(`api/auth.rs:175/214/366/585`)、`ReportProcessor`(`core/services.rs:204`)、`ProcessorUi`/`ConsoleUi`/`ReportConsole`(`core/terminal.rs:5/26/195`)、`PathConfig`(`utils/filedata.rs:17`)(另一个 bin `src/bin/gen_translate_tables.rs` 自带依赖,不受影响)。**只登记,不动代码**:属跨模块改动,须先出方案 | 2026-10-01 实测(`docs/rounds/39` §W5④) |
 | api 层类型化 DTO(351 处 `MewResult<Value>`) | 逐端点核对响应形态;建议按域分批 | `docs/rounds/15/16/17` §不落地 |
 | newtype ID 推广(`UserId` 等) | 先看 `WorkId` 试点收益 | `docs/rounds/19` §不落地 |
 | `work.rs` 再切 `WorkDataFetcher` | 纯搬迁,`re-export` 保路径;按需 | `docs/rounds/19` §不落地 |

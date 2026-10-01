@@ -161,7 +161,7 @@ fn parse_forward_item(
 /// (`tests/convert_bench.rs` 的两个正向样本)。id 值的逐字节一致只在
 /// `deterministic_ids(true)` 下承诺(非确定性模式只承诺合法 + 唯一,见
 /// [`TranslateOptions::entity_concurrency`])。
-pub(crate) fn convert_kitten4_document(
+pub(super) fn convert_kitten4_document(
     // `&mut`:装配阶段用不到源实体的 `block_data_json`,而它是整棵积木树(源文档里
     // 最大的字段)。取走它再克隆实体对象,省掉"每个实体复制一份完整积木树"的
     // 文档级白拷贝(方案 23 P0-3)。
@@ -428,7 +428,7 @@ fn find_object_shadow(source: &serde_json::Value) -> Option<(String, String)> {
 /// 会换掉画布尺寸,坐标也随之按 `canvas / stageSize` 的比例**重新换算**
 ///(`kitten4_position`,与正向 `stage_position` 互逆),所以搬到另一种画布时位置仍然对应;
 /// 只有**横屏壳的判定**(`mapping` 里的 `landscape`)仍按源 `stageSize`,不受本选项影响。
-pub(crate) fn convert_kn_document(
+pub(super) fn convert_kn_document(
     source: &serde_json::Value,
     options: &TranslateOptions,
     report: &mut TranslateReport,
@@ -566,7 +566,7 @@ pub(crate) fn convert_kn_document(
 // 而不是"每个字符串 × 每个临时 id"(后者在 10 MB 级作品上是数千万次子串搜索)。
 
 /// 临时 id → 最终 id 的改写表
-pub(crate) type IdRemap = HashMap<String, String>;
+pub(super) type IdRemap = HashMap<String, String>;
 
 // ---------------------------------------------------------------- 并行调度
 
@@ -575,7 +575,7 @@ pub(crate) type IdRemap = HashMap<String, String>;
 /// 作品级(批量)与实体级是**两级**并发,预算折算在
 /// [`TranslateOptions::fold_entity_concurrency`](super::TranslateOptions::fold_entity_concurrency)
 /// 里做(方案 25 §7 阻塞 #6);这里只负责"别为 3 个实体开 32 个线程、别超出核数"。
-pub(crate) fn workers(requested: usize, items: usize) -> usize {
+pub(super) fn workers(requested: usize, items: usize) -> usize {
     let available = std::thread::available_parallelism().map_or(1, |n| n.get());
     requested.max(1).min(items.max(1)).min(available.max(1))
 }
@@ -587,7 +587,7 @@ pub(crate) fn workers(requested: usize, items: usize) -> usize {
 /// - 返回的 `Vec` 与 `items` 等长同序:调用方按序号拼装,结果与串行逐项跑一致
 ///   (包括"首个错误按序号冒泡" —— `Result` 收集在调用方按序号做);
 /// - 工作线程 panic 会在此处重新抛出(`thread::scope` 的默认语义)。
-pub(crate) fn run_items<I, T, F>(
+pub(super) fn run_items<I, T, F>(
     items: Vec<I>,
     weights: &[usize],
     workers: usize,
@@ -728,7 +728,7 @@ fn remap_text<'a>(map: &IdRemap, text: &'a str) -> (Cow<'a, str>, usize) {
 /// 改写一棵实体树;返回 `(节点数, 未命中数)`
 ///
 /// 节点数顺带数出来,顶替旧实现里额外的 `tree.count()` 遍历。
-pub(crate) fn remap_tree(map: &IdRemap, tree: &mut BlockTree) -> (usize, usize) {
+pub(super) fn remap_tree(map: &IdRemap, tree: &mut BlockTree) -> (usize, usize) {
     let mut nodes = 0;
     let mut unmatched = 0;
     for root in &mut tree.roots {
@@ -738,7 +738,7 @@ pub(crate) fn remap_tree(map: &IdRemap, tree: &mut BlockTree) -> (usize, usize) 
 }
 
 /// 改写一条程序集条目(条目 id / 形参 id / 定义体积木);返回 `(节点数, 未命中数)`
-pub(crate) fn remap_entry(map: &IdRemap, entry: &mut ProcedureEntry) -> (usize, usize) {
+pub(super) fn remap_entry(map: &IdRemap, entry: &mut ProcedureEntry) -> (usize, usize) {
     let mut unmatched = remap_string(map, &mut entry.id);
     for param in &mut entry.params {
         unmatched += remap_string(map, &mut param.id);
@@ -755,7 +755,7 @@ pub(crate) fn remap_entry(map: &IdRemap, entry: &mut ProcedureEntry) -> (usize, 
 ///   (形如 `procedures_2_call.名字 -> <id>.fields.X`)。
 ///
 /// 返回未命中数(供调用方汇总断言)。
-pub(crate) fn merge_report(
+pub(super) fn merge_report(
     global: &mut TranslateReport,
     mut local: TranslateReport,
     map: &IdRemap,
@@ -903,7 +903,7 @@ fn remap_shadow_map(map: &IdRemap, shadows: &mut BTreeMap<String, String>) -> us
 }
 
 /// 递归改写一个 JSON 值(字符串 / 数组 / 对象的**键与值**);返回未命中数
-pub(crate) fn remap_json(map: &IdRemap, value: &mut Value) -> usize {
+pub(super) fn remap_json(map: &IdRemap, value: &mut Value) -> usize {
     match value {
         Value::String(text) => remap_string(map, text),
         Value::Array(items) => items.iter_mut().map(|item| remap_json(map, item)).sum(),

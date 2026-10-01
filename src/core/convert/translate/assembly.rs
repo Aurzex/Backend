@@ -77,7 +77,7 @@ const VAR_STYLE_COIN: &str = "icon_coin";
 
 /// 一个已转换完成的实体(角色/场景)
 #[derive(Debug, Clone)]
-pub(crate) struct ConvertedEntity {
+pub(super) struct ConvertedEntity {
     /// 源实体 id(同时也是目标字典的键)
     pub source_id: String,
     /// 场景还是角色(决定走 `scene_entry` 还是 `actor_entry`)
@@ -92,7 +92,7 @@ pub(crate) struct ConvertedEntity {
 ///
 /// `source` 是项目根 JSON(Kitten4 编辑版,或已经过 `mapping`/`neko` 处理的阶段 1 产物——
 /// 两种输入都能吃:`broadcasts` 已包成 `{broadcastsDict}` 时原样透传,否则只包一层)。
-pub(crate) fn build_document(
+pub(super) fn build_document(
     source: &Value,
     entities: Vec<ConvertedEntity>,
     procedures: &[ProcedureEntry],
@@ -517,7 +517,7 @@ fn stage_size(landscape: bool) -> Value {
 }
 
 /// 官方 `projectName || "空白作品"`:键名随方向不同(正向 `project_name`,反向 `projectName`)
-pub(crate) fn project_name_at(src: &Map<String, Value>, key: &str) -> String {
+pub(super) fn project_name_at(src: &Map<String, Value>, key: &str) -> String {
     match src.get(key) {
         Some(Value::String(name)) if !name.is_empty() => name.clone(),
         _ => DEFAULT_PROJECT_NAME.to_string(),
@@ -616,7 +616,7 @@ fn create_time(var: &Map<String, Value>, now_ms: u128) -> Value {
 }
 
 /// 当前毫秒时间戳(非确定性模式的 `Date.now()` 等价物)
-pub(crate) fn current_epoch_ms() -> u128 {
+pub(super) fn current_epoch_ms() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis())
@@ -640,7 +640,7 @@ fn workspace_scroll(value: &Map<String, Value>) -> Value {
 
 /// 官方 `jJ`(module 11937 的 `F`):删掉白名单外的字符 + `<>&."` 六个字符(250 行调用)
 fn sanitize(name: &str) -> String {
-    name.chars().filter(|c| is_name_char(*c)).collect()
+    name.chars().filter(|c| is_display_name_char(*c)).collect()
 }
 
 /// 官方白名单里额外放行的中文标点(其余按码点区间判断)
@@ -650,7 +650,10 @@ const EXTRA_NAME_CHARS: [char; 25] = [
 ];
 
 /// 官方正则 `/[^\x20-\x7e\u00C0-\u00FF\u4e00-\u9fa5 <中文标点>]|[<>&."]/` 的字符集语义
-fn is_name_char(c: char) -> bool {
+///
+/// 名字里的 `display`:本函数判的是**官方显示名**的可用字符,与 `xml.rs` 的 `is_name_char`
+/// (XML 名称字符)语义无关,故不重名。
+fn is_display_name_char(c: char) -> bool {
     if matches!(c, '<' | '>' | '&' | '.' | '"') {
         return false;
     }
@@ -724,7 +727,7 @@ fn increment_digits(digits: &str) -> String {
 }
 
 /// JS 数字 → JSON:整数值出整数(`45` 而不是 `45.0`),与官方产物逐字节对齐(两个装配方向共用)
-pub(crate) fn num(value: f64) -> Value {
+pub(super) fn num(value: f64) -> Value {
     if value.is_finite() && value.fract() == 0.0 && value.abs() < 9.007_199_254_740_992e15 {
         json!(value as i64)
     } else {
@@ -793,7 +796,7 @@ fn theme_of_style(style: &str) -> &'static str {
 }
 
 /// 树里出现两次以上的 id(每个重复值报一次)
-pub(crate) fn duplicate_ids(tree: &model::BlockTree) -> Vec<String> {
+pub(super) fn duplicate_ids(tree: &model::BlockTree) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
     let mut counted: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut duplicated = Vec::new();
@@ -808,16 +811,16 @@ pub(crate) fn duplicate_ids(tree: &model::BlockTree) -> Vec<String> {
     duplicated
 }
 
-/// 一个已反演完成的实体(反向编排在 `pipeline`,装配在本文件:字段对 `pub(crate)` 可见)
-pub(crate) struct KnEntity {
-    pub(crate) source_id: String,
-    pub(crate) is_scene: bool,
-    pub(crate) tree: model::BlockTree,
-    pub(crate) source: serde_json::Map<String, serde_json::Value>,
+/// 一个已反演完成的实体(反向编排在 `pipeline`,装配在本文件:字段对 `pub(super)` 可见)
+pub(super) struct KnEntity {
+    pub(super) source_id: String,
+    pub(super) is_scene: bool,
+    pub(super) tree: model::BlockTree,
+    pub(super) source: serde_json::Map<String, serde_json::Value>,
 }
 
 /// KN 舞台尺寸(官方只有 `562×900` / `900×562` 两种;缺失时按竖屏)
-pub(crate) fn kn_stage_size(src: &serde_json::Map<String, serde_json::Value>) -> (f64, f64) {
+pub(super) fn kn_stage_size(src: &serde_json::Map<String, serde_json::Value>) -> (f64, f64) {
     let stage = src.get("stageSize").and_then(serde_json::Value::as_object);
     let pick = |key: &str, fallback: f64| -> f64 {
         stage
@@ -1022,14 +1025,14 @@ fn shadow_type(xml: &serde_json::Value) -> Option<&str> {
 }
 
 /// 装配阶段需要的舞台口径(打包传参:横竖屏 + 画布尺寸 + KN 舞台尺寸)
-pub(crate) struct StageSize {
-    pub(crate) landscape: bool,
-    pub(crate) canvas: (f64, f64),
-    pub(crate) kn: (f64, f64),
+pub(super) struct StageSize {
+    pub(super) landscape: bool,
+    pub(super) canvas: (f64, f64),
+    pub(super) kn: (f64, f64),
 }
 
 /// 装配 Kitten4 编辑版文档
-pub(crate) fn build_kitten4_document(
+pub(super) fn build_kitten4_document(
     src: &serde_json::Map<String, serde_json::Value>,
     // `entities` / `blocks_by_entity` 都**按值**收:装配阶段要移动实体源对象与
     // 已编码的积木数据,旧实现每个实体各 clone 一次(含整份 `nekoBlockJsonList`)

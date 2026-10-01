@@ -53,9 +53,9 @@ use std::sync::LazyLock;
 
 /// 官方 `lI`:影子 / 变异 XML 的命名空间
 /// 程序集类型:普通(官方 `iI.NORMAL`)
-pub(crate) const PROCEDURE_NORMAL: &str = "NORMAL";
+pub(super) const PROCEDURE_NORMAL: &str = "NORMAL";
 /// 程序集类型:带返回值(官方 `iI.ROUND`)
-pub(crate) const PROCEDURE_ROUND: &str = "ROUND";
+pub(super) const PROCEDURE_ROUND: &str = "ROUND";
 
 // ---------------------------------------------------------------------------
 // 解析上下文(官方 `hI` 实例上的可变状态)
@@ -64,7 +64,7 @@ pub(crate) const PROCEDURE_ROUND: &str = "ROUND";
 /// 一个演员/场景:官方 `parseBlocksXML(xml, 实体对象)` 把实体对象挂到 `currentActor`,
 /// 解析期只用到 `id` 与 `styles`。
 #[derive(Debug, Clone, Default, PartialEq)]
-pub(crate) struct NemoEntity {
+pub(super) struct NemoEntity {
     pub id: String,
     /// 实体拥有的造型 id 数组;`None` 对应 JS 的 `undefined`(缺失)——与"空数组"语义不同
     /// (`[]` 在 JS 里是 truthy,会走"按 1 基下标取造型"的失败分支)。
@@ -73,7 +73,7 @@ pub(crate) struct NemoEntity {
 
 /// 程序集形参(官方 `createParams` 的 `{id,type,name,parent_id,parent_type}`)
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct NemoParam {
+pub(super) struct NemoParam {
     pub id: String,
     pub name: String,
     /// `Label`(程序集名本身)或 `String`(带实参的形参)
@@ -85,7 +85,7 @@ pub(crate) struct NemoParam {
 
 /// 一个程序集条目(官方 `proceduresDict` 的 value)
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct NemoProcedure {
+pub(super) struct NemoProcedure {
     pub id: String,
     pub name: String,
     /// `NORMAL` / `ROUND`
@@ -97,7 +97,7 @@ pub(crate) struct NemoProcedure {
 ///
 /// 官方靠 `t[0].parent_type` 是不是 `NORMAL`/`ROUND` 区分"形参数组"与"实体对象"
 /// (实体对象下 `t[0]` 是 `undefined`)。
-pub(crate) enum NemoSubject<'a> {
+pub(super) enum NemoSubject<'a> {
     /// 演员或场景
     Entity(&'a NemoEntity),
     /// 程序集形参(第一个元素是 `Label`)
@@ -109,7 +109,7 @@ pub(crate) enum NemoSubject<'a> {
 /// `current_actor` / `current_params` 官方**只置不清**,解析演员时 `current_params` 仍指着最后一个
 /// 程序集的形参;这里照抄(只有 `procedures_2_*` 分支会读到,真实作品里不会在演员里出现)。
 #[derive(Debug, Default)]
-pub(crate) struct NemoParseContext {
+pub(super) struct NemoParseContext {
     /// 程序集字典(键 = [`NemoProcedure::id`])
     pub procedures: BTreeMap<String, NemoProcedure>,
     /// 广播 id → 名称(官方 `nemoBcm.broadcast.broadcast_dict` 的 `name`)
@@ -141,7 +141,7 @@ static MUTATION_TEXT_INDEX: LazyLock<HashMap<&'static str, NemoMutationText>> =
     LazyLock::new(|| flat_index(NEMO_MUTATION_TEXT));
 
 /// 官方 `mapType`(`sI[e]||e`):表里没有就返回原值
-pub(crate) fn map_type(raw: &str) -> &str {
+pub(super) fn map_type(raw: &str) -> &str {
     NEMO_TO_KN_INDEX.get(raw).copied().unwrap_or(raw)
 }
 
@@ -182,15 +182,15 @@ const SPECIAL_BLOCK_TYPES: &[&str] = &[
 
 /// KN 的四种"文本占位积木"(降级产物)
 #[rustfmt::skip]
-pub(crate) fn is_logic_compare_block(kind: &str) -> bool {
+pub(super) fn is_logic_compare_block(kind: &str) -> bool {
     LOGIC_COMPARE_BLOCKS.contains(&kind)
 }
 
-pub(crate) fn is_multi_parameter_block(kind: &str) -> bool {
+pub(super) fn is_multi_parameter_block(kind: &str) -> bool {
     MULTI_PARAMETER_BLOCKS.contains(&kind)
 }
 
-pub(crate) fn is_procedure_block(kind: &str) -> bool {
+pub(super) fn is_procedure_block(kind: &str) -> bool {
     kind == "procedures_2_callreturn" || kind == "procedures_2_parameter"
 }
 
@@ -509,7 +509,7 @@ fn select_text(map: &[(&str, &str)], key: &str) -> String {
 ///
 /// `roots` 来自 [`super::xml::parse_fragment`](`<root>` 包装的直接子元素);
 /// `subject` 决定 `currentActor` / `currentProcedure`(官方 `parseBlocksXML` 的第二参)。
-pub(crate) fn translate_nemo_to_kn(
+pub(super) fn translate_nemo_to_kn(
     roots: &[XmlNode],
     subject: NemoSubject<'_>,
     ctx: &mut NemoParseContext,
@@ -532,7 +532,7 @@ pub(crate) fn translate_nemo_to_kn(
 
 /// 一个已解析的程序集条目(官方 `proceduresDict` 的一条)
 #[derive(Debug, Clone)]
-pub(crate) struct ParsedProcedure {
+pub(super) struct ParsedProcedure {
     /// `proceduresDict` 的键(与官方一致:骨架键 = 源字典键 / 副本键 = 新铸 id)
     pub key: String,
     pub id: String,
@@ -560,7 +560,7 @@ struct SourceProcedure {
 ///
 /// 官方顺序:**先**建骨架(只带 id/name/type/params)并挂到 `this.proceduresDict`(解析期查表用它),
 /// **再**逐个解析 `blocksXML`(此刻 `proceduresDict` 已完整),最后整体替换。
-pub(crate) fn nemo_parse_procedures(
+pub(super) fn nemo_parse_procedures(
     source: &Value,
     ctx: &mut NemoParseContext,
     ids: &mut IdSource,
@@ -2063,10 +2063,10 @@ fn escape_text(text: &str) -> String {
 // 转录口径:键按 **ASCII 升序** 排列(与仓库 `tables_gen.rs` 一致,便于 diff);值逐字保留原文(含中文与 `{index}` 这类占位符)。
 
 /// 版本迁移的目标版本(官方 `qC.bcm_version`)
-pub(crate) const NEMO_BCM_VERSION: &str = "0.16.2";
+pub(super) const NEMO_BCM_VERSION: &str = "0.16.2";
 
 /// NEMO → KN 积木类型映射(官方 `sI`)
-pub(crate) const NEMO_TO_KN: &[(&str, &str)] = &[
+pub(super) const NEMO_TO_KN: &[(&str, &str)] = &[
     ("add_width_height_scale", "add_width_height_scale"),
     ("ask_and_choose", "ask_and_choose"),
     ("audio__play_audio", "play_audio"),
@@ -2307,7 +2307,7 @@ pub(crate) const NEMO_TO_KN: &[(&str, &str)] = &[
 /// 注意:与 Kitten 侧同名表(`mapping.rs` 的 `INPUT_NAME_MAP`)不同 —— NEMO 表的键是小写
 /// (`var`/`index`/`value`/`text`…),Kitten 表是大写(`VAR`/`INDEX`/`VALUE`);两侧是两份独立的表,
 /// 不能互相代用(实测同一份 bundle 里两张表 33 / 69 条,同名键的映射也不一样)。
-pub(crate) const NEMO_INPUT_NAME_MAP: &[(&str, &[(&str, &str)])] = &[
+pub(super) const NEMO_INPUT_NAME_MAP: &[(&str, &[(&str, &str)])] = &[
     (
         "delete_list_item",
         &[("index", "list_index"), ("item", "type"), ("var", "list")],
@@ -2399,7 +2399,7 @@ pub(crate) const NEMO_INPUT_NAME_MAP: &[(&str, &[(&str, &str)])] = &[
 ];
 
 /// 官方 NEMO `specialFieldValueMap`:(字段名) → [(原值, 目标值)]
-pub(crate) const NEMO_SPECIAL_FIELD_VALUES: &[(&str, &[(&str, &str)])] = &[
+pub(super) const NEMO_SPECIAL_FIELD_VALUES: &[(&str, &[(&str, &str)])] = &[
     ("BOOL", &[("FALSE", "false"), ("TRUE", "true")]),
     (
         "align",
@@ -2491,7 +2491,7 @@ pub(crate) const NEMO_SPECIAL_FIELD_VALUES: &[(&str, &[(&str, &str)])] = &[
 ];
 
 /// 官方 `SHADOW_FIELD_NAME_MAP`:(影子 KN 类型, 字段名) → 影子里的字段名
-pub(crate) const NEMO_SHADOW_FIELD_NAMES: &[(&str, &str)] = &[
+pub(super) const NEMO_SHADOW_FIELD_NAMES: &[(&str, &str)] = &[
     ("get_play_audio", "audio_id"),
     ("get_stop_audio", "audio_id"),
     ("self_dialog_wait", "text"),
@@ -2499,7 +2499,7 @@ pub(crate) const NEMO_SHADOW_FIELD_NAMES: &[(&str, &str)] = &[
 
 /// 官方 `oI`:需要合成 mutation 的积木,其 mutation 里的中文标题(按原文保留,含 `{...}` 占位符)
 #[derive(Clone, Copy)]
-pub(crate) enum NemoMutationText {
+pub(super) enum NemoMutationText {
     /// 固定标题
     Plain(&'static str),
     /// 按选择器字段取值选标题
@@ -2509,7 +2509,7 @@ pub(crate) enum NemoMutationText {
 }
 
 /// (NEMO 原始类型, 标题)
-pub(crate) const NEMO_MUTATION_TEXT: &[(&str, NemoMutationText)] = &[
+pub(super) const NEMO_MUTATION_TEXT: &[(&str, NemoMutationText)] = &[
     (
         "check_sence",
         NemoMutationText::SelectNested(&[

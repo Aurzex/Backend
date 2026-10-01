@@ -92,7 +92,7 @@ pub struct TranslateReport {
 }
 
 impl TranslateReport {
-    pub(crate) fn new(from: EditorType, to: TargetEditor) -> Self {
+    pub(super) fn new(from: EditorType, to: TargetEditor) -> Self {
         TranslateReport {
             from,
             to,
@@ -104,12 +104,12 @@ impl TranslateReport {
         }
     }
 
-    pub(crate) fn warn(&mut self, w: TranslateWarning) {
+    pub(super) fn warn(&mut self, w: TranslateWarning) {
         self.warnings.push(w);
     }
 
     /// 取出全部告警(实体级并行按项收集局部报告后,再按项序并入全局报告;见 [`super::pipeline::merge_report`])
-    pub(crate) fn take_warnings(&mut self) -> Vec<TranslateWarning> {
+    pub(super) fn take_warnings(&mut self) -> Vec<TranslateWarning> {
         std::mem::take(&mut self.warnings)
     }
 

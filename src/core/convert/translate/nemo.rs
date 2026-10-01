@@ -61,7 +61,7 @@ const NEMO_ASSET_PREFIX: &str = "https://static.codemao.cn/nemo/22/";
 /// NEMO 编辑版 → KN 编辑版(纯文档级管线)
 ///
 /// `source` 只读:所有迁移/改写都作用在**派生**值上(不改源文档),与 Kitten 路径"转换不改源文档"一致。
-pub(crate) fn convert_nemo_document(
+pub(super) fn convert_nemo_document(
     source: &Value,
     options: &TranslateOptions,
     report: &mut TranslateReport,
@@ -1128,33 +1128,6 @@ fn replace_scene_index(node: &mut XmlNode, scenes_order: &[String]) {
 // 小工具
 // ---------------------------------------------------------------------------
 
-/// 先序找第一个 tag 匹配的后代(**不含**自身)
-fn find_descendant<'a>(node: &'a XmlNode, tag: &str) -> Option<&'a XmlNode> {
-    for child in &node.children {
-        if child.tag == tag {
-            return Some(child);
-        }
-        if let Some(found) = find_descendant(child, tag) {
-            return Some(found);
-        }
-    }
-    None
-}
-
-/// 先序找第一个 tag 匹配的可变后代(**不含**自身;与 `querySelector` 同序)
-fn find_descendant_mut<'a>(node: &'a mut XmlNode, tag: &str) -> Option<&'a mut XmlNode> {
-    for index in 0..node.children.len() {
-        if node.children[index].tag == tag {
-            return node.children.get_mut(index);
-        }
-        // 子树里真有目标才往下走(否则 `&mut` 的借用会跨迭代悬着)
-        if has_descendant(&node.children[index], tag) {
-            return find_descendant_mut(&mut node.children[index], tag);
-        }
-    }
-    None
-}
-
 /// 先序找第一个 `tag[name=…]` 后代(**不含**自身;与 `querySelector('tag[name="x"]')` 同序同义)
 fn find_named<'a>(node: &'a XmlNode, tag: &str, name: &str) -> Option<&'a XmlNode> {
     for child in &node.children {
@@ -1188,31 +1161,9 @@ fn has_named(node: &XmlNode, tag: &str, name: &str) -> bool {
     })
 }
 
-/// 子树里有没有 tag 匹配的后代(**不含**自身)
-fn has_descendant(node: &XmlNode, tag: &str) -> bool {
-    node.children
-        .iter()
-        .any(|child| child.tag == tag || has_descendant(child, tag))
-}
-
-/// 先序找第一个 `value[name=…] > shadow`(官方 `querySelector('value[name="x"] > shadow')`;
-/// 该 `value` 没有直接 `shadow` 时继续找下一个同名 `value`)
-fn find_value_shadow<'a>(node: &'a XmlNode, name: &str) -> Option<&'a XmlNode> {
-    for child in &node.children {
-        if child.tag == "value"
-            && child.attr("name") == Some(name)
-            && let Some(shadow) = child.child("shadow")
-        {
-            return Some(shadow);
-        }
-        if let Some(found) = find_value_shadow(child, name) {
-            return Some(found);
-        }
-    }
-    None
-}
-
-/// 同 [`find_value_shadow`],返回可变引用(先序,与 `querySelector` 同序)
+/// 先序找第一个 `value[name=…] > shadow`,返回**可变**引用(官方
+/// `querySelector('value[name="x"] > shadow')`;该 `value` 没有直接 `shadow` 时继续找下一个同名
+/// `value`。与 `querySelector` 同序)
 fn find_value_shadow_mut<'a>(node: &'a mut XmlNode, name: &str) -> Option<&'a mut XmlNode> {
     for index in 0..node.children.len() {
         if node.children[index].tag == "value"
@@ -1287,7 +1238,7 @@ fn position_of(entity: &Map<String, Value>) -> Value {
 }
 
 /// 递归把"整数值的浮点"折成整数(`f64` 与 `i64` 在 JS 里同一个类型)
-pub(crate) fn normalize_integral_numbers(value: &mut Value) {
+pub(super) fn normalize_integral_numbers(value: &mut Value) {
     match value {
         Value::Number(number) => {
             if let Some(float) = number.as_f64()
@@ -1417,7 +1368,7 @@ fn split_option_names(source: &Value) -> Map<String, Value> {
 /// **不静默丢块**:单根 `to_value` 失败时不再 `filter_map(ok())` 吞掉 —— 记一条
 /// [`TranslateWarning::DroppedField`] 进报告(产物会少一块,必须可见;`DroppedField`
 /// 不在 `is_lossy` 的白名单里 ⇒ 该次转换因此**算有损**)。
-pub(crate) fn tree_to_json(
+pub(super) fn tree_to_json(
     tree: &super::model::BlockTree,
     report: &mut TranslateReport,
 ) -> Vec<Value> {
@@ -1432,7 +1383,7 @@ pub(crate) fn tree_to_json(
 ///
 /// 独立成函数是为了让失败分支可测:`BlockJson` 的字段(字符串 / `Value` / 子节点)全都可序列化,
 /// 正常数据构造不出 `Err`(`nemo_tests` 里直接投喂一个真实的 `serde_json` 编码错误来守这条)。
-pub(crate) fn push_root(
+pub(super) fn push_root(
     out: &mut Vec<Value>,
     encoded: Result<Value, DecompilerError>,
     report: &mut TranslateReport,

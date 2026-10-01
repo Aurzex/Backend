@@ -7,7 +7,7 @@
 //! KittenN 版本常量 `bcm_version` = "0.16.2"
 
 /// Kitten → KN 积木类型映射(`LC`,恒等条目也在表里)
-pub(crate) const KITTEN_TO_KN: &[(&str, &str)] = &[
+pub(super) const KITTEN_TO_KN: &[(&str, &str)] = &[
     (
         "WIDGET_LVMI_bodySensorIs",
         "bcm_translator_text_return_boolean_block",
@@ -744,7 +744,7 @@ pub(crate) const KITTEN_TO_KN: &[(&str, &str)] = &[
 ];
 
 /// 降级占位积木的中文标题(`RC` 的纯字符串部分,按官方原样保留 `{字段}`)
-pub(crate) const KITTEN_MUTATION_TEXT: &[(&str, &str)] = &[
+pub(super) const KITTEN_MUTATION_TEXT: &[(&str, &str)] = &[
     ("WIDGET_LVMI_bodySensorIs", "人体传感器检测到{value}经过"),
     ("WIDGET_LVMI_bodySensorWhen", "当人体传感器检测到{value}时"),
     ("WIDGET_LVMI_buttonIs", "无线开关被{value}"),
@@ -1051,7 +1051,7 @@ pub(crate) const KITTEN_MUTATION_TEXT: &[(&str, &str)] = &[
 ];
 
 /// `RC` 里由官方 handler 按字段选词的部分(我们按选择器近似,见 docs/rounds/20 已知偏差)
-pub(crate) const KITTEN_MUTATION_TEXT_SELECT: &[(&str, &[(&str, &str)])] = &[
+pub(super) const KITTEN_MUTATION_TEXT_SELECT: &[(&str, &[(&str, &str)])] = &[
     (
         "change_volume_or_rate_2",
         &[
@@ -1150,7 +1150,7 @@ pub(crate) const KITTEN_MUTATION_TEXT_SELECT: &[(&str, &[(&str, &str)])] = &[
 ];
 
 /// 每个块的默认 shadow XML 覆盖表(`cy`)
-pub(crate) const SHADOW_XML: &[(&str, &[(&str, &str)])] = &[
+pub(super) const SHADOW_XML: &[(&str, &[(&str, &str)])] = &[
     (
         "ai_chat_ask",
         &[(
@@ -1200,7 +1200,7 @@ pub(crate) const SHADOW_XML: &[(&str, &[(&str, &str)])] = &[
 ];
 
 /// 中文名反查(类型 → 中文 token),占位积木标题兜底
-pub(crate) const ZH_NAME_BY_TYPE: &[(&str, &str)] = &[
+pub(super) const ZH_NAME_BY_TYPE: &[(&str, &str)] = &[
     ("add_width_height_scale", "改变角色宽高"),
     ("ai_chat_answer", "AI对话_获得AI回答"),
     ("ai_chat_ask", "AI对话_向AI询问"),
@@ -1424,7 +1424,7 @@ pub(crate) const ZH_NAME_BY_TYPE: &[(&str, &str)] = &[
 ];
 
 /// KN 里的四种「文本占位积木」
-pub(crate) const TEXT_PLACEHOLDER_BLOCKS: [&str; 4] = [
+pub(super) const TEXT_PLACEHOLDER_BLOCKS: [&str; 4] = [
     "bcm_translator_text_execution_block",
     "bcm_translator_text_event_block",
     "bcm_translator_text_return_value_block",
@@ -1432,8 +1432,11 @@ pub(crate) const TEXT_PLACEHOLDER_BLOCKS: [&str; 4] = [
 ];
 
 /// 目标格式版本常量(`qC.bcm_version`)
-pub(crate) const BCM_VERSION: &str = "0.16.2";
+///
+/// 可见性是 `core::convert`:地基 `shared.rs` 的 `bcm_version` 兜底要读它
+/// (`shared.rs` 在 `translate` 之外,`pub(super)` 不够,`pub(crate)` 又过宽)。
+pub(in crate::core::convert) const BCM_VERSION: &str = "0.16.2";
 /// 竖屏画布(562×900)
-pub(crate) const STAGE_PORTRAIT: (f64, f64) = (562.0, 900.0);
+pub(super) const STAGE_PORTRAIT: (f64, f64) = (562.0, 900.0);
 /// 横屏画布(900×562)
-pub(crate) const STAGE_LANDSCAPE: (f64, f64) = (900.0, 562.0);
+pub(super) const STAGE_LANDSCAPE: (f64, f64) = (900.0, 562.0);

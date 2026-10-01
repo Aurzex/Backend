@@ -18,7 +18,10 @@ pub enum TargetEditor {
 impl TargetEditor {
     /// 该目标对应的编辑器类型 —— **域内唯一的 `TargetEditor → EditorType` 转换点**,
     /// 消除散落的 `match`(见 `docs/rounds/31` §3 A4)
-    pub(crate) fn as_editor(self) -> EditorType {
+    ///
+    /// 可见性是 `core::convert`:它比 `pub(crate)` 小、比 `pub(super)`(= `translate`)大 ——
+    /// 这一小撮方法只被**域门面**(`convert/mod.rs`)与域内共用,故精确到「域」这一层。
+    pub(in crate::core::convert) fn as_editor(self) -> EditorType {
         match self {
             TargetEditor::KittenN => EditorType::Neko,
             TargetEditor::Kitten4 => EditorType::Kitten4,
@@ -26,7 +29,7 @@ impl TargetEditor {
     }
 
     /// 产物文件名中的目标标识
-    pub(crate) fn file_slug(self) -> &'static str {
+    pub(super) fn file_slug(self) -> &'static str {
         match self {
             TargetEditor::KittenN => "kn",
             TargetEditor::Kitten4 => "kitten4",
@@ -34,7 +37,7 @@ impl TargetEditor {
     }
 
     /// 产物扩展名(不含点)
-    pub(crate) fn file_extension(self) -> &'static str {
+    pub(super) fn file_extension(self) -> &'static str {
         match self {
             TargetEditor::KittenN => "bcmkn",
             TargetEditor::Kitten4 => "bcm4",
@@ -133,31 +136,33 @@ impl TranslateOptions {
         self
     }
 
-    pub(crate) fn source_version_ref(&self) -> Option<&str> {
+    // 取值器可见性分两档:域门面(`convert/mod.rs`)要读的那几个收到 `core::convert`
+    // (比 `pub(crate)` 小、比 `pub(super)` 大),只在本子树内用的保持 `pub(super)`(= `translate`)。
+    pub(in crate::core::convert) fn source_version_ref(&self) -> Option<&str> {
         self.source_version.as_deref()
     }
 
-    pub(crate) fn output_dir_ref(&self) -> Option<&std::path::Path> {
+    pub(super) fn output_dir_ref(&self) -> Option<&std::path::Path> {
         self.output_dir.as_deref()
     }
 
-    pub(crate) fn upload_enabled(&self) -> bool {
+    pub(in crate::core::convert) fn upload_enabled(&self) -> bool {
         self.upload
     }
 
-    pub(crate) fn is_strict(&self) -> bool {
+    pub(super) fn is_strict(&self) -> bool {
         self.strict
     }
 
-    pub(crate) fn keeps_source(&self) -> bool {
+    pub(in crate::core::convert) fn keeps_source(&self) -> bool {
         self.keep_source
     }
 
-    pub(crate) fn orientation(&self) -> StageOrientation {
+    pub(super) fn orientation(&self) -> StageOrientation {
         self.stage
     }
 
-    pub(crate) fn ids_deterministic(&self) -> bool {
+    pub(super) fn ids_deterministic(&self) -> bool {
         self.deterministic_ids
     }
 
@@ -186,12 +191,12 @@ impl TranslateOptions {
         self
     }
 
-    pub(crate) fn concurrency(&self) -> usize {
+    pub(in crate::core::convert) fn concurrency(&self) -> usize {
         self.batch_concurrency.max(1)
     }
 
     /// 本次文档转换用几个实体级工作线程(≥1)
-    pub(crate) fn entity_workers(&self) -> usize {
+    pub(super) fn entity_workers(&self) -> usize {
         self.entity_concurrency.max(1)
     }
 
@@ -203,7 +208,11 @@ impl TranslateOptions {
     ///
     /// 折算只改并行度,不碰产物。直接调用 [`super::translate_value`] / [`super::translate_file`] 的
     /// 单文档入口不做折算(调用方自己要的并发,由 [`super::pipeline::workers`] 兜住"不超核数")。
-    pub(crate) fn fold_entity_concurrency(mut self, works: usize, available: usize) -> Self {
+    pub(in crate::core::convert) fn fold_entity_concurrency(
+        mut self,
+        works: usize,
+        available: usize,
+    ) -> Self {
         let batch = self.concurrency().min(works.max(1));
         let share = (available.max(1) / batch).max(1);
         self.entity_concurrency = self.entity_concurrency.min(share).max(1);

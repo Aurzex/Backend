@@ -20,7 +20,7 @@ use std::collections::HashSet;
 
 /// 一个积木节点(树形)
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-pub(crate) struct BlockJson {
+pub(super) struct BlockJson {
     /// 积木类型(编辑器内的 snake_case 名,如 `repeat_n_times` / `on_running_group_activated`)
     #[serde(rename = "type", default, deserialize_with = "de_string")]
     pub kind: String,
@@ -130,7 +130,7 @@ impl BlockJson {
     /// 旧实现是 `serde_json::from_value(Value::Object(obj.clone()))` —— 每块先深拷贝一份
     /// 整块 JSON(含 `fields`/`inputs`/`shadows`)再消费它;10 万级块时是纯浪费
     /// (方案 23 P0-3)。`kind` 走 `de_string` 容错解析:缺失/显式 null 都折成空串。
-    pub(crate) fn from_value(value: &Value) -> Result<Self> {
+    pub(super) fn from_value(value: &Value) -> Result<Self> {
         if !value.is_object() {
             return Err(DecompilerError::TypeMismatch {
                 expected: "object(block json)".into(),
@@ -143,12 +143,12 @@ impl BlockJson {
     }
 
     /// 转回 JSON 对象
-    pub(crate) fn to_value(&self) -> Result<Value> {
+    pub(super) fn to_value(&self) -> Result<Value> {
         serde_json::to_value(self).map_err(DecompilerError::from)
     }
 
     /// 深度优先遍历(含 next / inputs / statements)
-    pub(crate) fn walk<F: FnMut(&BlockJson)>(&self, f: &mut F) {
+    pub(super) fn walk<F: FnMut(&BlockJson)>(&self, f: &mut F) {
         f(self);
         for child in self.inputs.values() {
             child.walk(f);
@@ -162,20 +162,20 @@ impl BlockJson {
     }
 
     /// 节点总数(含自身)
-    pub(crate) fn count(&self) -> usize {
+    pub(super) fn count(&self) -> usize {
         let mut n = 0;
         self.walk(&mut |_| n += 1);
         n
     }
 
     /// 类型频次统计
-    pub(crate) fn count_types(&self, out: &mut BTreeMap<String, usize>) {
+    pub(super) fn count_types(&self, out: &mut BTreeMap<String, usize>) {
         self.walk(&mut |b| *out.entry(b.kind.clone()).or_default() += 1);
     }
 }
 
 /// `math_number` 子积木
-pub(crate) fn math_number_node(id: String, num: &str, parent_id: Option<String>) -> BlockJson {
+pub(super) fn math_number_node(id: String, num: &str, parent_id: Option<String>) -> BlockJson {
     BlockJson {
         kind: "math_number".to_string(),
         id: Some(id),
@@ -192,21 +192,21 @@ pub(crate) fn math_number_node(id: String, num: &str, parent_id: Option<String>)
 
 /// 一个实体(角色/场景/程序集)的积木树集合
 #[derive(Debug, Clone, Default)]
-pub(crate) struct BlockTree {
+pub(super) struct BlockTree {
     /// 根积木(工作区里互不相连的脚本头)
     pub roots: Vec<BlockJson>,
 }
 
 impl BlockTree {
-    pub(crate) fn new(roots: Vec<BlockJson>) -> Self {
+    pub(super) fn new(roots: Vec<BlockJson>) -> Self {
         BlockTree { roots }
     }
 
-    pub(crate) fn count(&self) -> usize {
+    pub(super) fn count(&self) -> usize {
         self.roots.iter().map(BlockJson::count).sum()
     }
 
-    pub(crate) fn count_types(&self) -> BTreeMap<String, usize> {
+    pub(super) fn count_types(&self) -> BTreeMap<String, usize> {
         let mut out = BTreeMap::new();
         for r in &self.roots {
             r.count_types(&mut out);
@@ -214,7 +214,7 @@ impl BlockTree {
         out
     }
 
-    pub(crate) fn walk<F: FnMut(&BlockJson)>(&self, f: &mut F) {
+    pub(super) fn walk<F: FnMut(&BlockJson)>(&self, f: &mut F) {
         for r in &self.roots {
             r.walk(f);
         }
@@ -222,7 +222,7 @@ impl BlockTree {
 }
 
 /// JSON 值的类型名(错误信息用)
-pub(crate) fn type_name(v: &Value) -> &'static str {
+pub(super) fn type_name(v: &Value) -> &'static str {
     match v {
         Value::Null => "null",
         Value::Bool(_) => "bool",
@@ -246,7 +246,7 @@ pub(crate) fn type_name(v: &Value) -> &'static str {
 /// 记录模式(见 [`IdSource::recording`])只记"这一项的第几次铸造是什么形态",
 /// 最终 id 由串行阶段按**全局铸造序号**兑现 —— 形态是兑现时唯一需要的输入。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum MintKind {
+pub(super) enum MintKind {
     /// [`IdSource::uuid`]
     Uuid,
     /// [`IdSource::short`]
@@ -263,7 +263,7 @@ impl MintKind {
     }
 
     /// 用**串行** id 源兑现这次铸造(确定性模式下 = 第 counter 次铸造的纯函数)
-    pub(crate) fn mint(self, ids: &mut IdSource) -> String {
+    pub(super) fn mint(self, ids: &mut IdSource) -> String {
         match self {
             MintKind::Uuid => ids.uuid(),
             MintKind::Short => ids.short(),
@@ -275,16 +275,16 @@ impl MintKind {
 ///
 /// 真实 id 是 UUID / 十六进制短串,**不含控制字符**,因此带哨兵的串只可能来自
 /// [`IdSource::recording`],可以在改写时按前缀无歧义地定位(方案 25 §3 阶段 C)。
-pub(crate) const TEMP_ID_PREFIX: char = '\u{1}';
+pub(super) const TEMP_ID_PREFIX: char = '\u{1}';
 
 /// 临时 id 体允许的字符(用于单遍改写时确定 token 的右边界)
-pub(crate) fn is_temp_id_char(c: char) -> bool {
+pub(super) fn is_temp_id_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, ':' | '-' | '_' | '.')
 }
 
 /// id 来源(确定性 / 随机 / 记录)
 #[derive(Clone)]
-pub(crate) struct IdSource {
+pub(super) struct IdSource {
     deterministic: bool,
     counter: u64,
     chars: IdGenerator,
@@ -303,7 +303,7 @@ struct IdRecord {
 }
 
 impl IdSource {
-    pub(crate) fn new(deterministic: bool) -> Self {
+    pub(super) fn new(deterministic: bool) -> Self {
         IdSource {
             deterministic,
             counter: 0,
@@ -320,7 +320,7 @@ impl IdSource {
     ///
     /// 确定性标志在这里无用武之地:临时 id 只是占位符,最终值由串行阶段按账本顺序兑现
     /// (确定性模式下与"今天串行实现"逐字节相同)。
-    pub(crate) fn recording(slot: usize) -> Self {
+    pub(super) fn recording(slot: usize) -> Self {
         IdSource {
             deterministic: false,
             counter: 0,
@@ -333,7 +333,7 @@ impl IdSource {
     }
 
     /// 取出铸造账本(`(临时 id, 形态)`,顺序 = 铸造顺序);非记录模式返回空
-    pub(crate) fn into_log(self) -> Vec<(String, MintKind)> {
+    pub(super) fn into_log(self) -> Vec<(String, MintKind)> {
         self.record.map(|record| record.log).unwrap_or_default()
     }
 
@@ -357,7 +357,7 @@ impl IdSource {
     /// ⚠️ **冻结协议(rounds/37 §1 0.3)**:确定性模式下产物里的 id 是"第几次铸造"的纯函数
     /// (`{counter:012x}`)⇒ **铸造顺序就是产物的一部分**:任何调整铸造次数/次序的重构
     /// (含合并两次插入、延迟到需要时才铸)都会整体偏移 id,**必须先解释再接受 SHA 变化**。
-    pub(crate) fn uuid(&mut self) -> String {
+    pub(super) fn uuid(&mut self) -> String {
         if self.record.is_some() {
             return self.temp(MintKind::Uuid);
         }
@@ -383,7 +383,7 @@ impl IdSource {
     }
 
     /// 22 字符短 id(与反编译侧 `IdGenerator` 同风格;KN 里两种形态都见得到)
-    pub(crate) fn short(&mut self) -> String {
+    pub(super) fn short(&mut self) -> String {
         if self.record.is_some() {
             return self.temp(MintKind::Short);
         }
@@ -414,7 +414,7 @@ impl IdSource {
 // 只有**环**会致命,遇环直接报错(官方会栈溢出)。
 
 /// 解析 Kitten4 编辑版的 `block_data_json`
-pub(crate) fn parse_block_data_json(block_data_json: &Value) -> Result<BlockTree> {
+pub(super) fn parse_block_data_json(block_data_json: &Value) -> Result<BlockTree> {
     let bdj = block_data_json
         .as_object()
         .ok_or_else(|| DecompilerError::TypeMismatch {
@@ -556,7 +556,7 @@ const ROOT_LAYOUT_STEP: i64 = 220;
 /// - `next` 子节点的 `parent_id` 指向链上前一个积木(Kitten4 实测如此);
 /// - 缺 id / id 重复(菱形展开的同一积木被两个槽位引用)时现铸新 id —— `blocks` 是 id 字典,
 ///   不重铸就会互相覆盖(正向产物里这类重复 id 有 49 个)。
-pub(crate) fn build_block_data_json(tree: &BlockTree, ids: &mut IdSource) -> Result<Value> {
+pub(super) fn build_block_data_json(tree: &BlockTree, ids: &mut IdSource) -> Result<Value> {
     let mut blocks: Map<String, Value> = Map::new();
     let mut connections: Map<String, Value> = Map::new();
     let mut seen: HashSet<String> = HashSet::new();
@@ -744,7 +744,7 @@ const VALUE_SHADOW_XML: &str = "<shadow type=\"math_number\">\n        <field na
 
 /// 一个程序集形参(官方 `params[]` 元素)
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ProcedureParam {
+pub(super) struct ProcedureParam {
     /// 目标侧形参 id(合成 Label 是新铸 UUID;String 沿用源侧形参积木 id)
     pub id: String,
     /// 形参类型:`Label`(程序集名本身)/ `String`
@@ -755,7 +755,7 @@ pub(crate) struct ProcedureParam {
 
 /// 一条 `proceduresDict` 条目
 #[derive(Debug, Clone)]
-pub(crate) struct ProcedureEntry {
+pub(super) struct ProcedureEntry {
     /// 条目 id(`NORMAL` = 源定义积木 id;`ROUND` = 现铸 UUID)
     pub id: String,
     /// 程序集名(源侧 `fields.NAME`)
@@ -775,7 +775,7 @@ pub(crate) struct ProcedureEntry {
 /// 官方顺序:先处理**所有**场景再处理所有角色(`GN`,82821-82830),所以调用方按
 /// `scenes → actors` 顺序喂进来,`procedures` 数组的顺序才与官方一致;`rewrite_calls`
 /// 按数组顺序线性查找同名程序集,顺序错了两条同名程序集就会串。
-pub(crate) fn split_procedures(
+pub(super) fn split_procedures(
     tree: BlockTree,
     ids: &mut IdSource,
     report: &mut TranslateReport,
@@ -1022,7 +1022,7 @@ fn inject_return_values(node: &mut BlockJson, ids: &mut IdSource) {
 ///
 /// 官方只对**实体**的 `nekoBlockJsonList` 调用 `KC`(程序集定义体不经此函数),
 /// 且对每个节点先做 `GC`——`GC` 已由 [`mapping`](super::mapping) 施加,这里不再重复。
-pub(crate) fn rewrite_calls(
+pub(super) fn rewrite_calls(
     tree: &mut BlockTree,
     procedures: &[ProcedureEntry],
     ids: &mut IdSource,
@@ -1119,7 +1119,7 @@ fn rewrite_call(
 // ---------------------------------------------------------------- 反向:KN → Kitten4(自建)
 
 /// KN 的 `nekoBlockJsonList`(数组)→ 中核树。空/缺失 → 空树(实体可以没有积木)。
-pub(crate) fn parse_kn_entity(list: &Value) -> Result<BlockTree> {
+pub(super) fn parse_kn_entity(list: &Value) -> Result<BlockTree> {
     // 数组形态(绝大多数)直接借用,**不再整表克隆**;只有字符串形态才需要持有一份解析结果
     let owned: Vec<Value>;
     let values: &[Value] = match list {
@@ -1149,7 +1149,7 @@ pub(crate) fn parse_kn_entity(list: &Value) -> Result<BlockTree> {
 }
 
 /// `procedures.proceduresDict`(或裸字典)→ 程序集条目(字段与 KN 完全一致)
-pub(crate) fn parse_kn_procedures(dict: &Value) -> Result<Vec<ProcedureEntry>> {
+pub(super) fn parse_kn_procedures(dict: &Value) -> Result<Vec<ProcedureEntry>> {
     let dict = match dict {
         Value::Object(map) => match map.get("proceduresDict") {
             Some(inner) => inner,
@@ -1213,7 +1213,7 @@ pub(crate) fn parse_kn_procedures(dict: &Value) -> Result<Vec<ProcedureEntry>> {
 }
 
 /// 只带元信息的程序集条目(反向调用点重写用:只需 id/name/params,不克隆定义体)
-pub(crate) fn call_targets(procedures: &[ProcedureEntry]) -> Vec<ProcedureEntry> {
+pub(super) fn call_targets(procedures: &[ProcedureEntry]) -> Vec<ProcedureEntry> {
     procedures
         .iter()
         .map(|entry| ProcedureEntry {
@@ -1231,7 +1231,7 @@ pub(crate) fn call_targets(procedures: &[ProcedureEntry]) -> Vec<ProcedureEntry>
 ///
 /// 官方只对**实体**的 `nekoBlockJsonList` 跑 `KC`;我们这里实体与程序集体都跑(程序集体里的调用点
 /// 同样需要还原,否则 Kitten 编辑器看到的是拿不到引用的 UUID)。
-pub(crate) fn unrewrite_calls(
+pub(super) fn unrewrite_calls(
     tree: &mut BlockTree,
     procedures: &[ProcedureEntry],
     ids: &mut IdSource,
@@ -1357,7 +1357,7 @@ fn unrewrite_call(
 
 /// 程序集条目 → Kitten4 的定义根积木(`zC` 的逆):形参回到 `PARAMS<j>` 输入 + `stable_parameter`,
 /// 定义体回到 `statements.STACK`(正向把 `inputs.STACK` 搬去了 `statements.STACK`,这里保持)。
-pub(crate) fn def_root_from_entry(
+pub(super) fn def_root_from_entry(
     entry: &ProcedureEntry,
     ids: &mut IdSource,
     report: &mut TranslateReport,
@@ -1448,7 +1448,7 @@ fn default_value_shadow(id: &str, value: &str) -> String {
 /// 实体/程序集的积木树 → `nekoBlockJsonList` 数组
 ///
 /// 编码前会补齐官方一定会写的 `shield` 键(见 [`fill_shield`])。
-pub(crate) fn tree_to_json(tree: &BlockTree) -> Result<Vec<Value>> {
+pub(super) fn tree_to_json(tree: &BlockTree) -> Result<Vec<Value>> {
     tree.roots
         .iter()
         .map(|root| {
@@ -1483,7 +1483,7 @@ fn fill_shield(node: &mut Value) {
 }
 
 /// 程序集条目 → `proceduresDict`(调用方再包一层 `{"proceduresDict": …}`)
-pub(crate) fn procedures_to_json(procedures: &[ProcedureEntry]) -> Result<Map<String, Value>> {
+pub(super) fn procedures_to_json(procedures: &[ProcedureEntry]) -> Result<Map<String, Value>> {
     let mut dict = Map::new();
     for entry in procedures {
         let params = entry

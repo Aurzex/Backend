@@ -189,7 +189,7 @@ const FIELD_NAME_MAP: &[(&str, &str)] = &[
 /// 把一个实体的积木树按官方管线翻成 KN 语义(就地改写 `tree`)。
 ///
 /// `landscape` 对应官方模块级 `UC = size.width > size.height`(横屏时坐标要除以 1.3)。
-pub(crate) fn translate_kitten_to_kn(
+pub(super) fn translate_kitten_to_kn(
     tree: &mut BlockTree,
     landscape: bool,
     ids: &mut IdSource,
@@ -290,7 +290,7 @@ pub(super) fn translate_type(kind: &str) -> &str {
 }
 
 /// 是否 KN 的四种「文本占位积木」(降级产物)
-pub(crate) fn is_text_placeholder(kind: &str) -> bool {
+pub(super) fn is_text_placeholder(kind: &str) -> bool {
     TEXT_PLACEHOLDER_BLOCKS.contains(&kind)
 }
 
@@ -315,7 +315,7 @@ fn value_key(value: &Value) -> Option<Cow<'_, str>> {
 ///
 /// 两个装配方向共用:`None` 等价 `undefined`;`serde_json` 表示不了 `NaN`
 /// (`Number::from_f64(NaN)` 返回 `None`),所以无需再单独判 `NaN`。
-pub(crate) fn truthy(value: Option<&Value>) -> bool {
+pub(super) fn truthy(value: Option<&Value>) -> bool {
     match value {
         None | Some(Value::Null) => false,
         Some(Value::Bool(b)) => *b,
@@ -822,7 +822,7 @@ struct RevCtx<'a> {
 }
 
 /// 把一棵 KN 语义的积木树就地改写成 Kitten4 语义(自建反向映射)。
-pub(crate) fn translate_kn_to_kitten(
+pub(super) fn translate_kn_to_kitten(
     tree: &mut BlockTree,
     landscape: bool,
     report: &mut TranslateReport,

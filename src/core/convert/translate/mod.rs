@@ -45,21 +45,23 @@
 //! - 角色 ↔ 造型关联、云变量与本地变量的区分在 KN 里已丢失,按 `currentStyleId` / 全部并入
 //!   `variables` 还原并报告。
 
-pub(crate) mod assembly;
+// 子模块只服务本子树 ⇒ 默认**私有**(除 `tables_gen`:地基 `shared.rs` 的 `bcm_version`
+// 兜底要读它的 `BCM_VERSION`,故收窄到 `core::convert`)。收太紧编译器会报错兜底。
+mod assembly;
 mod kitten4_vocab;
-pub(crate) mod mapping;
-pub(crate) mod model;
-pub(crate) mod nemo;
-pub(crate) mod nemo_mapping;
+mod mapping;
+mod model;
+mod nemo;
+mod nemo_mapping;
 #[cfg(test)]
 mod nemo_tests;
-pub(crate) mod options;
-pub(crate) mod pipeline;
-pub(crate) mod report;
+mod options;
+mod pipeline;
+mod report;
 #[cfg(test)]
 mod reverse_tests;
-pub(crate) mod tables_gen;
-pub(crate) mod xml;
+pub(in crate::core::convert) mod tables_gen;
+mod xml;
 
 // 拆分后仍留在门面的公开路径:外部(`convert` 域门面与 `tests/`)按这些路径取类型
 pub use options::{
@@ -170,7 +172,9 @@ pub fn translate_file(
 /// 产物路径口径:`<源文件名主干>.<slug>.<bcmkn|bcm4>`
 ///
 /// `translate_file` 与域门面(内存直通路径)共用同一口径,避免两条入口命名分叉。
-pub(crate) fn product_path(
+/// 可见性是 `core::convert`(域门面 `convert/mod.rs` 与 `translate_file` 共用;`pub(super)` 不够、
+/// `pub(crate)` 过宽)。
+pub(in crate::core::convert) fn product_path(
     source_file: &std::path::Path,
     target: TargetEditor,
     options: &TranslateOptions,
@@ -244,7 +248,8 @@ pub fn set_source_reference(
 /// Kitten2 与 Kitten3 的编辑版都是 `blocksXML`,本地样本与 `docs/rounds/20` 都没有可靠的
 /// 区分标记,而**两者都不支持转化**(编辑器自己会拒绝,见 `docs/rounds/20` §3.1),
 /// 故统一按 Kitten3 报;不编造 `size` 之类的判据。
-pub(crate) fn detect_editor(
+/// 可见性是 `core::convert`(域门面 `convert/mod.rs` 用它做跨子域判定)。
+pub(in crate::core::convert) fn detect_editor(
     source: &serde_json::Value,
 ) -> Option<crate::core::convert::EditorType> {
     use serde_json::Value;
@@ -282,8 +287,10 @@ pub(crate) fn detect_editor(
 }
 
 /// 测试用临时目录:**每次调用唯一**(进程 + 随机后缀),避免并行测试/跨运行互相覆盖
+///
+/// 只服务 `translate` 子树自己的测试(本文件 `diff_tests` 与 `reverse_tests`)⇒ 私有。
 #[cfg(test)]
-pub(crate) fn unique_test_dir(tag: &str) -> std::path::PathBuf {
+fn unique_test_dir(tag: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
         "backend-convert-{tag}-{}-{:08x}",
         std::process::id(),

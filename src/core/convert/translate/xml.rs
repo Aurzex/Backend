@@ -11,12 +11,12 @@ use std::ops::Range;
 
 /// 从整段 XML 取开始标签里 `attr="…"` 的值(先按引号感知找标签尾,再取属性)
 /// 唯一的 XML 属性读取实现:本模块与 `neko.rs` 的 mutation 改写共用
-pub(crate) fn xml_attr_value<'a>(xml: &'a str, attr: &str) -> Option<&'a str> {
+pub(super) fn xml_attr_value<'a>(xml: &'a str, attr: &str) -> Option<&'a str> {
     attr_value(&xml[..start_tag_end(xml)?], attr)
 }
 
 /// 开始标签里 `attr="…"` 的值区间(只认双引号属性;属性名前须是空白,避免 `xname=` 误命中)
-pub(crate) fn attr_span(tag: &str, attr: &str) -> Option<Range<usize>> {
+pub(super) fn attr_span(tag: &str, attr: &str) -> Option<Range<usize>> {
     let bytes = tag.as_bytes();
     let mut from = 0;
     loop {
@@ -33,12 +33,12 @@ pub(crate) fn attr_span(tag: &str, attr: &str) -> Option<Range<usize>> {
     }
 }
 
-pub(crate) fn attr_value<'a>(tag: &'a str, attr: &str) -> Option<&'a str> {
+pub(super) fn attr_value<'a>(tag: &'a str, attr: &str) -> Option<&'a str> {
     attr_span(tag, attr).map(|span| &tag[span])
 }
 
 /// 替换开始标签里某个属性的值(其余字节原样保留)
-pub(crate) fn set_attr_value(tag: &str, attr: &str, value: &str) -> String {
+pub(super) fn set_attr_value(tag: &str, attr: &str, value: &str) -> String {
     match attr_span(tag, attr) {
         Some(span) => format!("{}{}{}", &tag[..span.start], value, &tag[span.end..]),
         None => tag.to_string(),
@@ -46,7 +46,7 @@ pub(crate) fn set_attr_value(tag: &str, attr: &str, value: &str) -> String {
 }
 
 /// `<` 到开始标签结束(跳过引号里的 `>`)
-pub(crate) fn start_tag_end(xml: &str) -> Option<usize> {
+pub(super) fn start_tag_end(xml: &str) -> Option<usize> {
     let mut quoted = false;
     for (i, b) in xml.as_bytes().iter().enumerate().skip(1) {
         match b {
@@ -59,7 +59,7 @@ pub(crate) fn start_tag_end(xml: &str) -> Option<usize> {
 }
 
 /// 官方 `text_select_changeable` 修补:`items` 属性减一(解析失败则原样保留)
-pub(crate) fn decrement_items(xml: &str) -> String {
+pub(super) fn decrement_items(xml: &str) -> String {
     match attr_span(xml, "items").and_then(|span| {
         xml[span.clone()]
             .trim()
@@ -76,7 +76,7 @@ pub(crate) fn decrement_items(xml: &str) -> String {
 ///
 /// NEMO 侧的属性值解析共用这一份(`nemo_mapping.rs` 的 `parse_int` 与 `nemo.rs` 的几个前置改写;
 /// 原先两边各有一份逐字相同的副本)。
-pub(crate) fn parse_int_prefix(text: &str) -> Option<i64> {
+pub(super) fn parse_int_prefix(text: &str) -> Option<i64> {
     let trimmed = text.trim_start();
     let (sign, digits) = match trimmed.strip_prefix('-') {
         Some(rest) => (-1i64, rest),
@@ -92,7 +92,7 @@ pub(crate) fn parse_int_prefix(text: &str) -> Option<i64> {
 }
 
 /// JS 属性访问 / `String(v)` / 模板拼接的等价物(缺失 → `undefined`)
-pub(crate) fn js_text(value: Option<&Value>) -> String {
+pub(super) fn js_text(value: Option<&Value>) -> String {
     match value {
         None => "undefined".to_string(),
         Some(Value::String(s)) => s.clone(),
@@ -104,13 +104,13 @@ pub(crate) fn js_text(value: Option<&Value>) -> String {
 }
 
 /// 官方两个算术包装里共用的 `math_number` 影子串(默认值恒为 `1`)
-pub(crate) fn math_number_shadow(id: &str, num: &str) -> String {
+pub(super) fn math_number_shadow(id: &str, num: &str) -> String {
     format!(
         "<shadow xmlns=\"{XHTML}\" type=\"math_number\" id=\"{id}\" visible=\"visible\"><field constraints=\"-Infinity,Infinity,0,\" name=\"NUM\">{num}</field></shadow>"
     )
 }
 
-pub(crate) fn pure_list_shadow(id: &str, list: &Value) -> String {
+pub(super) fn pure_list_shadow(id: &str, list: &Value) -> String {
     format!(
         "<shadow xmlns=\"{XHTML}\" type=\"pure_list_get\" id=\"{id}\" visible=\"visible\" inline=\"true\"><field name=\"list\">{}</field></shadow>",
         js_text(Some(list))
@@ -118,7 +118,7 @@ pub(crate) fn pure_list_shadow(id: &str, list: &Value) -> String {
 }
 
 /// `<mutation …>正文</mutation>` 的正文(占位积木的降级文本就存在这里)
-pub(crate) fn mutation_body(xml: &str) -> &str {
+pub(super) fn mutation_body(xml: &str) -> &str {
     let Some(open) = xml.find('>') else { return "" };
     let rest = &xml[open + 1..];
     match rest.rfind("</mutation>") {
@@ -128,7 +128,7 @@ pub(crate) fn mutation_body(xml: &str) -> &str {
 }
 
 /// 源 XML 元素计数:`block` / `shadow` / `empty`(官方研究的统计口径)
-pub(crate) fn count_source_elements(nodes: &[XmlNode]) -> usize {
+pub(super) fn count_source_elements(nodes: &[XmlNode]) -> usize {
     let mut total = 0;
     let mut stack: Vec<&XmlNode> = nodes.iter().collect();
     while let Some(node) = stack.pop() {
@@ -195,7 +195,7 @@ const MAX_DEPTH: usize = 4096;
 
 /// 一个 XML 元素(属性按出现顺序存,子节点按文档顺序存)
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct XmlNode {
+pub(super) struct XmlNode {
     /// 元素名(Scratch 积木 XML 一律小写:`block`/`shadow`/`value`/`field`/…)
     pub tag: String,
     /// 属性:按**出现顺序**存放(同名重复的按宽松策略各留一项)
@@ -208,7 +208,7 @@ pub(crate) struct XmlNode {
 
 impl XmlNode {
     /// 新建元素(无属性、无子元素、无文本)
-    pub(crate) fn new(tag: &str) -> Self {
+    pub(super) fn new(tag: &str) -> Self {
         Self {
             tag: tag.to_string(),
             attrs: Vec::new(),
@@ -218,7 +218,7 @@ impl XmlNode {
     }
 
     /// 首个同名属性;未声明同名属性时返回 `None`(注意:不存在 ≠ 空串,对应 `getAttribute` 的 `null`)
-    pub(crate) fn attr(&self, name: &str) -> Option<&str> {
+    pub(super) fn attr(&self, name: &str) -> Option<&str> {
         self.attrs
             .iter()
             .find(|(k, _)| k == name)
@@ -226,7 +226,7 @@ impl XmlNode {
     }
 
     /// 同名则替换值(**保持原位置**),否则追加到末尾(`DOMParser` + `setAttribute` 语义)
-    pub(crate) fn set_attr(&mut self, name: &str, value: &str) {
+    pub(super) fn set_attr(&mut self, name: &str, value: &str) {
         match self.attrs.iter_mut().find(|(k, _)| k == name) {
             Some((_, v)) => *v = value.to_string(),
             None => self.attrs.push((name.to_string(), value.to_string())),
@@ -234,22 +234,22 @@ impl XmlNode {
     }
 
     /// 删除所有同名属性(对应 `removeAttribute`;属性不存在时无操作)
-    pub(crate) fn remove_attr(&mut self, name: &str) {
+    pub(super) fn remove_attr(&mut self, name: &str) {
         self.attrs.retain(|(k, _)| k != name);
     }
 
     /// 首个直接子元素(tag 精确匹配,不做大小写折叠)
-    pub(crate) fn child(&self, tag: &str) -> Option<&XmlNode> {
+    pub(super) fn child(&self, tag: &str) -> Option<&XmlNode> {
         self.children.iter().find(|c| c.tag == tag)
     }
 
     /// 首个直接子元素(可变)
-    pub(crate) fn child_mut(&mut self, tag: &str) -> Option<&mut XmlNode> {
+    pub(super) fn child_mut(&mut self, tag: &str) -> Option<&mut XmlNode> {
         self.children.iter_mut().find(|c| c.tag == tag)
     }
 
     /// 所有直接子元素中 tag 匹配的那些(文档顺序)
-    pub(crate) fn children_of<'a>(
+    pub(super) fn children_of<'a>(
         &'a self,
         tag: &'a str,
     ) -> impl Iterator<Item = &'a XmlNode> + 'a {
@@ -260,7 +260,7 @@ impl XmlNode {
     ///
     /// 元素按文档顺序先序展开("两段式"模型下父节点的直接文本无法还原交错位置,
     /// 这里按"自身文本 + 各后代"的顺序拼;对文本只出现在叶子里的积木 XML 结果一致)。
-    pub(crate) fn text_content(&self) -> String {
+    pub(super) fn text_content(&self) -> String {
         let mut out = String::new();
         // 显式栈先序遍历:弹一个节点 → 收它的直接文本 → 逆序压入子节点
         let mut stack: Vec<&XmlNode> = Vec::with_capacity(8);
@@ -278,7 +278,7 @@ impl XmlNode {
     ///
     /// 布局:`<tag a="1" b="2">子元素序列 + 文本</tag>`;无子元素且无文本 → 自闭合 `<tag/>`。
     /// 迭代实现(显式工作栈),深层嵌套不会栈溢出。
-    pub(crate) fn serialize(&self) -> String {
+    pub(super) fn serialize(&self) -> String {
         /// 待完成的工作项(先序:开始标签 → 子元素 → 文本 → 结束标签)
         enum Job<'a> {
             Open(&'a XmlNode),
@@ -367,7 +367,7 @@ fn push_text_escaped(out: &mut String, s: &str) {
 
 /// 解析一整份文档,返回**第一个元素**
 /// (跳过 XML 声明/注释/DOCTYPE/前后空白/末尾其它节点)
-pub(crate) fn parse(xml: &str) -> Result<XmlNode, DecompilerError> {
+pub(super) fn parse(xml: &str) -> Result<XmlNode, DecompilerError> {
     let mut parser = Parser::new(xml);
     let roots = parser.run()?;
     // 顶层可以有多个元素(编辑器把 `<variables></variables>` 与各根积木并排存),
@@ -384,7 +384,7 @@ pub(crate) fn parse(xml: &str) -> Result<XmlNode, DecompilerError> {
 /// 解析 `<root>…</root>` 这种**单根包装**,返回该根的直接子元素
 /// (官方 `parseFromString("<root>" + blocksXML + "</root>", "text/xml")` 的用法)。
 /// 整份文档的根不是唯一元素 → `Err`。
-pub(crate) fn parse_fragment(xml: &str) -> Result<Vec<XmlNode>, DecompilerError> {
+pub(super) fn parse_fragment(xml: &str) -> Result<Vec<XmlNode>, DecompilerError> {
     let mut parser = Parser::new(xml);
     let roots = parser.run()?;
     let count = roots.len();

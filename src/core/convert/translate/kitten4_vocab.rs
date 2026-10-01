@@ -21,7 +21,7 @@
 ///
 /// 编辑器认识的积木类型(已排序,二分查找用)
 #[rustfmt::skip]
-pub(crate) const KITTEN4_EDITOR_TYPES: &[&str] = &[
+pub(super) const KITTEN4_EDITOR_TYPES: &[&str] = &[
     "LOGIC_SHADOW", "SHADOW", "add_width_height_scale", "add_width_height_scale_2",
     "ai_lab_add_data", "ai_lab_classify", "ai_lab_predict_classification", "ai_lab_predict_confidence",
     "allow_rotate", "ask_and_choose", "auto_player_actor_die", "auto_player_actor_is_dead",
@@ -113,7 +113,7 @@ pub(crate) const KITTEN4_EDITOR_TYPES: &[&str] = &[
 ];
 
 /// 目标编辑器是否认识这个类型
-pub(crate) fn kitten4_editor_knows(kind: &str) -> bool {
+pub(super) fn kitten4_editor_knows(kind: &str) -> bool {
     KITTEN4_EDITOR_TYPES.binary_search(&kind).is_ok()
 }
 
