@@ -153,6 +153,45 @@ fn meta_for_assert(meta: &serde_json::Value) -> serde_json::Value {
     meta
 }
 
+/// S2:[`META_RECORD_ONLY`] 的**钉子** —— 剔除的必须**恰好**是那 4 个分配键
+///
+/// 为什么需要:那几个"只记录不判"的键靠 [`meta_for_assert`] 剔掉才不参与断言;哪天名单被**改大**
+/// (多塞进一个本该断言的键,比如 `warnings`),门就静默变松而没人知道。两条断言:①机制(名单外的
+/// 键一个不少地留下)②名单本身(改名/增删都红)。
+#[test]
+fn meta_record_only_strips_exactly_the_alloc_keys() {
+    let meta = serde_json::json!({
+        "source_sha256": "sha",
+        "blocks_total": 1,
+        "warnings": 2,
+        "source_version": "0.11.0",
+        "alloc_count_serial": 3,
+        "alloc_bytes_serial": 4,
+        "alloc_count_parallel": 5,
+        "alloc_bytes_parallel": 6,
+    });
+    assert_eq!(
+        meta_for_assert(&meta),
+        serde_json::json!({
+            "source_sha256": "sha",
+            "blocks_total": 1,
+            "warnings": 2,
+            "source_version": "0.11.0",
+        }),
+        "剔除的必须恰好是分配键 —— 名单一被改大,本该断言的键就会静默不设防"
+    );
+    assert_eq!(
+        META_RECORD_ONLY,
+        [
+            "alloc_count_serial",
+            "alloc_bytes_serial",
+            "alloc_count_parallel",
+            "alloc_bytes_parallel"
+        ],
+        "名单本身钉住(改键名或增删条目都会在这里红)"
+    );
+}
+
 /// 每个样本重复次数(取**最小值**:CPU 基准里最小值≈最少干扰,比中位数稳)
 const RUNS: usize = 5;
 
