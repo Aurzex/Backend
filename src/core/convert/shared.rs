@@ -38,8 +38,6 @@ pub enum DecompilerError {
     Crypto(String),
     #[error("作品解析失败: {0}")]
     Decompile(String),
-    #[error("不支持的作品类型: {0}")]
-    UnsupportedType(String),
     #[error("无效的响应数据: {0}")]
     InvalidResponse(String),
     #[error("缺少字段: {field}")]
