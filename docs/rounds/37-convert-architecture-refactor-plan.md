@@ -707,3 +707,28 @@ scenes 实体 b5e60282…: 块 20 / 根 4 / 可达 20
 **下一轮第一步(单元级,分钟级)**:拿一个只含 `get_midis` 的最小 Kitten4 文档(照 `mapping.rs` 现有测试的夹具写法)
 过一遍 `convert_kitten4_document`,看它变成什么(占位块?消失?报什么告警)——
 把"整份语料里的疑似丢块"缩小到"一个块的最小复现",再顺 `LC`/`KC` 查那一步。
+
+### 13.7 **更正 §13.5/§13.6**:正向没有丢块 —— 最小复现给出反证
+
+用**真 API 的最小复现**(只含一个 `get_midis` 的 Kitten4 文档过一遍 `convert_kitten4_document`,仪器用完即撤):
+
+```
+KN 侧块数 = 1
+块: {"id":"b1","shield":false,"type":"bcm_translator_text_return_value_block"}
+告警: []
+translate_type("get_midis") = bcm_translator_text_return_value_block
+```
+
+⇒ `get_midis` **被正常转换**成文档化的占位块(`LC` 降级一族),**没有丢、也没有告警** ⇒
+**正向腿没有"吞掉可达积木"这回事**,§13.6 据此下的"真缺陷"结论**不成立,撤回**。
+
+**那 §13.5 的"KN 中间态只有 17 块"从哪来?** —— 那是我**临时探针自己的 bug**:遍历 KN 侧时只看了
+顶层 `nekoBlockJsonList` 数组元素与它下面的 map 值,**漏掉了嵌在 `inputs`/`statements` 里、以及定义体里的块**
+(相邻的两次探针里,`bcm_translator_text_execution_block×2` 这种"块里的块"就是这么被漏算的),于是把 37 数成 17,
+又据此编出"丢 ≈20 块"的结论。**两条更正连在一起读**:探针写错一次,就会造出一个不存在的缺陷。
+
+**本轮最终结论(正向扫描)**:
+- 差异**全部**落在 ① 改名(等价类,§13.4 已把口径修稳)② 已文档化的降级/包装(占位块、GC 包装、`procedures_2_*` 拆分、
+  `stop⇄terminate`、`shadow_number`)③ 槽默认影子不回写(rounds/34 §4quinquies)⇒ **没有确认的正向缺陷**;
+- **方法教训(第二次同类,这次更狠)**:探针/仪器必须**用真 API 走最小复现**来交叉验证,
+  不能只靠自己写的遍历 —— 遍历写错一次,就能凭空造出一个"缺陷"并一路写成结论。
