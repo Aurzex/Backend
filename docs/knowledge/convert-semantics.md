@@ -122,6 +122,7 @@ NEMO → KN 是另一条前端(`hI.parseBlocksXML`),官方管线共 12 步(`main
 | 官方校验器 | `BcmHelpers.validateBcm`(bundle module 87123)**可 headless 运行** —— "产物能否被编辑器加载"的硬门 |
 | 语义 diff | 与官方产物比较**忽略 id/location/uuid**(`docs/rounds/20` §9);官方产物按键插入序,**从不逐字节对齐官方** |
 | 确定性 | `IdSource` + `TranslateOptions::deterministic_ids`;并发 1 与并发 N 产物 **SHA256 相同** |
+| **字节基线** | `convert_bench` 的产物 SHA256 + `#meta`(源 SHA / 字节 / 块数 / 告警数 / `source_version`):**6 样本 = 4 Kitten + 2 NEMO**(NEMO 一件含 YC 版本迁移);产物字节或报告退化(块变少、告警变多)都必须先解释再接受 |
 | 往返守恒 | KN→Kitten4→KN 的积木类型**多重集**一致(差异仅白名单降级项 + 预算断言) |
 | 有损记账 | 一切有损进 `TranslateReport`;官方重传资源不算有损(`ReuploadedOnImport`) |
 | **编辑器能否打开** | 实机硬门:无头 Chromium + 线上 Kitten4 的「打开本地作品」,数画布积木并看角色列表(带对照组) |

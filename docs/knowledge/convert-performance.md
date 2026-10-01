@@ -11,6 +11,8 @@
 | KN 作品反编译(模式分派) | 46s | **1.5s** |
 | Kitten4 作品反编译 | 单块 `from_value` | **1.5s**(逐块克隆改掉) |
 | 转换 Kitten4→KN(离线、确定性) | — | **38 ms**(374 输入积木 → 439 产物节点) |
+| 转换 NEMO→KN(离线、确定性) | — | **core 365–442 ms / e2e 466–556 ms**(3.5 MB 源 → 7.7 MB 产物;15 482 源元素 → 13 637 产物节点) |
+| 转换 NEMO→KN(老版本 0.11.0,**含 YC 迁移**) | — | **core 108–121 ms / e2e 142–152 ms**(1.5 MB 源 → 2.4 MB 产物;4 862 源元素 → 4 421 产物节点) |
 | 转换(官方 JS 同输入参照) | 355 ms(Node) | — |
 | 资源删除(批量) | 7.9s | **5.3s**(并行 delete) |
 
@@ -51,6 +53,8 @@
 
 - **绑核**:`taskset -c 0-3`,**5 轮取最小**(本机 2 物理核 / 4 逻辑核);报告要区分 `core` 与 `e2e`。
 - **字节门**:并发优化必须证"并发 1 与并发 N 产物 SHA256 相同",再谈加速比。
+  样本现为 **6 个**(4 Kitten + 2 NEMO);NEMO 那两件的 `#meta` 带 `source_version`
+  (`0.11.0` 那件 < 0.15.0 ⇒ **YC 版本迁移真的进基线**;`0.16.2` 那件等于迁移目标版本,迁移是 no-op)。
 - **无数据不做**:任何"看起来更快"的改动,要么有基准点,要么承认在噪声内(例:某次优化 `core` 259 vs 261 ms 属噪声,保留它的理由只是"构造上更少分配")。
 - 官方差分门只做**语义比较**(官方从不逐字节对齐)。
 
@@ -60,4 +64,4 @@
 - `docs/rounds/23-convert-performance-plan.md` §1–§3、§5、§7(落地记录)。
 - `docs/rounds/25-convert-entity-parallelism-plan.md` §1(分布)、§9(正向落地)、§10(反向判不做)。
 - `docs/rounds/29-optimization-scan-ledger.md`(P0/P1 台账)。
-- 代码锚点:`src/core/convert/decompile/mod.rs`(`RESOURCE_DOWNLOAD_BUDGET`)、`src/core/convert/mod.rs`(两级预算折算)、`tests/convert_bench.rs`(自有 SHA256 基线)。
+- 代码锚点:`src/core/convert/decompile/mod.rs`(`RESOURCE_DOWNLOAD_BUDGET`)、`src/core/convert/mod.rs`(两级预算折算)、`tests/convert_bench.rs`(自有 SHA256 基线:6 样本,4 Kitten + 2 NEMO)。

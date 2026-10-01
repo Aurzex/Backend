@@ -112,7 +112,7 @@
 ## 4. 需要留意的既有防线(改动前先看)
 
 - `tests/convert_live.rs`(真机,默认 `#[ignore]`;写平台的用例会建"可删"草稿)。
-- `tests/convert_bench.rs`(自有 SHA256 基线:任何产物字节变化都必须先解释再接受)。
+- `tests/convert_bench.rs`(自有 SHA256 基线:任何产物字节变化都必须先解释再接受;**现 6 样本 = 4 Kitten + 2 NEMO**,NEMO 那两件带 `source_version`,`#meta` 里也记着)。
 - `reverse_tests` 里的往返多重集守恒 + 缺口预算断言(只许变小;每次跑打印 `[预算]` 读数)。
 - **实机门(最强)**:无头 Chromium + 线上 Kitten4 的「打开本地作品」—— 数画布积木 + 看角色列表,
   必须带一个已知能读的对照组(方法留档见 `docs/rounds/35`;配方也可从 `docs/knowledge/convert-semantics.md` §5bis 反查)。
@@ -126,7 +126,7 @@
 | - | ---- | -------- | ---- |
 | 1 | ~~**把两条扫描器的"差异类别"升级成基线门(只许变少)**~~ → **rounds/39 W3c 改判**:差异类别**不升格为门**(保留"只打印 + 人工分诊"),只**删掉** `reverse_tests.rs:1825-1835` 那份死 allow-list 副本(活的那份在 `:2192-2225`)。理由:`download/` 是 gitignored 的**增量**语料,集合门必然假红;与仓库"按文件名索引 + 表外取表内最大值"的门口径不合 | — | 见 `docs/rounds/39` §W3c/§4 |
 | 2 | 性能:P8–P11 | — | **实测判定不再做**:P2/P3/P5/P6 同轮 A/B 都落在噪声内(±2%,rounds/37 §6.2bis/§10.6);要真收益只有"少建中间 `Value` 树"那条重写装配层的路,风险极高,除非有硬性指标 |
-| 3 | NEMO 方向:补 SHA 基线 + 采一次 perf → **方案已细化:`docs/rounds/39` §W6** | — | NEMO 有 6 条内存单测但没有字节门;加样本时 `Sample` **必须能传 `source_version`**(否则基线锁死"不迁移"口径,门绿但证错东西);它已知有重复解析(同一段 XML 包 `<root>` 解析两次,见 §W8) |
+| 3 | ~~NEMO 方向:补 SHA 基线~~ → ✅ **已落地(2026-10-01,见 §6.3 G6)**:样本进 `SAMPLES`(`source_version` 逐样本透传 + `#meta` 记该字段),两件 NEMO 作品入基线 | — | 加样本时 `Sample` **必须能传 `source_version`**(否则基线锁死"不迁移"口径,门绿但证错东西)。**仍未做**:NEMO 前端已知有重复解析(同一段 XML 包 `<root>` 解析两次,见 `docs/rounds/39` §W8) |
 | 4 | 实机门进 CI | — | 离线替身:官方 `validateBcm` 可 headless 跑(注:CI 目前只跑 build + `repo_hygiene`,`download/` 被 gitignore ⇒ 任何 CI 门都得先有**入库的**夹具) |
 
 ---
@@ -152,9 +152,9 @@
 | -- | ---- | ---- |
 | 正向 Kitten4→KN | 真原件语料 24 条差异**全部**归因于改名/等价类 + 已文档化降级与包装 + 槽默认影子不回写 ⇒ **无已确认缺陷** | `docs/rounds/37` §13.4/§13.8 |
 | 反向 KN→Kitten4 | 自建、有损;实机门已过(角色列表 + 画布块数);损失已量化 = **改成「未收录积木」标记**(位置与存在保住、内容不可恢复)+ 槽默认影子不回写 + 类型歧义 + id 重铸 | `docs/rounds/34/35/36/38`、`knowledge/convert-semantics.md` §5bis |
-| 既有门 | 定义体缺口预算 `≤3193`;**两处预算门(都只许变小)**:id 台账门 `LOST_ID_BUDGET`(正向扫描器,`reverse_tests` 的 `k4_corpus_round_trip_sweep`)+ 标记量门 `MARKER_BUDGET`(反向扫描器,`kn_corpus_round_trip_sweep`;**"改成「未收录积木」标记的块数 + 清空影子数"**,rounds/38 起由"剔除量门"改名改语义);`convert_bench` SHA + `#meta` 基线(Phase 0 已重刷加固,`ae41361`);往返多重集守恒 | `reverse_tests` 的扫描器/预算函数(按名引用;行号会漂)、`tests/convert_bench.rs` |
+| 既有门 | 定义体缺口预算 `≤3193`;**两处预算门(都只许变小)**:id 台账门 `LOST_ID_BUDGET`(正向扫描器,`reverse_tests` 的 `k4_corpus_round_trip_sweep`)+ 标记量门 `MARKER_BUDGET`(反向扫描器,`kn_corpus_round_trip_sweep`;**"改成「未收录积木」标记的块数 + 清空影子数"**,rounds/38 起由"剔除量门"改名改语义);`convert_bench` SHA + `#meta` 基线(**现 6 样本 = 4 Kitten + 2 NEMO**;Phase 0 已重刷加固,`ae41361`);往返多重集守恒 | `reverse_tests` 的扫描器/预算函数(按名引用;行号会漂)、`tests/convert_bench.rs` |
 | 仪器 | `kn_corpus_round_trip_sweep` / `k4_corpus_round_trip_sweep`(默认跑,读 `download/compile/`,缺语料则跳过)+ 平台真原件编辑格式语料 `download/compile/k4edit/`(2 件作品 × 10 版)+ 实机门(手动) | `reverse_tests` 的同名扫描器、`tests/convert_edit_harvest.rs` |
-| NEMO | 与官方逐数一致,但**无 SHA 字节门**、`report.elapsed_ms` **恒 0** | `docs/rounds/37` §1 0.5 |
+| NEMO | 与官方逐数一致;**已有 SHA + `#meta` 字节门**(`convert_bench` 的 `nemo-3.4MB-kn` / `nemo-old-1.5MB-kn`,后者让版本迁移真的进基线;`#meta` 带 `source_version`);`report.elapsed_ms` 实测非 0(3.5 MB 源:core 365–442 ms)⇒ 原先记的"恒 0"已过时;`tree_to_json` 编码失败不再静默丢块(进报告,计有损) | `tests/convert_bench.rs`、`src/core/convert/translate/nemo.rs`(2026-10-01) |
 
 ### 6.3 目标
 
@@ -166,7 +166,7 @@
 | **G3** ◐ **部分落地(2026-10-01;口径与后续见 `docs/rounds/39` §W3c/§W3d)** | **差异类别门**:两台扫描器的"差异类别集合"从"只打印"升格为基线门(只许变少) | ✅ 正向扫描器已加 **id 台账门**(`LOST_ID_BUDGET`,只许变小,每次打印 `[id台账]`;基线 = 59 件里 33 件非零,构成已逐类查过)。**差异类别集合门已改判不做**(gitignored 增量语料 ⇒ 必然假红,`rounds/39` §W3c);**反向 id 台账仍未建**(`rounds/39` §W3d:按正向同口径新增 `LOST_ID_BUDGET_REVERSE`) | 便宜;口径已稳 |
 | **G4** | **覆盖度**:真原件语料常态化(并入常规扫描)+ 词表新鲜度检查 | `cargo test` 默认即覆盖 `k4edit` 真原件;`kitten4_vocab` 的导出日期过旧/条目数异常时报警 | 便宜;扩语料需登录采样 |
 | **G5** | **加载门离线化进 CI**:`validateBcm` headless 接进 CI(实机浏览器门仍手动) | CI 上一条"产物可被编辑器加载"的校验;故意写一个编辑器不认识的类型 ⇒ 拦下 | 重:CI 现只跑 build + `repo_hygiene`,`download/` 与官方 bundle 都不入库 ⇒ 要先决定"入库最小夹具" |
-| **G6** | **NEMO 补门**:加 SHA 字节基线 + 耗时读数 | NEMO 样本进 `convert_bench` 的 `SAMPLES` 并有 `#meta`;`elapsed_ms` 非 0 | §5 #3 |
+| **G6** ✅ **已完成(2026-10-01)** | **NEMO 补门**:加 SHA 字节基线 + 耗时读数 | NEMO 样本进了 `convert_bench` 的 `SAMPLES` 并有 `#meta`:① `nemo-3.4MB`(`download/compile/` 的真作品,`source_version` = 0.16.2 = 迁移目标版本 ⇒ 迁移 no-op;与官方产物**语义 diff 0 处**、`validateBcm → VALID`);② `nemo-old-1.5MB`(公开作品 `103791894`,0.11.0 < 0.15.0 ⇒ **YC 迁移生效**;文件在 `temp/harness/`,**非**语料目录,缺失只跳过不假红)。`elapsed_ms` 非 0(实测)。另:`tree_to_json` 的编码失败不再静默丢块(进报告、计有损) | 已落地(含基线刷新) |
 
 ### 6.4 建议顺序与需拍板处
 
