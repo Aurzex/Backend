@@ -18,7 +18,9 @@
 //!
 //! 文件下半部是**反向**(KN → Kitten4,[`translate_kn_to_kitten`]):`LC`/字段表/槽位表/影子 XML 的
 //! 逐条反转、`GC` 两个算术壳的拆解、列表积木 `pure_list_get` 的折叠、占位积木按 mutation 标题
-//! 还原原类型;不可逆处一律进 [`TranslateReport`](见该节的分节说明)。
+//! 还原原类型(**反查不到时顶替成编辑器认识的「未收录积木」标记**,见 `incompatible_marker` ——
+//! 留下占位名会被写出阶段当"编辑器不认识"整块剔掉,积木就真没了);
+//! 不可逆处一律进 [`TranslateReport`](见该节的分节说明)。
 //!
 //! ## 与官方的刻意差异(见 docs/rounds/20 §6.2「逃生舱」)
 //!
@@ -1322,9 +1324,43 @@ fn reverse_placeholder(kn_kind: &str, node: &mut BlockJson, ctx: &mut RevCtx) ->
             ctx.report.warn(TranslateWarning::UnmappedBlock {
                 kind: kn_kind.to_string(),
             });
-            kn_kind.to_string()
+            if node.is_shadow {
+                // 影子照旧:由写出阶段按"编辑器不认识"清空该影子(槽位显示差异,引用不丢)
+                kn_kind.to_string()
+            } else {
+                incompatible_marker(node, kn_kind)
+            }
         }
     }
+}
+
+/// 占位积木反查不到原类型时,顶替成**编辑器认识**的「未收录积木」标记。
+///
+/// **为什么不能保留占位名**:`bcm_translator_text_*` 都不在编辑器注册表里,写出阶段的
+/// [`super::assembly`] `strip_unknown_blocks` 会把整块剔掉 ⇒ 积木**真的消失**。
+/// 实测(`P1拓展任务1音乐顺序_300981590.bcm4`):4 个可达块在 KN 中间态一个不少、
+/// 产物里一个不剩(第 38 轮用 **(c) 口径 = id 是否出现在产物里** 定案)。
+///
+/// **为什么必然走到这里**:`RC` 标题表只覆盖 187 个占位映射里的 144 个,剩下 **43** 个
+/// (`get_midis`/`get_any_midis`/`ai_lab_*`/`auto_player_*`/`microbit_*` …)正向写不出 mutation
+/// 标题 ⇒ 反向没有可反查的键。
+///
+/// 标记形态照平台自己的定义(编辑器注册表里的 `incompatible_block` / `incompatible_output_block`,
+/// `args0` 为空),**实机验证**(线上 Kitten4 + 「打开本地作品」):语句型原地渲染成「未收录积木」
+/// 并留在语句链里;值型因平台自己的块定义**没有 `output` 连接**而以孤立块形式保留
+/// —— 位置与存在都还在,类型信息照样进报告。见 `docs/rounds/38`。
+fn incompatible_marker(node: &mut BlockJson, kn_kind: &str) -> String {
+    let marker = if PLACEHOLDERS_OUTPUT.contains(&kn_kind) {
+        "incompatible_output_block"
+    } else {
+        "incompatible_block"
+    };
+    // 标记块 `args0` 为空 ⇒ 不留字段/影子/变异,形态与平台一致
+    node.fields.clear();
+    node.shadows.clear();
+    node.mutation = None;
+    node.is_output = marker == "incompatible_output_block";
+    marker.to_string()
 }
 
 /// `processAppearanceAttribute`(77313)的反查:`*_of_sprite` + 字段 → `get_3` 的 `attribute` 取值

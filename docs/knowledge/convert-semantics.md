@@ -62,6 +62,9 @@ NEMO → KN 是另一条前端(`hI.parseBlocksXML`),官方管线共 12 步(`main
     `traverse_number*`、`self_listen*`/`self_broadcast_with_param`、`procedure_boolean`、
     `self_text_effect_color`、`color_size_slider`(证据:平台 40 件 Kitten4 语料里这些名字**0 次出现**,
     编辑器注册表 349 条里也没有)。要继续减损只能做"语义降级"(改语义,见 `goals/pending-decisions.md` D1)。
+  - **例外(rounds/38 起)**:文本占位积木(`bcm_translator_text_*`)反查不到原类型时**不再剔除** ——
+    顶替成编辑器认识的「未收录积木」`incompatible_block` / `incompatible_output_block`(§5bis 第 5 条)。
+    这类块此前是"整块消失",现在是"**位置与存在保住**,类型信息进报告"。
 - 运行时实测:KN→Kitten4 产物有 `theatre`/`size`/`block_data_json`,可被平台接受。
 
 ## 5bis. Kitten4 **编辑器的隐性契约**(实机验证得出,改写出器前必读)
@@ -82,6 +85,14 @@ NEMO → KN 是另一条前端(`hI.parseBlocksXML`),官方管线共 12 步(`main
    以及将来任何新写出点)**都要过词汇判据**:候选认识取候选;否则 KN 名认识就保留 KN 名;否则照旧剔除并报告。
    反例(已修):KN `text` 的候选只有 `get_split_options`,而平台 40 件 Kitten4 语料里 `get_split_options`
    出现 **0** 次、`text` **1338** 次(rounds/36)。
+5. **"还原不出原类型"的占位积木必须**保留**、不能剔**(rounds/38):KN 的 `bcm_translator_text_*` 都不在
+   编辑器注册表里;反向若反查不到原类型就把占位名留给写出阶段,会被当"不认识"整块剔除 ⇒ **积木真丢**
+   (实测 `P1拓展任务1音乐顺序_300981590.bcm4`:4 个可达块在 KN 中间态还在,产物里一个不剩)。
+   现行兜底:顶替成平台自己的「未收录积木」`incompatible_block`(语句位)/ `incompatible_output_block`
+   (值位)—— 两者都在注册表里,实机渲染为「未收录积木」;值型因平台块定义**没有 `output` 连接**而落成
+   **孤立块**(槽位仍空,但块与位置保住)。**为什么会走到这一步**:187 个占位映射里 **43 个**没有
+   `RC` 标题(`get_midis`/`get_any_midis`/`ai_lab_*`/`auto_player_*`/`microbit_*` …)⇒ 正向写不出
+   mutation ⇒ 反向无从反查。
 
 **判据与证据来源**(都可复用):
 
@@ -96,7 +107,7 @@ NEMO → KN 是另一条前端(`hI.parseBlocksXML`),官方管线共 12 步(`main
 | 偏差 | 说明 | 处置 |
 | ---- | ---- | ---- |
 | `keep_source` 上传的是**重建版**而非原始字节 | 原始 `.bcm*` 字节在反编译阶段就被解开,本库手上只有重建的编辑版 ⇒ 平台侧"保留原件"打开的是重建版(可读、可再转换,语义不受影响)。见 `docs/rounds/21` §8.4 N2 | **文档化**(rustdoc 已写明),不改反编译侧 |
-| KN 侧"不认识"的类型在 Kitten4 产物里**被剔除** | 不是偷懒:Kitten4 编辑器不认识的名字会让**整份工作区加载失败**(§5bis 第 3 条) | 已按预算记账(`reverse_tests`)+ 逐类打印报告 |
+| KN 侧"不认识"的类型在 Kitten4 产物里**被剔除** | 不是偷懒:Kitten4 编辑器不认识的名字会让**整份工作区加载失败**(§5bis 第 3 条) | 已按预算记账(`reverse_tests`)+ 逐类打印报告。**例外**:文本占位积木反查不到原类型时改用「未收录积木」标记保留(§5bis 第 5 条) |
 | Kitten4 没有 **list 类型的程序集参数** | `param(type=List)` 必丢;属格式能力差 | 已定性(rounds/32) |
 
 ## 6. 硬门与不变量(实现任何新方向都必须满足)
@@ -110,6 +121,7 @@ NEMO → KN 是另一条前端(`hI.parseBlocksXML`),官方管线共 12 步(`main
 | 有损记账 | 一切有损进 `TranslateReport`;官方重传资源不算有损(`ReuploadedOnImport`) |
 | **编辑器能否打开** | 实机硬门:无头 Chromium + 线上 Kitten4 的「打开本地作品」,数画布积木并看角色列表(带对照组) |
 | **剔除预算** | 编辑器不认识的块/影子的剔除量必须 ≤ 记录值(只许变小);定义体缺口预算见 §5bis / rounds/36 |
+| **id 口径台账** | 正向扫描器(`k4_corpus_round_trip_sweep`):源里"带类型的块节点 id"在往返产物里缺失的 **真块 / 影子** 数必须 ≤ 记录基线(`LOST_ID_BUDGET`,只许变小;每次打印 `[id台账]`)。这是"块有没有被搬过去"的**直接**证据 —— 积木计数/告警/树可达都不是(rounds/37 §13 三次翻车) |
 
 ## 7. 判定"不做"的两项(有证据,别再重开)
 

@@ -323,3 +323,12 @@ pub struct LocalClientProvider {
 | rounds/34 §4nonies 的挑名描述 | "歧义挑选:候选里编辑器认识的优先 → KN 名本身认识就保留 → 再退非云优先" | 这段只描述**多候选(歧义)**分支;**单候选分支当时完全没做判据** ⇒ KN `text` 被写成 Kitten3 口径的 `get_split_options` 而被剔掉。现块与影子**共用**同一判据。见 rounds/36 |
 | `src/core/convert/translate/assembly.rs` 旧注释 / rounds/31 审计 | "反向没有 groups 概念,写回 `scene.actors` 即可" | **不完整**:`scene.actors` 之外还必须有 `theatre.groups` 与 `group_order`(编辑器靠它们列角色)。见 rounds/35 |
 | 一般印象:"积木数对得上就能打开" | — | **错**:见 `knowledge/convert-semantics.md` §5bis 的四条隐性契约(骨架键 / groups / 词汇表 / 表是 Kitten3 口径) |
+
+## 第三十八轮的结论变更(2026-10-01)
+
+| 出处 | 已过时的表述 | 正确值 / 证据 |
+| ---- | ------------ | ------------- |
+| `knowledge/convert-semantics.md` §5 旧版、rounds/20–37 | "占位积木(`LC` 降级)是**已文档化的不可逆项**,反向"至少应把占位块保留在 Kitten4 侧"" | **保留不住**:`bcm_translator_text_*` 不在编辑器注册表里,反向留下占位名会被写出阶段**整块剔除**(= 积木真丢)。**187 个占位映射里 43 个没有 `RC` 标题 ⇒ 必然走到这里**。现改为顶替成「未收录积木」`incompatible_block`/`incompatible_output_block`。见 `rounds/38` |
+| rounds/37 §13.4/§13.8 | "`bcm_translator_text_return_value_block: 4 -> 0` … 往返差异全部落在已文档化族里" | **那一条是真缺陷**,不是归一化:4 个 id 在 KN 中间态都在、产物里一个不剩(id 口径)。§13.8 的 id 证明**只覆盖正向腿**。见 `rounds/38` §3.2 |
+| rounds/34 §4quinquies | "槽默认影子不回写 ⇒ 表示差异、引用零丢失(基于代理指标)" | **结论不变**,但**证据换成 id 口径**重证:丢的 278 个 `lists_get` **逐个都是 KN 侧 `is_shadow` 的 `pure_list_get`**(折回父块 `fields`)。见 `rounds/38` §3.1 |
+| 一般印象:"积木数对了就没丢" | — | **判"丢没丢"只用 id 口径**(id 是否出现在产物里);且要分清**节点 id / XML 里的 id / 只是 `connections` 键上出现** —— 混了会同时造出"幻影丢失"和"漏报" |

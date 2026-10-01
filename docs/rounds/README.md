@@ -3,7 +3,7 @@
 > 轮次记录是**过程与证据链**(真机实测、抓包、官方 bundle 逆向、逐条评审),**不改写**(约定见 `rounds/20` §6.1)。
 > **读之前先查** `../knowledge/errata.md` —— 它集中列出已过时/写错的表述及正确值(含"第三十三至三十六轮的结论变更")。
 
-## 转换域近十轮(28–37,2026-09-25 ~ 09-26)
+## 转换域近十轮(28–38,2026-09-25 ~ 10-01)
 
 | 轮次 | 一句话 | 状态 |
 | ---- | ------ | ---- |
@@ -17,6 +17,7 @@
 | [35](35-kitten4-groups-fix.md) | `theatre.groups` + 场景 `group_order`:**角色不显示/画布 0 块**的根因与修法(实机验证) | 已落地 |
 | [36](36-editor-vocabulary-single-candidate.md) | 块与影子的取名**统一过编辑器词汇判据**;剔除量 942→715 / 398→50 | 已落地 |
 | [37](37-convert-architecture-refactor-plan.md) | **convert 域重构**:架构归位(`options`/`report`/`pipeline`/`xml`)、样板/死重量清理、性能 P1–P10 与实测结论、**抓到平台原始编辑格式语料**、差异口径与"三个块数口径"方法教训 | 已实施(Phase 0–4);性能收益实测 ≈0,结构与安全是真收益 |
+| [38](38-convert-fidelity-id-caliber.md) | **保真:id 口径**定案 rounds/37 §13 的两条悬案(`lists_get` 大减 = 归一化;`get_midis` 整块消失 = **真缺陷**);反向对"反查不到原类型的占位块"改**保留**(「未收录积木」`incompatible_*`);正向扫描器加 **id 台账门**(只许变小) | 已落地 |
 
 ## 更早的轮次(01–27)
 
@@ -28,6 +29,7 @@ Kitten↔KN 转换方案与落地(20–21)、NEMO 路线(22–24)、性能(25–
 ## 转换域"该看哪几篇"
 
 1. 想理解**产物为什么打不开/看不到东西** → `34` §4octies/§4nonies、`35`;
-2. 想知道**判据怎么定** → `../knowledge/convert-semantics.md` §5bis(四条隐性契约 + 三种证据方法);
+2. 想知道**判据怎么定** → `../knowledge/convert-semantics.md` §5bis(五条隐性契约 + 三种证据方法);
 3. 想知道**编辑格式语料/编辑器端点** → `37` §12(逆向 bundle 得到的读写端点 + 采集工具);
-4. 想知道**还剩什么没做** → `../goals/convert-backlog.md` 与 `../goals/pending-decisions.md`(A/D 两组)。
+4. 想知道**还剩什么没做** → `../goals/convert-backlog.md` 与 `../goals/pending-decisions.md`(A/D 两组);
+5. 想知道**"丢没丢积木"怎么量、怎么定案** → `38`(id 口径)与 `37` §13(三个块数口径的教训)。

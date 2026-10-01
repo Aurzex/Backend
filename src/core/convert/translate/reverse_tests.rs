@@ -120,7 +120,9 @@ mod reverse_tests_inner {
         assert!(node.shadows.is_empty(), "TITLE_HEAD 是正向注入的");
         assert!(report.warnings().is_empty(), "可逆的降级不该报损失");
 
-        // 标题对不上(或不在表里)→ 保留占位积木 + 报告
+        // 标题对不上(或不在表里)→ **不能**留下占位名(`bcm_translator_text_*` 编辑器不认识,
+        // 写出阶段会整块剔掉 ⇒ 积木真丢),改顶替成编辑器认识的「未收录积木」标记。
+        // 语句型 → `incompatible_block`;值型 → `incompatible_output_block`;影子照旧留名。
         let (node, report) = reverse(
             json!({
                 "type": "bcm_translator_text_execution_block",
@@ -129,13 +131,46 @@ mod reverse_tests_inner {
             }),
             false,
         );
-        assert_eq!(node.kind, "bcm_translator_text_execution_block");
+        assert_eq!(node.kind, "incompatible_block");
+        assert!(node.fields.is_empty() && node.shadows.is_empty() && node.mutation.is_none());
         assert_eq!(
             report.warnings(),
             [TranslateWarning::UnmappedBlock {
                 kind: "bcm_translator_text_execution_block".into()
             }]
         );
+
+        let (node, report) = reverse(
+            json!({
+                "type": "bcm_translator_text_return_value_block",
+                "id": "c",
+                "is_output": true,
+                "fields": { "midimusic_id": "x" },
+                "mutation": "<mutation items=\"0\">不存在的标题</mutation>"
+            }),
+            false,
+        );
+        assert_eq!(node.kind, "incompatible_output_block");
+        assert!(node.is_output, "值型标记必须仍是输出块");
+        assert!(node.fields.is_empty(), "标记块 args0 为空,不留字段");
+        assert_eq!(
+            report.warnings(),
+            [TranslateWarning::UnmappedBlock {
+                kind: "bcm_translator_text_return_value_block".into()
+            }]
+        );
+
+        // 影子保持原名:它由写出阶段清空(槽位显示差异,引用不丢),不换标记块
+        let (node, _) = reverse(
+            json!({
+                "type": "bcm_translator_text_return_value_block",
+                "id": "d",
+                "is_shadow": true,
+                "mutation": "<mutation items=\"0\">不存在的标题</mutation>"
+            }),
+            false,
+        );
+        assert_eq!(node.kind, "bcm_translator_text_return_value_block");
     }
 
     #[test]
@@ -913,6 +948,138 @@ mod reverse_tests_inner {
             .unwrap_or_else(|| names.first().cloned().unwrap_or_default())
     }
 
+    /// 收集文档里**所有** id:块节点上的 `id` 字段 + 影子 XML 串里的 `id="…"`。
+    ///
+    /// 这是 **id 口径(第 38 轮)**:判"这块有没有被搬过去"的**唯一直接证据**
+    /// (原始 JSON 遍历只知道"形态差异",从根可达的树计数只是"转换器这一趟搬了多少"——
+    /// 拿它们当"丢没丢"会造出幻影缺陷,rounds/37 §13 连翻三次)。
+    fn collect_ids(node: &Value, out: &mut std::collections::BTreeSet<String>, depth: usize) {
+        match node {
+            Value::Object(map) => {
+                if let Some(Value::String(id)) = map.get("id") {
+                    out.insert(id.clone());
+                }
+                for value in map.values() {
+                    collect_ids(value, out, depth);
+                }
+            }
+            Value::Array(items) => {
+                for item in items {
+                    collect_ids(item, out, depth);
+                }
+            }
+            Value::String(text) if depth < 4 => {
+                if let Ok(inner) = serde_json::from_str::<Value>(text) {
+                    collect_ids(&inner, out, depth + 1);
+                } else {
+                    // 影子 XML(`<shadow … id="…">`)里的 id 也是"块还在"的证据
+                    let mut rest = text.as_str();
+                    while let Some(at) = rest.find("id=\"") {
+                        rest = &rest[at + 4..];
+                        match rest.find('"') {
+                            Some(end) => {
+                                out.insert(rest[..end].to_string());
+                                rest = &rest[end..];
+                            }
+                            None => break,
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// **源里"带类型的块节点"**:id → 是否影子(只收节点,不收影子 XML 串里的 —— 那些正向会重铸)。
+    fn block_node_ids(doc: &Value) -> BTreeMap<String, bool> {
+        fn walk(node: &Value, out: &mut BTreeMap<String, bool>, depth: usize) {
+            match node {
+                Value::Object(map) => {
+                    if let (Some(Value::String(id)), Some(Value::String(kind))) =
+                        (map.get("id"), map.get("type"))
+                        && !kind.is_empty()
+                        && kind.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                    {
+                        let shadow = map
+                            .get("is_shadow")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false);
+                        out.insert(id.clone(), shadow);
+                    }
+                    for value in map.values() {
+                        walk(value, out, depth);
+                    }
+                }
+                Value::Array(items) => {
+                    for item in items {
+                        walk(item, out, depth);
+                    }
+                }
+                Value::String(text) if depth < 4 => {
+                    if let Ok(inner) = serde_json::from_str::<Value>(text) {
+                        walk(&inner, out, depth + 1);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut out = BTreeMap::new();
+        walk(doc, &mut out, 0);
+        out
+    }
+
+    /// 源块 id 在往返产物里"没出现"的**基线**(只许变小),`(文件名, 真块, 影子)`。
+    ///
+    /// 为什么不是"绝对 0":有几条**已定性的 id 改铸**机制会改 id 而不丢内容 ——
+    /// ① 横屏坐标的 `GC` 算术壳(`wrap_arithmetic` 照官方"给原节点重铸 id 并挂到包装块",
+    ///    mapping.rs:~493);② `get_3`+属性、`appearance_of_sprite` 之类的**类型级派生**;
+    /// ③ 槽默认影子不回写(D2,只留 `fields`,影子块本身不再写出)。
+    /// 这些是"名字/编号变了"而不是"块没了",混在一起就没法用绝对 0 当门。
+    ///
+    /// 但**基线**能拦住真正的那一类:第 38 轮修的缺陷(P1拓展任务1 的 4 个占位块被整块剔掉)
+    /// 在基线上就是 `+4`,变多即红灯。读数每次都打印(`[id台账]`),便于逐件分诊。
+    ///
+    /// 基线值 = 2026-10-01 修完 `incompatible_marker` 之后的全语料实测(59 件里 33 件非零);
+    /// 构成已逐类查过(见 `docs/rounds/38` §4):真块侧的绝大多数是**横屏 `GC` 算术壳给被包住的
+    /// 原节点重铸 id**(`wrap_arithmetic`,照官方)与 `get_3`/`appearance_of_sprite` 一类的类型级派生;
+    /// 影子侧是 D2(槽默认影子不回写)。表外新语料按"已记录的最大值"守(同 `STRIP_BUDGET` 的约定)。
+    #[rustfmt::skip]
+    const LOST_ID_BUDGET: &[(&str, usize, usize)] = &[
+        ("1711-2_261973468.bcm4", 5, 0),
+        ("AR舞台-1_301277806.bcm4", 1, 0),
+        ("MarioJump有排行榜_1228045.bcm4", 13, 0),
+        ("Plactions_227366634.bcm4", 1, 100),
+        ("174408420-0.bcm4", 45, 88),
+        ("174408420-1.bcm4", 45, 88),
+        ("174408420-2.bcm4", 45, 88),
+        ("174408420-3.bcm4", 45, 88),
+        ("174408420-4.bcm4", 45, 88),
+        ("174408420-5.bcm4", 45, 88),
+        ("174408420-6.bcm4", 45, 88),
+        ("174408420-7.bcm4", 45, 88),
+        ("174408420-8.bcm4", 45, 88),
+        ("174408420-9.bcm4", 45, 88),
+        ("215246857-0.bcm4", 2, 0),
+        ("215246857-1.bcm4", 2, 0),
+        ("215246857-2.bcm4", 2, 0),
+        ("215246857-3.bcm4", 2, 0),
+        ("215246857-4.bcm4", 2, 0),
+        ("215246857-5.bcm4", 2, 0),
+        ("215246857-6.bcm4", 2, 0),
+        ("215246857-7.bcm4", 2, 0),
+        ("215246857-8.bcm4", 2, 0),
+        ("215246857-9.bcm4", 2, 0),
+        ("几何对战-联机_215246857.bcm4", 2, 0),
+        ("原气骑士 且听风吟_136021231.bcm4", 408, 278),
+        ("垃圾分类_299861824.bcm4", 1, 0),
+        ("小蓝跑酷开源_300668312.bcm4", 6, 0),
+        ("烂_268587509.bcm4", 32, 54),
+        ("特效大全_252154780.bcm4", 35, 0),
+        ("神仙的射击_279589958.bcm4", 17, 0),
+        ("联机乱斗_配置低别玩_292170836.bcm4", 163, 356),
+        ("跑酷_70_248857834.bcm4", 8, 1),
+    ];
+
     fn census_kitten4_blocks(doc: &Value) -> BTreeMap<String, usize> {
         fn count_inside(node: &Value, out: &mut BTreeMap<String, usize>, depth: usize) {
             match node {
@@ -1140,6 +1307,8 @@ mod reverse_tests_inner {
         // 出现过的**差异类别**(只收类别名,数量随作品变,只打印不断言)
         let mut seen_classes: std::collections::BTreeSet<String> =
             std::collections::BTreeSet::new();
+        // 逐件的 id 口径台账(真块 / 影子),[`LOST_ID_BUDGET`] 只许变小
+        let mut lost_id_ledger: Vec<(String, usize, usize)> = Vec::new();
 
         for path in &files {
             let label = path
@@ -1229,6 +1398,36 @@ mod reverse_tests_inner {
                 lost_lists.is_empty() && lost_vars.is_empty(),
                 "{label}:往返后丢失了被引用的实体 id —— 列表{lost_lists:?} 变量{lost_vars:?}"
             );
+            // **id 口径台账(第 38 轮)**:源里"带类型的块节点 id"有多少没出现在往返产物里。
+            //
+            // 这是"转换效果"的直接度量:积木计数 / 告警 / 树可达都可能骗人(rounds/37 §13 连翻三次),
+            // 只有"id 还在不在"能直接回答"这块有没有被搬过去"。真块与影子分开记 —— 影子侧的差异
+            // 多数是 D2(槽默认影子不回写)与影子重铸,真块侧才是"块没了"。
+            {
+                let mut product_ids = std::collections::BTreeSet::new();
+                collect_ids(&back1, &mut product_ids, 0);
+                let (mut real, mut shadow) = (0usize, 0usize);
+                for (id, is_shadow) in block_node_ids(&source) {
+                    if product_ids.contains(&id) {
+                        continue;
+                    }
+                    if is_shadow {
+                        shadow += 1;
+                    } else {
+                        real += 1;
+                    }
+                }
+                eprintln!("[id台账] {label}: 真块丢 {real} / 影子丢 {shadow}");
+                lost_id_ledger.push((
+                    path.file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or_default()
+                        .to_string(),
+                    real,
+                    shadow,
+                ));
+            }
+
             let diffs = census_diff(
                 &census_kitten4_blocks(&source),
                 &census_kitten4_blocks(&back1),
@@ -1249,6 +1448,31 @@ mod reverse_tests_inner {
                 seen_classes.len()
             );
         }
+
+        // **id 口径门**(只许变小;基线表见 [`LOST_ID_BUDGET`] 的说明)
+        let mut id_violations = Vec::new();
+        for (file, real, shadow) in &lost_id_ledger {
+            let (budget_real, budget_shadow) = LOST_ID_BUDGET
+                .iter()
+                .find(|(name, _, _)| name == file)
+                .map(|(_, real, shadow)| (*real, *shadow))
+                .unwrap_or((
+                    LOST_ID_BUDGET.iter().map(|(_, r, _)| *r).max().unwrap_or(0),
+                    LOST_ID_BUDGET.iter().map(|(_, _, s)| *s).max().unwrap_or(0),
+                ));
+            if *real > budget_real || *shadow > budget_shadow {
+                id_violations.push(format!(
+                    "{file}: 真块 {real} > {budget_real} / 影子 {shadow} > {budget_shadow}"
+                ));
+            }
+        }
+        assert!(
+            id_violations.is_empty(),
+            "往返产物里丢的源块 id **变多**了(只许变小)。先看 KN 中间态:它是被正向丢了,\
+             还是反向 `reverse_placeholder` 反查不到标题后被写出阶段当'编辑器不认识'剔了\
+             (兜底应是 `incompatible_block`):\n  {}",
+            id_violations.join("\n  ")
+        );
 
         eprintln!(
             "[扫描汇总·正向] {}/{} 件作品存在往返差异(逐条见上;差异只作分诊,不作断言)",
@@ -2440,10 +2664,4 @@ mod reverse_tests_inner {
         let (node, _) = reverse(json!({ "type": "get_split_options", "id": "t2" }), false);
         assert_eq!(node.kind, "get_split_options");
     }
-
-
-
-
-
-
 }
