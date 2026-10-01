@@ -2109,6 +2109,50 @@ mod assembly_tests {
         );
     }
 
+    /// R3:`mark_unknown_blocks` 的**影子清空**那半边 —— 块**认识**、它的 `shadows` 里写着编辑器
+    /// 不认识类型 ⇒ 该槽变**空串**(影子是槽位默认值,不换标记块),并按类型计一条
+    /// `…已清空 N 条影子` 告警;同一块里**认识**的影子原样保留。
+    /// (语料预算门只覆盖整件作品的那几档,这里把行为本身钉住。)
+    #[test]
+    fn unknown_shadow_is_cleared_and_reported() {
+        let known = "<shadow type=\"math_number\" id=\"s1\"><field name=\"NUM\">1</field></shadow>";
+        let unknown = "<shadow type=\"get_split_options\" id=\"s2\"/>";
+        let blocks = json!({
+            "blocks": {
+                "b1": {
+                    "id": "b1",
+                    "type": "math_number",
+                    "shadows": { "NUM": known, "SPLIT": unknown }
+                }
+            },
+            "connections": {}
+        });
+        let mut report = report();
+        let out = mark_unknown_blocks(blocks, &mut report);
+        let shadows = out["blocks"]["b1"]["shadows"]
+            .as_object()
+            .expect("shadows 还在");
+        assert_eq!(shadows["SPLIT"], json!(""), "未知影子清成空串");
+        assert_eq!(shadows["NUM"], json!(known), "认识的影子原样保留");
+        assert_eq!(
+            out["blocks"]["b1"]["type"], "math_number",
+            "块本身认识 ⇒ 不动"
+        );
+        let kinds: Vec<&str> = report
+            .warnings()
+            .iter()
+            .filter_map(|warning| match warning {
+                TranslateWarning::UnmappedBlock { kind } => Some(kind.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            ["get_split_options(Kitten4 编辑器不认识,已清空 1 条影子)"],
+            "只该有影子那条告警"
+        );
+    }
+
     #[test]
     fn sanitize_truncates_and_keeps_chinese_punctuation() {
         assert_eq!(sanitize("小明。"), "小明。");
