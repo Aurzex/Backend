@@ -1,4 +1,7 @@
 use crate::api::auth::CloudAuthenticator;
+use crate::core::convert::decompile::config::DecompilerConfig;
+use crate::core::convert::decompile::shadow::ShadowBuilder;
+use crate::core::convert::decompile::work::{RawWorkData, WorkFetcher, WorkInfo};
 use crate::core::convert::decompile::{
     BlockContext, DecompileResult, DecompilerContext, WorkDecompiler, child_input_name,
     create_block_decompiler, referenced_ids, save_json_result,
@@ -8,8 +11,7 @@ use crate::core::convert::decompile::{
 };
 use crate::core::convert::shared::{CryptoService, FileService, WorkId};
 use crate::core::convert::shared::{
-    DecompilerConfig, DecompilerError, EditorType, HttpClient, IdGenerator, RawWorkData, Result,
-    ResultExt, ShadowBuilder, ValueExt, WorkFetcher, WorkInfo,
+    DecompilerError, EditorType, HttpClient, IdGenerator, Result, ResultExt, ValueExt,
 };
 use log::info;
 use log::warn;

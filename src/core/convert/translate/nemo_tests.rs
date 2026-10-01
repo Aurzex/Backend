@@ -797,9 +797,11 @@ impl crate::core::convert::shared::HttpClient for OfflineHttp {
 /// NEMO 的内存入口:直接给明文编辑版 + 源版本(`bcm_version` 只存在于作品元信息里)
 #[test]
 fn nemo_decompiler_offers_in_memory_editable_document() {
+    use crate::core::convert::decompile::config::DecompilerConfig;
     use crate::core::convert::decompile::editors::NemoDecompiler;
+    use crate::core::convert::decompile::work::{RawWorkData, WorkInfo};
     use crate::core::convert::decompile::{DecompilerContext, WorkDecompiler};
-    use crate::core::convert::shared::{DecompilerConfig, FileService, IdGenerator, RawWorkData};
+    use crate::core::convert::shared::{FileService, IdGenerator};
     use std::sync::Arc;
 
     let config = Arc::new(DecompilerConfig::default());
@@ -807,7 +809,7 @@ fn nemo_decompiler_offers_in_memory_editable_document() {
         output_dir: None,
         resource_concurrency: 1,
         download_resources: false,
-        work_info: crate::core::convert::shared::WorkInfo {
+        work_info: WorkInfo {
             id: crate::core::convert::WorkId::new(194684070),
             name: "测试作品".to_string(),
             work_type: EditorType::Nemo,

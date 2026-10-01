@@ -2,13 +2,18 @@ use crate::core::convert::decompile::editors::{
     CocoDecompiler, CocoFetcher, KittenDecompiler, KittenFetcher, NekoDecompiler, NekoFetcher,
     NemoDecompiler, NemoFetcher, WoodDecompiler, WoodFetcher,
 };
+pub(crate) mod config;
 pub(crate) mod editors;
+pub(crate) mod shadow;
+pub(crate) mod work;
 
-use crate::core::convert::shared::ShadowBuilder;
+use crate::core::convert::decompile::config::DecompilerConfig;
+use crate::core::convert::decompile::shadow::ShadowBuilder;
+use crate::core::convert::decompile::work::{RawWorkData, WorkFetcher, WorkInfo};
 use crate::core::convert::shared::ValueExt;
 use crate::core::convert::shared::{
-    CodeMaoHttpClient, DecompilerConfig, EditorType, FileService, HttpClient, IdGenerator,
-    RawWorkData, Result, ResultExt, WorkFetcher, WorkInfo, batch_map,
+    CodeMaoHttpClient, EditorType, FileService, HttpClient, IdGenerator, Result, ResultExt,
+    batch_map,
 };
 use crate::core::convert::shared::{DecompilerError, WorkId};
 use crate::core::convert::upload::{DraftUpload, create_draft, supports_account_upload};
