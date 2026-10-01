@@ -30,6 +30,13 @@ NEMO → KN 是另一条前端(`hI.parseBlocksXML`),官方管线共 12 步(`main
 - **类型改名**是主要工作:实测一次真实转换 374 个输入积木里 **151 个被改名**(`start_on_click→on_running_group_activated`、`self_disappear→self_appear`、`set_costume→set_sprite_style`、`get_audios→get_play_audio`、`math_single→math_function`、`default_value→math_number`;`get_3` 按 `fields.attribute` **分流**成 `coordinate_of_sprite`/`appearance_of_sprite`/`effect_of_sprite`)。
 - **字段改名**同步:`math_arithmetic.fields.OP:"MULTIPLY"` → `fields.type:"multiply"`。
 - **影子**:XML 串原样搬运,同时物化成嵌套 `inputs`(177 个积木两者都有)。
+- **老形态的"内联对象影子"**(`shadows: {槽: {type, id, visible, editable, fields}}`)也吃:
+  正向入口把它就地改写成**平台同款影子 XML**再解析(`pipeline::normalize_object_shadows`)。
+  全语料只有一件(`A28社区-开幕_174408420`,第三十三轮曾因此被拒收),形态依据是**同一件作品的
+  平台原件**(`download/compile/k4edit/174408420-*.bcm4`):字段名取对象的 `fields.name`、字段文本取
+  `fields.text`、其余字段键(`constraints`/`allow_text`/`has_been_edited`…)当**字段元素的属性**;
+  `editable=false` 的占位影子写成 `<empty … editable="false">`(平台就是这么写的)。对象里没有的
+  渲染属性(`inline`/`deletable`)会丢 —— 对象形态本身不携带它们。
 - **常量/枚举**:`fl_`/`gd_` 前缀表、`chineseNameDict` **208** 条(中文名 ↔ KN 类型)。
 - **槽位覆盖语义**:`<value name="A"><shadow/><block/></value>` 时 `inputs["A"]` = 那个块、`shadows["A"]` = **重新序列化**的 shadow XML(`xmlns=xhtml`、**新 uuid**);`<empty>` 与 `<shadow>` 走不同分支。
 - 已知不对称(照抄官方):云列表分支只写 `inputs.list`,并 `delete fields.list`。

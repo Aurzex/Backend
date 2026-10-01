@@ -970,6 +970,11 @@ mod reverse_tests_inner {
     /// 判据与旧口径一致:对象带字符串 `id` + `type`(非空、只含 ASCII 字母数字下划线)才算节点,
     /// `is_shadow` 记影子;字符串节点按 JSON 再解一层(容器内部也会套字符串或影子 XML 串)。
     /// **不收影子 XML 串里的 `id="…"`** —— 那是产物侧 [`collect_ids`] 的活,节点侧只认真节点。
+    ///
+    /// **例外**:Kitten4 老形态的**内联对象影子**(`shadows: {槽: {type, id, …}}`,
+    /// 实测只有 `A28社区-开幕_174408420.bcm4`)是**影子**,按通用形状判据会被算成真块
+    /// (它没有 `is_shadow` 键)⇒ `[id台账]` 的真块列会把影子 id 也吸进去。这里就地把
+    /// `shadows` 里的对象条目收成影子节点(字符串形态的影子照旧不进账本)。
     fn block_nodes_in(root: &Value, out: &mut BTreeMap<String, bool>) {
         fn walk(node: &Value, out: &mut BTreeMap<String, bool>, depth: usize) {
             match node {
@@ -985,7 +990,20 @@ mod reverse_tests_inner {
                             .unwrap_or(false);
                         out.insert(id.clone(), shadow);
                     }
-                    for value in map.values() {
+                    for (key, value) in map {
+                        if key == "shadows" {
+                            if let Some(shadows) = value.as_object() {
+                                for entry in shadows.values() {
+                                    if let (Some(Value::String(id)), Some(Value::String(kind))) =
+                                        (entry.get("id"), entry.get("type"))
+                                        && !kind.is_empty()
+                                    {
+                                        out.insert(id.clone(), true);
+                                    }
+                                }
+                            }
+                            continue;
+                        }
                         walk(value, out, depth);
                     }
                 }
@@ -1102,10 +1120,22 @@ mod reverse_tests_inner {
     /// 构成已逐类查过(见 `docs/rounds/38` §4):真块侧的绝大多数是**横屏 `GC` 算术壳给被包住的
     /// 原节点重铸 id**(`wrap_arithmetic`,照官方)与 `get_3`/`appearance_of_sprite` 一类的类型级派生;
     /// 影子侧是 D2(槽默认影子不回写)。表外新语料按"已记录的最大值"守(同 `STRIP_BUDGET` 的约定)。
+    ///
+    /// **新增一行:老形态的对象影子作品**(`A28社区-开幕_174408420.bcm4`;W10 起它不再被拒收,
+    /// 于是第一次进台账)。它的读数比同件作品的平台新形态(`k4edit/174408420-*.bcm4`,45/88)高,
+    /// 原因已定位在**这份老形态的内容**上,不在"对象影子 → 影子 XML"的改写上:
+    /// ① 老形态把**槽默认值实体化成对象/子块**(515 个 `logic_empty` 占位对象 + 58 个
+    ///    `default_value` 占位块),而正向映射对这些槽本来就会**重新合成**默认影子(调用点形参
+    ///    影子在 `model.rs` 的 `KC` 逆过程里现铸 id、`default_value` 同理)⇒ 源 id 被换掉;
+    /// ② 这些被换掉 id 的槽所在的块若整块被派生/包装,影子 id 连带消失。
+    /// 实测对照(同一件作品两份形态,各自"源影子 id 未出现在往返产物里"的条数):
+    /// 对象形态 3653 条里丢 603、平台字符串形态 2237 条里丢 114 —— 差值就是 ①里的老形态占位物;
+    /// 而对象→XML 的改写**只**可能保住 id(它不删也不重铸任何影子)。
     #[rustfmt::skip]
     const LOST_ID_BUDGET: &[(&str, usize, usize)] = &[
         ("1711-2_261973468.bcm4", 5, 0),
         ("AR舞台-1_301277806.bcm4", 1, 0),
+        ("A28社区-开幕_174408420.bcm4", 194, 603),
         ("MarioJump有排行榜_1228045.bcm4", 13, 0),
         ("Plactions_227366634.bcm4", 1, 100),
         ("174408420-0.bcm4", 45, 88),

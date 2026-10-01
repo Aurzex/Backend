@@ -10,6 +10,8 @@ use super::model::{self, BlockJson, BlockTree, ProcedureEntry, TEMP_ID_PREFIX, i
 use super::options::{StageOrientation, TargetEditor, TranslateError, TranslateOptions};
 use super::report::{TranslateReport, TranslateWarning};
 use super::tables_gen;
+use super::xml;
+use crate::core::convert::shared::XHTML;
 use serde_json::{Map, Value};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
@@ -124,7 +126,18 @@ fn parse_forward_item(
         TargetEditor::KittenN,
     );
     let mut tree = match block_data_json {
-        Some(block_data_json) => model::parse_block_data_json(block_data_json)?,
+        Some(block_data_json) => {
+            // 内联对象形态的影子先在**副本**上改写成影子 XML(源文档不动)
+            let normalized;
+            let block_data_json = match normalize_object_shadows(block_data_json) {
+                Some(owned) => {
+                    normalized = owned;
+                    &normalized
+                }
+                None => block_data_json,
+            };
+            model::parse_block_data_json(block_data_json)?
+        }
         None => model::BlockTree::default(),
     };
     local.blocks_total += tree.count(); // 源文件里的积木数(映射前)
@@ -215,15 +228,9 @@ pub(super) fn convert_kitten4_document(
     }
 
     // 影子形态:本库吃 XML 字符串(`shadows: {槽: "<shadow …>"}`),但平台上有些作品的
-    // 影子是**内联对象**(`shadows: {槽: {type, fields, …}}`)。直接喂进去只会在深层
-    // 反序列化时报 `invalid type: map, expected a string`(第三十三轮实测 `A28社区-开幕_174408420`),
-    // 所以在这里拦下并说清楚是什么(支持对象形态 = 把对象转成影子 XML,列在待办里)。
-    if let Some((kind, slot)) = find_object_shadow(source) {
-        return Err(TranslateError::InvalidArgument(format!(
-            "源作品的内联影子是对象形态(块 `{kind}` 的槽 `{slot}`):本库目前只支持 XML 字符串形态的影子,暂不支持该作品"
-        )));
-    }
-
+    // 影子是**内联对象**(`shadows: {槽: {type, fields, …}}`,第三十三轮实测 `A28社区-开幕_174408420`)。
+    // 这一类现在**能转换**了 —— 对象在解析前就地改写成平台同款影子 XML,见
+    // [`normalize_object_shadows`](它在 [`parse_forward_item`] 里按项做,不改源文档)。
     let mut items = collect_forward_items(source)?;
     let weights: Vec<usize> = items.iter().map(|item| item.weight).collect();
     let workers = workers(options.entity_workers(), items.len());
@@ -373,48 +380,142 @@ pub(super) fn convert_kitten4_document(
     outcome
 }
 
-/// 找出第一个"影子是内联对象"的位置(`shadows` 的值不是字符串),返回 `(块类型, 槽名)`。
+/// 把 `block_data_json` 里的**内联对象形态影子**改写成影子 XML;没有这种影子时返回 `None`。
 ///
-/// `block_data_json` 既可能是对象,也可能是 JSON 字符串(编辑格式),两种都看。
-fn find_object_shadow(source: &serde_json::Value) -> Option<(String, String)> {
-    use serde_json::Value;
-
-    fn inspect(bdj: &Value) -> Option<(String, String)> {
-        let inner: std::borrow::Cow<'_, Value> = match bdj {
-            Value::String(text) if text.trim_start().starts_with('{') => {
-                std::borrow::Cow::Owned(serde_json::from_str(text).ok()?)
+/// 平台上有作品的影子不是 XML 字符串而是**对象**(`shadows: {槽: {type, id, visible,
+/// editable, fields}}`;第三十三轮实测 `A28社区-开幕_174408420`,全语料仅此一件),而本库
+/// 内部一律吃 XML 字符串(`model::BlockJson::shadows` 是 `BTreeMap<String, String>`)⇒
+/// 直接喂进去只会在深层反序列化时报 `invalid type: map, expected a string`。
+///
+/// ## 目标形态的依据(都是平台自己的东西,不是自创写法)
+///
+/// **同一件作品的平台原件**:`download/compile/k4edit/174408420-*.bcm4`(`ide/load` 拿到的
+/// 编辑器亲手写出的源文件)里同一批影子的写法,与对象逐槽比过 800 对(按影子 id 配对):
+///
+/// - 影子元素:`<shadow xmlns="http://www.w3.org/1999/xhtml" type="{type}" id="{id}"
+///   visible="{visible}">…</shadow>`(属性集与对象键一一对应;`editable=false` 的占位影子
+///   平台写的是 `<empty … editable="false">`,见下);
+/// - 字段:`<field {fields 里除 name/text 外的键=属性} name="{fields.name}">{fields.text}</field>`
+///   —— 对象把"字段名/字段文本"放在 `name`/`text` 两个键上,其余键(`constraints`/
+///   `allow_text`/`has_been_edited`…)是**字段元素的属性**;
+/// - 字段文本为空 → 自闭合 `<field … name="X"/>`(与平台一致)。
+///
+/// 这套写法同时是**本管线自己合成影子时的形态**(`xml::math_number_shadow`、
+/// `nemo_mapping::render_shadow_xml` 都是"真实字段名 + 字段属性"),与 KN 侧语料
+/// (`download/compile/*.bcmkn`)一致 ⇒ 产物里不会混进第二种影子方言。
+///
+/// 对象表达不了的**渲染属性**(`inline`/`deletable`:平台侧由块定义/实例状态决定)会丢。
+/// 另外平台在**字符串**形态里对"空槽"写 `""`,而仅凭对象分不出该写 `""` 还是 `<empty>` ⇒
+/// 统一按 `editable=false` 写平台的 `<empty … editable="false">`(保住 id 与 `editable`
+/// 两个事实;写 `""` 会把这类占位影子的 id 全丢,`[id台账]` 立刻可见)。
+///
+/// 只返回**副本**:调用方(见 [`parse_forward_item`])拿它去解析,源文档一字不动。
+fn normalize_object_shadows(block_data_json: &Value) -> Option<Value> {
+    let bdj = block_data_json.as_object()?;
+    match bdj.get("blocks") {
+        // 编辑格式:`blocks` 就是 id → 积木对象的字典(积木树靠 `connections` 表达,不在嵌套里)
+        Some(Value::Object(blocks)) => {
+            if !blocks.values().any(has_object_shadow) {
+                return None; // 绝大多数作品走这里:一次廉价探测,零拷贝
             }
-            other => std::borrow::Cow::Borrowed(other),
+            let mut copy = bdj.clone();
+            let Some(Value::Object(copied)) = copy.get_mut("blocks") else {
+                return None;
+            };
+            for block in copied.values_mut() {
+                normalize_block_shadows(block);
+            }
+            Some(Value::Object(copy))
+        }
+        // 旧/另一形态:`blocks` 是一段 JSON 字符串,里面再套一层 `{blocks, connections}`
+        Some(Value::String(text)) => {
+            let inner: Value = serde_json::from_str(text).ok()?;
+            let normalized = normalize_object_shadows(&inner)?;
+            let mut copy = bdj.clone();
+            copy.insert(
+                "blocks".into(),
+                Value::String(serde_json::to_string(&normalized).ok()?),
+            );
+            Some(Value::Object(copy))
+        }
+        _ => None,
+    }
+}
+
+/// 这个积木对象的 `shadows` 里有没有对象形态的影子(只探测,不改)
+fn has_object_shadow(block: &Value) -> bool {
+    block
+        .get("shadows")
+        .and_then(Value::as_object)
+        .is_some_and(|shadows| shadows.values().any(Value::is_object))
+}
+
+/// 一个积木对象的 `shadows` 槽:对象形态的就地改写成 XML 字符串
+fn normalize_block_shadows(block: &mut Value) {
+    let Some(shadows) = block.get_mut("shadows").and_then(Value::as_object_mut) else {
+        return;
+    };
+    for value in shadows.values_mut() {
+        let Some(rendered) = value.as_object().and_then(object_shadow_xml) else {
+            continue; // 字符串形态(以及别的怪东西)原样保留
         };
-        fn walk(node: &Value) -> Option<(String, String)> {
-            match node {
-                Value::Object(map) => {
-                    if let Some(shadows) = map.get("shadows").and_then(Value::as_object) {
-                        for (slot, value) in shadows {
-                            if value.is_object() {
-                                let kind = map
-                                    .get("type")
-                                    .and_then(Value::as_str)
-                                    .unwrap_or("(未知)")
-                                    .to_string();
-                                return Some((kind, slot.clone()));
-                            }
-                        }
-                    }
-                    map.values().find_map(walk)
-                }
-                Value::Array(items) => items.iter().find_map(walk),
-                _ => None,
+        *value = Value::String(rendered);
+    }
+}
+
+/// 一个内联对象影子 → 影子 XML(形态依据见 [`normalize_object_shadows`];转义与自闭合复用
+/// [`xml::XmlNode::serialize`],与官方 `XMLSerializer` 同口径)
+fn object_shadow_xml(shadow: &Map<String, Value>) -> Option<String> {
+    let kind = shadow.get("type")?.as_str()?;
+    let id = shadow.get("id").and_then(Value::as_str).unwrap_or_default();
+    let visible = shadow
+        .get("visible")
+        .and_then(Value::as_str)
+        .unwrap_or("visible");
+    let editable = shadow
+        .get("editable")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+
+    // 平台在 `editable=false` 的占位影子上写 `<empty … editable="false">`(不是 `<shadow>`)
+    let mut node = xml::XmlNode::new(if editable { "shadow" } else { "empty" });
+    node.set_attr("xmlns", XHTML);
+    node.set_attr("type", kind);
+    node.set_attr("id", id);
+    node.set_attr("visible", visible);
+    if !editable {
+        node.set_attr("editable", "false");
+        return Some(node.serialize());
+    }
+
+    if let Some(fields) = shadow.get("fields").and_then(Value::as_object) {
+        let mut field = xml::XmlNode::new("field");
+        for (key, value) in fields {
+            if key != "name" && key != "text" {
+                field.set_attr(key, &shadow_field_text(value));
             }
         }
-        walk(&inner)
+        field.set_attr(
+            "name",
+            fields
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+        );
+        field.text = fields
+            .get("text")
+            .map_or_else(String::new, shadow_field_text);
+        node.children.push(field);
     }
-    ["actors", "scenes"]
-        .iter()
-        .filter_map(|container| source["theatre"][container].as_object())
-        .flat_map(|map| map.values())
-        .filter_map(|entity| entity.get("block_data_json"))
-        .find_map(inspect)
+    Some(node.serialize())
+}
+
+/// 影子字段值的文本形态(对象里的字段值实测都是字符串;其余值按 JSON 文本兜底)
+fn shadow_field_text(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        other => other.to_string(),
+    }
 }
 
 /// KittenN 编辑版 → Kitten4 编辑版(自建反向管线)
@@ -1071,8 +1172,12 @@ mod forward_parallel_tests {
         })
     }
 
-    /// 走**新**管线(实体级并行),返回产物与报告
-    fn convert(source: &mut Value, entity_concurrency: usize) -> (Value, TranslateReport) {
+    /// 走**新**管线(实体级并行),返回产物与报告(`pub(super)`:W10 的对象影子测试在隔壁
+    /// `object_shadow_tests` 里复用同一个口径)
+    pub(super) fn convert(
+        source: &mut Value,
+        entity_concurrency: usize,
+    ) -> (Value, TranslateReport) {
         let mut report = TranslateReport::new(
             crate::core::convert::EditorType::Kitten4,
             TargetEditor::KittenN,
@@ -1661,5 +1766,189 @@ mod remint_tests {
         assert_eq!(workers(8, 0), 1, "没有工作项时不空转");
         assert_eq!(workers(8, 3), 3.min(available).max(1));
         assert_eq!(workers(8, 1000), available.max(1), "封顶到可用核数");
+    }
+}
+
+/// 内联对象形态影子(第三十三轮被拒收的那类作品)的转换测试 —— W10。
+#[cfg(test)]
+mod object_shadow_tests {
+    use super::forward_parallel_tests::convert;
+    use super::*;
+    use serde_json::json;
+
+    // ---------------------------------------------------------------- 内联对象形态的影子(W10)
+
+    /// 自造一份**内联对象影子**的 Kitten4 文档(竖屏 ⇒ 不触发横屏算术包装):
+    /// 一个角色,`self_move_to` 的 `x` 是 `math_number` 对象影子(带 `constraints`/`allow_text`
+    /// 两个额外字段键 + 空 `text`),`y` 是 `editable=false` 的 `logic_empty` 占位对象影子。
+    fn object_shadow_document() -> Value {
+        json!({
+            "project_name": "内联对象影子自造样本",
+            "size": { "width": 562, "height": 900 },
+            "theatre": {
+                "scenes": {},
+                "actors": {
+                    "a1": { "name": "甲", "block_data_json": {
+                        "blocks": {
+                            "hat": { "type": "start_on_click", "id": "hat" },
+                            "move": {
+                                "type": "self_move_to", "id": "move",
+                                "shadows": {
+                                    "x": {
+                                        "editable": true, "id": "sx", "type": "math_number",
+                                        "visible": "visible",
+                                        "fields": {
+                                            "allow_text": "true",
+                                            "constraints": "-Infinity,Infinity,0,",
+                                            "name": "NUM", "text": "10"
+                                        }
+                                    },
+                                    "y": {
+                                        "editable": false, "id": "sy", "type": "logic_empty",
+                                        "visible": "visible"
+                                    }
+                                }
+                            }
+                        },
+                        "connections": { "hat": { "move": { "type": "next" } } },
+                        "comments": {}
+                    } }
+                },
+                "scenes_order": [],
+                "current_scene_id": null
+            },
+            "broadcasts": {}
+        })
+    }
+
+    /// 对象影子 → 影子 XML:逐字段对照平台同款写法(`k4edit/174408420-*.bcm4` 的形态),
+    /// 且整条路不报任何告警。
+    #[test]
+    fn object_shadow_is_rendered_as_platform_xml() {
+        let mut document = object_shadow_document();
+        // 源文档必须原样保留(改写只发生在解析用的副本上)
+        let pristine = document.clone();
+        let (product, report) = convert(&mut document, 1);
+        assert_eq!(document, pristine, "转换不得改动源文档(含对象影子)");
+        assert!(
+            report.warnings().is_empty(),
+            "对象影子应无损改写,不该有告警:{:#?}",
+            report.warnings()
+        );
+
+        let entities = product["actors"]["actorsDict"]["a1"]["nekoBlockJsonList"]
+            .as_array()
+            .expect("a1 积木");
+        // `self_move_to` 挂在 hat 的 `next` 上 ⇒ 递归找
+        fn find_in<'a>(value: &'a Value, want: &str) -> Option<&'a Value> {
+            match value {
+                Value::Object(map) => {
+                    if map.get("type").and_then(Value::as_str) == Some(want) {
+                        return Some(value);
+                    }
+                    map.values().find_map(|child| find_in(child, want))
+                }
+                Value::Array(items) => items.iter().find_map(|child| find_in(child, want)),
+                _ => None,
+            }
+        }
+        let move_block = entities
+            .iter()
+            .find_map(|block| find_in(block, "self_move_to"))
+            .expect("self_move_to 还在");
+        let shadows = move_block["shadows"].as_object().expect("shadows");
+        assert_eq!(
+            shadows["x"],
+            json!(
+                "<shadow xmlns=\"http://www.w3.org/1999/xhtml\" type=\"math_number\" id=\"sx\" \
+                 visible=\"visible\"><field allow_text=\"true\" constraints=\"-Infinity,Infinity,0,\" \
+                 name=\"NUM\">10</field></shadow>"
+            ),
+            "math_number 对象影子的形态:字段名取 `name`、文本取 `text`、其余键当字段属性"
+        );
+        assert_eq!(
+            shadows["y"],
+            json!(
+                "<empty xmlns=\"http://www.w3.org/1999/xhtml\" type=\"logic_empty\" id=\"sy\" \
+                 visible=\"visible\" editable=\"false\"/>"
+            ),
+            "editable=false 的占位影子按平台写成 <empty …>(不是 <shadow>)"
+        );
+    }
+
+    /// 空 `text` 的字段自闭合(平台也这么写:`<field name=\"TEXT\"/>`),且对象影子里的
+    /// **文本转义**走 XMLSerializer 口径。
+    #[test]
+    fn object_shadow_field_text_is_escaped_and_self_closed() {
+        let empty = json!({
+            "editable": true, "id": "s1", "type": "text", "visible": "visible",
+            "fields": { "name": "TEXT", "text": "" }
+        });
+        assert_eq!(
+            super::object_shadow_xml(empty.as_object().expect("对象")).expect("可改写"),
+            "<shadow xmlns=\"http://www.w3.org/1999/xhtml\" type=\"text\" id=\"s1\" \
+             visible=\"visible\"><field name=\"TEXT\"/></shadow>"
+        );
+        let escaped = json!({
+            "editable": true, "id": "s2", "type": "text", "visible": "visible",
+            "fields": { "name": "TEXT", "text": "a<b & c>d\"e" }
+        });
+        assert_eq!(
+            super::object_shadow_xml(escaped.as_object().expect("对象")).expect("可改写"),
+            "<shadow xmlns=\"http://www.w3.org/1999/xhtml\" type=\"text\" id=\"s2\" \
+             visible=\"visible\"><field name=\"TEXT\">a&lt;b &amp; c&gt;d\"e</field></shadow>"
+        );
+        // 字符串形态的影子一个字节都不动(既有语料的字节基线靠这条)
+        assert_eq!(
+            normalize_object_shadows(&json!({ "blocks": { "a": {
+            "type": "wait", "id": "a",
+            "shadows": { "time": "<shadow type=\"math_number\" id=\"t\"/>", "DO": "" }
+        } } })),
+            None
+        );
+    }
+
+    /// 真作品(第三十三轮那份被拒收的 `A28社区-开幕_174408420`):现在**能转换**了,
+    /// 且不再有"暂不支持"的拒收。
+    #[test]
+    fn real_object_shadow_work_converts_when_sample_present() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("download/compile/A28社区-开幕_174408420.bcm4");
+        if !path.exists() {
+            super::super::missing_fixture(&format!("真作品样本 {}", path.display()));
+            return;
+        }
+        let mut source: Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("读作品")).expect("JSON");
+        let (product, report) = convert(&mut source, 1);
+        assert!(
+            report.blocks_converted > 1000,
+            "真作品应搬走大量积木:{}",
+            report.blocks_converted
+        );
+        // 对象影子一件不剩:产物里的 `shadows` 全是字符串
+        let mut seen_xml = 0usize;
+        let mut objects = 0usize;
+        fn walk(node: &Value, seen_xml: &mut usize, objects: &mut usize) {
+            match node {
+                Value::Object(map) => {
+                    if let Some(shadows) = map.get("shadows").and_then(Value::as_object) {
+                        for value in shadows.values() {
+                            match value {
+                                Value::String(_) => *seen_xml += 1,
+                                Value::Object(_) => *objects += 1,
+                                _ => {}
+                            }
+                        }
+                    }
+                    map.values().for_each(|v| walk(v, seen_xml, objects));
+                }
+                Value::Array(items) => items.iter().for_each(|v| walk(v, seen_xml, objects)),
+                _ => {}
+            }
+        }
+        walk(&product, &mut seen_xml, &mut objects);
+        assert!(seen_xml > 3000, "产物里应有大量影子 XML:{seen_xml}");
+        assert_eq!(objects, 0, "产物里不得残留对象形态的影子");
     }
 }
