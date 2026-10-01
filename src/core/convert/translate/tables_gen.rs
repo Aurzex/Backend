@@ -1433,8 +1433,8 @@ pub(super) const TEXT_PLACEHOLDER_BLOCKS: [&str; 4] = [
 
 /// 目标格式版本常量(`qC.bcm_version`)
 ///
-/// 可见性是 `core::convert`:地基 `shared.rs` 的 `bcm_version` 兜底要读它
-/// (`shared.rs` 在 `translate` 之外,`pub(super)` 不够,`pub(crate)` 又过宽)。
+/// 可见性是 `core::convert`:域级工具 `upload.rs` 的 `bcm_version` 兜底要读它
+/// (`upload.rs` 在 `translate` 之外,`pub(super)` 不够,`pub(crate)` 又过宽)。
 pub(in crate::core::convert) const BCM_VERSION: &str = "0.16.2";
 /// 竖屏画布(562×900)
 pub(super) const STAGE_PORTRAIT: (f64, f64) = (562.0, 900.0);

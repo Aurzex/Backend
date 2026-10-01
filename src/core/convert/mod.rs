@@ -10,22 +10,25 @@
 //! 域内约定:
 //!
 //! - `shared` 是两子域共用的地基(错误 / 模型 / 配置 / 加密 / 文件 / HTTP / 抓取),不对外暴露;
+//! - 上传到账号的编排在域级工具 `upload`(与本文同级 —— 它要读 `translate` 的生成常量);
 //! - 子域之间不互相依赖,跨子域编排写在本文(域门面)里;
 //! - 域外只从 `decompile` / `translate` 两个公开面取东西,跨子域类型从本文件取。
 
 pub mod decompile;
 pub(crate) mod shared;
 pub mod translate;
+pub(crate) mod upload;
 
 // 跨子域类型:域内两处都要用,只在这里留一条公开路径
 pub use crate::core::convert::shared::{DecompilerError, EditorType, WorkId};
 
 use crate::core::convert::decompile::{CodemaoDecompiler, DecompileOptions, DecompiledArtifact};
-use crate::core::convert::shared::{DraftUpload, FileService};
+use crate::core::convert::shared::FileService;
 use crate::core::convert::translate::{
     TargetEditor, TranslateError, TranslateOptions, TranslateOutcome, detect_editor, product_path,
     set_source_reference_in, translate_value,
 };
+use crate::core::convert::upload::DraftUpload;
 use crate::utils::filedata::PathConfig;
 use crate::utils::requests::UploadChannel;
 
@@ -208,7 +211,7 @@ fn upload_source_file(source_path: &std::path::Path) -> Result<String, Translate
 
 /// 上传产物并新建同名草稿作品,返回新作品 id
 ///
-/// 上传 + 建作品 + 取名都在 `shared::upload`(**反编译侧的"上传到账号"走同一份实现**,
+/// 上传 + 建作品 + 取名都在域级工具 `upload`(**反编译侧的"上传到账号"走同一份实现**,
 /// 见 `docs/rounds/30`);这里只负责把转化结果翻译成那份入参。
 fn create_draft_work(
     outcome: &TranslateOutcome,
@@ -235,7 +238,7 @@ fn create_draft_work(
         n_blocks: Some(outcome.report.blocks_converted as i32),
         preview: preview.as_deref(),
     };
-    crate::core::convert::shared::create_draft(&client, &spec).map_err(TranslateError::Decompiler)
+    crate::core::convert::upload::create_draft(&client, &spec).map_err(TranslateError::Decompiler)
 }
 
 #[cfg(test)]

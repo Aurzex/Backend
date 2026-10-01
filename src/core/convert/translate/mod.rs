@@ -45,7 +45,7 @@
 //! - 角色 ↔ 造型关联、云变量与本地变量的区分在 KN 里已丢失,按 `currentStyleId` / 全部并入
 //!   `variables` 还原并报告。
 
-// 子模块只服务本子树 ⇒ 默认**私有**(除 `tables_gen`:地基 `shared.rs` 的 `bcm_version`
+// 子模块只服务本子树 ⇒ 默认**私有**(除 `tables_gen`:域级工具 `upload.rs` 的 `bcm_version`
 // 兜底要读它的 `BCM_VERSION`,故收窄到 `core::convert`)。收太紧编译器会报错兜底。
 mod assembly;
 mod kitten4_vocab;

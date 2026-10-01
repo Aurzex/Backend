@@ -7,11 +7,11 @@ pub(crate) mod editors;
 use crate::core::convert::shared::ShadowBuilder;
 use crate::core::convert::shared::ValueExt;
 use crate::core::convert::shared::{
-    CodeMaoHttpClient, DecompilerConfig, DraftUpload, EditorType, FileService, HttpClient,
-    IdGenerator, RawWorkData, Result, ResultExt, WorkFetcher, WorkInfo, batch_map, create_draft,
-    supports_account_upload,
+    CodeMaoHttpClient, DecompilerConfig, EditorType, FileService, HttpClient, IdGenerator,
+    RawWorkData, Result, ResultExt, WorkFetcher, WorkInfo, batch_map,
 };
 use crate::core::convert::shared::{DecompilerError, WorkId};
+use crate::core::convert::upload::{DraftUpload, create_draft, supports_account_upload};
 use crate::utils::requests::{CodeMaoClient, MewError};
 use log::error;
 use log::{debug, info, warn};
