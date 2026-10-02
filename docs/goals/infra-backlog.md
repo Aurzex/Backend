@@ -6,9 +6,9 @@
 
 | 项 | 说明 | 出处 |
 | ---- | ---- | ---- |
-| ~~恢复 `[lints.rust] unused` 告警~~ | ✅ **已完成(2026-10-02,rounds/40 R2,三阶段 `6414b97` 机械族 / `30216c5` `dead_code` / `8da596d` 收口)**:终态 `unused = "warn"`,三选择(`--lib`/`--bins`/`--tests`)诊断 **0/0/0**,四道门全绿。阶段 1 清机械族 19 条、阶段 2 处置 `dead_code` 31 条(删 13 / `#[cfg(test)]` 10 / `#[allow]`+理由 8)。两条坑记下来:**组的 `level` 要配 `priority = -1`**(否则 clippy `lint_groups_priority`(deny 默认)直接报错)、**显式 `warn` 挡不住 `-D warnings`**。口径与逐条处置见 §1.1,登记待决项见 §1.1 末 | R2;`README.md` 第 40 轮目标表 R2 行 |
+| ~~恢复 `[lints.rust] unused` 告警~~ | ✅ **已完成(2026-10-02,rounds/40 R2,三阶段 `6414b97` / `30216c5` / `8da596d`)** ⇒ 终态读数、逐条处置、两条实测坑与对外形状四项的去向**只在 §1.1 展开** | R2;`../rounds/40-gates-cleanup-and-real-defects.md` §2 |
 | ~~CI 产物名列与 `crate-type` 不符(⇒ job 静默绿、产物其实没上传)~~ | ✅ **已完成(2026-10-02,`f68c2e6`)**:走"改 CI"这一边 —— **删掉 artifact 上传步**及矩阵里 5 组 `artifact:`/`libname:` 键,理由:本仓 `[lib] crate-type=["rlib"]` 只产 rlib、`src/main.rs` 是需账号的**交互式控制台**、仓内没有消费这些 artifact 的地方 ⇒ **没有可分发的产物**(不恢复 `cdylib`)。同时新增 `offline-gate` job(fmt/clippy/逐目标点名的离线测试)。旧症状与根因线索:期待 `libbackend.so`/`backend.dll`/`libbackend.dylib` 而实际不产,`if-no-files-found` 默认 `warn` ⇒ 一直静默绿 | `f68c2e6`;口径见 `../knowledge/repo-conventions.md` §6 与 `../knowledge/errata.md` 的「非轮次条目」节 |
-| ~~`src/main.rs` 作第二个 crate root,把整棵树重复编译一遍~~ | **已修(2026-10-02,`47a8c5e`)**:`src/main.rs` 开头的 `mod api; mod core; mod utils;` 已删,4 条 `use crate::…`(`:8-11`)改 `use backend::…`,**公共 API 零改动**(bin 用到的 11 个符号逐条核对皆 `pub`,与下方只读结论一致)。判据:bin 单元 dep-info 输入 **49 → 1**(`src/main.rs`;lib 单元仍覆盖整棵树);bin 单测目标 **121 tests / 214 s → 0 tests / 0.00 s**;`unused = "warn"` 下 bin 侧 **896 → 0**。`Cargo.toml` 未动(bin 仍由 `src/main.rs` 自动发现) | `47a8c5e` |
+| ~~`src/main.rs` 作第二个 crate root,把整棵树重复编译一遍~~ | ✅ **已完成(2026-10-02,`47a8c5e`)**:`src/main.rs` 开头的 `mod api; mod core; mod utils;` 已删,顶部四条 `use crate::…` 全改成 `use backend::…`,**公共 API 零改动**(bin 用到的 11 个符号逐条核对皆 `pub`,与下方只读结论一致)。判据:bin 单元 dep-info 输入 **49 → 1**(`src/main.rs`;lib 单元仍覆盖整棵树);bin 单测目标 **121 tests / 214 s → 0 tests / 0.00 s**;`unused = "warn"` 下 bin 侧 **896 → 0**。`Cargo.toml` 未动(bin 仍由 `src/main.rs` 自动发现) | `47a8c5e` |
 | api 层类型化 DTO(351 处 `MewResult<Value>`) | 逐端点核对响应形态;建议按域分批 | `../rounds/15/16/17` §不落地 |
 | newtype ID 推广(`UserId` 等) | 先看 `WorkId` 试点收益 | `../rounds/19` §不落地 |
 | `work.rs` 再切 `WorkDataFetcher` | 纯搬迁,`re-export` 保路径;按需 | `../rounds/19` §不落地 |

@@ -58,7 +58,7 @@
      实测 654→13),`kitten/r2/work/edit/load/*` 与 `kitten/work/ide/load/*` 都 404,`source/public` 对 Kitten 报 422;
      编辑格式只存在于**编辑器保存时的载荷**里 ⇒ 需要浏览器会话抓包(形态与两次误判见 rounds/33 §2;
      扫描器已加"缺 `block_data_json` 即跳过"的形态守卫)。
-2. **NEMO 侧内存入口**:按 `../rounds/27` §2,应像 KN 侧一样把编辑版 `Value` 直接交给 translate,避免"落盘→读回"。✅ **已完成**:NEMO 走 `WorkDecompiler::editable_document` 直接给明文编辑版(不落盘、不下资源),域门面再交 `translate_value`(见 `src/core/convert/decompile/mod.rs` 与 `src/core/convert/mod.rs` 的"方案 23 P0-2"注释;rounds/37 §10.1 P10)。
+2. ✅ **已完成** —— **NEMO 侧内存入口**:按 `../rounds/27` §2,应像 KN 侧一样把编辑版 `Value` 直接交给 translate,避免"落盘→读回"。✅ **已完成**:NEMO 走 `WorkDecompiler::editable_document` 直接给明文编辑版(不落盘、不下资源),域门面再交 `translate_value`(见 `src/core/convert/decompile/mod.rs` 与 `src/core/convert/mod.rs` 的"方案 23 P0-2"注释;rounds/37 §10.1 P10)。
 2a. ✅ **已完成(2026-09-26)**:单包上传上限已实测并加了
    `shared::ensure_single_package_fits` 提前报错闸(>20 MB 直接给出"上限 + 实测值"的错误);
    逐档读数/速率/渠道见 `../knowledge/platform-and-protocol.md` §5bis。
@@ -98,7 +98,7 @@
     有生产调用(`assembly::duplicate_ids`)⇒ 按仓库口径"**保留并注明**",不删。原记录:
     `nemo::parse`(仅测试用)、`DecompilerContextBuilder`(已随骨架瘦身删除)、`TOP_BLOCKS` / `KN_TYPES`。
     处理口径:仅测试用 ⇒ 标 `#[cfg(test)]` 或保留并注明;完全不用的 ⇒ 删(删除前按仓库约定确证零调用)。
-    **已落地(2026-10-02,rounds/40 R2,`30216c5`)**:两处 `count_types` 都标了 `#[cfg(test)]` —— 从生产构建里彻底移出、函数体保留,`reverse_tests` 的 census 仍可用(1 参版本调用 2 参版本,两处必须同标)。
+    **✅ 已完成(2026-10-02,rounds/40 R2,`30216c5`)**:两处 `count_types` 都标了 `#[cfg(test)]` —— 从生产构建里彻底移出、函数体保留,`reverse_tests` 的 census 仍可用(1 参版本调用 2 参版本,两处必须同标)。
 0b. ✅ **已完成(2026-09-26)**:词汇表新鲜度:`kitten4_vocab.rs` 里的编辑器类型快照(条目数与导出日期以该文件的 `KITTEN4_VOCAB_EXPORTED` 为**单一事实源**,见 `../knowledge/convert-semantics.md` §5bis 第 3 条);
    编辑器升级后名字会漂移(名字认错 = 整份打不开)。待做:把"重导 + 整体替换"写成一个可复跑的小流程
    (浏览器一句 `Object.keys(window.Blockly.Blocks).sort()`,方法见 §5bis 的"判据与证据来源"),
@@ -115,7 +115,7 @@
     预 1.0 可接受),并计入 `is_lossy`(Kitten 原类型名不可恢复)。
     报告类别因此从「丢弃实体属性 3301」修正为「类型歧义 2959 + 丢弃实体属性 342」。
 
-13. ⚠️ **未修 / 有风险 / 需方案**:`download/compile/` 同时是**输出目录**与**夹具/语料目录**(`../rounds/40` 记的
+13. ⏳ **待方案**(未修 + 有风险):`download/compile/` 同时是**输出目录**与**夹具/语料目录**(`../rounds/40` 记的
     "夹具撞车"在同一结构上的第二个实例)——
     - **写点**:反编译默认输出目录(`decompile/config.rs` 的 `default_output_dir`)、语料采集器
       `tests/convert_corpus_harvest.rs`、编辑格式采集器 `tests/convert_edit_harvest.rs`;
@@ -193,7 +193,7 @@
 | **G3** ◐ **部分(两腿 id 台账均已落地;类别集合门改判不做,2026-10-01)** | **id 口径台账**(正/反两腿)+ 差异类别集合门 | ✅ 已完成(正向扫描器 `k4_corpus_round_trip_sweep`):**`LOST_ID_BUDGET`**(只许变小,每次打印 `[id台账]`;基线 = 59 件里 33 件非零,构成已逐类查过)。✅ **已完成(反向 id 台账已建)**(`../rounds/39` §W3d):反向扫描器 `kn_corpus_round_trip_sweep` 的 **`LOST_ID_BUDGET_REVERSE`**(正向同口径,逐件打印 `[id台账·反向]`;`d10d0cb` 首版、`ef37978` 把口径收窄到真正的积木节点)。基线读数:多数作品 **0/0**,`FjDQB…bcmkn` 真块 0 / 影子 120,`FjSw…bcmkn` 真块 110 / 影子 32(全名见 `reverse_tests` 的 `LOST_ID_BUDGET_REVERSE`)。**差异类别集合门已改判不做**(gitignored 增量语料 ⇒ 必然假红,`../rounds/39` §W3c;那份死 allow-list 副本已随 `e8e19d6` 删除) | 便宜;口径已稳 |
 | **G4** ✅ **已完成(2026-10-02)** | **覆盖度**:真原件语料常态化(并入常规扫描)+ 词表新鲜度检查 | ✅ 已完成(语料常态化):`download/compile/k4edit/` 的平台原件已由正向扫描器常规吃到(`k4_corpus_round_trip_sweep` 扫 `k4edit/*.bcm4`,默认 `cargo test` 即覆盖)。✅ 已完成(词表侧):`kitten4_vocab::tests::editor_type_list_is_sorted_and_queryable`(严格升序 + 抽样查询,含两个「未收录积木」标记)+ **新鲜度读数** `editor_type_list_freshness_is_reported_not_enforced`(打印条目数 / 导出日期 / 距今天数,条目数与记录不一致或 >180 天时醒目提醒;单一事实源 = `kitten4_vocab::KITTEN4_VOCAB_EXPORTED`)。**刻意不做按挂钟时间失败**(如"导出超 N 天就 panic"):那会让整套测试在某个日期之后**自动变红**、门沦为噪音而被忽略(仓库的门是 `-D warnings` + 全绿)—— 新鲜度**只打印,不参与断言** | 便宜;扩语料需登录采样 |
 | **G5** ⏳ 待决(已挂到第 40 轮 R5) | **加载门离线化进 CI**:`validateBcm` headless 接进 CI(实机浏览器门仍手动) | CI 上一条"产物可被编辑器加载"的校验;故意写一个编辑器不认识的类型 ⇒ 拦下 | 重:`download/` 与官方 bundle 都不入库 ⇒ 要先决定**入库最小夹具**。CI 现状(2026-10-02,`f68c2e6`)= `build` 矩阵 + `hygiene` + `offline-gate`;真机门与语料基准**刻意不进**(见 `../knowledge/repo-conventions.md` §6) |
-| **G6** ✅ **已完成(2026-10-01)** | **NEMO 补门**:加 SHA 字节基线 + 耗时读数 | NEMO 样本进了 `convert_bench` 的 `SAMPLES` 并有 `#meta`:① `nemo-3.4MB`(`download/compile/` 的真作品,`source_version` = 0.16.2 = 迁移目标版本 ⇒ 迁移 no-op;与官方产物**语义 diff 0 处**、`validateBcm → VALID`);② `nemo-old-1.5MB`(公开作品 `103791894`,0.11.0 < 0.15.0 ⇒ **YC 迁移生效**;文件已挪进语料目录 `download/compile/`(`1d0be93`;R2 前在 `temp/harness/`),缺失仍只跳过不假红)。`elapsed_ms` 非 0(实测)。另:`tree_to_json` 的编码失败不再静默丢块(进报告、计有损) | 已落地(含基线刷新) |
+| **G6** ✅ **已完成(2026-10-01)** | **NEMO 补门**:加 SHA 字节基线 + 耗时读数 | NEMO 样本进了 `convert_bench` 的 `SAMPLES` 并有 `#meta`:① `nemo-3.4MB`(`download/compile/` 的真作品,`source_version` = 0.16.2 = 迁移目标版本 ⇒ 迁移 no-op;与官方产物**语义 diff 0 处**、`validateBcm → VALID`);② `nemo-old-1.5MB`(公开作品 `103791894`,0.11.0 < 0.15.0 ⇒ **YC 迁移生效**;文件已挪进语料目录 `download/compile/`(`1d0be93`;R2 前在 `temp/harness/`),缺失仍只跳过不假红)。`elapsed_ms` 非 0(实测)。另:`tree_to_json` 的编码失败不再静默丢块(进报告、计有损) | ✅ 已完成(含基线刷新) |
 
 ### 6.4 建议顺序与需拍板处
 

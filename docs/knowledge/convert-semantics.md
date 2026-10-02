@@ -71,7 +71,7 @@ NEMO → KN 是另一条前端(`hI.parseBlocksXML`),官方管线共 12 步(`main
   - 会走到"标记"这一步的是**Kitten4 没有对应概念**的 Neko 专有块族:`temporary_list`、
     `script_variables*`、`traverse_number*`、`self_listen*`/`self_broadcast_with_param`、
     `procedure_boolean`、`self_text_effect_color`、`color_size_slider`,以及反向反查不到原类型的
-    **文本占位积木**(证据:平台 40 件 Kitten4 语料里这些名字**0 次出现**,编辑器注册表 349 条里也没有)。
+    **文本占位积木**(证据:平台 40 件 Kitten4 语料里这些名字**0 次出现**,编辑器注册表里也没有(条目数与单一事实源见 §5bis 第 3 条))。
     要继续减损只能做"语义降级"(改语义,见 `../goals/pending-decisions.md` D1)。
 - 运行时实测:KN→Kitten4 产物有 `theatre`/`size`/`block_data_json`,可被平台接受。
 

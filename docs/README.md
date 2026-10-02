@@ -36,7 +36,7 @@
 价值在**证据链**(真机实测、抓包、官方 bundle 逆向、逐条评审),以及"为什么当初这么决定"。
 读它们时先看 [`knowledge/errata.md`](knowledge/errata.md):早期文档里的文件名/类型名/行号多数已经漂移。
 
-**文件分布**:知识库 7 篇([`knowledge/`](knowledge/))、目标库 5 篇([`goals/`](goals/))、轮次记录 41 篇编号文档([`rounds/`](rounds/),另有 1 篇 `README.md`;第 38–40 轮是转换域最近的工作)。
+**文件分布**:知识库 [`knowledge/`](knowledge/)、目标库 [`goals/`](goals/)、轮次记录 `rounds/01`–`rounds/40`(每轮一篇,40 号已合并为单篇;另有 1 篇 `README.md`;第 38–40 轮是转换域最近的工作)。
 
 > **读老轮次前先做的两件事**:① 查 [`knowledge/errata.md`](knowledge/errata.md)(它集中列出已过时/写错的表述及正确值,
 > 含"第三十三至三十六轮的结论变更"一节);② 转换相关的问题先读 [`knowledge/convert-semantics.md`](knowledge/convert-semantics.md) 的
