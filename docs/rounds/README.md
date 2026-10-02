@@ -21,7 +21,7 @@
 | [39](39-convert-architecture-refinement-plan.md) | **convert 域架构精进方案**(只读调研 + 独立评审):职责错位收口(`model ⇄ xml` 环、地基里的上传编排/影子大表)、门与仪器补洞(**基线缺失/部分样本缺失/REFRESH 丢键**/中文文案协议/反向 id 台账)、NEMO 进门(带 `source_version`)与**分配计数门**;含 W1–W13、不做清单、**C1/C2/C3 已拍板**、评审与修订记录 | **基本落地**(2026-10-02,以该文 §0.3 为准):✅ W1/W2/W3a/W3b/W3c/W3d/W3e/W4/W5/W6/W7/W10/W11/W12b/W12c/W12d;◐ W8(只做②);❌ W9(实测判不做);⏸ W13(暂缓并登记);C1 做(`eea82bf`)/C2 不拆/C3 做(`6027b18`+`fb799b6`) |
 
 | [40a](40-download-timeout-and-body-cap.md) | **下载侧大文件**:请求级超时 `DOWNLOAD_TIMEOUT = 900 s` + 修 `ureq` 的 **10 MB 隐性体量上限**(`BodyExceedsLimit`)—— 改走显式有界的大体通路,超限报可操作的 `MewError::ResponseTooLarge`;顺带查明 `timeout_global` **只管到响应头** | 已落地(`afca96c`) |
-| [40b](40-bench-fixture-discipline.md) | **夹具目录纪律**:真机门按默认输出路径把 bench 输入夹具整体覆盖的事故;修法 = 夹具迁到只读 `download/fixtures/`(而非只改门的输出目录);`kn-9.4MB` 基线有据刷新(它是**快照冻结门**,不是可复现门);顺带记 `#meta` 与产物 SHA 的**语义区分** | 已落地(`9290ede`) |
+| [40b](40-bench-fixture-discipline.md) | **夹具目录纪律**:真机门按默认输出路径把 bench 输入夹具整体覆盖的事故;修法 = 夹具迁到只读 `download/fixtures/`(而非只改门的输出目录);`kn-9.4MB` 基线有据刷新(它是**快照冻结门**,不是可复现门);顺带记 `#meta` 与产物 SHA 的**语义区分**,并修掉"`#meta` 先 panic 遮住产物 SHA 红"的断言顺序(§6) | 已落地(`9290ede` + `636127f`) |
 
 ## 更早的轮次(01–27)
 

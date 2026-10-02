@@ -55,7 +55,7 @@
 
 **为什么之前只看到 `#meta` 红**:`tests/convert_bench.rs` 的断言顺序是 `meta_mismatched` 先于
 `mismatched` panic ⇒ `#meta` 一变,产物 SHA 的门**根本来不及报**。只看输出会以为"产物没变"。
-(该断言顺序已单独立项修:`#meta` 与产物 SHA 要**收集完所有不一致再一次性报**,并**区分两类**。)
+(该断言顺序**已修** —— `636127f`,见本文 §6。)
 
 ### 3.2 产物 SHA 为什么会变 —— 输入快照换了,不是行为变了(已证)
 
@@ -126,3 +126,40 @@
 撞车已消灭的旁证:移入 `download/fixtures/` 的那份夹具 = 9357804 字节、
 sha256 `c5881f55…`(与刷新后的 `#meta.source_sha256` 一致)⇒ 基准跑完后**夹具字节未被动过**;
 `download/convert/` 现在只剩空的 `staging/`。
+
+## 6. 第二处缺陷:断言顺序把红遮住(已修)
+
+> 提交 `636127f`(只改 `tests/convert_bench.rs`,+269/−28)。这是 §3.1 那个"只看输出会以为产物没变"
+> 的**根因**。
+
+**症状**:`tests/convert_bench.rs` 里 `#meta` 不一致先 panic、产物 SHA 不一致后 panic ⇒ 产物 SHA 的红
+**永远看不到**。§3.1 的误判就是这么来的。
+
+**修法**:
+
+- 比较逻辑抽成**纯函数** `baseline_mismatches(key, 基线产物 SHA, 实跑产物 SHA, 基线 `#meta`, 实跑 `#meta`)
+  -> `Vec<BaselineMismatch>`:一次返回**全部**不一致项 —— 产物 SHA 一项 + `#meta` 每个**参与断言的**键各一项
+  (按字段名排序;**键被加/删也算**,缺失渲染成 `<缺>`)。
+  **记录键(`alloc_*`)仍不参与断言**(与既有"只记录不判"口径一致,否则跨机抖动会假红)。
+- 两类红**分开标注**(这是"可操作"的核心):
+  `[产物 SHA256 | 行为/产物变了]` 与 `[#meta.<字段> | 输入夹具被换 / 元信息漂]`;
+  报告开头点清"产物 SHA256 N 项 / `#meta` M 项",随后逐项给出 **样本名 → 键 → 基线值 → 现在值**。
+- `render_baseline_mismatches`(纯函数)负责这份"一次列全"的报告文本,便于测试。
+- **行为不变(判据等价)**:通过/失败仍只看"不一致项是否为空"(等价于原来的"任一非空即 panic");
+  并发腿不一致(1 vs 8 产物不同)仍是**独立**断言,且仍在 refresh 分支**之前** panic(相对顺序未动);
+  pass 分支打印的绿字不变。
+
+**测试**(非 `#[ignore]`,全部用**合成输入**,不动真基线;该集成测试目标现有 **3 个**测试):
+
+- `baseline_mismatches_reports_product_and_every_meta_key_together`:构造"产物 SHA 与 `#meta`
+  **同时**不一致"(正是实测那次的形状),断言 ① 产物项在列表里 ② `#meta` 逐键报、记录键不进、
+  按字段名排序 ③ 报告文本同时含两类标签 + 样本名 + 期望/实际 ④ 共 3 项。
+- `baseline_mismatches_is_silent_without_baseline_or_when_equal`:基线缺键 ⇒ 不报(归 W3a/W3e 的
+  加载与重刷守卫);完全一致 ⇒ 空列表(不误报)。
+
+**变异验证**(证明测试真有牙齿):临时在 `baseline_mismatches` 里插入"首个错即停"
+(`if !out.is_empty() { return out; }`),`cargo test --test convert_bench baseline_mismatches`
+⇒ **FAILED**(exit 101,`left: []` / `right: ["source_bytes", "source_sha256"]`);还原后绿。
+
+**门**:`fmt --check` 0 / `clippy --all-targets -- -D warnings` 0 / `cargo test` 0 /
+`BACKEND_REQUIRE_BENCH=1 … convert_bench --ignored` 0(6 样本含 `kn-9.4MB` 与基线逐项一致)。
