@@ -588,24 +588,24 @@ fn parse_entity(
     let Some(xml) = entity.get("blocksXML").and_then(Value::as_str) else {
         return (super::model::BlockTree::default(), None);
     };
-    let roots = match prepare_blocks_xml(xml, qc, yc, split_options, scenes_order, ids) {
+    match prepare_blocks_xml(xml, qc, yc, split_options, scenes_order, ids) {
         Ok((roots, source_elements, migrated_xml)) => {
             // 计数口径:源 XML 里的 `block`/`shadow`/`empty` 元素数(与 `temp/harness/tables-output.txt`
             // 的 "XML elements: block=… shadow=… empty=…" 同一口径,前置改写**之前**数)
             report.blocks_total += source_elements;
-            return (
+            (
                 translate_nemo_to_kn(&roots, subject, ctx, ids, report),
                 migrated_xml,
-            );
+            )
         }
         Err(error) => {
             // 官方这里会拿到 `parsererror` 文档并静默产出空树;我们记一条报告后跳过本体。
             report.warn(TranslateWarning::DroppedField {
                 path: format!("blocksXML: {error}"),
             });
-            return (super::model::BlockTree::default(), None);
+            (super::model::BlockTree::default(), None)
         }
-    };
+    }
 }
 
 /// 前置改写:版本迁移(QC/YC)+ 官方 `parseBlocksXML` 里的 9 个 `transform*`

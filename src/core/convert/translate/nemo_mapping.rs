@@ -5,7 +5,6 @@ use crate::core::convert::shared::XHTML;
 // 文本占位积木集合的唯一定义在生成物 `tables_gen`(原先此处手抄了一份逐字节相同的副本,
 // 见 `docs/rounds/31` §3.6 N1);谓词复用 `mapping` 的那一份
 use super::mapping::is_text_placeholder;
-use super::tables_gen::TEXT_PLACEHOLDER_BLOCKS;
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::LazyLock;
@@ -1889,7 +1888,7 @@ impl Mapper<'_> {
             "<mutation xmlns=\"{XHTML}\" def_id=\"{}\" name=\"{}\" type=\"{}\">",
             procedure.id, procedure.id, procedure.kind
         );
-        let mut push_arg = |id: &str, content: &str, kind: &str, out: &mut String| {
+        let push_arg = |id: &str, content: &str, kind: &str, out: &mut String| {
             out.push_str(&format!(
                 "<arg id=\"{id}\" content=\"{content}\" type=\"{kind}\"/>"
             ));

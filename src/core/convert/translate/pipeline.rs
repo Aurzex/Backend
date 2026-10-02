@@ -4,7 +4,7 @@
 //! 原先正向编排在 `translate/mod.rs`、反向编排与并行机/remint 在 `assembly.rs`
 //! (后者还排在测试之后);拆出来让两边同层可对照,`assembly.rs` 回归单一职责。
 
-use super::assembly::{self, KnEntity, StageSize};
+use super::assembly::{self, KnEntity};
 use super::mapping;
 use super::model::{self, BlockJson, BlockTree, ProcedureEntry, TEMP_ID_PREFIX, is_temp_id_char};
 use super::options::{StageOrientation, TargetEditor, TranslateError, TranslateOptions};
@@ -540,7 +540,7 @@ pub(super) fn convert_kn_document(
     options: &TranslateOptions,
     report: &mut TranslateReport,
 ) -> std::result::Result<serde_json::Value, TranslateError> {
-    use serde_json::{Map, Value};
+    use serde_json::Value;
     let started = std::time::Instant::now();
 
     let src = source.as_object().ok_or_else(|| {

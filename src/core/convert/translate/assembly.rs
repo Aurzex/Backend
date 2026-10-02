@@ -1,8 +1,8 @@
 use super::mapping::truthy;
-use super::model::{BlockTree, ProcedureEntry, procedures_to_json, type_name};
+use super::model::{ProcedureEntry, procedures_to_json, type_name};
 use super::report::{TranslateReport, TranslateWarning};
 use super::tables_gen::{BCM_VERSION, STAGE_LANDSCAPE, STAGE_PORTRAIT};
-use super::{mapping, model, tables_gen};
+use super::{model, tables_gen};
 use crate::core::convert::shared::{DecompilerError, Result};
 use serde_json::{Map, Value, json};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -125,7 +125,7 @@ pub(super) fn build_document(
             source_id,
             is_scene,
             blocks,
-            mut source,
+            source,
         } = entity;
         let mut value = source;
         value.remove("block_data_json");

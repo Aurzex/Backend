@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tungstenite::Message;
 use tungstenite::client::IntoClientRequest;
+use tungstenite::connect;
 use tungstenite::http::HeaderValue;
-use tungstenite::{WebSocket, connect};
 
 use crate::api::auth::CloudAuthenticator;
 use crate::utils::requests::{ClientAccess, CodeMaoClient};

@@ -1397,10 +1397,6 @@ pub(crate) struct IfBlockDecompiler<'a> {
 
 impl<'a> IfBlockDecompiler<'a> {
     pub(crate) fn new(compiled: &'a Value) -> Self {
-        let conditions_count = compiled
-            .get("conditions")
-            .and_then(|v| v.as_array())
-            .map_or(0, std::vec::Vec::len);
         let core = BlockDecompilerCore::new(compiled);
         Self { core, compiled }
     }

@@ -2,7 +2,7 @@ use super::report::{TranslateReport, TranslateWarning};
 use super::xml::{math_number_shadow, xml_attr_value};
 use crate::core::convert::shared::XHTML;
 use crate::core::convert::shared::{DecompilerError, IdGenerator, Result};
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;

@@ -17,7 +17,7 @@ use log::info;
 use log::warn;
 use serde_json::{Value, json};
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -176,7 +176,7 @@ impl WorkDecompiler for KittenDecompiler {
         // 作品 JSON 的主体是各角色的 blocks/block_data_json,恢复逻辑用不到,
         // 只克隆这些字段可避免数十 MB 的整份深拷贝
         let mut restore_fields: HashMap<&'static str, Value> = HashMap::new();
-        let mut restore_groups: Option<Value> = None;
+        let restore_groups: Option<Value>;
         {
             let original = work_arc.as_ref();
             for key in [

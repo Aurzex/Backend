@@ -801,7 +801,7 @@ fn nemo_decompiler_offers_in_memory_editable_document() {
     use crate::core::convert::decompile::editors::NemoDecompiler;
     use crate::core::convert::decompile::work::{RawWorkData, WorkInfo};
     use crate::core::convert::decompile::{DecompilerContext, WorkDecompiler};
-    use crate::core::convert::shared::{FileService, IdGenerator};
+    use crate::core::convert::shared::IdGenerator;
     use std::sync::Arc;
 
     let config = Arc::new(DecompilerConfig::default());

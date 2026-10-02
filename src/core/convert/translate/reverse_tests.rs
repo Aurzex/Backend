@@ -1,13 +1,11 @@
 //! 反向转化(KN → Kitten4)与往返测试。
 
-use super::assembly::*;
 use super::*;
 
 mod reverse_tests_inner {
     //! 反向(KN → Kitten4)单测:类型/字段/槽位反演、`KC`/`zC` 的逆、邻接表往返、
     //! 以及「KN → Kitten4 → KN 类型多重集守恒」(docs/rounds/20 §7 Phase 4 验收)。
 
-    use super::assembly::*;
     use super::pipeline::*;
     use super::*;
     use crate::core::convert::translate::model::{BlockJson, BlockTree};
@@ -22,7 +20,6 @@ mod reverse_tests_inner {
 
     fn reverse(block: Value, landscape: bool) -> (BlockJson, TranslateReport) {
         let mut tree = BlockTree::new(vec![BlockJson::from_value(&block).expect("块 JSON")]);
-        let mut ids = model::IdSource::new(true);
         let mut report = TranslateReport::new(
             crate::core::convert::EditorType::Neko,
             TargetEditor::Kitten4,
@@ -894,7 +891,7 @@ mod reverse_tests_inner {
         while cursor < names.len() {
             let current = names[cursor].clone();
             cursor += 1;
-            let mut push = |name: &str, names: &mut Vec<String>| {
+            let push = |name: &str, names: &mut Vec<String>| {
                 if !names.iter().any(|existing| existing == name) {
                     names.push(name.to_string());
                 }
@@ -1456,7 +1453,7 @@ mod reverse_tests_inner {
                 );
                 let kn = convert_kitten4_document(&mut k4, &options, &mut forward)
                     .unwrap_or_else(|e| panic!("{label}:正向 Kitten4→KN 失败: {e}"));
-                let mut kn: Value = serde_json::from_str(&kn.to_string()).expect("复刻");
+                let kn: Value = serde_json::from_str(&kn.to_string()).expect("复刻");
                 let mut back = TranslateReport::new(
                     crate::core::convert::EditorType::Neko,
                     TargetEditor::Kitten4,

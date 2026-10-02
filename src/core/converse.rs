@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tungstenite::Message;
 use tungstenite::client::IntoClientRequest;
+use tungstenite::connect;
 use tungstenite::http::HeaderValue;
-use tungstenite::{WebSocket, connect};
 
 use crate::utils::requests::generate_random_id;
 use crate::utils::socketio::{
@@ -579,7 +579,7 @@ impl ChatEventHandler for JoinAckHandler {
             }),
         )
         .inspect_err(|e| warn!("发送预设消息失败: {e}"));
-        send_event_on(inner, "get_text2Img_remaining_times", &Value::Null)
+        let _ = send_event_on(inner, "get_text2Img_remaining_times", &Value::Null)
             .inspect_err(|e| warn!("查询剩余生成次数失败: {e}"));
     }
 }

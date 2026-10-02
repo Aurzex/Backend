@@ -151,7 +151,6 @@ pub fn translate_file(
     options: TranslateOptions,
 ) -> std::result::Result<TranslateOutcome, TranslateError> {
     use crate::core::convert::shared::FileService;
-    use crate::utils::filedata::PathConfig;
 
     let text = std::fs::read_to_string(input)?;
     let source: serde_json::Value = serde_json::from_str(&text)?;
@@ -340,7 +339,6 @@ mod diff_tests {
 
     use super::pipeline::convert_kitten4_document;
     use super::*;
-    use crate::core::convert::translate::model::BlockJson;
     use serde_json::Value;
     use std::collections::{BTreeMap, BTreeSet};
 
