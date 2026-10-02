@@ -353,5 +353,5 @@ W10 落地(`66c0b6b`)后,**"内联对象形态影子 ⇒ 拒收该作品"这条�
 - **错**:`.github/workflows/CI.yml:28/33/39/44/49` 的 `libname` 列(`libbackend.so` ×2 / `backend.dll` / `libbackend.dylib` ×2)+ 上传步 `:63-67`(`path: target/<target>/release/<libname>`)—— 蕴含"release 会产出动态库"。
   - **为何错**:`Cargo.toml:8` 是 `crate-type = ["rlib"]`,**只产 rlib,不产 `.so`/`.dll`/`.dylib`** ⇒ 上传步按该路径**找不到文件**;`actions/upload-artifact` 的 `if-no-files-found` **默认 `warn`** ⇒ **job 静默绿,产物其实从未上传**。
   - **根因线索**:`docs/rounds/01-websocket-pitfalls.md:791`(为让库可被测试引用,把 `"rlib"` **加进** `crate-type`)与 `:809`(「`crate-type = ["cdylib"]` 的库不参与测试…加了 `"rlib"` 后测试才运行」)。此后 `cdylib` 从 `crate-type` 里消失,而 CI 的 `libname` 列表没跟上。
-  - **正确(二选一,待定、本轮不落地)**:① 恢复 `crate-type = ["cdylib","rlib"]` 并让 `[lib]` 与 CI 产物形态对齐;② 若发布物本意就是 rlib(供 Rust 下游用),则改 CI —— 上传 `libbackend.rlib` 或去掉该上传步。
+  - **正确(已决并落地,2026-10-02,`f68c2e6`)**:取方案 ② 的删法 —— **删掉 artifact 上传步**及矩阵里的 `artifact:`/`libname:` 键。理由:本仓 `[lib] crate-type=["rlib"]` **只产 rlib**、`src/main.rs` 又是需账号的**交互式管理控制台**、仓内无消费方 ⇒ **没有可分发产物**,不恢复 `cdylib`。五目标 `cargo build --release` 矩阵保留;另新增 `offline-gate` job(fmt --check + clippy -D warnings + 逐目标点名的离线测试)。CI 口径(含**刻意不跑**真机门与吃 `download/` 的语料扫描器)见 `knowledge/repo-conventions.md` §6。
   - 出处:`.github/workflows/CI.yml`、`Cargo.toml:8`、`docs/rounds/01` 附录「空的 lib」两节;登记在 `docs/goals/infra-backlog.md` §1。

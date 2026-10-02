@@ -87,6 +87,8 @@
 | **严格模式** | `BACKEND_REQUIRE_LIVE=1` —— 缺配置/登录失败**必须失败**,不再"静默 pass" |
 | 转换专项 | 官方校验器(`validateBcm`)硬门 + 语义 diff + `deterministic_ids` 字节一致 + 往返多重集守恒 |
 | 词表新鲜度 | `kitten4_vocab::tests::editor_type_list_freshness_is_reported_not_enforced` —— **只打印读数**(条目数 / 导出日期 / 距今天数;超过 180 天、或条目数与单一事实源 `KITTEN4_VOCAB_EXPORTED` 不一致时醒目提醒)。**刻意不做按挂钟时间失败**:那会让门在某个日期之后**自动变红**、沦为噪音;允许随日期改变**打印内容**,不允许让测试失败 |
+| **CI 跑什么** | `.github/workflows/CI.yml` 三个 job:`build`(**五目标** `cargo build --release` 矩阵,含 aarch64 交叉链接)、`hygiene`(`cargo test --test repo_hygiene`,与本地 pre-commit 同一份)、**`offline-gate`**(`cargo fmt --check` + `cargo clippy --all-targets -- -D warnings` + **逐目标点名**的离线测试:`--lib` / `--test repo_hygiene` / `--test convert_bench`) |
+| **CI 刻意不管什么**(是遗漏的反面,别当缺口补) | ① **真机门**(`compile_live`/`convert_live`/`live_features`):无 `data/test-config.json` 时它们 `load_config()` → None 后**直接 return(静默 pass)**,当门等于没验;CI 也**不设** `BACKEND_REQUIRE_LIVE`(设了就依赖凭据/网络)⇒ 真机验证只在本机做。② **语料扫描器与 `convert_bench` 的性能样本**:吃 gitignored 的 `download/`,干净检出上走 `missing_fixture` **打印一行并跳过**(**预期跳过**,不是没跑)。③ **artifact 上传**:本仓 `[lib] crate-type=["rlib"]`(只产 rlib)、`src/main.rs` 是需账号的交互式控制台、仓内无消费方 ⇒ **没有可分发产物**,旧上传步已删(`f68c2e6`,详见 `errata.md` 末节与 `goals/infra-backlog.md` §1) |
 | 必备前置 | 大改先出方案文档 → 子代理评审 → 再动 Rust 代码 |
 
 配置与代码分离:真机配置从 `tests/fixtures/test-config.example.json` 复制到 `data/test-config.json`(`data/` 已 gitignore);`temp/` 放临时产物并及时清理。
@@ -94,7 +96,7 @@
 ## 7. 提交习惯(本项目实际用法)
 
 - 提交信息用中文、`type: 摘要` 形式(如 `perf(convert): …`、`docs: …`);一个提交一件事,搬迁与行为改动**不混在一个提交**。
-- 交付前自检:`cargo fmt`、`cargo clippy`(零新增告警)、`cargo test`;`.githooks/pre-commit` 会在可用时执行这些。
+- 交付前自检:`cargo fmt`、`cargo clippy`(零新增告警)、`cargo test`;`.githooks/pre-commit` 会在可用时执行这些。CI 侧由 `offline-gate` 跑同一套**离线**门(`fmt --check` + `clippy --all-targets -D warnings` + 逐目标点名的离线测试,见 §6)——真机门与吃语料的基准**不在 CI 里**。
 
 ## 依据
 
