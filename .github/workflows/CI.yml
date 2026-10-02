@@ -1,3 +1,25 @@
+# CI 管什么:
+#   1. build —— 五目标矩阵 `cargo build --release`,验证各平台/架构能编过(含 aarch64 交叉链接)。
+#   2. hygiene —— 凭据不入库检查(`cargo test --test repo_hygiene`),与本地 pre-commit 钩子同一份。
+#   3. offline-gate —— 离线门:`cargo fmt --check` + `cargo clippy --all-targets -- -D warnings`
+#      + 离线测试(确切命令见该 job)。
+#
+# CI 刻意不管什么(是遗漏的反面,别当缺口补):
+#   - **真机门**(`tests/compile_live.rs` / `tests/convert_live.rs` / `tests/live_features.rs`)
+#     需要账号/平台,配置在 gitignored 的 `data/test-config.json`。CI 上没有配置时这些测试
+#     `load_config()` 返回 None 后**直接 return(静默 pass)**,不联网;只有在设了
+#     `BACKEND_REQUIRE_LIVE=1` 时"缺配置"才会变成失败(见各文件 `skip_or_fail`)。
+#     ⇒ CI **不跑它们、也不设 `BACKEND_REQUIRE_LIVE`**:真机验证只在本机做,别让 CI 依赖网络/凭据。
+#   - **语料扫描器**(lib 单测 `kn_corpus_round_trip_sweep` / `k4_corpus_round_trip_sweep`)
+#     与 `tests/convert_bench.rs` 的性能样本,都吃 gitignored 的 `download/` 真作品语料;
+#     干净检出上没有语料 ⇒ 走 `missing_fixture` **打印一行并跳过**(设 `BACKEND_REQUIRE_FIXTURES=1`
+#     才会把"缺夹具"变红)——这是**预期跳过**,不是没跑。
+#   - **语料采集器**(`tests/convert_corpus_harvest.rs` / `tests/convert_edit_harvest.rs`):需要网络,全 `#[ignore]`。
+#   - **发布产物**:本仓 `[lib] crate-type = ["rlib"]`(只产 rlib),`src/main.rs` 又是需要账号的交互式
+#     管理控制台 ⇒ 没有可供分发的二进制/动态库,故**不上传 artifact**。(旧的上传步期待
+#     `libbackend.so` / `backend.dll` / `libbackend.dylib`,与 crate-type 不符,`if-no-files-found`
+#     默认 `warn` ⇒ job 静默绿、产物从未上传;根因见 `docs/knowledge/errata.md` 末节与 `docs/goals/infra-backlog.md` §1。)
+
 name: CI
 
 on:
@@ -14,6 +36,7 @@ permissions:
     contents: read
 
 jobs:
+    # 五目标构建矩阵:只验证能编过,不产/不传任何 artifact(本仓产物形态见文件头)。
     build:
         name: ${{ matrix.name }}
         runs-on: ${{ matrix.os }}
@@ -24,29 +47,19 @@ jobs:
                     - name: linux-x86_64
                       os: ubuntu-22.04
                       target: x86_64-unknown-linux-gnu
-                      artifact: backend-linux-x86_64
-                      libname: libbackend.so
                     - name: linux-aarch64
                       os: ubuntu-22.04
                       target: aarch64-unknown-linux-gnu
-                      artifact: backend-linux-aarch64
-                      libname: libbackend.so
                       linker: aarch64-linux-gnu-gcc
                     - name: windows-x86_64
                       os: windows-latest
                       target: x86_64-pc-windows-msvc
-                      artifact: backend-windows-x86_64
-                      libname: backend.dll
                     - name: macos-x86_64
                       os: macos-15-intel
                       target: x86_64-apple-darwin
-                      artifact: backend-macos-x86_64
-                      libname: libbackend.dylib
                     - name: macos-aarch64
                       os: macos-latest
                       target: aarch64-apple-darwin
-                      artifact: backend-macos-aarch64
-                      libname: libbackend.dylib
         steps:
             - uses: actions/checkout@v6
             - uses: dtolnay/rust-toolchain@stable
@@ -60,11 +73,6 @@ jobs:
                   echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
             - name: Build release
               run: cargo build --release --target ${{ matrix.target }}
-            - name: Upload artifact
-              uses: actions/upload-artifact@v6
-              with:
-                  name: ${{ matrix.artifact }}
-                  path: target/${{ matrix.target }}/release/${{ matrix.libname }}
 
     # 凭据入库检查:与本地 pre-commit 钩子跑同一个测试(tests/repo_hygiene.rs)
     hygiene:
@@ -75,3 +83,31 @@ jobs:
             - uses: dtolnay/rust-toolchain@stable
             - name: 凭据不入库检查
               run: cargo test --test repo_hygiene
+
+    # 离线门:格式 / Clippy / 不需要网络与凭据的测试。
+    #
+    # 测试目标**逐个点名**(而不用 `cargo test` 全量):全量会把真机测试一起编进去跑,
+    # 它们在无配置时静默 pass,门看起来在跑其实什么都没验;逐个点名可保证跑到的东西
+    # 不依赖网络/凭据。当前无网络/凭据依赖、且非 `#[ignore]` 的测试目标共三个:
+    #   - `--lib`:单元测试(内含语料扫描器,CI 上无 `download/` ⇒ 预期跳过,见文件头);
+    #   - `--test repo_hygiene`:凭据不入库;
+    #   - `--test convert_bench`:其中非 `#[ignore]` 的 `meta_record_only_strips_exactly_the_alloc_keys`
+    #     (纯内存断言,不吃语料);其余样本/基准测试均 `#[ignore]`,不会被跑到。
+    # 新增"离线且默认跑"的测试目标时,把它加进下面这条命令,否则 CI 看不到它。
+    offline-gate:
+        name: offline-gate
+        runs-on: ubuntu-22.04
+        steps:
+            - uses: actions/checkout@v6
+            - uses: dtolnay/rust-toolchain@stable
+              with:
+                  components: rustfmt, clippy
+            - name: 格式检查(fmt)
+              run: cargo fmt --check
+            - name: Clippy(全目标,告警即失败)
+              run: cargo clippy --all-targets -- -D warnings
+            - name: 离线测试(无网络 / 无凭据)
+              run: |
+                  cargo test --lib
+                  cargo test --test repo_hygiene
+                  cargo test --test convert_bench
