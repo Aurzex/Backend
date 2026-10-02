@@ -153,6 +153,149 @@ fn meta_for_assert(meta: &serde_json::Value) -> serde_json::Value {
     meta
 }
 
+/// 一条"基线与实跑不一致"(第二处缺陷:一次收集、逐项报)
+///
+/// 两种红**性质不同**,报告里必须能分开 —— 判断"是回归还是夹具问题"全靠这个区分:
+/// - [`BaselineMismatch::Product`] = **行为/产物变了**(产物 SHA256 与基线不同);
+/// - [`BaselineMismatch::Meta`] = **输入夹具被换 / 元信息漂了**(`#meta` 的某个断言键不同)。
+#[derive(Debug, Clone, PartialEq)]
+enum BaselineMismatch {
+    /// 产物 SHA256 不一致
+    Product {
+        key: String,
+        baseline: String,
+        measured: String,
+    },
+    /// `#meta` 的某个**参与断言的**键不一致(记录键见 [`META_RECORD_ONLY`])
+    Meta {
+        key: String,
+        field: String,
+        baseline: String,
+        measured: String,
+    },
+}
+
+impl std::fmt::Display for BaselineMismatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Product {
+                key,
+                baseline,
+                measured,
+            } => write!(
+                f,
+                "[产物 SHA256 | 行为/产物变了] {key}\n    基线 {baseline}\n    现在 {measured}"
+            ),
+            Self::Meta {
+                key,
+                field,
+                baseline,
+                measured,
+            } => write!(
+                f,
+                "[#meta.{field} | 输入夹具被换 / 元信息漂] {key}\n    基线 {baseline}\n    现在 {measured}"
+            ),
+        }
+    }
+}
+
+/// 基线与实跑的比较(**纯函数**:不打印、不 panic、不看环境开关)。
+///
+/// - 输入:样本键、基线里的产物 SHA(`None` = 基线没这个键 ⇒ 不参与断言,与 [`load_baseline`] 的
+///   W3a 口径一致)、实跑产物 SHA、基线 `#meta`(`None` 同上)、实跑 `#meta`;
+/// - 输出:**全部**不一致项 —— 产物 SHA(若有)在前,`#meta` 的每个参与断言的键各一条在后
+///   (按字段名排序;键被加/删也算,缺失渲染成 `<缺>`)。
+///
+/// 为什么返回**全部**而不是布尔:上一版是"`#meta` 先 panic、产物 SHA 后 panic",于是产物 SHA 的红
+/// 被 `#meta` 的红**遮住**(实测踩过:只看到 `#meta` 变就误判"产物 SHA 一致")。两种红的性质不同
+/// (见 [`BaselineMismatch`]),必须同时可见。
+///
+/// `#meta` 只比参与断言的键:分配计数那几个键经 [`meta_for_assert`] 剔除 —— 它们是"只记录不判"
+/// (跨机不可比),进不一致项会假红。
+fn baseline_mismatches(
+    key: &str,
+    baseline_product: Option<&str>,
+    measured_product: &str,
+    baseline_meta: Option<&serde_json::Value>,
+    measured_meta: &serde_json::Value,
+) -> Vec<BaselineMismatch> {
+    let mut out = Vec::new();
+    if let Some(baseline) = baseline_product
+        && baseline != measured_product
+    {
+        out.push(BaselineMismatch::Product {
+            key: key.to_string(),
+            baseline: baseline.to_string(),
+            measured: measured_product.to_string(),
+        });
+    }
+    let Some(baseline_meta) = baseline_meta else {
+        return out;
+    };
+    let old = meta_for_assert(baseline_meta);
+    let new = meta_for_assert(measured_meta);
+    let old_object = old.as_object();
+    let new_object = new.as_object();
+    // 两边键的**并集**(键被加/删也是不一致);排序让报告稳定、可 diff
+    let mut fields: Vec<&str> = old_object
+        .into_iter()
+        .flat_map(|object| object.keys().map(String::as_str))
+        .chain(
+            new_object
+                .into_iter()
+                .flat_map(|object| object.keys().map(String::as_str)),
+        )
+        .collect();
+    fields.sort_unstable();
+    fields.dedup();
+    for field in fields {
+        let old_value = old_object.and_then(|object| object.get(field));
+        let new_value = new_object.and_then(|object| object.get(field));
+        if old_value != new_value {
+            out.push(BaselineMismatch::Meta {
+                key: key.to_string(),
+                field: field.to_string(),
+                baseline: render_meta_value(old_value),
+                measured: render_meta_value(new_value),
+            });
+        }
+    }
+    out
+}
+
+/// 渲染 `#meta` 的一个键值(`None` ⇒ `<缺>`:键被加/删本身也是不一致,不能静默)
+fn render_meta_value(value: Option<&serde_json::Value>) -> String {
+    match value {
+        Some(value) => value.to_string(),
+        None => "<缺>".to_string(),
+    }
+}
+
+/// 不一致项的计数:`(产物 SHA 项数, #meta 项数)`
+fn mismatch_counts(items: &[BaselineMismatch]) -> (usize, usize) {
+    let products = items
+        .iter()
+        .filter(|item| matches!(item, BaselineMismatch::Product { .. }))
+        .count();
+    (products, items.len() - products)
+}
+
+/// 把不一致项渲染成报告(**纯函数**:只拼字符串、不打印、不 panic)。
+///
+/// "一次列全":同一个样本的产物 SHA 与 `#meta` 各键一起出现;每项都带**性质标签**
+/// (行为/产物变了 vs 输入夹具被换)—— 这是判断"回归还是夹具问题"的依据。
+fn render_baseline_mismatches(items: &[BaselineMismatch]) -> String {
+    let (products, metas) = mismatch_counts(items);
+    let mut report = format!(
+        "[convert_bench] 基线与实跑不一致(**一次列全** —— 产物 SHA 与 #meta 不再互相遮掩):\n  \
+         产物 SHA256 {products} 项(行为/产物变了);#meta {metas} 项(输入夹具被换 / 元信息漂)"
+    );
+    for item in items {
+        report.push_str(&format!("\n  {item}"));
+    }
+    report
+}
+
 /// S2:[`META_RECORD_ONLY`] 的**钉子** —— 剔除的必须**恰好**是那 4 个分配键
 ///
 /// 为什么需要:那几个"只记录不判"的键靠 [`meta_for_assert`] 剔掉才不参与断言;哪天名单被**改大**
@@ -189,6 +332,112 @@ fn meta_record_only_strips_exactly_the_alloc_keys() {
             "alloc_bytes_parallel"
         ],
         "名单本身钉住(改键名或增删条目都会在这里红)"
+    );
+}
+
+/// 第二处缺陷的钉子:**产物 SHA 与 `#meta` 同时不一致时,两项都必须报出来**
+///
+/// 上一版是"`#meta` 先 panic ⇒ 产物 SHA 的红永远看不到"(实测因此把"产物变了"误判成"只有输入换了")
+/// ⇒ 这里用**合成输入**(内联 `json!`,与磁盘上的真基线无关,不制造真红)构造两者同时不一致:
+/// 任何"报第一个就停"的实现都会漏掉产物项或某个 `#meta` 键,从而在本测试上红。
+#[test]
+fn baseline_mismatches_reports_product_and_every_meta_key_together() {
+    let baseline_meta = serde_json::json!({
+        "source_sha256": "old-src",
+        "source_bytes": 100,
+        "output_bytes": 200,
+        "blocks_total": 10,
+        "blocks_converted": 9,
+        "warnings": 1,
+        // 记录键:下面故意全漂,但它们**不许**进不一致项(只记录不判)
+        "alloc_count_serial": 5,
+        "alloc_bytes_serial": 50,
+        "alloc_count_parallel": 6,
+        "alloc_bytes_parallel": 60,
+    });
+    let measured_meta = serde_json::json!({
+        "source_sha256": "new-src", // 输入夹具被换
+        "source_bytes": 172,
+        "output_bytes": 200, // 不变
+        "blocks_total": 10,
+        "blocks_converted": 9,
+        "warnings": 1,
+        "alloc_count_serial": 999,
+        "alloc_bytes_serial": 999,
+        "alloc_count_parallel": 998,
+        "alloc_bytes_parallel": 997,
+    });
+
+    // 产物 SHA 与 `#meta` **同时**不一致
+    let got = baseline_mismatches(
+        "kn-9.4MB-kitten4",
+        Some("old-product"),
+        "new-product",
+        Some(&baseline_meta),
+        &measured_meta,
+    );
+
+    // ① 产物 SHA 的红必须在 —— 这条正是上一版被 `#meta` 遮住的那个红
+    assert!(
+        got.iter().any(|item| matches!(
+            item,
+            BaselineMismatch::Product { key, baseline, measured }
+                if key.as_str() == "kn-9.4MB-kitten4"
+                    && baseline.as_str() == "old-product"
+                    && measured.as_str() == "new-product"
+        )),
+        "产物 SHA 不一致必须报出来(不能被 #meta 的红遮住):{got:#?}"
+    );
+    // ② `#meta` **逐键**报(这里只有 source_sha256 / source_bytes 变),记录键一个都不许进
+    let fields: Vec<&str> = got
+        .iter()
+        .filter_map(|item| match item {
+            BaselineMismatch::Meta { field, .. } => Some(field.as_str()),
+            BaselineMismatch::Product { .. } => None,
+        })
+        .collect();
+    assert_eq!(
+        fields,
+        ["source_bytes", "source_sha256"],
+        "`#meta` 要逐键报、按字段名排序,且不含 alloc_* 记录键:{got:#?}"
+    );
+    assert_eq!(got.len(), 3, "1 项产物 + 2 项 #meta,一项都不能少:{got:#?}");
+
+    // ③ 报告文本本身可操作:两类红**分开标注**(判断"回归还是夹具问题"就靠这个),并逐项带值
+    let report = render_baseline_mismatches(&got);
+    assert!(
+        report.contains("产物 SHA256 1 项(行为/产物变了)"),
+        "报告开头要点清产物 SHA 几项:{report}"
+    );
+    assert!(
+        report.contains("#meta 2 项(输入夹具被换"),
+        "报告开头要点清 #meta 几项:{report}"
+    );
+    assert!(
+        report.contains("[产物 SHA256 | 行为/产物变了] kn-9.4MB-kitten4")
+            && report.contains("基线 old-product")
+            && report.contains("现在 new-product"),
+        "产物那项要带样本名 + 期望/实际:{report}"
+    );
+    assert!(
+        report.contains("[#meta.source_sha256 | 输入夹具被换")
+            && report.contains("基线 \"old-src\"")
+            && report.contains("现在 \"new-src\""),
+        "#meta 那项要带字段名、性质标签 + 期望/实际:{report}"
+    );
+}
+
+/// 通过/失败判据的钉子:基线缺键 ⇒ 不参与断言;完全一致 ⇒ 空列表(不误报)
+#[test]
+fn baseline_mismatches_is_silent_without_baseline_or_when_equal() {
+    let meta = serde_json::json!({ "source_sha256": "same", "warnings": 3 });
+    assert!(
+        baseline_mismatches("k", None, "sha", None, &meta).is_empty(),
+        "基线没这个键 ⇒ 不在这里报(缺键归 W3a/W3e 的加载与重刷守卫管)"
+    );
+    assert!(
+        baseline_mismatches("k", Some("sha"), "sha", Some(&meta), &meta).is_empty(),
+        "完全一致 ⇒ 不许误报"
     );
 }
 
@@ -531,9 +780,10 @@ fn convert_bench() {
         );
     }
     let mut fresh = serde_json::Map::new();
-    let mut mismatched = Vec::new();
     let mut parallel_mismatched = Vec::new();
-    let mut meta_mismatched = Vec::new();
+    // 基线与实跑的全部不一致项(产物 SHA + `#meta` 逐键):**一次收集、最后一次性报**
+    // —— 别让"先报 `#meta`"把"产物 SHA 变了"这条更重的红遮住(见 `baseline_mismatches`)
+    let mut baseline_mismatched: Vec<BaselineMismatch> = Vec::new();
 
     for sample in SAMPLES {
         if !Path::new(sample.path).exists() {
@@ -620,11 +870,6 @@ fn convert_bench() {
         if p.sha256 != m.sha256 {
             parallel_mismatched.push((key.clone(), m.sha256.clone(), p.sha256.clone()));
         }
-        if let Some(old) = baseline.get(&key).and_then(|v| v.as_str())
-            && old != m.sha256
-        {
-            mismatched.push((key.clone(), old.to_string(), m.sha256.clone()));
-        }
         fresh.insert(key.clone(), serde_json::Value::String(m.sha256.clone()));
         let mut meta = serde_json::json!({
             "source_sha256": source_sha,
@@ -647,13 +892,15 @@ fn convert_bench() {
         if let Some(version) = sample.source_version {
             meta["source_version"] = serde_json::Value::String(version.to_string());
         }
-        // 元信息也参与断言:字节没变但块数/告警退化、或输入被换掉,都要抓。
-        // **但**分配计数那几个键要先剔除 —— 它们是"只记录不判"(跨机不可比,作门会假红)。
-        if let Some(old) = baseline.get(&format!("{key}#meta"))
-            && meta_for_assert(old) != meta_for_assert(&meta)
-        {
-            meta_mismatched.push((key.clone(), old.clone(), meta.clone()));
-        }
+        // 与基线比较:**一次收集全部**不一致项(产物 SHA + `#meta` 逐键)。
+        // `#meta` 里"只记录不判"的分配计数键由 `meta_for_assert` 剔除(跨机不可比,作门会假红)。
+        baseline_mismatched.extend(baseline_mismatches(
+            &key,
+            baseline.get(&key).and_then(|v| v.as_str()),
+            &m.sha256,
+            baseline.get(&format!("{key}#meta")),
+            &meta,
+        ));
         fresh.insert(format!("{key}#meta"), meta);
     }
 
@@ -684,20 +931,14 @@ fn convert_bench() {
         return;
     }
 
-    if !meta_mismatched.is_empty() {
-        eprintln!("\n[convert_bench] 元信息与基线不一致(字节可能没变,但**报告退化或输入被换**):");
-        for (key, old, new) in &meta_mismatched {
-            eprintln!("  {key}\n    基线 {old}\n    现在 {new}");
-        }
-        panic!("convert 基准:元信息(source SHA/块数/告警/字节)与基线不一致");
-    }
-
-    if !mismatched.is_empty() {
-        eprintln!("\n[convert_bench] 产物与基线不一致(性能改了但产物变了 = 失败):");
-        for (key, old, new) in &mismatched {
-            eprintln!("  {key}\n    基线 {old}\n    现在 {new}");
-        }
-        panic!("convert 基准:产物 SHA256 与基线不一致");
+    // **一次列全**:产物 SHA 与 `#meta` 的全部不一致项一起报。这里曾是先后两个 panic,
+    // `#meta`(先)会把产物 SHA(后)的红**遮住**(实测因此把"产物变了"误判成"只有输入换了")。
+    if !baseline_mismatched.is_empty() {
+        let (products, metas) = mismatch_counts(&baseline_mismatched);
+        eprintln!("\n{}", render_baseline_mismatches(&baseline_mismatched));
+        panic!(
+            "convert 基准:基线与实跑不一致 —— 产物 SHA256 {products} 项、#meta {metas} 项(逐项见上)"
+        );
     }
 
     // 走到这里基线必然非空且对得上:缺失在 `load_baseline` 就炸了(W3a),`REFRESH` 已在上面的分支
