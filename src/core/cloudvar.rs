@@ -172,26 +172,24 @@ pub enum ConnectionEvent {
 /// 排行榜条目中的用户信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RankingUser {
-    pub(crate) id: i64,
-    pub(crate) nickname: String,
-    pub(crate) avatar_url: String,
+    pub id: i64,
+    pub nickname: String,
+    pub avatar_url: String,
 }
 
 /// 排行榜条目
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RankingItem {
-    pub(crate) value: CloudValue,
-    pub(crate) user: RankingUser,
+    pub value: CloudValue,
+    pub user: RankingUser,
 }
 
 /// 一次排行榜查询结果
 #[derive(Debug, Clone, Default)]
 pub struct RankingData {
-    /// 只写不读(构造时由接口填);它是 `pub(crate)` 字段、外部不可见,但删除属对外类型形状改动 ⇒ 标 allow
-    #[allow(dead_code)]
-    pub(crate) cvid: String,
-    pub(crate) name: String,
-    pub(crate) items: Vec<RankingItem>,
+    pub cvid: String,
+    pub name: String,
+    pub items: Vec<RankingItem>,
 }
 
 // 回调类型别名

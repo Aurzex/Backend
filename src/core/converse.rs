@@ -96,16 +96,13 @@ impl HistoryMessage {
 }
 
 /// 用户配额信息
-// 三个字段都只写不读(由 `get_text2Img_remaining_times` 事件填入);它们是 `pub(crate)`,
-// 外部不可见,但删除属对外类型形状改动 ⇒ 标 allow 并登记。
-#[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub struct UserInfo {
-    pub(crate) user_id: Option<i64>,
+    pub user_id: Option<i64>,
     /// 剩余对话次数
-    pub(crate) chat_count: Option<i64>,
+    pub chat_count: Option<i64>,
     /// 剩余图片生成次数
-    pub(crate) remaining_image_times: Option<i64>,
+    pub remaining_image_times: Option<i64>,
 }
 
 // 回调类型别名

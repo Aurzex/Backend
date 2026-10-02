@@ -1158,37 +1158,32 @@ impl Default for DataQuery {
 /// 管理员举报统计条目
 #[derive(Debug, Clone)]
 pub struct AdminReportStatsEntry {
-    pub(crate) admin_id: i32,
-    pub(crate) admin_name: String,
-    pub(crate) comment_reports: i32,
-    pub(crate) work_reports: i32,
-    pub(crate) total_reports: i32,
-    pub(crate) percentage: f64,
+    pub admin_id: i32,
+    pub admin_name: String,
+    pub comment_reports: i32,
+    pub work_reports: i32,
+    pub total_reports: i32,
+    pub percentage: f64,
 }
 
 /// 管理员举报统计汇总
 #[derive(Debug, Clone)]
 pub struct AdminReportStatistics {
-    /// 只写不读(汇总时填);`pub(crate)` 字段外部不可见,但对外类型形状改动要单独评审 ⇒ 标 allow
-    #[allow(dead_code)]
-    pub(crate) total_admins: i32,
-    pub(crate) total_comment_reports: i32,
-    pub(crate) total_work_reports: i32,
-    pub(crate) total_all_reports: i32,
-    pub(crate) statistics: Vec<AdminReportStatsEntry>,
+    pub total_admins: i32,
+    pub total_comment_reports: i32,
+    pub total_work_reports: i32,
+    pub total_all_reports: i32,
+    pub statistics: Vec<AdminReportStatsEntry>,
 }
 
 /// 粉丝点赞统计
-// 五个字段都只写不读(统计时填);它们是 `pub(crate)`、外部不可见,但删除属对外类型形状改动
-// ⇒ 标 allow 并登记(该 pub struct 的字段全是 `pub(crate)`,外部拿到也读不到 —— 见 R2 报告)。
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct FanByLikesStatistics {
-    pub(crate) target_user_id: i32,
-    pub(crate) like_threshold: i32,
-    pub(crate) total_fans: i32,
-    pub(crate) qualified_fans_count: i32,
-    pub(crate) qualified_fans: Vec<JsonObject>,
+    pub target_user_id: i32,
+    pub like_threshold: i32,
+    pub total_fans: i32,
+    pub qualified_fans_count: i32,
+    pub qualified_fans: Vec<JsonObject>,
 }
 
 // 辅助迭代器实现
