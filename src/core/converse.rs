@@ -715,6 +715,7 @@ fn send_event_on(inner: &Arc<ChatInner>, name: &str, payload: &Value) -> Result<
 
 // 帧处理
 
+// chat 事件无字符串化载荷,刻意不二次解析(与 cloudvar 不同,见 cloudvar.rs:1819),勿改
 fn handle_frame(inner: &Arc<ChatInner>, text: &str) -> Result<()> {
     match parse_frame(text) {
         Frame::Ping => send_raw(inner, PONG_MESSAGE),
