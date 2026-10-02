@@ -14,9 +14,9 @@
 
 ## 2. 待核验(文档称已完成,但证据不足)
 
-1. `fetch_organization_ids` 的绝对 URL 处 `Some(BaseKey::Education)` → `None` 是否**逐处**改完(`docs/rounds/13` §P3-5)。
-2. `fetch_7day_hot_posts_gen` 的 `board_id` 是否已走 `with_iter_param`(端点已固定为 `/web/forums/boards/posts/7dayHot`)(`docs/rounds/13` §P3-6)。
-3. `converse` 的 `parse_frame` 是否已补注释说明"**不二次解析**"(`docs/rounds/11` §P4-3)。
+1. ✅ **已核对,早已办妥**:`fetch_organization_ids` 的绝对 URL 调用点只有一处且传 `None` —— `src/api/education.rs` 的 `build_request(..., None)`;全仓绝对 URL 调用点均为 `None`(`docs/rounds/13` §P3-5)。
+2. ✅ **已核对,早已办妥**:`fetch_7day_hot_posts_iter`(`src/api/forum.rs`)端点固定为 `"/web/forums/boards/posts/7dayHot"`,`board_id` 走 `with_iter_param`(`docs/rounds/13` §P3-6)。
+3. ✅ **已完成(`60d5358`)**:`src/core/converse.rs` 补注释「chat 事件无字符串化载荷,刻意不二次解析(与 cloudvar 不同),勿改」(`docs/rounds/11` §P4-3),零行为改动。
 
 ## 3. 待方案 + 评审
 
@@ -26,7 +26,7 @@
 | 举报"每类型 100 条"上限 | 现默认移除上限;是否保留取决于产品语义 | `docs/rounds/04` Assumptions |
 | ~~大作品上传超时~~ | ✅ 已修(2026-09-26):上传请求用 `UPLOAD_TIMEOUT=600s`(请求级超时覆盖) | `docs/rounds/21` §8.4 N1 |
 | ~~单包上传大小上限(413)~~ | ✅ **已收尾(2026-09-26)**:同渠道逐档实测,上限落在 **20~24 MB**(20 MB 成功 / 24 MB 413);已加 `shared::ensure_single_package_fits` 提前报错,>20 MB 直接给出"上限 + 实测值"的错误。要传更大作品需分片上传(暂无需求) | `pending-decisions.md` A5/D5 |
-| **下载侧大文件风险**(新) | 单请求下载 63 MB 级作品/资源仍受全局 30 s 限制 ⇒ 慢网必失败。同类修法(给工作文件/资源下载单独放宽超时)未做 | `docs/knowledge/nemo-runtime-and-upload.md` |
+| ~~下载侧大文件风险~~ | ✅ **已修(2026-10-02,`afca96c`)**,两层:① **超时** —— 下载请求加请求级超时 `DOWNLOAD_TIMEOUT = 900 s`(`core/convert/shared.rs` 的 `CodeMaoHttpClient` 三个方法,覆盖作品文档与资源两条下载通路);② **体量(更硬)** —— `ureq` 的 `Body::read_to_vec`/`read_to_string` 自带 **10 MB** 上限,大作品会在**超时之前**先 `BodyExceedsLimit`,故新增显式有界的大体通路 `response_to_{binary,string,json}_large`(`MAX_DOWNLOAD_BODY_BYTES = 256 MiB` 内存护栏;超限报带 URL/上限/已读字节的 `MewError::ResponseTooLarge`),只给下载路径用,普通 API 响应仍守 10 MB 护栏。**未做**:body 流式读取的"无读超时"是另一类问题 | `docs/rounds/40-download-timeout-and-body-cap.md` |
 
 ## 4. P2 性能小项(择机清)
 

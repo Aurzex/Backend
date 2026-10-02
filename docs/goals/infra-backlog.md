@@ -30,7 +30,12 @@
 ## 2. 小改(机械、低风险,可批量做)
 
 1. ~~`DecompilerError` 自带 `Io/Json/Http` 与 `MewError` 重复 ⇒ 改为包装~~ —— **已不成立(2026-10-01 核实)**:`DecompilerError` 已无 `Io`/`Json`/`Http` 变体,`io::Error`/`serde_json::Error` 经 `From` 折进 `Mew`(与 `ProcessorError`/`DataQueryError` 同处置);残留的死变体 `UnsupportedType` **已于 2026-10-02 删除**(`fef30e7`,公共面破坏性变更、已授权;见 `pending-decisions.md`「已决」的 2026-10-02 移入记录、`docs/rounds/39` §W5②)⇒ 本项**已清零**。
-2. **49 处非锁裸 `unwrap`** 硬化:`auth.rs::time_difference`、`registry.rs` 的 `active.as_mut().unwrap()`、`compiler.rs` 的 `template.unwrap()` 与 10 处 `write!(String).unwrap()` → `let _ = write!(...)`(`docs/rounds/18` Phase 7,P2)。
+2. ✅ **已完成(2026-10-02,`cbb167a`)**:非锁裸 `unwrap` 硬化 —— **重新枚举后真实 50 处**(生产 **10** / `cfg(test)` **40**),**硬化 49、按约定保留 1**。
+   - **旧计数「49 处」不可复现**:它点名的四族(`auth.rs::time_difference`、`registry.rs` 的 `active.as_mut().unwrap()`、`compiler.rs`(已并入 `core/convert/`)的 `template.unwrap()` 与 10 处 `write!(String).unwrap()`)在本树**已全部不存在**(时差缓存改 `Option` 判定、`active.as_mut()` 已是 `let Some(…) else`、`write!` 现均写作 `let _ = write!(…)`)。
+   - **旧口径的坑**:`grep '\.unwrap()' | grep -v 'lock()\.unwrap()'` 会**漏掉跨行书写的 `lock()` ⏎ `.unwrap()` 链**、把大量锁解锁算成非锁 ⇒ 数字虚高且不可复现。正确口径要把 `.unwrap()` 的**接收者跨行回溯**,排除 `.lock()/.read()/.write()`。
+   - **保留 1 处**:`utils/socketio.rs` 的 `Condvar::wait_timeout(...).unwrap()` —— 错误来源是**同一 Mutex 毒化**,与紧邻的 `lock().unwrap()` 同失败类,按"锁解锁保留"的约定**判为保留**。
+   - **待复核 1 处**:`core/terminal.rs` 的 stdin 读失败本应错误返回,但 `ProcessorUi::input(&mut self, &str) -> String` 是**公共 trait 形状** ⇒ 现退为 `expect` fail-fast(避免空串让 `choose/menu` 死循环)。**已登记为 `pending-decisions.md` D6④**(是否改 `MewResult<String>` 并逐调用点传播 —— 破坏性,需拍板)。
+   - 另:测试夹具层的 5 处(`tests/**`)不在本口径内,未动。逐处消息见 `cbb167a` 的 diff。
 3. `P2` 收尾:`nemo.rs::get_sha` 每次 `clone()` 64 字节 hex(可返回 `&str`);`auth.rs::AccountStatus` 与 `requests.rs::Identity` 平行枚举合并(易漂移);`MessageHandler`/`ChatEventHandler` 两个 trait 改自由函数;`registry.rs` 错位工具函数归位(`docs/rounds/29` §3-5/§3-6、`docs/rounds/11` P2、`docs/rounds/05` 未执行项)。
 
 ## 3. 待核验(证据不足)

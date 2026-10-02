@@ -53,7 +53,17 @@
 - 本库建的 KN 草稿已实测:平台回读 `work_type=15`、`bcm_version=0.16.2`、`work_url=…bcmkn`,该文件交官方 `validateBcm` 通过。
 - 上传**大作品曾必失败**:≈9 MB 产物在全局 30 s 超时下超时(实测 31.2 s / 35.5 s)。**已修**(2026-09-26):
   上传请求改用请求级超时 `UPLOAD_TIMEOUT = 600 s`(`MewRequestBuilder::with_timeout`,ureq 3 per-request config),
-  其余请求仍走全局 30 s。下载侧的大文件单请求(如 63 MB 作品)是同类风险,尚未处理。
+  其余请求仍走全局 30 s。
+- 下载侧同类问题**已修**(2026-10-02,`afca96c`):转换域取作品/资源的唯一通路 `CodeMaoHttpClient`
+  (`src/core/convert/shared.rs`)三个方法都带请求级超时 `DOWNLOAD_TIMEOUT = 900 s`;普通接口请求仍走全局 30 s。
+- 另修一层**更硬的**下载限制:`ureq::Body::read_to_vec`/`read_to_string` 默认**只吃 10 MB**
+  (`MAX_BODY_SIZE`),大作品会在**超时之前**先 `BodyExceedsLimit` 失败。下载侧改走显式有界的
+  `response_to_{binary,string,json}_large`(`MAX_DOWNLOAD_BODY_BYTES = 256 MiB` 内存护栏,
+  超限报带 URL / 上限 / 已读字节的 `MewError::ResponseTooLarge`);普通 API 响应仍守 10 MB 护栏。
+- ⚠ 实测细节:`ureq` 的 `timeout_global` 只覆盖到**响应头**(40 s 才回的响应在 30 s 被掐),
+  **不覆盖 body 流式读取**(40 B 分 40 s 才送完,30 s 全局照样成功)。所以上面两处改动解决的是
+  "**首字节/响应头 > 30 s**"与"**单个响应体 > 10 MB**"两类失败;真正慢的 body 传输本就不受全局超时约束,
+  属**另一类"无 body 读超时"问题**(未修)。详见 `docs/rounds/40-download-timeout-and-body-cap.md`。
 
 ## 依据
 

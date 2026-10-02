@@ -115,6 +115,18 @@
     预 1.0 可接受),并计入 `is_lossy`(Kitten 原类型名不可恢复)。
     报告类别因此从「丢弃实体属性 3301」修正为「类型歧义 2959 + 丢弃实体属性 342」。
 
+13. ⚠️ **未修 / 有风险 / 需方案**:`download/compile/` 同时是**输出目录**与**夹具/语料目录**(`rounds/40` 记的
+    "夹具撞车"在同一结构上的第二个实例)——
+    - **写点**:反编译默认输出目录(`decompile/config.rs` 的 `default_output_dir`)、语料采集器
+      `tests/convert_corpus_harvest.rs`、编辑格式采集器 `tests/convert_edit_harvest.rs`;
+    - **读点(byte-baselined 夹具)**:`convert_bench` 5 个样本、`convert_facade_bench` 4 个样本、
+      `convert_work_bench` 的 `RAW_SAMPLE`,以及 `reverse_tests.rs` / `nemo_tests.rs` / `translate/mod.rs` /
+      `pipeline.rs` 的多条真作品门 + 两个**默认跑**的往返扫描器(遍历整个目录)。
+    采集器是"增量写新文件、不覆盖"故**目前未出事**;但**默认输出通路仍在**:以默认选项反编译恰为夹具的那几件
+    作品会按同名口径**覆盖夹具**(`rounds/40` 的 `kn-9.4MB` 就是这么被真机门覆盖的,已用"夹具迁到只读目录"
+    止血)。**彻底修 = 把"语料/夹具目录"与"输出目录"分离**(较大的布局约定变更)⇒ 需先出方案。
+    出处:`docs/rounds/40-bench-fixture-discipline.md`。
+
 ## 3. 已在案、不做的(别再重开)
 
 - `RawValue` 顶层只透传、单遍遍历合并(`docs/rounds/26` §6):透传占比 ≈0%、正向本已 2 趟。

@@ -30,7 +30,6 @@
 
 | # | 项 | 建议 | 说明 |
 | - | -- | ---- | ---- |
-| C1 | 49 处**非锁 `unwrap`** 硬化(`time_difference` / `active.as_mut` / 模板 `unwrap` / 10 处 `write!().unwrap()`) | 做 | 机械改动,零行为变化 |
 | C3 | P2 死代码/收尾:`simple.rs` 的 `Arc::clone`、`nemo.rs::get_sha` 的 64 字节 clone、`cloudvar` flush 的 100 ms 轮询改 `Condvar` | 做 | 都是局部小改,**删除前需零调用点证据** |
 | C4 | `auth.rs::AccountStatus` 与 `requests.rs::Identity` 平行枚举合并 | 做(不紧急) | 易漂移,合并前先确认无外部依赖 |
 | C5 | `MessageHandler` / `ChatEventHandler` 两个 trait 改自由函数 | 做 | 可读性收尾,非必须 |
@@ -40,7 +39,7 @@
 | C9 | 真机实测两项:`/coconut/clouddb/currentTime` 单位、`update_phone_number` 字段名(`phone` vs `phone_number`) | 做 | 便宜,能消掉两处假设 |
 | C10 | 人工验证项:错误信息含服务端 body、并发 `connect` 串行化、断连不发虚假 `Error`、云存储事件帧是否容忍无空格 `42[…]` | 做 | 都要真实服务;可以在跑真机测试时顺带确认 |
 
-## D. 转换域 · 最近四轮(33–36)新出的决策点(**D1–D5 已按建议落定**;**D6 为第 40 轮 R2 新登记:① `c076918`、③ `104964f` 已落定,仅 ② 待拍板**)
+## D. 转换域 · 最近四轮(33–36)新出的决策点(**D1–D5 已按建议落定**;**D6 为第 40 轮 R2 新登记:① `c076918`、③ `104964f` 已落定;**② 与 ④ 待拍板**)
 
 > 背景:rounds/34–36 把"产物能在真编辑器里打开"这条线走通了(实机验证),
 > 代价与剩余缺口都量化过了。事实与证据见 `docs/knowledge/convert-semantics.md` §5bis 与 `docs/rounds/34–36`。
@@ -52,12 +51,13 @@
 | D3 ✅ **已决(2026-09-26):方案①,维持手动** | **"编辑器能打开"这条门要不要进 CI**:现在是我按轮次手动跑(无头 Chromium + 线上 Kitten4 + 对照组) | ① 维持手动 ② 进 CI | **①**:依赖真编辑器与网络,CI 里容易 flaky;进 CI 需要先做"离线可复现"的替身(例如把 `validateBcm` 硬门接进 CI,那条已经 headless 可跑) | 编辑器回归只能靠轮次里的人工实机验证兜 |
 | D4 ✅ **已落地(2026-09-26;rounds/38 起由"剔除量门"改成 `MARKER_BUDGET`)** | **标记量的预算门**:现在只有**定义体侧**有预算断言(`≤3193`);**块/影子的标记量**另有门(rounds/36 的 942→715 / 398→50 是人工 A/B 比的,rounds/38 起口径为"改成「未收录积木」标记的块数 + 清空影子数") | ① 做(对全语料测一遍记基线,写进 `reverse_tests`) ② 不做 | **①**:便宜且能防"悄悄又标记多了";口径可复用现成的扫描器 | 标记量回退时没人拦 |
 | D5 ✅ **已完成(2026-09-26)** | **单包上传上限**(原 A5)是否继续:30 MB 单包被 qiniu 拒 **413**,平台自己 9.3 MB 产物写入成功 ⇒ 上限落在 9.3~30 MB 之间 | ① 做便宜实验定位上限归属(取凭证带 `fsize`;或试 KN 官方口径 `projectName=neko` + `insertOnly=true`) ② 分片上传 ③ 标注上限并接受 | 已按 ① 收尾(上限 20~24 MB + 提前报错) | 无(超出上限的作品现在是**明确报错**而不是白等后 413) |
-| **D6** **对外形状三项**(第 40 轮 R2 报出,2026-10-02 登记) | ① `BlockContext.variable_map` **只写不读**(每角色一份 UUID→变量名,由 `with_capacity` 注入;**已于 `c076918` 删除**);② `ActionRegistry.client` / `ReportFetcher.client` **存而不用** —— 请求实际走**方法参数**上的 client,`new_with_client` 收下的那个被丢弃(不是错客户端 bug,但注入形状**名不副实**);③ 四个 `pub` 类型(`AdminReportStatistics` / `FanByLikesStatistics` / `RankingData` / `UserInfo`)的字段**曾是 `pub(crate)`** ⇒ 外部拿到类型也读不到字段(**已放宽**,`104964f`) | ① 并入 R4 一并做 / 留 / 删;② **删字段 + 删 `new_with_client`**(注入改由方法参数承担,干净切齐)/ 保留现状;③ 先查这些类型是否出现在 `backend::` 的**公开签名**里再定(对外数据 ⇒ 放宽字段;内部类型 ⇒ 把类型收 `pub(crate)`) | ① ✅ **已完成**(`c076918`,随 R4 落地:字段 + `with_capacity` 参数 + 调用点已删,产物字节不变)⇒ 不必在此再决策;② **待你拍板**(删字段/方法属**公共面**改动);③ ✅ **已完成**(`104964f`:**7 个类型 / 27 个字段**放宽到 `pub`,含 4 张嵌套表;同步撤掉 4 处 `#[allow(dead_code)]`,全仓现剩 **7 处**) | ②不定:使用者以为 `new_with_client` 生效,实际被丢;③不定:外部拿到类型但零可读字段(名不副实) |
+| **D6** **对外形状 / 公共面四项**(第 40 轮 R2 与 T2 报出,2026-10-02 登记) | ① `BlockContext.variable_map` **只写不读**(每角色一份 UUID→变量名,由 `with_capacity` 注入;**已于 `c076918` 删除**);② `ActionRegistry.client` / `ReportFetcher.client` **存而不用** —— 请求实际走**方法参数**上的 client,`new_with_client` 收下的那个被丢弃(不是错客户端 bug,但注入形状**名不副实**);③ 四个 `pub` 类型(`AdminReportStatistics` / `FanByLikesStatistics` / `RankingData` / `UserInfo`)的字段**曾是 `pub(crate)`** ⇒ 外部拿到类型也读不到字段(**已放宽**,`104964f`);④ `ProcessorUi::input(&mut self, &str) -> String`(公共 trait)在 **stdin 读失败**时**无处返回错误** ⇒ 现为 `expect` fail-fast(避免空串让 `choose/menu` 死循环) | ① 并入 R4 一并做 / 留 / 删;② **删字段 + 删 `new_with_client`**(注入改由方法参数承担,干净切齐)/ 保留现状;③ 先查这些类型是否出现在 `backend::` 的**公开签名**里再定(对外数据 ⇒ 放宽字段;内部类型 ⇒ 把类型收 `pub(crate)`);④ **改签名 `MewResult<String>` 并逐调用点传播**(破坏性公共面,但本库未 1.0、约定是"直接改")/ 维持 `expect` fail-fast + 文档写明 | ① ✅ **已完成**(`c076918`,随 R4 落地:字段 + `with_capacity` 参数 + 调用点已删,产物字节不变)⇒ 不必在此再决策;② **待你拍板**(删字段/方法属**公共面**改动);③ ✅ **已完成**(`104964f`:**7 个类型 / 27 个字段**放宽到 `pub`,含 4 张嵌套表;同步撤掉 4 处 `#[allow(dead_code)]`,全仓现剩 **7 处**);④ **建议改签名**(真外部输入失败应能返回错误)—— 按纪律等拍板 | ②不定:使用者以为 `new_with_client` 生效,实际被丢;③不定:外部拿到类型但零可读字段(名不副实);④不定:`expect` 会让"stdin 关闭 / 管道断开"变成 **panic**(`release` 是 `panic="abort"` ⇒ 直接终止进程) |
 
 ## 已决(不用再问)
 
 > **2026-10-02 从 B/C 组移入**(已完成,保留结论与提交号以便回溯):
 > - ~~B5 **恢复 `[lints.rust] unused` 告警**~~ → **已完成**:旧为 `allow`;第 40 轮 R2 三阶段放开为 `warn`(`6414b97` 机械族 19 条 / `30216c5` `dead_code` 31 条 / `8da596d` 收口),**终态三选择(`--lib`/`--bins`/`--tests`)诊断 0/0/0**;口径与逐条处置见 `../goals/infra-backlog.md` §1.1,耐久约定见 `repo-conventions.md` §6。
+> - ~~C1 **49 处非锁 `unwrap` 硬化**~~ → **已完成(`cbb167a`)**:按新口径重新枚举,真实 **50 处**(生产 10 / `cfg(test)` 40),**硬化 49、按约定保留 1**(`utils/socketio.rs` 的 `Condvar::wait_timeout` —— 与相邻 `lock().unwrap()` 同属 Mutex 毒化,按"锁解锁保留"处理);另有 **1 处待拍板**(`core/terminal.rs` 的 stdin 读失败 ⇒ 见 **D6④**)。旧"49 处"点名的四族在本树**已不存在** ⇒ 旧计数**不可复现**(旧口径还会漏掉跨行 `lock()`⏎`.unwrap()` 链);新口径见 `../goals/infra-backlog.md` §2 第 2 条。
 > - ~~C2 **`DecompilerError` 包装 `MewError`**(原记"消除自带 `Io/Json/Http` 重复")~~ → **已不成立并已办净**:该重复 **2026-10-01 核实已不存在**(`io::Error`/`serde_json::Error` 经 `From` 折进 `Mew`);剩下的零调用死变体 `UnsupportedType` **已于 `fef30e7` 删除**(破坏性公共面变更、已授权)。见 `docs/rounds/39` §1.3/§W5②/§W12d。
 
 - `MewError`/`MewResult` **品牌名保留**;`terminal.rs` 留在库内;`HttpClient` trait 不公开;类型级 WS 状态机(`CloudConnection<Connected>`)不做;god file 不拆、不加宏(`impl_api_manager!` 类)。
