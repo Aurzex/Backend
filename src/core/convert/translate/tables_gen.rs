@@ -1150,6 +1150,9 @@ pub(super) const KITTEN_MUTATION_TEXT_SELECT: &[(&str, &[(&str, &str)])] = &[
 ];
 
 /// 每个块的默认 shadow XML 覆盖表(`cy`)
+/// 注:当前只被 `mapping::SHADOW_XML_INDEX`(→ 仅 `#[cfg(test)]` 用)读 ⇒ 生产构建里不需要它。
+/// 生成器 `src/bin/gen_translate_tables.rs` 同步产出这个属性(见其 SHADOW_XML 段)。
+#[cfg(test)]
 pub(super) const SHADOW_XML: &[(&str, &[(&str, &str)])] = &[
     (
         "ai_chat_ask",

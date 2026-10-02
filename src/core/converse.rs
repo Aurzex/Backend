@@ -96,6 +96,9 @@ impl HistoryMessage {
 }
 
 /// 用户配额信息
+// 三个字段都只写不读(由 `get_text2Img_remaining_times` 事件填入);它们是 `pub(crate)`,
+// 外部不可见,但删除属对外类型形状改动 ⇒ 标 allow 并登记。
+#[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub struct UserInfo {
     pub(crate) user_id: Option<i64>,

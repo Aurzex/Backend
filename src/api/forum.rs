@@ -51,30 +51,11 @@ pub enum DeleteItemType {
     Post,
 }
 
-impl DeleteItemType {
-    fn as_str(&self) -> &'static str {
-        match self {
-            DeleteItemType::Reply => "reply",
-            DeleteItemType::Comment => "comment",
-            DeleteItemType::Post => "post",
-        }
-    }
-}
-
 /// 发布帖子目标类型(板块 / 工作室)
 #[derive(Debug, Clone, Copy)]
 pub enum TargetType {
     Board,
     Workshop,
-}
-
-impl TargetType {
-    fn as_str(&self) -> &'static str {
-        match self {
-            TargetType::Board => "board",
-            TargetType::Workshop => "workshop",
-        }
-    }
 }
 
 /// 回帖/评论举报原因 ID

@@ -75,7 +75,6 @@ pub(crate) fn bytes_to_human(size_bytes: u64) -> String {
 pub(crate) struct ActionConfig {
     pub(crate) key: String,
     pub(crate) name: String,
-    pub(crate) description: String,
     /// 动作对应的处理决议;非执行类动作(检查违规/跳过)为 None
     pub(crate) resolution: Option<Resolution>,
     pub(crate) enabled: bool,
@@ -162,7 +161,6 @@ impl ActionConfig {
         ActionConfig {
             key: key.into(),
             name: action_name(key).into(),
-            description: String::new(),
             resolution,
             enabled: true,
         }
@@ -201,7 +199,6 @@ pub(crate) struct SourceConfig {
     pub(crate) name: String,
     pub(crate) parent_id_field: String,
     pub(crate) reason_field: String,
-    pub(crate) reason_id_field: String,
     pub(crate) report_id_field: String,
     pub(crate) source_id_field: String,
     pub(crate) source_name_field: String,
@@ -249,7 +246,6 @@ impl SourceConfig {
             item_id_field: "id".into(),
             parent_id_field: String::new(),
             reason_field: "reason_content".into(),
-            reason_id_field: "reason_id".into(),
             report_id_field: "id".into(),
             source_id_field: String::new(),
             source_name_field: String::new(),
@@ -271,7 +267,6 @@ impl SourceConfig {
 // 举报类型注册表
 /// 按举报类型预计算的动作提示与合法键集合(注册表运行期不变)
 pub(crate) struct ActionOptions {
-    pub(crate) prompt: String,
     pub(crate) valid_keys: HashSet<String>,
     /// 有序可用动作列表(已过滤禁用项),供菜单渲染零分配
     pub(crate) actions: Vec<ActionConfig>,
@@ -280,7 +275,9 @@ pub(crate) struct ActionOptions {
 pub(crate) struct ReportTypeRegistry {
     /// Arc 包装:每条举报记录的处理都需持有配置,避免逐记录深克隆整个 SourceConfig(~30 个 String)
     registry: HashMap<String, Arc<SourceConfig>>,
-    default_actions: Vec<ActionConfig>, // 保留用于构建默认动作,也可直接为静态
+    /// 保留用于构建默认动作(动作键顺序的单一来源),也可直接为静态;当前无读取方 ⇒ 标 allow 而非删
+    #[allow(dead_code)]
+    default_actions: Vec<ActionConfig>,
     action_cache: Mutex<HashMap<String, Arc<ActionOptions>>>,
 }
 
@@ -338,12 +335,7 @@ impl ReportTypeRegistry {
                     .collect()
             })
             .unwrap_or_default();
-        let parts: Vec<String> = actions
-            .iter()
-            .map(|a| format!("{}({})", a.key, a.name))
-            .collect();
         let options = Arc::new(ActionOptions {
-            prompt: format!("选择操作:{}", parts.join(",")),
             valid_keys: actions.iter().map(|a| a.key.clone()).collect(),
             actions,
         });
@@ -395,6 +387,9 @@ struct ActiveSource {
 }
 
 pub(crate) struct ReportFetcher {
+    /// 注入缝:`new_with_client` 收下客户端,但各方法改为**按参数**注入(见 `new_with_client` 里的
+    /// `let c = client.clone()`),该字段因此无读者 —— 不删,否则 `new_with_client` 会变成忽略参数的假注入
+    #[allow(dead_code)]
     client: CodeMaoClient,
     /// Arc 共享:ReportProcessor 的管道工厂与 fetcher 复用同一注册表,避免深拷贝
     pub(crate) registry: Arc<ReportTypeRegistry>,

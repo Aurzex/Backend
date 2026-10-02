@@ -87,23 +87,6 @@ pub enum UserRole {
     Admin,
 }
 
-impl UserRole {
-    fn as_str(&self) -> &'static str {
-        match self {
-            UserRole::User => "user",
-            UserRole::Admin => "admin",
-        }
-    }
-
-    fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "user" => Some(UserRole::User),
-            "admin" => Some(UserRole::Admin),
-            _ => None,
-        }
-    }
-}
-
 /// 账号状态/类型(普通,评审,教育)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccountStatus {
@@ -113,23 +96,6 @@ pub enum AccountStatus {
 }
 
 impl AccountStatus {
-    fn as_str(&self) -> &'static str {
-        match self {
-            AccountStatus::Judgement => "judgement",
-            AccountStatus::Average => "average",
-            AccountStatus::Edu => "edu",
-        }
-    }
-
-    fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "judgement" => Some(AccountStatus::Judgement),
-            "average" => Some(AccountStatus::Average),
-            "edu" => Some(AccountStatus::Edu),
-            _ => None,
-        }
-    }
-
     /// 映射为身份枚举 `Identity`
     pub fn to_identity(self) -> Identity {
         match self {

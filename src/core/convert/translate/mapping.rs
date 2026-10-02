@@ -48,9 +48,12 @@ use super::model::IdSource;
 use super::model::{BlockJson, BlockTree, flat_index, math_number_node, nested_index};
 use super::report::{TranslateReport, TranslateWarning};
 use super::tables_gen::{
-    KITTEN_MUTATION_TEXT, KITTEN_MUTATION_TEXT_SELECT, KITTEN_TO_KN, SHADOW_XML,
-    TEXT_PLACEHOLDER_BLOCKS, ZH_NAME_BY_TYPE,
+    KITTEN_MUTATION_TEXT, KITTEN_MUTATION_TEXT_SELECT, KITTEN_TO_KN, TEXT_PLACEHOLDER_BLOCKS,
+    ZH_NAME_BY_TYPE,
 };
+// 只被下面的 `SHADOW_XML_INDEX`(cfg(test))使用;生产构建里 `tables_gen::SHADOW_XML` 不存在。
+#[cfg(test)]
+use super::tables_gen::SHADOW_XML;
 use super::xml::{
     attr_span, attr_value, decrement_items, js_text, math_number_shadow, mutation_body,
     pure_list_shadow, set_attr_value, start_tag_end,
@@ -219,6 +222,8 @@ pub(super) fn translate_kitten_to_kn(
 static KITTEN_TO_KN_INDEX: std::sync::LazyLock<HashMap<&'static str, &'static str>> =
     std::sync::LazyLock::new(|| flat_index(KITTEN_TO_KN));
 
+// 只服务 `shadow_xml`(见下),而 `shadow_xml` 只被本文件的 cfg(test) 用例调用 ⇒ 生产构建里不需要它。
+#[cfg(test)]
 static SHADOW_XML_INDEX: std::sync::LazyLock<
     HashMap<&'static str, HashMap<&'static str, &'static str>>,
 > = std::sync::LazyLock::new(|| nested_index(SHADOW_XML));
@@ -295,6 +300,8 @@ pub(super) fn is_text_placeholder(kind: &str) -> bool {
 }
 
 /// 官方 `cy` 表:某积木某槽位的默认影子 XML
+/// 注:只被本文件的 `#[cfg(test)]` 用例使用 ⇒ 生产构建里不需要它(连带 `SHADOW_XML_INDEX` / `SHADOW_XML`)。
+#[cfg(test)]
 fn shadow_xml(kind: &str, slot: &str) -> Option<&'static str> {
     SHADOW_XML_INDEX.get(kind)?.get(slot).copied()
 }
@@ -885,6 +892,8 @@ fn is_kitten_side(kind: &str) -> bool {
 ///
 /// 往返扫描折等价类时必须有这条边:只走"我指向谁"会漏掉 `stop` ← `terminate` 这类
 /// ——`terminate` 不是正向表的键,但它的伙伴 `stop` 的反向候选里有它。
+/// 注:只被 `reverse_tests.rs`(lib 的 `#[cfg(test)]` 子模块)使用 ⇒ 标 `cfg(test)` 而不是删。
+#[cfg(test)]
 pub(super) fn kitten_names_for(kn_name: &str) -> Vec<&'static str> {
     KITTEN_TO_KN
         .iter()
@@ -896,6 +905,8 @@ pub(super) fn kitten_names_for(kn_name: &str) -> Vec<&'static str> {
 /// 某个类型在反向表里的候选 Kitten 原类型(没有则空)。
 ///
 /// 与 [`translate_type`] 一起用于把"同一个积木在不同方向的名字"折成一类。
+/// 注:只被 `reverse_tests.rs`(lib 的 `#[cfg(test)]` 子模块)使用 ⇒ 标 `cfg(test)` 而不是删。
+#[cfg(test)]
 pub(super) fn reverse_candidates(kind: &str) -> &'static [&'static str] {
     match REVERSE_TYPES.get(kind) {
         Some(candidates) => candidates.as_slice(),

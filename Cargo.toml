@@ -28,13 +28,14 @@ panic = "unwind"
 # 组的 `level` 必须配 `priority = -1`,否则 clippy 的 `lint_groups_priority`(deny 默认)
 # 直接报错 —— 它要求成员比所在组更具体(同优先级会被判定为"顺序未定义")。
 # 注意显式 `warn` **挡不住** `clippy --all-targets -- -D warnings`,所以每放开一族前
-# 阶段 1 = 机械族(下面 5 条);`dead_code` 待阶段 2 逐条判完后单独开。
+# 阶段 1 = 机械族(下面 5 条);阶段 2 = `dead_code`(逐条判完后见下)。
 unused = { level = "allow", priority = -1 }
 unused_imports = "warn"
 unused_variables = "warn"
 unused_mut = "warn"
 unused_assignments = "warn"
 unused_must_use = "warn"
+dead_code = "warn"
 
 [dependencies]
 aes-gcm = "0.11.1"

@@ -137,6 +137,9 @@ fn run() -> Result<String, String> {
     let _ = writeln!(out, "];\n");
 
     let _ = writeln!(out, "/// 每个块的默认 shadow XML 覆盖表(`cy`)");
+    // 该表当前只被 `mapping::SHADOW_XML_INDEX`(仅 `#[cfg(test)]` 用)读 ⇒ 生成物里也标 cfg(test),
+    // 两处同步(手改生成物 + 生成器,见 rounds/40 R2;本机没有 temp/tables,无法重跑生成器核对)。
+    let _ = writeln!(out, "#[cfg(test)]");
     let _ = writeln!(
         out,
         "pub(crate) const SHADOW_XML: &[(&str, &[(&str, &str)])] = &["

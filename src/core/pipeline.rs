@@ -183,10 +183,6 @@ impl BatchActionManager {
     pub(crate) fn is_record_processed(&self, record_id: &str) -> bool {
         self.processed_records.contains(record_id)
     }
-
-    pub(crate) fn clear_processed_records(&mut self) {
-        self.processed_records.clear();
-    }
 }
 
 // 动作注册表(可捕获客户端)
@@ -194,6 +190,9 @@ type ActionFn = Box<dyn Fn(i32, i32, Resolution) -> Result<bool, ProcessorError>
 
 pub(crate) struct ActionRegistry {
     handlers: HashMap<&'static str, ActionFn>,
+    /// 注入缝:`new_with_client` 收下客户端,但 `apply*` 改为**按参数**注入客户端,该字段因此无读者
+    /// —— 不删,否则 `new_with_client` 会变成忽略参数的假注入
+    #[allow(dead_code)]
     client: CodeMaoClient,
 }
 

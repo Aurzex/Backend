@@ -892,6 +892,9 @@ pub(crate) fn child_input_name(block_type: &str, index: usize, conditions_count:
 pub(crate) struct BlockContext {
     pub(crate) actor_data: Value,
     pub(crate) functions: Arc<HashMap<String, Value>>,
+    // 只写不读:由 `with_capacity` 注入,当前无读取方。删它要连带 9 处(字段 + 两个签名参数 +
+    // 3 处调用点 + 每个角色的 map 构造),属 decompile 内部清理 ⇒ 登记给 R4(decompile 补离线测试)一并做。
+    #[allow(dead_code)]
     pub(crate) variable_map: Arc<HashMap<String, String>>, // UUID -> 变量名
     pub(crate) shadow_builder: ShadowBuilder,
     pub(crate) blocks: HashMap<String, Value>,
@@ -902,24 +905,6 @@ pub(crate) struct BlockContext {
 }
 
 impl BlockContext {
-    pub(crate) fn new(
-        actor_data: Value,
-        functions: Arc<HashMap<String, Value>>,
-        shadow_builder: ShadowBuilder,
-        variable_map: Arc<HashMap<String, String>>,
-    ) -> Self {
-        Self {
-            actor_data,
-            functions,
-            variable_map,
-            shadow_builder,
-            blocks: HashMap::new(),
-            connections: HashMap::new(),
-            layout_col: 0.0,
-            layout_row: 0.0,
-        }
-    }
-
     pub(crate) fn with_capacity(
         actor_data: Value,
         functions: Arc<HashMap<String, Value>>,

@@ -169,6 +169,9 @@ impl BlockJson {
     }
 
     /// 类型频次统计
+    /// 注:只被同名的 1 参版本(见下)调用,而那个版本只被 `#[cfg(test)]` 用例/往返扫描用
+    /// (`convert-backlog.md` §2 第 10 条:仅测试/仪器用 ⇒ 保留并注明,不删)⇒ 两处都标 `cfg(test)`。
+    #[cfg(test)]
     pub(super) fn count_types(&self, out: &mut BTreeMap<String, usize>) {
         self.walk(&mut |b| *out.entry(b.kind.clone()).or_default() += 1);
     }
@@ -206,6 +209,10 @@ impl BlockTree {
         self.roots.iter().map(BlockJson::count).sum()
     }
 
+    /// 类型频次统计(整树版)
+    /// 注:只被 `#[cfg(test)] mod tests` 与 `reverse_tests.rs`(lib 的 `#[cfg(test)]` 子模块)调用 ⇒
+    /// 标 `cfg(test)` 从生产构建里移出,而不是删(`convert-backlog.md` §2 第 10 条)。
+    #[cfg(test)]
     pub(super) fn count_types(&self) -> BTreeMap<String, usize> {
         let mut out = BTreeMap::new();
         for r in &self.roots {

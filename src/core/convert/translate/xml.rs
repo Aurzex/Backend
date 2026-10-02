@@ -236,6 +236,8 @@ impl XmlNode {
     }
 
     /// 删除所有同名属性(对应 `removeAttribute`;属性不存在时无操作)
+    /// 注:当前只被本文件的 `#[cfg(test)]` 用例使用 ⇒ 生产构建里不需要它。
+    #[cfg(test)]
     pub(super) fn remove_attr(&mut self, name: &str) {
         self.attrs.retain(|(k, _)| k != name);
     }
@@ -369,6 +371,9 @@ fn push_text_escaped(out: &mut String, s: &str) {
 
 /// 解析一整份文档,返回**第一个元素**
 /// (跳过 XML 声明/注释/DOCTYPE/前后空白/末尾其它节点)
+/// 注:只被本文件的 `#[cfg(test)]` 用例使用(生产入口是 [`parse_fragment`])⇒ 标 `cfg(test)`;
+/// 它连带 [`Parser::run`](仅此处调用)一起只进测试构建。
+#[cfg(test)]
 pub(super) fn parse(xml: &str) -> Result<XmlNode, DecompilerError> {
     let mut parser = Parser::new(xml);
     let roots = parser.run()?;
@@ -552,6 +557,8 @@ impl<'a> Parser<'a> {
     }
 
     /// 解析整份文档,返回所有**顶层**元素(调用方决定取第一个还是要求唯一)
+    /// 注:只被 [`parse`](cfg(test) 的函数)调用 ⇒ 同样只进测试构建(`run_wrapped` 走 `run_inner`)。
+    #[cfg(test)]
     fn run(&mut self) -> Result<Vec<XmlNode>, DecompilerError> {
         self.run_inner(None)
     }

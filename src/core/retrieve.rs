@@ -48,16 +48,6 @@ pub enum CommentSource {
     Shop,  // 工坊讨论评论
 }
 
-impl CommentSource {
-    pub(crate) fn as_str(&self) -> &'static str {
-        match self {
-            CommentSource::Work => "work",
-            CommentSource::Forum => "forum",
-            CommentSource::Shop => "shop",
-        }
-    }
-}
-
 impl std::str::FromStr for CommentSource {
     type Err = DataQueryError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -76,16 +66,6 @@ pub enum NotificationCategory {
     LikeFork,     // 点赞/收藏
     CommentReply, // 评论/回复
     System,       // 系统通知
-}
-
-impl NotificationCategory {
-    pub(crate) fn as_str(&self) -> &'static str {
-        match self {
-            NotificationCategory::LikeFork => "LIKE_FORK",
-            NotificationCategory::CommentReply => "COMMENT_REPLY",
-            NotificationCategory::System => "SYSTEM",
-        }
-    }
 }
 
 // 数据类型别名
@@ -1189,6 +1169,8 @@ pub struct AdminReportStatsEntry {
 /// 管理员举报统计汇总
 #[derive(Debug, Clone)]
 pub struct AdminReportStatistics {
+    /// 只写不读(汇总时填);`pub(crate)` 字段外部不可见,但对外类型形状改动要单独评审 ⇒ 标 allow
+    #[allow(dead_code)]
     pub(crate) total_admins: i32,
     pub(crate) total_comment_reports: i32,
     pub(crate) total_work_reports: i32,
@@ -1197,6 +1179,9 @@ pub struct AdminReportStatistics {
 }
 
 /// 粉丝点赞统计
+// 五个字段都只写不读(统计时填);它们是 `pub(crate)`、外部不可见,但删除属对外类型形状改动
+// ⇒ 标 allow 并登记(该 pub struct 的字段全是 `pub(crate)`,外部拿到也读不到 —— 见 R2 报告)。
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct FanByLikesStatistics {
     pub(crate) target_user_id: i32,

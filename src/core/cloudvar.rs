@@ -187,6 +187,8 @@ pub struct RankingItem {
 /// 一次排行榜查询结果
 #[derive(Debug, Clone, Default)]
 pub struct RankingData {
+    /// 只写不读(构造时由接口填);它是 `pub(crate)` 字段、外部不可见,但删除属对外类型形状改动 ⇒ 标 allow
+    #[allow(dead_code)]
     pub(crate) cvid: String,
     pub(crate) name: String,
     pub(crate) items: Vec<RankingItem>,
@@ -208,7 +210,13 @@ type ConnectionCallback = Box<dyn Fn(ConnectionEvent) + Send + Sync>;
 #[derive(Debug, Clone)]
 pub(crate) enum CloudCommand {
     /// 变量更新:私有/公有
-    Variable { private: bool, data: Value },
+    // `private` 刻意只写不读 —— 旧实现就没读,不能在重构里顺手改语义(见 `plan_commands` 的注释);
+    // 保留字段是为了与线上命令形态对齐。
+    Variable {
+        #[allow(dead_code)]
+        private: bool,
+        data: Value,
+    },
     /// 列表更新:cvid + 操作序列
     List { cvid: String, ops: Vec<Value> },
 }
