@@ -366,8 +366,8 @@ sha256 `c5881f55…`(与刷新后的 `#meta.source_sha256` 一致)⇒ 基准跑�
 
 ## 依据
 
-- 本文件合并自(原文件已并入并删除):`40-download-timeout-and-body-cap.md`(§7 全文)、
-  `40-bench-fixture-discipline.md`(§8 全文)、`docs/goals/README.md` 第 40 轮目标表 R1–R7 的单元格(§1–§6 的证据原文);
+- 本文件合并自(原文件已并入并删除):原「下载侧大文件」篇(§7 全文)、
+  原「夹具目录纪律 + 断言顺序」篇(§8 全文)、`../goals/README.md` 第 40 轮目标表 R1–R7 的单元格(§1–§6 的证据原文);
   其余提交号(`cbb167a` / `60d5358`)见 §9。
 - 相关权威落点:`../goals/infra-backlog.md` §1/§1.1(R2 读数、CI 产物、`47a8c5e`)、§2 第 2 条(unwrap 硬化);
   `../goals/convert-backlog.md` §2 第 8 条(根块)、§5 第 2 行(R6);`../goals/pending-decisions.md` D6(公共面四项);

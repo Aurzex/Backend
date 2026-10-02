@@ -7,11 +7,11 @@
 
 | # | 问题 | 选项 | 建议 | 不定的后果 |
 | - | ---- | ---- | ---- | ---------- |
-| A1 ✅ **已修 + 已实测证明(2026-09-26)** | 大作品上传必失败:≈9 MB 作品在全局 30 s 超时下超时(实测 31.2 s / 35.5 s)⇒ 已按方案 ① 落地:上传路径改用**请求级超时覆盖**(`MewRequestBuilder::with_timeout`),其余请求仍走全局 30 s,行为不变。**实测读数与常量值只在 `../knowledge/nemo-runtime-and-upload.md` §6 展开**(超时口径见 `platform-and-protocol.md` §5bis) | — | 分片上传仍留待真需要;下载侧大文件(单请求 63 598 143 B)的同类风险**已修**(2026-10-02,`afca96c`,见 `platform-backlog`) |
+| A1 ✅ **已修 + 已实测证明(2026-09-26)** | 大作品上传必失败:≈9 MB 作品在全局 30 s 超时下超时(实测 31.2 s / 35.5 s)⇒ 已按方案 ① 落地:上传路径改用**请求级超时覆盖**(`MewRequestBuilder::with_timeout`),其余请求仍走全局 30 s,行为不变。**实测读数与常量值只在 `../knowledge/nemo-runtime-and-upload.md` §6 展开**(超时口径见 `../knowledge/platform-and-protocol.md` §5bis) | — | 分片上传仍留待真需要;下载侧大文件(单请求 63 598 143 B)的同类风险**已修**(2026-10-02,`afca96c`,见 `platform-backlog.md`) |
 | A2 ✅ **已决(2026-09-26,方案① 文档化)** | **`keep_source` 上传的是"反编译重建的编辑版",不是原始文件字节** | ① 保留现状 + 文档说明 ② 反编译侧额外保留原始字节(改动跨域) ③ 放弃 `keep_source` | **①**:官方语义是"保留原件",我们手里只有重建版;文档说明偏差即可 | 平台的"保留原件"打不开原件(功能名实不符) |
 | A3 ✅ **已修(2026-09-26)** | **`cloudvar.rs` 的 `detect_editor` 仍用全局 `WorkDataFetcher::new()`**(接 WS 时自动识别编辑器类型) | ① 让 `CloudBuilder` 持有 `CodeMaoClient` 完成注入 ② 维持全局 | **①**:与 14–17 轮注入纪律一致;设计已清楚(WS 持有 HTTP 客户端) | 剩余一处全局依赖,纯注入式使用方无法完全隔离 |
 | A4 | **NEMO 作品上传链路**(✅ 上传渠道与编排已落地:`UploadChannel::Nemo` + `DecompileOptions::upload_to_account`) | 剩余待决:**是否真机验证 NEMO 上传**(建一份 NEMO 草稿) | **可择机**:KN 侧已端到端验证通过(`docs/rounds/30` §5:反编译 → 建草稿 330852319 → 回读 → 自删);NEMO 只差"敢不敢建" | NEMO 草稿**擦不掉**(删除端点未知;`empty_kn_trash` 只清 KN),所以跑一次会在你账号下留一份 NEMO 草稿;另:产物只带 `.bcm`,资源仍指向源 CDN(不重传) |
-| A5 ✅ **已定位 + 已收尾(2026-09-26)** | **单包上传大小上限(与超时无关)** ⇒ 已实测:**上限落在 20~24 MB**,超过则**提前报错**(`shared::ensure_single_package_fits`,别让用户白等几分钟再吃 413)。逐档读数/速率/渠道只在 `../knowledge/platform-and-protocol.md` §5bis 展开 | 分片上传留待真需要 | ✅ 结论写进 `knowledge/platform-and-protocol.md` §5bis | 超过上限的作品 `translate_work(upload=true)` 仍会失败(真实 KN 产物多在 3~9 MB,暂不阻塞日常使用) |
+| A5 ✅ **已定位 + 已收尾(2026-09-26)** | **单包上传大小上限(与超时无关)** ⇒ 已实测:**上限落在 20~24 MB**,超过则**提前报错**(`shared::ensure_single_package_fits`,别让用户白等几分钟再吃 413)。逐档读数/速率/渠道只在 `../knowledge/platform-and-protocol.md` §5bis 展开 | 分片上传留待真需要 | ✅ 结论写进 `../knowledge/platform-and-protocol.md` §5bis | 超过上限的作品 `translate_work(upload=true)` 仍会失败(真实 KN 产物多在 3~9 MB,暂不阻塞日常使用) |
 
 ## B. 大方向(决定"要不要立轮")
 

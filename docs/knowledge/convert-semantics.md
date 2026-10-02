@@ -88,7 +88,7 @@ NEMO → KN 是另一条前端(`hI.parseBlocksXML`),官方管线共 12 步(`main
    反向必须**合成**(rounds/35)。
 3. **所有积木类型名(含影子 XML 的 `type`)**必须是编辑器**注册表里有的名字** —— 不认识的名字会让
    **整份工作区加载失败**。注册表 = 线上编辑器 `Object.keys(window.Blockly.Blocks)`(**349 条**;快照在
-   `src/core/convert/translate/kitten4_vocab.rs`,**条目数与导出日期的单一事实源 = `kitten4_vocab::KITTEN4_VOCAB_EXPORTED`,重导流程见 `convert-backlog.md` §2 第 0b 条**)⇒ 写出阶段必须落成编辑器认识的形态(不认识的就地改成「未收录积木」标记、
+   `src/core/convert/translate/kitten4_vocab.rs`,**条目数与导出日期的单一事实源 = `kitten4_vocab::KITTEN4_VOCAB_EXPORTED`,重导流程见 `../goals/convert-backlog.md` §2 第 0b 条**)⇒ 写出阶段必须落成编辑器认识的形态(不认识的就地改成「未收录积木」标记、
    影子清空)+ 逐类报告(rounds/34 §4nonies、36、38 §7bis)。
    - **反编译侧的同一条契约(已被测试钉住,`c076918`)**:反编译遇到**未知影子类型**时一律**告警 + 回退成
      `logic_empty` 占位**(JSON 与 XML 两种形态各钉一条测试,见 `src/core/convert/decompile/shadow.rs`),

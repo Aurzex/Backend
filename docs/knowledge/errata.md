@@ -360,16 +360,16 @@ W10 落地(`66c0b6b`)后,**"内联对象形态影子 ⇒ 拒收该作品"这条�
 
 - **错**:`docs/rounds/31-convert-layout-consolidation-plan.md` §3.6 N4 引 `translate/model.rs` 的注释「`XmlBlockWriter` 的约定:首根 80、每根 +220」,据此把两边当作**同一约定**,只把起点差异记作"疑似漂移",并提出"若确认是同一约定,则把 220/80 提到一处"。
   - **为何错**:两边是**同名不同物**(`decompile` 侧写 Kitten2/3 blocksXML 的 `y=0.0 + 220·i`;`translate/model.rs` 写 Kitten4 `block_data_json` 的 `location`,且只在缺 `location` 时兜底)⇒ 不存在可提的"共享常量";平台侧读数也不支持"起点 80 是平台约定"。
-  - **正确**:根块坐标**非语义**(`location` 就在语义 diff 的 allow-list 里),两处唯一的硬要求是"根块互不重叠"⇒ **不做共享常量、也不改数值**;只把 `model.rs` 那句自称"一致"的注释改准(`4072846`)。**平台取数(711 个含根块实体 / 起点 0 出现 257 / 起点 80 零次)与 A/B 实测的 SHA 数字只在 `goals/convert-backlog.md` §2 第 8 条展开。**
+  - **正确**:根块坐标**非语义**(`location` 就在语义 diff 的 allow-list 里),两处唯一的硬要求是"根块互不重叠"⇒ **不做共享常量、也不改数值**;只把 `model.rs` 那句自称"一致"的注释改准(`4072846`)。**平台取数(711 个含根块实体 / 起点 0 出现 257 / 起点 80 零次)与 A/B 实测的 SHA 数字只在 `../goals/convert-backlog.md` §2 第 8 条展开。**
   - 出处:docs/rounds/31-convert-layout-consolidation-plan.md §3.6 N4(⚠️ 它点名的 `model.rs:706-708`、`editors.rs:625-626` 已随文件增长**行号漂移**,请按符号定位:`ROOT_LAYOUT_Y`/`ROOT_LAYOUT_STEP` 及其文档注释、`XmlBlockWriter::write_blocks`)。
 
 ## 第 40 轮 R2 的 `unused` 读数(2026-10-02)
 
 - **易误**:表格/历史文里出现的 `--bins` 946(其中 `main.rs` 896)/ `--tests` 551,被当成**现在能跑出来**的数。
-  - **正确**:那是 **`47a8c5e`(bin 改走库 crate)之前**的旧读数,已被那次**重写**清掉(不是"清 `unused`"清的)⇒ 当前树**不可复现**。**全部读数(两棵树 / 三阶段 / 终态)与口径只在 `goals/infra-backlog.md` §1.1 展开**;`docs/rounds/39` §0.3/§W5 段按纪律就地标注(2026-10-02),不改。
+  - **正确**:那是 **`47a8c5e`(bin 改走库 crate)之前**的旧读数,已被那次**重写**清掉(不是"清 `unused`"清的)⇒ 当前树**不可复现**。**全部读数(两棵树 / 三阶段 / 终态)与口径只在 `../goals/infra-backlog.md` §1.1 展开**;`docs/rounds/39` §0.3/§W5 段按纪律就地标注(2026-10-02),不改。
 
 ## 2026-10-02 文档巡检(阶段 1:准确性)发现的两处
 
 - **渲染硬错误(已修,在此登记)**:`docs/rounds/37-convert-architecture-refactor-plan.md` §3.2 的表格在 Q5 与 Q6 两行之间夹了一个空行 ⇒ Markdown 把它断成两张表(Q6 那一行掉到表外、渲染异常)。已**只删该空行**(不改任何正文文字)。同批的同类空行断表另有两处:`docs/goals/pending-decisions.md` A 组表(A4/A5 之间)与 `docs/rounds/README.md` 第 40 轮两行之前,均已并回。
 - **失效目录(只登记,按"历史保真"不改正文)**:`docs/rounds/33-corpus-sweeps-and-format-split.md` §1、§3 与 §4 的命令示例把正向语料目录写成 `download/compile/k4raw/`(§3 还写"落盘到该目录")—— **该目录不存在**;平台原件编辑格式现在落在 `download/compile/k4edit/`(由 rounds/37 §12 的采集器写入),正向扫描器实际吃 `download/compile/*.bcm4`。`docs/goals/convert-backlog.md` §2 第 1 条与 `docs/rounds/37` §10.3 已改正,轮次正文按纪律不动。
-- **尺寸写法(只登记,不改历史正文)**:`docs/rounds/20-kitten-kn-work-conversion-plan.md` 附录里的「3.7 MB / 63 MB」指同一份 `原气骑士 且听风吟-编辑版.bcm4` —— **63 MB 是十进制量级(≈63.6 MB),数字本身不错**;现行统一口径写**字节数** `63 598 143 B(≈60.6 MiB)`(见 `knowledge/work-file-formats.md` §6 第 5 条)。
+- **尺寸写法(只登记,不改历史正文)**:`docs/rounds/20-kitten-kn-work-conversion-plan.md` 附录里的「3.7 MB / 63 MB」指同一份 `原气骑士 且听风吟-编辑版.bcm4` —— **63 MB 是十进制量级(≈63.6 MB),数字本身不错**;现行统一口径写**字节数** `63 598 143 B(≈60.6 MiB)`(见 `work-file-formats.md` §6 第 5 条)。
