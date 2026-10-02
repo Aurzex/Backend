@@ -24,18 +24,11 @@ debug = false
 panic = "unwind"
 
 [lints.rust]
-# `unused` 组分阶段放开(rounds/40 R2):组保持 `allow` 兜底,逐族用**单条** lint 覆盖。
-# 组的 `level` 必须配 `priority = -1`,否则 clippy 的 `lint_groups_priority`(deny 默认)
-# 直接报错 —— 它要求成员比所在组更具体(同优先级会被判定为"顺序未定义")。
-# 注意显式 `warn` **挡不住** `clippy --all-targets -- -D warnings`,所以每放开一族前
-# 阶段 1 = 机械族(下面 5 条);阶段 2 = `dead_code`(逐条判完后见下)。
-unused = { level = "allow", priority = -1 }
-unused_imports = "warn"
-unused_variables = "warn"
-unused_mut = "warn"
-unused_assignments = "warn"
-unused_must_use = "warn"
-dead_code = "warn"
+# `unused` 组已整体恢复 `warn`(rounds/40 R2 三阶段:机械族 → `dead_code` → 收口)。
+# 门是 `cargo clippy --all-targets -- -D warnings` ⇒ 任何残留都会红:新增死代码要么接上调用、
+# 要么标 `#[cfg(test)]`、要么 `#[allow(dead_code)]` + 一句理由(口径见 `docs/knowledge/repo-conventions.md`)。
+# 过程记录(含"组的 level 要配 `priority = -1`"这条坑)见 `docs/goals/infra-backlog.md` §1.1。
+unused = "warn"
 
 [dependencies]
 aes-gcm = "0.11.1"

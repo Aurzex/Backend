@@ -6,28 +6,27 @@
 
 | 项 | 说明 | 出处 |
 | -- | ---- | ---- |
-| 恢复 `[lints.rust] unused` 告警 | **2026-10-02 重测(口径已修正)。** 旧记录「943 条 = `lib` 55 + `bin "backend"` 898」**不可复现**:那条用的 `--message-format short` **不带 target 信息**,分不出编译单元;且 `943 ≠ 55+898=953`,数字自相矛盾。新口径(临时把 `unused` 改 `warn`,**按目标选择分别跑**,清单见 §1.1):`cargo clippy --lib` = **50**(全在 `src/lib.rs`);`cargo clippy --bins` = 50(**全部来自被顺带重编的 lib 依赖单元,bin 自身 0 条**);`cargo clippy --tests` = 98(全在 `src/lib.rs`;bin-test 与集成测试目标 0 条)。对照改前同口径:`--lib` 50、`--bins` **946**(其中 `src/main.rs` 896)、`--tests` **551**(其中 `src/main.rs` 453)。⇒ **bin 侧噪声已随「去第二个 crate root」清零**;**开关仍维持 `allow`** —— 剩余 lib 侧 50 条未清,改 `warn` 会让 `clippy --all-targets -- -D warnings` 变红(rustc 1.98.0 实测:显式 `--warn=unused` **挡不住** `-D warnings`,`--allow=unused` 挡得住;Cargo 把 `[lints]` 表当 `--warn/--allow=unused` 传给 rustc,可在 `cargo build -v` 的 rustc 命令行里直接看到) | 2026-10-02 实测(本轮提交);旧数字出处 `docs/rounds/39` §W5④ |
+| ~~恢复 `[lints.rust] unused` 告警~~ | ✅ **已完成(2026-10-02,rounds/40 R2,三阶段 `6414b97` / `30216c5` / 阶段 3 = 收口提交)**:终态 `unused = "warn"`,三选择(`--lib`/`--bins`/`--tests`)诊断 **0/0/0**,四道门全绿。阶段 1 清机械族 19 条、阶段 2 处置 `dead_code` 31 条(删 13 / `#[cfg(test)]` 10 / `#[allow]`+理由 8)。两条坑记下来:**组的 `level` 要配 `priority = -1`**(否则 clippy `lint_groups_priority`(deny 默认)直接报错)、**显式 `warn` 挡不住 `-D warnings`**。旧记录「943 = lib 55 + bin 898」仍不成立。口径与逐条处置见 §1.1,登记待决 3 项见 §1.1 末 | R2;`README.md` 第 40 轮目标表 R2 行 |
 | ~~CI 产物名列与 `crate-type` 不符(⇒ job 静默绿、产物其实没上传)~~ | ✅ **已决并落地(2026-10-02,`f68c2e6`)**:走"改 CI"这一边 —— **删掉 artifact 上传步**及矩阵里 5 组 `artifact:`/`libname:` 键,理由:本仓 `[lib] crate-type=["rlib"]` 只产 rlib、`src/main.rs` 是需账号的**交互式控制台**、仓内没有消费这些 artifact 的地方 ⇒ **没有可分发的产物**(不恢复 `cdylib`)。同时新增 `offline-gate` job(fmt/clippy/逐目标点名的离线测试)。旧症状与根因线索:期待 `libbackend.so`/`backend.dll`/`libbackend.dylib` 而实际不产,`if-no-files-found` 默认 `warn` ⇒ 一直静默绿 | `f68c2e6`;口径见 `repo-conventions` §6 与 `errata.md` 末节 |
 | ~~`src/main.rs` 作第二个 crate root,把整棵树重复编译一遍~~ | **已修(2026-10-02,本轮提交)**:`src/main.rs` 开头的 `mod api; mod core; mod utils;` 已删,4 条 `use crate::…`(`:8-11`)改 `use backend::…`,**公共 API 零改动**(bin 用到的 11 个符号逐条核对皆 `pub`,与下方只读结论一致)。判据:bin 单元 dep-info 输入 **49 → 1**(`src/main.rs`;lib 单元仍覆盖整棵树);bin 单测目标 **121 tests / 214 s → 0 tests / 0.00 s**;`unused = "warn"` 下 bin 侧 **896 → 0**。`Cargo.toml` 未动(bin 仍由 `src/main.rs` 自动发现) | 本轮提交 |
 | api 层类型化 DTO(351 处 `MewResult<Value>`) | 逐端点核对响应形态;建议按域分批 | `docs/rounds/15/16/17` §不落地 |
 | newtype ID 推广(`UserId` 等) | 先看 `WorkId` 试点收益 | `docs/rounds/19` §不落地 |
 | `work.rs` 再切 `WorkDataFetcher` | 纯搬迁,`re-export` 保路径;按需 | `docs/rounds/19` §不落地 |
 
-### 1.1 `unused` 剩余清单(**lib 侧 50 条**,2026-10-02 用 `unused = "warn"` 实测)
+### 1.1 `unused` 落地记录(rounds/40 R2:基线 → 三阶段 → **0 条**)
 
-> **口径**:`cargo clippy --lib --message-format=json`,取 `reason == compiler-message`、`level ∈ {warning,error}`、`target.src_path` 属本包者 ⇒ 即 **lib 的非 test 编译单元**。
-> 另有 lib 的 **test 编译单元 98 条**(`cargo clippy --tests`;含 `#[cfg(test)]` 代码,数字不同是因为测试会"用活"一部分私有项);bin 与集成测试目标 **0 条**。
-> 机械项(`unused_imports` 13 + `unused_variables` 2 + `unused_mut` 2 + `unused_assignments` 1 + `unused_must_use` 1 = **19 条**)可一轮清掉;`dead_code` 31 条要逐条判「删 / 接线 / 留 `#[allow]` 并写理由」,其中**删 `pub` 面是红线**(先取授权,先例:rounds/39 §W5②)。
+> **口径**(全程同一把尺子,可复现):临时把 `unused` 改 `warn`,**按目标选择分别跑** `cargo clippy --lib` / `--bins` / `--tests --message-format=json`,按 `target.src_path` 归属。**不能按 `target.name`** —— lib / bin:`backend` / bin:gen 全叫 `backend`;`--all-targets` 也不行:既混单元又去重跨单元诊断(实测 1447 < 三个选择之和 1547)。旧记录「`--message-format short` 共 943 = lib 55 + bin 898」不可复现(short 不带 target 信息,且 943 ≠ 55+898)。
 
-- `unused_imports`(13):`api/community.rs:3 DEFAULT_LIMIT`、`core/cloudvar.rs:3 AtomicUsize`、`core/cloudvar.rs:14 WebSocket`、`core/converse.rs:14 WebSocket`、`core/convert/decompile/editors.rs:20 HashSet`、`core/convert/translate/assembly.rs:2 BlockTree`、`core/convert/translate/assembly.rs:5 mapping`、`core/convert/translate/mod.rs:154 PathConfig`、`core/convert/translate/model.rs:5 Deserializer`、`core/convert/translate/nemo_mapping.rs:8 TEXT_PLACEHOLDER_BLOCKS`、`core/convert/translate/pipeline.rs:7 StageSize`、`core/convert/translate/pipeline.rs:543 Map`、`utils/filedata.rs:2 serde_json::Value`
-- `unused_variables`(2):`core/convert/decompile/mod.rs:1400 conditions_count`、`core/convert/translate/nemo.rs:591 roots`
-- `unused_mut`(2):`core/convert/translate/assembly.rs:128`、`core/convert/translate/nemo_mapping.rs:1892`
-- `unused_assignments`(1):`core/convert/decompile/editors.rs:179 restore_groups`
-- `unused_must_use`(1):`core/converse.rs:582`(未用的 `Result`)
-- `dead_code`(31,均为"never read/never used"):
-  - 私有字段未读:`core/cloudvar.rs:190 cvid`、`:211 private`、`core/converse.rs:101 user_id/chat_count/remaining_image_times`、`core/convert/decompile/mod.rs:895 variable_map`、`core/pipeline.rs:197 client`、`core/registry.rs:78 description`、`:204 reason_id_field`、`:274 prompt`、`:283 default_actions`、`:398 client`、`core/retrieve.rs:1192 total_admins`、`:1202 target_user_id/like_threshold/total_fans/qualified_fans_count`
-  - 关联项/方法未用:`api/auth.rs:91 as_str+from_str`(UserRole)、`:116 as_str+from_str`(AccountStatus)、`api/forum.rs:55 as_str`、`:72 as_str`、`core/retrieve.rs:52 as_str`、`:82 as_str`、`core/convert/decompile/mod.rs:905 new`、`core/convert/shared.rs:370 get_string_or`、`core/convert/translate/model.rs:172 count_types`、`:209 count_types`、`core/convert/translate/xml.rs:239 remove_attr`、`:555 run`、`core/pipeline.rs:187 clear_processed_records`
-  - 自由函数/常量未用:`core/convert/translate/mapping.rs:222 SHADOW_XML_INDEX`、`:298 shadow_xml`、`:888 kitten_names_for`、`:899 reverse_candidates`、`core/convert/translate/tables_gen.rs:1153 SHADOW_XML`、`core/convert/translate/xml.rs:372 parse`
+- **基线**(阶段 1 前):`--lib` **50**、`--bins` **946**(bin 自身 **896**)、`--tests` **551**(bin-test 453 + lib-test 98)。**终态**:`0 / 0 / 0`。
+- **阶段 1(机械族,`6414b97`)**:lib 单元 **19 条** —— `unused_imports` 13、`unused_variables` 2、`unused_mut` 2、`unused_assignments` 1(`decompile/editors.rs:179 restore_groups`:值本身在 `:340` 被读,死的是 `= None` 初值 ⇒ 改延迟初始化)、`unused_must_use` 1(`core/converse.rs:582` 加 `let _ =`);**test 目标侧另清 8 条**(`reverse_tests.rs`/`nemo_tests.rs`/`translate/mod.rs` 的 cfg(test) 模块 —— 门是 `--all-targets`,只清 lib 单元不够)。`translate/model.rs:5` 的 `Deserializer` 按 Main 裁定删除(全文件另有 3 处用全限定 `serde::Deserializer<'de>`)。
+- **阶段 2(`dead_code` 31 条,`30216c5`)**:
+  - **删 13**(零调用点):`auth.rs:91`/`:116` 的 `as_str`+`from_str`、`forum.rs:72 TargetType::as_str`、`shared.rs:370 ValueExt::get_string_or`(声明+实现)、`pipeline.rs:187 clear_processed_records`、`registry.rs:78 description`、`:204 reason_id_field`、`:274 prompt`(连带其 `format!` 与孤立的 `parts` 绑定)、`retrieve.rs:52`/`:82` 的 `as_str`、`decompile/mod.rs:905 BlockContext::new`。**踩坑记录**:原清单把 `forum.rs:55` 记为死项,但那一行是 `DeleteItemType::as_str`,而**相邻**的 `ItemType::as_str` 有调用点(`forum.rs:418/436`)⇒ 误删被编译器当场拦下,已还原原文、改删 `DeleteItemType`/`TargetType` 两处。
+  - **`#[cfg(test)]` 10**(从生产构建移出,比"留着再闭嘴"合仓库口径):`mapping::{SHADOW_XML_INDEX, shadow_xml, kitten_names_for, reverse_candidates}`、`xml::{remove_attr, parse, Parser::run}`、`model::count_types` ×2(依 `convert-backlog.md` §2 第 10 条)、`tables_gen::SHADOW_XML`(**生成物 + 生成器 `src/bin/gen_translate_tables.rs` 两处同步**;本机 `temp/tables` 不在库内 ⇒ 无法重跑生成器核对,属刻意手改,提交信息已写明);`mapping.rs` 的 import 也拆出 cfg(test) 一条。
+  - **`#[allow(dead_code)]` + 理由 8**:`cloudvar.rs:190 RankingData.cvid`、`:211 CloudCommand::Variable.private`(代码里本就写明"刻意不读")、`converse.rs:101 UserInfo` 三字段、`retrieve.rs:1192 AdminReportStatistics.total_admins`、`:1202 FanByLikesStatistics` 五字段、`pipeline.rs:197 ActionRegistry.client`、`registry.rs:398 ReportFetcher.client`、`registry.rs:283 ReportTypeRegistry.default_actions`(注释明写"保留")。
+- **登记待决 3 项**(本轮按 `allow`/未改处理,各自成文):
+  1. `BlockContext.variable_map` 只写不读(每角色一份 UUID→变量名,由 `with_capacity` 注入);删它要连带 **9 处**(字段 + 两个签名参数 + 2 个调用点 + 每角色的 map 构造)⇒ 建议并入 **R4**(decompile 补离线测试)一并做;
+  2. `ActionRegistry.client` / `ReportFetcher.client` 是"**存而不用**"的客户端注入缝 —— 请求实际走**方法参数**上的 client,`new_with_client` 收下的那个被丢弃(不是错客户端 bug,但注入形状名不副实);
+  3. `pub struct AdminReportStatistics` / `FanByLikesStatistics` / `RankingData` / `UserInfo` 的字段**全是 `pub(crate)`** ⇒ 外部拿到这些类型也读不到任何字段(要么本意是内部类型、要么字段该放宽到 `pub`)—— 属对外形状,需拍板。
 
 ## 2. 小改(机械、低风险,可批量做)
 

@@ -14,10 +14,10 @@
    - `convert-backlog.md` §2:反向保真缺口的历史研究路线(已收口到"只剩语义降级"这一步,见 §2 第 0 条);
    - `platform-backlog.md` §1/§2:C9 两项真机实测 + 三条待核验(便宜、能消掉假设);
    - `infra-backlog.md` §2:小改批量(49 处 `unwrap` 硬化、P2 收尾;原先列的 `DecompilerError` 包装已不成立,见 `pending-decisions.md` C2)。
-3. **要立轮的大方向**:`pending-decisions.md` B 组(DTO 类型化、kn→nemo、断线退避重连、`unused` 告警恢复);
-   ~~**`src/main.rs` 改成 `use backend::…`(走库 crate)= 立轮**~~ —— **已落地(2026-10-02,本轮提交)**:
-   bin 不再自带 `mod api/core/utils`(公共 API 零改动),bin 侧 `unused` 噪声 **896 → 0**、bin 单测目标 **121 tests/214 s → 0 tests/0.00 s**。
-   **`unused` 仍维持 `allow`**:lib 侧还剩 **50 条**(逐条清单与口径见 `infra-backlog.md` §1.1),清完再按族放开(显式 `warn` 挡不住 `clippy -- -D warnings`,已用 rustc 实测)。
+3. **要立轮的大方向**:`pending-decisions.md` B 组(DTO 类型化、kn→nemo、断线退避重连 —— ~~`unused` 告警恢复~~ 已由第 40 轮 R2 完成);
+   ~~**`src/main.rs` 改成 `use backend::…`(走库 crate)= 立轮**~~ —— **已落地(2026-10-02)**:
+   bin 不再自带 `mod api/core/utils`(公共 API 零改动),bin 侧 `unused` 噪声 **896 → 0**、bin 单测目标 **121 tests/214 s → 0 tests/0.00 s**;
+   **`unused` 告警已整体恢复 `warn`**(R2 三阶段,终态三选择诊断 **0/0/0**;口径与逐条处置见 `infra-backlog.md` §1.1)。
 4. **已决但暂缓(登记,待重新立项)**:`convert-backlog.md` §5 的 **W13**(`wrap_arithmetic` 移动不重铸)——
    收益是"我们自己的往返 id 台账更干净 / 往返 id 更稳",**不是用户可见差异**;代价是偏离官方 + 改产物字节 + 需重做实体机与刷基线(证据:`rounds/38 §8`、`rounds/39` §W13)。
 
@@ -29,7 +29,7 @@
 | # | 目标 | 状态 | 说明 / 判据 |
 | - | ---- | ---- | ----------- |
 | **R1** | **CI 产物步不再可能"空着绿" + 离线门进 CI** | ✅ **已完成(2026-10-02,`f68c2e6`)** | 删掉 artifact 上传步及其矩阵 `artifact:`/`libname:` 键(本仓只有 rlib、bin 是需账号的交互式控制台、无消费方 ⇒ 没有可分发产物;旧步期待 `.so/.dll/.dylib`,`if-no-files-found` 默认 `warn` ⇒ 一直静默绿);新增 `offline-gate`:`fmt --check` + `clippy --all-targets -D warnings` + **逐目标点名**的离线测试(`--lib`/`--test repo_hygiene`/`--test convert_bench`)。**刻意不跑**真机门、不设 `BACKEND_REQUIRE_LIVE`(理由见 `../knowledge/repo-conventions.md` §6) |
-| **R2** | **`unused` 告警分阶段放开** | ⏳ 待做 | 实测清单 **50 条**:19 机械(`unused_imports` 13 / `unused_variables` 2 / `unused_mut` 2 / `unused_assignments` 1 / `unused_must_use` 1)+ 31 `dead_code`(逐条判"删 / 接线 / 留 `#[allow]` + 理由";**删 `pub` 面是红线,先取授权**)。数字与口径见 `infra-backlog.md` §1.1 |
+| **R2** | **`unused` 告警分阶段放开** | ✅ **已完成(2026-10-02,`6414b97` 阶段 1 / `30216c5` 阶段 2 / 阶段 3 = 收口提交)** | 终态 `[lints.rust] unused = "warn"`,三选择诊断 **0/0/0**,四道门全绿。计数:基线 `--lib` 50 / `--bins` 946(bin 自身 896)/ `--tests` 551;阶段 1 清机械族 19 条(+ test 目标侧 8 条),阶段 2 处置 `dead_code` 31 条(**删 13 / `#[cfg(test)]` 10 / `#[allow]`+理由 8**)。两条坑:**组的 `level` 要配 `priority = -1`**(否则 clippy `lint_groups_priority` 直接报错)、**显式 `warn` 挡不住 `-D warnings`**。口径与逐条处置表见 `infra-backlog.md` §1.1;登记待决 3 项见其末(`BlockContext.variable_map` 只写不读 → 建议并入 R4;两个 `client` 注入缝"存而不用";4 个 `pub struct` 字段全是 `pub(crate)`) |
 | **R3** | **根块纵向布局 `0 vs 80` 是否真 bug** | ✅ **已完成(2026-10-02,`4072846`)** | 结论:**不是行为缺陷** —— 两者不是同一约定(**同名不同物**),错的是 `model.rs` 那句自称"一致"的注释(已改准)。平台取证(711 个含根块实体):编辑器自排网格是 `0 + 80·k`(起点 0 出现 257/711,起点 80 **零次**),平台步长 80 与我们 220 也不是一套,而根块坐标**非语义**(在语义 diff 的 allow-list 里);A/B 实测把 80 改 0 只让 `kn-3.7MB` 一个基线键变 SHA ⇒ 零行为收益,**数值刻意保持 80/220**。见 `convert-backlog.md` §2 第 8 条 |
 | **R4** | **反编译域补离线测试** | ⏳ 待做(第二优先域) | `decompile/` 的回归现在几乎只能靠真机门 ⇒ 给纯函数(`XmlBlockWriter::write_blocks`、`referenced_ids`、`child_input_name` …)补离机断言(`rounds/37` §0.4) |
 | **R5** | **加载门离线化**(原 `convert-backlog` §6.3 G5) | ⏳ 待做(**需拍板**) | `validateBcm` headless 进常规测试 + 一个**入库的最小夹具**;`download/` 与官方 bundle 都不入库 ⇒ 先决定夹具形态 |
@@ -44,7 +44,7 @@
 | `pending-decisions.md` | 需要你决策:A 组(剩 A4)+ B 组 8 + C 组 9 + 已决清单(D 组 5 项已全部落定) | **待决 18**(共 28 行;A1–A3/A5、C2、D1–D5 已定) |
 | `convert-backlog.md` | 转换域(格式/语义/性能/NEMO):§1 待决策 4、§2 待做 6、§3 不做 4 | **待决 14**(§2 待做 = 第 2/4/5/6/7/8 条) |
 | `platform-backlog.md` | 平台/接口域:§1 真机实测 5、§2 待核验 3、§3 待方案 5 行(其中 2 项 ✅)、§4 P2 3、§5 公开面 1 | 17 行 |
-| `infra-backlog.md` | 仓库工程:§1 待决策 5(原「去第二个 crate root」已完成)+ §1.1 `unused` 剩余清单(lib 侧 50)、§2 小改 3、§3 待核验 3、§4 已决 6、§5 文档 3 | 21 行 |
+| `infra-backlog.md` | 仓库工程:§1 待决策 3(「去第二个 crate root」「`unused` 告警」「CI 产物」三项已完成)+ §1.1 `unused` 落地记录(0 残;待决 3 项在其末)、§2 小改 3、§3 待核验 3、§4 已决 6、§5 文档 3 | 58 行 |
 
 > 统计口径:来自 `docs/rounds/01–19` 的自动抽取(未开始 36 / 进行中 1 / 被阻塞 1 / 已放弃 16)
 > 与 `docs/rounds/20–36` 的手工归并(33–36 轮的结论见 `../knowledge/errata.md` 的"第三十三至三十六轮"节);**已完成的 33 条不再列入**(它们在轮次记录里)。
