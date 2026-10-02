@@ -401,8 +401,9 @@ impl IdSource {
 // - **前端**:Kitten4 编辑版 `block_data_json = {blocks, connections, comments}` 的**邻接表**
 // → [`BlockTree`](中核树)([`parse_block_data_json`]);
 // - **后端**(反向,Phase 4):中核树 → 邻接表([`build_block_data_json`]),重建
-// `blocks`/`connections`/`parent_id`/`location`(根积木按 80 + 220·i 排开,与
-// `decompile` 侧 `XmlBlockWriter` 的约定一致)。
+// `blocks`/`connections`/`parent_id`/`location`(根积木按 80 + 220·i 排开 —— 这是我们
+// **自定**的非重叠排布:它与 `decompile` 侧 `XmlBlockWriter`(Kitten2/3 blocksXML,0 + 220·i)
+// 各写一份,也不是平台约定,详见 [`ROOT_LAYOUT_Y`] 的说明)。
 // 与官方实现(`kittenBcmToNekoBcmUtils` 里的 `jC.parseBlock`,`mod41888.pretty.js:77578`)对齐的语义:
 // - `blocks` 是 `id → block` 字典(积木本体);
 // - `connections[parent][child] = {type: "next"|"input", input_type?: "value"|"statement", input_name?}`;
@@ -543,7 +544,21 @@ fn build_node(
 
 // ---------------------------------------------------------------- 后端(反向,Phase 4)
 
-/// 根积木的初始纵坐标(`XmlBlockWriter` 的约定:首根 80、每根 +220,互不重叠)
+/// 根积木的初始纵坐标(`location` 缺失时的兜底排布:首根 80、每根 +220,互不重叠)。
+///
+/// **这是自定值,不是平台约定,也不与 `XmlBlockWriter` 共用那对数字**(2026-10-02 核实:
+/// 那对数字属于另一种格式、另一条路 —— `decompile` 侧 `XmlBlockWriter` 写 Kitten2/3 的
+/// blocksXML,起点是 `0.0`)。
+/// 平台侧实测(编辑器亲手写出的编辑格式:`download/compile/k4edit/*.bcm4` 与
+/// `download/compile/raw/*.bcm4`,共 711 个有根块的实体):根块坐标**是用户拖出来的任意值**
+/// (含负数与小数),只有编辑器自己排出来的那些才成网格 —— 那套网格是 **0 + 80·k**
+/// (起点 0 出现在 257/711 个实体里;起点 80 **一次都没有**)。
+/// 即:要说"平台起点",那是 0,但平台的步长(80)与这里的 220 也不是同一套;
+/// 两个写出器(本处与 `XmlBlockWriter`)唯一的硬要求只是**根块互不重叠**
+/// (坐标属编辑器布局、非语义 —— 见 [`nemo_mapping`](super::nemo_mapping) 语义 diff 的 allow-list)。
+/// 故这里保持 80/220 不变:A/B 实测(与 `convert_bench` 的 `kn-3.7MB` 样本同选项)把它改成
+/// 0 会让该样本产物 SHA256 由 `0d3cf2e3…` 变成 `15d7d050…`(4117977 → 4117976 字节),
+/// 而 `kn-9.4MB` 逐字节不变 ⇒ 改数值零行为收益,却要重刷一个基线键。
 const ROOT_LAYOUT_Y: i64 = 80;
 const ROOT_LAYOUT_STEP: i64 = 220;
 
