@@ -812,7 +812,8 @@ impl ReportProcessor {
                 self.config.batch_content_threshold
             };
             if entry.len() >= threshold {
-                let items = pending.remove(&key).unwrap();
+                // 不变量:本迭代上面 entry() 刚把该键插入 pending
+                let items = pending.remove(&key).expect("上面 entry() 刚插入该键");
                 ready.push(BatchGroup::new(&key.0, &key.1, items));
             }
         }

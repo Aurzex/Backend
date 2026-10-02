@@ -1706,7 +1706,7 @@ mod tests {
         assert!(!is_text_placeholder("math_arithmetic"));
         assert!(
             shadow_xml("set_camera_alpha", "camera_alpha")
-                .unwrap()
+                .expect("set_camera_alpha 应有影子 xml")
                 .contains("camera_alpha_slider")
         );
         assert_eq!(shadow_xml("math_arithmetic", "A"), None);
@@ -1733,7 +1733,7 @@ mod tests {
         assert!(node.disabled);
         assert_eq!(node.shadows.get("TITLE_HEAD").map(String::as_str), Some(""));
         assert_eq!(
-            node.mutation.unwrap(),
+            node.mutation.expect("降级应写入 mutation"),
             "<mutation xmlns=\"http://www.w3.org/1999/xhtml\" items=\"0\">未命名模型: 添加训练数据 特征1{value} 到{value1}</mutation>"
         );
         assert!(report.warnings().is_empty());
@@ -1741,7 +1741,7 @@ mod tests {
         let (node, report) = run(json!({"type": "clone", "id": "b"}), false);
         assert!(
             node.mutation
-                .unwrap()
+                .expect("clone 降级应写入 mutation")
                 .contains("分裂 {sprite_id} 到 x {x} y {y}")
         );
         assert_eq!(
@@ -1889,7 +1889,13 @@ mod tests {
             node.next.as_ref().map(|n| n.kind.as_str()),
             Some("wait_until")
         );
-        assert!(node.next.as_ref().unwrap().parent_id.is_none());
+        assert!(
+            node.next
+                .as_ref()
+                .expect("事件帽值输入应挂在 next")
+                .parent_id
+                .is_none()
+        );
         // 普通值输入按槽位表改名后留在 inputs
         let (node, _) = run(
             json!({"type": "logic_compare", "id": "h", "inputs": {"a": {"type": "math_number", "id": "i"}}}),
@@ -1962,7 +1968,11 @@ mod tests {
             false,
         );
         assert_eq!(node.kind, "bcm_translator_text_return_value_block");
-        assert!(node.mutation.unwrap().contains("展示数字5"));
+        assert!(
+            node.mutation
+                .expect("shadow_number 降级应写入 mutation")
+                .contains("展示数字5")
+        );
         // 有父 → 直接换成内层 math_number(位置换成外层的位置);根节点会被清掉 parent_id,故这里当子积木
         let (node, _) = run(
             json!({"type": "variables_set", "id": "p", "fields": {"VAR": "v"}, "inputs": {"VALUE": {"type": "shadow_number", "id": "c", "location": [1, 2], "inputs": {"VALUE": {"type": "math_number", "id": "d", "fields": {"NUM": "5"}}}}}}),
@@ -1977,7 +1987,13 @@ mod tests {
             false,
         );
         assert!(node.statements["DO"].disabled);
-        assert!(node.statements["DO"].next.as_ref().unwrap().disabled);
+        assert!(
+            node.statements["DO"]
+                .next
+                .as_ref()
+                .expect("DO 后应接下一块")
+                .disabled
+        );
         // 循环外的音频不动
         let (node, _) = run(json!({"type": "play_audio", "id": "h"}), false);
         assert!(!node.disabled);

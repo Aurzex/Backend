@@ -100,9 +100,14 @@ impl ProcessorUi for ConsoleUi {
 /// 从 stdin 读取一行并去除首尾空白
 fn read_line(prompt: &str) -> String {
     print!("{}", prompt);
-    io::stdout().flush().unwrap();
+    // 提示符刷新失败(如 stdout 已关闭)不影响后续读输入,尽力而为即可
+    let _ = io::stdout().flush();
     let mut input = String::new();
-    io::stdin().read_line(&mut input).unwrap();
+    // ProcessorUi::input 的签名固定为返回 String,无法向上传播错误;
+    // stdin 已关闭/管道断开是致命环境错误,若静默返回空串会让 choose/menu 死循环重试 ⇒ 尽快 panic
+    io::stdin()
+        .read_line(&mut input)
+        .expect("stdin 读取失败(stdin 已关闭或管道断开)");
     input.trim().to_string()
 }
 

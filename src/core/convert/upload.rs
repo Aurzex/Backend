@@ -221,12 +221,12 @@ mod upload_tests {
     #[test]
     fn oversized_artifact_is_rejected_before_upload() {
         let dir = std::env::temp_dir().join("backend-single-package-limit");
-        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(&dir).expect("建测试临时目录");
         // 稀疏文件:只设长度,不真写 20 MB 字节
         let make = |name: &str, size: u64| {
             let path = dir.join(name);
-            let file = std::fs::File::create(&path).unwrap();
-            file.set_len(size).unwrap();
+            let file = std::fs::File::create(&path).expect("建稀疏测试文件");
+            file.set_len(size).expect("设稀疏文件长度");
             path
         };
 

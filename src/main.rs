@@ -21,7 +21,8 @@ impl Log for ConsoleLogger {
 }
 
 fn main() {
-    log::set_logger(&ConsoleLogger).unwrap();
+    // 只可能在 main 里被调用一次;若失败说明日志器已初始化过(启动逻辑 bug)
+    log::set_logger(&ConsoleLogger).expect("日志器只能在启动时初始化一次");
     log::set_max_level(LevelFilter::Info);
 
     let mut ui = ConsoleUi;

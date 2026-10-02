@@ -849,7 +849,8 @@ mod tests {
         let a = CodeMaoClient::new_independent(ClientConfig::default());
         let b = CodeMaoClient::new_independent(ClientConfig::default());
         let m = AccountManager::new_with_client(a.clone());
-        a.set_token(Identity::Fluffy, "tok-a").unwrap();
+        a.set_token(Identity::Fluffy, "tok-a")
+            .expect("设置测试 token");
         assert_eq!(m.client().current_token().as_deref(), Some("tok-a"));
         assert_eq!(b.current_token(), None); // b 独立,不受影响
     }

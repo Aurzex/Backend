@@ -1688,7 +1688,7 @@ mod xml_writer_tests {
                 }
             }
         });
-        let xml = writer.write_blocks(&actor).unwrap();
+        let xml = writer.write_blocks(&actor).expect("渲染块 XML");
 
         assert!(xml.starts_with("<variables></variables>"));
         // 两个块各渲染一次:a 作根(+x/y),b 作 a 的 <next> 子块
@@ -1709,14 +1709,14 @@ mod xml_writer_tests {
 
         // 边界:`compiled_block_map` 缺失时不是错误,只输出表头
         assert_eq!(
-            writer.write_blocks(&json!({})).unwrap(),
+            writer.write_blocks(&json!({})).expect("空块表应渲染空表头"),
             "<variables></variables>"
         );
         // 边界:空块表同样只有表头
         assert_eq!(
             writer
                 .write_blocks(&json!({"compiled_block_map": {}}))
-                .unwrap(),
+                .expect("空 compiled_block_map 应渲染表头"),
             "<variables></variables>"
         );
     }
@@ -1745,7 +1745,7 @@ mod xml_writer_tests {
                 }
             }
         });
-        let xml = writer.write_blocks(&actor).unwrap();
+        let xml = writer.write_blocks(&actor).expect("渲染块 XML");
 
         // 单遍转义:& 先于 < 处理,结果里不会出现 &amp;lt;
         assert!(
@@ -1781,7 +1781,7 @@ mod xml_writer_tests {
                 "r3": {"type": "motion_gotoxy", "id": "r3", "params": {"X": 3}}
             }
         });
-        let xml = writer.write_blocks(&actor).unwrap();
+        let xml = writer.write_blocks(&actor).expect("渲染块 XML");
 
         let positions = root_positions(&xml);
         assert_eq!(positions.len(), 3, "三个根块各输出一次:{xml}");
@@ -1799,7 +1799,7 @@ mod xml_writer_tests {
             }
         }
         // 稳定:同一输入两次序列化逐字节相同(布局不得依赖全局游标/随机)
-        assert_eq!(xml, writer.write_blocks(&actor).unwrap());
+        assert_eq!(xml, writer.write_blocks(&actor).expect("渲染块 XML"));
     }
 
     /// 取根块标签的 `(x, y)`:根块带 `x`/`y`(嵌套块不带),故按"有没有 x 属性"过滤。

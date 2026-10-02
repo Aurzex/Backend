@@ -550,12 +550,14 @@ mod reverse_tests_inner {
     #[test]
     fn roots_get_spread_locations() {
         let tree = BlockTree::new(vec![
-            BlockJson::from_value(&json!({ "type": "repeat_forever", "id": "r1" })).unwrap(),
-            BlockJson::from_value(&json!({ "type": "repeat_forever", "id": "r2" })).unwrap(),
+            BlockJson::from_value(&json!({ "type": "repeat_forever", "id": "r1" }))
+                .expect("构造根积木 r1"),
+            BlockJson::from_value(&json!({ "type": "repeat_forever", "id": "r2" }))
+                .expect("构造根积木 r2"),
             BlockJson::from_value(
                 &json!({ "type": "repeat_forever", "id": "r3", "location": [7, 9] }),
             )
-            .unwrap(),
+            .expect("构造根积木 r3"),
         ]);
         let mut ids = model::IdSource::new(true);
         let bdj = model::build_block_data_json(&tree, &mut ids).expect("编码");
@@ -581,7 +583,7 @@ mod reverse_tests_inner {
                 "id": "call",
                 "inputs": { "ARG0": shared.clone(), "ARG1": shared.clone() }
             }))
-            .unwrap(),
+            .expect("构造调用积木"),
         ]);
         let mut ids = model::IdSource::new(true);
         let bdj = model::build_block_data_json(&tree, &mut ids).expect("编码");

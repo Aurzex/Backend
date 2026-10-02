@@ -374,7 +374,11 @@ impl IdSource {
         }
         let hex = |n: usize| -> String {
             (0..n)
-                .map(|_| std::char::from_digit(fastrand::u32(0..16), 16).unwrap())
+                // 0..16 恒小于进制 16,必为合法数字(不可能失败)
+                .map(|_| {
+                    std::char::from_digit(fastrand::u32(0..16), 16)
+                        .expect("0..16 在 16 进制下必为合法数字")
+                })
                 .collect()
         };
         let variant = ['8', '9', 'a', 'b'][fastrand::usize(0..4)]; // RFC 4122 variant 位固定为 10xx(单字符)
@@ -1743,7 +1747,7 @@ mod neko_tests {
             !normal_stack
                 .next
                 .as_deref()
-                .unwrap()
+                .expect("普通 return_value 的 STACK 后应接下一块")
                 .inputs
                 .contains_key("VALUE")
         );
@@ -1770,7 +1774,7 @@ mod neko_tests {
         let injected = round_stack
             .next
             .as_deref()
-            .unwrap()
+            .expect("ROUND 的 STACK 后应接下一块")
             .inputs
             .get("VALUE")
             .expect("补出来的 VALUE");
@@ -1783,7 +1787,7 @@ mod neko_tests {
             round_stack
                 .next
                 .as_deref()
-                .unwrap()
+                .expect("ROUND 的 STACK 后应接下一块")
                 .shadows
                 .get("VALUE")
                 .map(String::as_str),
@@ -1948,7 +1952,7 @@ mod model_tests {
         let parsed: f64 = serde_json::from_str("240.88868713378906").expect("解析浮点");
         assert_eq!(parsed, 240.88868713378906_f64);
         assert_eq!(
-            serde_json::to_string(&parsed).unwrap(),
+            serde_json::to_string(&parsed).expect("序列化浮点"),
             "240.88868713378906",
             "往返后必须逐字一致"
         );
@@ -1961,7 +1965,9 @@ mod model_tests {
             "inputs": { "A": { "type": "mid", "id": "m", "inputs": { "A": { "type": "leaf", "id": "l" } } } },
             "next": { "type": "second", "id": "s" }
         });
-        let tree = BlockTree::new(vec![BlockJson::from_value(&root).unwrap()]);
+        let tree = BlockTree::new(vec![
+            BlockJson::from_value(&root).expect("构造测试 BlockJson"),
+        ]);
         assert_eq!(tree.count(), 4);
         let mut ids = std::collections::HashSet::new();
         tree.walk(&mut |b| {
@@ -2117,9 +2123,18 @@ mod kitten_tests {
         assert_eq!(parsed.roots.len(), 1);
         let root = &parsed.roots[0];
         assert_eq!(root.kind, "start_on_click");
-        assert_eq!(root.next.as_ref().unwrap().kind, "repeat_forever");
         assert_eq!(
-            root.next.as_ref().unwrap().next.as_ref().unwrap().kind,
+            root.next.as_ref().expect("root 应接下一块").kind,
+            "repeat_forever"
+        );
+        assert_eq!(
+            root.next
+                .as_ref()
+                .expect("root 应接下一块")
+                .next
+                .as_ref()
+                .expect("第二块应再接一块")
+                .kind,
             "self_appear"
         );
         assert_eq!(parsed.count(), 3);

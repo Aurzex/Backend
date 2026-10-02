@@ -2550,7 +2550,8 @@ fn flush_loop(inner: Arc<CloudInner>) {
             // `Vec<&Value>` 与原来的 `Vec<Value>` 序列化结果逐字节相同(同一个 Serializer)
             let frame = format!(
                 "{EVENT_MESSAGE_PREFIX}{}",
-                serde_json::to_string(&("update_private_vars", &plan.private)).unwrap()
+                serde_json::to_string(&("update_private_vars", &plan.private))
+                    .expect("serde_json Value 序列化不会失败")
             );
             if !send(frame) {
                 failed = true;
@@ -2559,7 +2560,8 @@ fn flush_loop(inner: Arc<CloudInner>) {
         if !failed && !plan.public.is_empty() {
             let frame = format!(
                 "{EVENT_MESSAGE_PREFIX}{}",
-                serde_json::to_string(&("update_vars", &plan.public)).unwrap()
+                serde_json::to_string(&("update_vars", &plan.public))
+                    .expect("serde_json Value 序列化不会失败")
             );
             if !send(frame) {
                 failed = true;
@@ -2570,7 +2572,8 @@ fn flush_loop(inner: Arc<CloudInner>) {
             for (cvid, ops) in plan.lists {
                 let frame = format!(
                     "{EVENT_MESSAGE_PREFIX}{}",
-                    serde_json::to_string(&("update_lists", json!({ cvid: ops }))).unwrap()
+                    serde_json::to_string(&("update_lists", json!({ cvid: ops })))
+                        .expect("serde_json Value 序列化不会失败")
                 );
                 if !send(frame) {
                     failed = true;
@@ -2611,7 +2614,9 @@ mod tests {
     fn cloud_builder_uses_injected_client() {
         let injected = CodeMaoClient::new_independent(ClientConfig::default());
         let other = CodeMaoClient::new_independent(ClientConfig::default());
-        injected.set_token(Identity::Fluffy, "tok-cloud").unwrap();
+        injected
+            .set_token(Identity::Fluffy, "tok-cloud")
+            .expect("设置测试 token");
 
         let connection = CloudBuilder::new_with_client(123, injected.clone()).build();
         assert_eq!(

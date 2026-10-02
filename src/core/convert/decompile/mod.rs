@@ -1895,7 +1895,8 @@ mod block_helper_tests {
             // 叶子块自己不是被引用者(root 才是根)
             "n1": {"type": "text", "params": {"TEXT": "hi"}}
         });
-        let got = referenced_ids(blocks.as_object().unwrap()).unwrap();
+        let got =
+            referenced_ids(blocks.as_object().expect("测试输入是 JSON 对象")).expect("收集引用 id");
 
         let mut expected: HashSet<String> = HashSet::new();
         for id in ["n1", "c1", "c2", "cond0", "cond1", "p1"] {
@@ -1905,7 +1906,11 @@ mod block_helper_tests {
         assert_eq!(got, expected);
 
         // 空块表是合法输入(空作品/只有全局块),不得报错
-        assert!(referenced_ids(&serde_json::Map::new()).unwrap().is_empty());
+        assert!(
+            referenced_ids(&serde_json::Map::new())
+                .expect("空块表应可收集")
+                .is_empty()
+        );
     }
 
     /// 字符串引用必须**显式报错**而不是静默漏掉。
@@ -1926,7 +1931,7 @@ mod block_helper_tests {
                 json!({"a": {"type": "x", "conditions": ["b"]}}),
             ),
         ] {
-            let map = raw.as_object().unwrap();
+            let map = raw.as_object().expect("测试输入是 JSON 对象");
             let err = referenced_ids(map)
                 .expect_err("字符串 id 引用必须报错,否则子块会被当成根块(产物多出散块)");
             let msg = err.to_string();

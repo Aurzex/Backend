@@ -761,20 +761,21 @@ mod diff_tests {
             return;
         }
         let mut source: Value =
-            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("读取夹具作品文件"))
+                .expect("解析夹具作品 JSON");
         let mut report = TranslateReport::new(
             crate::core::convert::EditorType::Kitten4,
             TargetEditor::KittenN,
         );
         let options = TranslateOptions::new().deterministic_ids(true);
-        let doc = convert_kitten4_document(&mut source, &options, &mut report).unwrap();
+        let doc = convert_kitten4_document(&mut source, &options, &mut report).expect("转换应成功");
         let dir = unique_test_dir("forward2");
-        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(&dir).expect("建输出目录");
         std::fs::write(
             dir.join("geoduel.kn.bcmkn"),
-            serde_json::to_string(&doc).unwrap(),
+            serde_json::to_string(&doc).expect("序列化产物"),
         )
-        .unwrap();
-        std::fs::write(dir.join("report.md"), report.to_markdown()).unwrap();
+        .expect("写出产物文件");
+        std::fs::write(dir.join("report.md"), report.to_markdown()).expect("写出报告文件");
     }
 }

@@ -300,7 +300,8 @@ impl ChatClient {
             let messages: &[HistoryMessage] = if mode == HistoryMode::Include && history.len() > 1 {
                 &history
             } else {
-                std::slice::from_ref(history.last().unwrap())
+                // 不变量:上一行刚 push 过一条,history 必非空
+                std::slice::from_ref(history.last().expect("刚 push 过,history 必非空"))
             };
             build_chat_frame(&session_id, messages)?
         };
