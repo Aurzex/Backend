@@ -55,7 +55,7 @@ NEMO → KN 是另一条前端(`hI.parseBlocksXML`),官方管线共 12 步(`main
 - **保真缺口(当前口径,2026-10-01 起)**:见 §5bis —— 反向的可见损失来自"**写出的名字必须是编辑器注册表里的**"
   这条硬约束:不认识的**块**就地改成「未收录积木」标记(`rounds/38` §7bis 起;此前是"整块剔除"),
   **影子**清空;`def_census` 口径修正(只数定义根子树)后,定义体侧的"残块假缺口"已归零(rounds/33 §3bis),
-  现行门是**预算断言 `≤3193`**(rounds/36,只许变小;每次跑都会打印读数)。历史研究路线见 `docs/rounds/28`、`docs/rounds/32`。
+  现行门是**定义体缺口预算**(只许变小;数值与口径见 §6 **硬门表**)。历史研究路线见 `docs/rounds/28`、`docs/rounds/32`。
 - **整作品实测(2026-09-26,真作品 `325806995` = `now但是1080P`,KN → Kitten4)**:
   告警 3 973 条按类别 = `未映射积木 643 · 丢弃实体属性 3 301 · 丢弃字段 12 · 重铸 id 17`
   (由 `tests/convert_live::kn_work_to_kitten4_file` 按类别打印)。
@@ -87,8 +87,8 @@ NEMO → KN 是另一条前端(`hI.parseBlocksXML`),官方管线共 12 步(`main
    "谁在场景里";两张表都空 ⇒ **角色一个都不列、画布 0 块**(积木一块没少也照样黑屏)。KN 侧没有分组概念,
    反向必须**合成**(rounds/35)。
 3. **所有积木类型名(含影子 XML 的 `type`)**必须是编辑器**注册表里有的名字** —— 不认识的名字会让
-   **整份工作区加载失败**。注册表 = 线上编辑器 `Object.keys(window.Blockly.Blocks)`(349 条,导出快照在
-   `src/core/convert/translate/kitten4_vocab.rs`)⇒ 写出阶段必须落成编辑器认识的形态(不认识的就地改成「未收录积木」标记、
+   **整份工作区加载失败**。注册表 = 线上编辑器 `Object.keys(window.Blockly.Blocks)`(**349 条**;快照在
+   `src/core/convert/translate/kitten4_vocab.rs`,**条目数与导出日期的单一事实源 = `kitten4_vocab::KITTEN4_VOCAB_EXPORTED`,重导流程见 `convert-backlog.md` §2 第 0b 条**)⇒ 写出阶段必须落成编辑器认识的形态(不认识的就地改成「未收录积木」标记、
    影子清空)+ 逐类报告(rounds/34 §4nonies、36、38 §7bis)。
    - **反编译侧的同一条契约(已被测试钉住,`c076918`)**:反编译遇到**未知影子类型**时一律**告警 + 回退成
      `logic_empty` 占位**(JSON 与 XML 两种形态各钉一条测试,见 `src/core/convert/decompile/shadow.rs`),
@@ -132,11 +132,11 @@ NEMO → KN 是另一条前端(`hI.parseBlocksXML`),官方管线共 12 步(`main
 | 官方校验器 | `BcmHelpers.validateBcm`(bundle module 87123)**可 headless 运行** —— "产物能否被编辑器加载"的硬门 |
 | 语义 diff | 与官方产物比较**忽略 id/location/uuid**(`docs/rounds/20` §9);官方产物按键插入序,**从不逐字节对齐官方** |
 | 确定性 | `IdSource` + `TranslateOptions::deterministic_ids`;并发 1 与并发 N 产物 **SHA256 相同** |
-| **字节基线** | `convert_bench` 的产物 SHA256 + `#meta`(源 SHA / 字节 / 块数 / 告警数 / `source_version`):**6 样本 = 4 Kitten + 2 NEMO**(NEMO 一件含 YC 版本迁移);产物字节或报告退化(块变少、告警变多)都必须先解释再接受 |
+| **字节基线** | `convert_bench` 的产物 SHA256 + `#meta`(源 SHA / 字节 / 块数 / 告警数 / `source_version`);**样本清单与"两种门(可复现 / 快照冻结)"的说明只在 `convert-performance.md` §5 展开**。不变量:产物字节或报告退化(块变少、告警变多)都必须先解释再接受 |
 | 往返守恒 | KN→Kitten4→KN 的积木类型**多重集**一致(差异仅白名单降级项 + 预算断言) |
 | 有损记账 | 一切有损进 `TranslateReport`;官方重传资源不算有损(`ReuploadedOnImport`) |
 | **编辑器能否打开** | 实机硬门:无头 Chromium + 线上 Kitten4 的「打开本地作品」,数画布积木并看角色列表(带对照组) |
-| **标记量预算** | 编辑器不认识的块被改成「未收录积木」的数量、以及被清空的影子数,必须 ≤ 记录值(只许变小,`MARKER_BUDGET`);定义体缺口预算见 §5bis / rounds/36。读数**直接读结构字段**(`TranslateWarning::UnmappedBlock { marked, cleared_shadows }`,rounds/39 §W4 起)——此前靠**反解中文文案**取数,文案改一个空格读数就静默变 0、门变成"永远通过" |
+| **标记量预算** | 编辑器不认识的块被改成「未收录积木」的数量、以及被清空的影子数,必须 ≤ 记录值(只许变小,`MARKER_BUDGET`)。**定义体缺口预算**(同属这一类`:≤3193`,口径 = `def_census` 只数定义根子树;只许变小,每次跑打印读数;rounds/33 §3bis、rounds/36)。读数**直接读结构字段**(`TranslateWarning::UnmappedBlock { marked, cleared_shadows }`,rounds/39 §W4 起)——此前靠**反解中文文案**取数,文案改一个空格读数就静默变 0、门变成"永远通过" |
 | **id 口径台账** | 正向扫描器(`k4_corpus_round_trip_sweep`):源里"带类型的块节点 id"在往返产物里缺失的 **真块 / 影子** 数必须 ≤ 记录基线(`LOST_ID_BUDGET`,只许变小;每次打印 `[id台账]`)。**反向同口径**:反向扫描器(`kn_corpus_round_trip_sweep`)的 `LOST_ID_BUDGET_REVERSE`(逐件打印 `[id台账·反向]`;源侧只认积木容器节点,见 rounds/39 §W3d)。这是"块有没有被搬过去"的**直接**证据 —— 积木计数/告警/树可达都不是(rounds/37 §13 三次翻车) |
 
 ## 7. 判定"不做"的两项(有证据,别再重开)

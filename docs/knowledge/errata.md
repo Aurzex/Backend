@@ -318,7 +318,7 @@ pub struct LocalClientProvider {
 | 出处 | 已过时的表述 | 正确值 / 证据 |
 | ---- | ------------ | ------------- |
 | rounds/20–32(多处)、`knowledge/convert-semantics.md` §5 旧版 | "编辑器不认识的类型**保留 KN 原名** + 告警,**不丢积木**" | **不成立**:保留不认识的名字会让编辑器**整份工作区加载失败** ⇒ 现行是**块就地改成「未收录积木」标记(`incompatible_block`/`incompatible_output_block`)+ 清空影子** + 逐类报告(`rounds/38` §7bis 起;**`rounds/34–36` 当时是"整块剔除块",那会让积木真的消失**)。见 rounds/34 §4nonies、rounds/36、rounds/38 |
-| rounds/28 §4、rounds/33 §3bis | "定义体侧差异归零,预算收紧到 **0/0**" | **0/0 只在那套口径下成立**;剔块会连带整棵子树 ⇒ 现行是**预算 `≤3193`(只许变小)** + 常显读数。见 rounds/36 |
+| rounds/28 §4、rounds/33 §3bis | "定义体侧差异归零,预算收紧到 **0/0**" | **0/0 只在那套口径下成立**;剔块会连带整棵子树 ⇒ 现行是**预算门(只许变小)+ 常显读数**,门的定义与数值只在 `knowledge/convert-semantics.md` §6 展开。见 rounds/36 |
 | rounds/34 §4nonies 末段 | "**仍未解决**:产品在编辑器里作品名与变量能进,但 3 个角色一个都不出现(⇒ 画布 0 块)" | **已解决**(rounds/35):根因是缺 `theatre.groups` + 场景 `group_order`;KN 侧没有分组概念 ⇒ 反向必须合成"一角色一组" |
 | rounds/34 §4nonies 的挑名描述 | "歧义挑选:候选里编辑器认识的优先 → KN 名本身认识就保留 → 再退非云优先" | 这段只描述**多候选(歧义)**分支;**单候选分支当时完全没做判据** ⇒ KN `text` 被写成 Kitten3 口径的 `get_split_options` 而被剔掉。现块与影子**共用**同一判据。见 rounds/36 |
 | `src/core/convert/translate/assembly.rs` 旧注释 / rounds/31 审计 | "反向没有 groups 概念,写回 `scene.actors` 即可" | **不完整**:`scene.actors` 之外还必须有 `theatre.groups` 与 `group_order`(编辑器靠它们列角色)。见 rounds/35 |
@@ -358,18 +358,18 @@ W10 落地(`66c0b6b`)后,**"内联对象形态影子 ⇒ 拒收该作品"这条�
 
 ## 第三十一轮 §3.6 N4 的"同一约定"结论(2026-10-02 核实)
 
-- **错**:`docs/rounds/31-convert-layout-consolidation-plan.md` §3.6 N4 引 `translate/model.rs` 的注释「`XmlBlockWriter` 的约定:首根 80、每根 +220」,据此把两边当作**同一约定**、只把起点差异记作"疑似漂移",并提出"若确认是同一约定,则把 220/80 提到一处(可能需要放到 shared.rs)"。
-  - **为何错**:两边不是同一约定,是**同名不同物** —— `decompile` 侧 `XmlBlockWriter` 写 **Kitten2/3 blocksXML**(根块 `x=0, y=0.0 + 220·i`);`translate/model.rs` 的 `ROOT_LAYOUT_Y`/`ROOT_LAYOUT_STEP` 写 **Kitten4 `block_data_json` 的 `location`**(`[0, 80 + 220·i]`,且只在 KN 侧根块缺 `location` 时兜底)。格式、编辑器、方向三者皆不同 ⇒ 不存在可提的"共享常量"。且平台侧实测:编辑器亲手写出的编辑格式里(711 个含根块的实体)根块坐标是用户拖出来的任意值,编辑器自己排的网格是 **0 + 80·k**(起点 0 出现 257/711,起点 80 零次)⇒ 那对 220 与"平台约定"也不沾边。
-  - **正确**:① 根块坐标属**非语义**(`location` 就在 `nemo_mapping` 语义 diff 的 allow-list 里),两处唯一的硬要求是"根块互不重叠";② 因此**不做共享常量、也不改数值** —— 改数值(`80 → 0`)零行为收益(实测该样本产物 SHA256 `0d3cf2e3…` → `15d7d050…`)却要重刷 `kn-3.7MB-kitten4` 基线键;③ 只把 `model.rs` 那句自称"一致"的注释改准(`4072846`),并把 0/80 的平台读数写在那里。
-  - 出处:docs/rounds/31-convert-layout-consolidation-plan.md §3.6 N4(⚠️ 它点名的 `model.rs:706-708`、`editors.rs:625-626` 已随文件增长**行号漂移**,请按符号定位:`ROOT_LAYOUT_Y`/`ROOT_LAYOUT_STEP` 及其文档注释、`XmlBlockWriter::write_blocks`)、src/core/convert/translate/model.rs、src/core/convert/decompile/editors.rs;语料 `download/compile/k4edit/*.bcm4`、`download/compile/raw/*.bcm4`(取证脚本为只读的一次性解析,未入库)。
+- **错**:`docs/rounds/31-convert-layout-consolidation-plan.md` §3.6 N4 引 `translate/model.rs` 的注释「`XmlBlockWriter` 的约定:首根 80、每根 +220」,据此把两边当作**同一约定**,只把起点差异记作"疑似漂移",并提出"若确认是同一约定,则把 220/80 提到一处"。
+  - **为何错**:两边是**同名不同物**(`decompile` 侧写 Kitten2/3 blocksXML 的 `y=0.0 + 220·i`;`translate/model.rs` 写 Kitten4 `block_data_json` 的 `location`,且只在缺 `location` 时兜底)⇒ 不存在可提的"共享常量";平台侧读数也不支持"起点 80 是平台约定"。
+  - **正确**:根块坐标**非语义**(`location` 就在语义 diff 的 allow-list 里),两处唯一的硬要求是"根块互不重叠"⇒ **不做共享常量、也不改数值**;只把 `model.rs` 那句自称"一致"的注释改准(`4072846`)。**平台取数(711 个含根块实体 / 起点 0 出现 257 / 起点 80 零次)与 A/B 实测的 SHA 数字只在 `goals/convert-backlog.md` §2 第 8 条展开。**
+  - 出处:docs/rounds/31-convert-layout-consolidation-plan.md §3.6 N4(⚠️ 它点名的 `model.rs:706-708`、`editors.rs:625-626` 已随文件增长**行号漂移**,请按符号定位:`ROOT_LAYOUT_Y`/`ROOT_LAYOUT_STEP` 及其文档注释、`XmlBlockWriter::write_blocks`)。
 
-## 第 40 轮 R2 的两组 `unused` 读数(2026-10-02)
+## 第 40 轮 R2 的 `unused` 读数(2026-10-02)
 
-- **易误**:"`--bins` **946**(其中 `main.rs` **896**)/ `--tests` **551**"看起来像**现在能跑出来**的数。
-  - **正确**:这是 **`47a8c5e`(bin 改走库 crate、去掉第二个 crate root)之前**的旧读数(`src/main.rs` 当时还把 `mod api/core/utils` 再编一遍)—— 它被那次**重写**清掉,**不是**"清 `unused`"清的;现行 `--bins` = **0**,当前树**不可复现**该数字。R2 开工时(`47a8c5e` 之后)的同口径读数是 `--lib` 50 / `--bins` 50(bin 自身 0)/ `--tests` 98,终态三选择 **0/0/0**。
-  - **权威口径**:`docs/goals/infra-backlog.md` §1.1 的"两棵树"分层与 `docs/goals/README.md` 第 40 轮 R2 行;另 `docs/rounds/39` §0.3 W5 行 / §W5 落地段 / 回填段也在**就地标注**(标注日期 **2026-10-02** —— 该文按纪律本不改写,只因它仍是**在用中的计划文档**才接受这种临时处理,故在此登记)。
+- **易误**:表格/历史文里出现的 `--bins` 946(其中 `main.rs` 896)/ `--tests` 551,被当成**现在能跑出来**的数。
+  - **正确**:那是 **`47a8c5e`(bin 改走库 crate)之前**的旧读数,已被那次**重写**清掉(不是"清 `unused`"清的)⇒ 当前树**不可复现**。**全部读数(两棵树 / 三阶段 / 终态)与口径只在 `goals/infra-backlog.md` §1.1 展开**;`docs/rounds/39` §0.3/§W5 段按纪律就地标注(2026-10-02),不改。
 
 ## 2026-10-02 文档巡检(阶段 1:准确性)发现的两处
 
 - **渲染硬错误(已修,在此登记)**:`docs/rounds/37-convert-architecture-refactor-plan.md` §3.2 的表格在 Q5 与 Q6 两行之间夹了一个空行 ⇒ Markdown 把它断成两张表(Q6 那一行掉到表外、渲染异常)。已**只删该空行**(不改任何正文文字)。同批的同类空行断表另有两处:`docs/goals/pending-decisions.md` A 组表(A4/A5 之间)与 `docs/rounds/README.md` 第 40 轮两行之前,均已并回。
 - **失效目录(只登记,按"历史保真"不改正文)**:`docs/rounds/33-corpus-sweeps-and-format-split.md` §1、§3 与 §4 的命令示例把正向语料目录写成 `download/compile/k4raw/`(§3 还写"落盘到该目录")—— **该目录不存在**;平台原件编辑格式现在落在 `download/compile/k4edit/`(由 rounds/37 §12 的采集器写入),正向扫描器实际吃 `download/compile/*.bcm4`。`docs/goals/convert-backlog.md` §2 第 1 条与 `docs/rounds/37` §10.3 已改正,轮次正文按纪律不动。
+- **尺寸写法(只登记,不改历史正文)**:`docs/rounds/20-kitten-kn-work-conversion-plan.md` 附录里的「3.7 MB / 63 MB」指同一份 `原气骑士 且听风吟-编辑版.bcm4` —— **63 MB 是十进制量级(≈63.6 MB),数字本身不错**;现行统一口径写**字节数** `63 598 143 B(≈60.6 MiB)`(见 `knowledge/work-file-formats.md` §6 第 5 条)。

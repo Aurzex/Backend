@@ -24,9 +24,9 @@
 | -- | ---- | ---- |
 | AI 对话**指数退避重连** | 现在断线只置 `connected=false` + emit 错误;`send_and_wait` 只能等 `Timeout`,必须手动 `connect()`。云变量有退避 ⇒ 对齐前**先定会话/历史重建语义** | `docs/rounds/29` §2-3 |
 | 举报"每类型 100 条"上限 | 现默认移除上限;是否保留取决于产品语义 | `docs/rounds/04` Assumptions |
-| ~~大作品上传超时~~ | ✅ 已修(2026-09-26):上传请求用 `UPLOAD_TIMEOUT=600s`(请求级超时覆盖) | `docs/rounds/21` §8.4 N1 |
-| ~~单包上传大小上限(413)~~ | ✅ **已收尾(2026-09-26)**:同渠道逐档实测,上限落在 **20~24 MB**(20 MB 成功 / 24 MB 413);已加 `shared::ensure_single_package_fits` 提前报错,>20 MB 直接给出"上限 + 实测值"的错误。要传更大作品需分片上传(暂无需求) | `pending-decisions.md` A5/D5 |
-| ~~下载侧大文件风险~~ | ✅ **已修(2026-10-02,`afca96c`)**,两层:① **超时** —— 下载请求加请求级超时 `DOWNLOAD_TIMEOUT = 900 s`(`core/convert/shared.rs` 的 `CodeMaoHttpClient` 三个方法,覆盖作品文档与资源两条下载通路);② **体量(更硬)** —— `ureq` 的 `Body::read_to_vec`/`read_to_string` 自带 **10 MB** 上限,大作品会在**超时之前**先 `BodyExceedsLimit`,故新增显式有界的大体通路 `response_to_{binary,string,json}_large`(`MAX_DOWNLOAD_BODY_BYTES = 256 MiB` 内存护栏;超限报带 URL/上限/已读字节的 `MewError::ResponseTooLarge`),只给下载路径用,普通 API 响应仍守 10 MB 护栏。**未做**:body 流式读取的"无读超时"是另一类问题 | `docs/rounds/40-download-timeout-and-body-cap.md` |
+| ~~大作品上传超时~~ | ✅ 已修(2026-09-26):上传请求用**请求级超时覆盖**(常量值与实测读数见 `../knowledge/nemo-runtime-and-upload.md` §6) | `docs/rounds/21` §8.4 N1 |
+| ~~单包上传大小上限(413)~~ | ✅ **已收尾(2026-09-26)**:上限 **20~24 MB**,已加 `shared::ensure_single_package_fits` 提前报错(逐档读数/速率/渠道见 `../knowledge/platform-and-protocol.md` §5bis)。要传更大作品需分片上传(暂无需求) | `pending-decisions.md` A5/D5 |
+| ~~下载侧大文件风险~~ | ✅ **已修(2026-10-02,`afca96c`)**:两层 —— 请求级超时 + 显式有界的大体通路(普通 API 响应仍守 10 MB 护栏);**未做**:body 流式读取的"无读超时"。常量值/逐路径枚举/一次性证明见 `docs/rounds/40-…` | `docs/rounds/40-download-timeout-and-body-cap.md` |
 
 ## 4. P2 性能小项(择机清)
 
