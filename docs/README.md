@@ -62,6 +62,9 @@
 10. **勘误总表 [`knowledge/errata.md`](knowledge/errata.md) 的定位**:它是"**文档与现实不符**"的勘误总表,
     **含非轮次条目**(见其「非轮次条目」节),不是"只针对 `rounds/`"。
 
-> **三处例外**:① [`knowledge/errata.md`](knowledge/errata.md) 里的 `文件:行` 是**勘误内容本身**(记录当年的行号与漂移),不受第 8 条约束;
+> **四处例外**:① [`knowledge/errata.md`](knowledge/errata.md) 里的 `文件:行` 是**勘误内容本身**(记录当年的行号与漂移),不受第 8 条约束;
 > ② [`knowledge/convert-semantics.md`](knowledge/convert-semantics.md) §1 支持矩阵里的 ✅ 表示"该方向支持",不是完成状态;
-> ③ **引用原文/原标题**里的"本轮 / 本次 / 最新 / 目前"照旧不改成日期(改了就不是引用)。
+> ③ **引用原文/原标题**里的"本轮 / 本次 / 最新 / 目前"照旧不改成日期(改了就不是引用);
+> ④ **导航/索引页**(本篇、[`rounds/README.md`](rounds/README.md)、[`goals/README.md`](goals/README.md))的状态列按「标记 + 至多一支语」写,
+> 允许 `已落地 / 已收口 / 已实施 / 基本落地` 这类**更细的词**来区分"已实施 / 结论已收口 / 部分落地";
+> **目标库与知识库的正文仍必须用 `✅ 已完成(日期,提交号)`**。
