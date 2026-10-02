@@ -13,7 +13,7 @@
 
 // ===== 外部依赖 =====
 use crate::utils::requests::MewError;
-use crate::utils::requests::{CodeMaoClient, HttpMethod};
+use crate::utils::requests::{CodeMaoClient, DOWNLOAD_TIMEOUT, HttpMethod};
 use aes_gcm::aead::array::Array;
 use aes_gcm::aead::array::typenum::{U12, U32};
 use base64::{Engine as _, engine::general_purpose};
@@ -332,28 +332,35 @@ impl CodeMaoHttpClient {
 
 impl HttpClient for CodeMaoHttpClient {
     fn get_json(&self, url: &str, headers: Option<Vec<(String, String)>>) -> Result<Value> {
-        let mut request_builder = self.client.build_request(HttpMethod::Get, url, None);
+        let mut request_builder = self
+            .client
+            .build_request(HttpMethod::Get, url, None)
+            // 下载侧请求级超时覆盖(见 [`DOWNLOAD_TIMEOUT`]);全局默认 30 s 兜不住大作品
+            .with_timeout(DOWNLOAD_TIMEOUT);
         if let Some(headers_map) = headers {
             request_builder = request_builder.with_headers(headers_map);
         }
         let response = request_builder.send()?;
-        Ok(self.client.response_to_json(response)?)
+        // 作品文档可到几十 MB,用大体读取(10 MB 默认上限会先失败)
+        Ok(self.client.response_to_json_large(response, url)?)
     }
 
     fn get_binary(&self, url: &str) -> Result<Vec<u8>> {
         let response = self
             .client
             .build_request(HttpMethod::Get, url, None)
+            .with_timeout(DOWNLOAD_TIMEOUT)
             .send()?;
-        Ok(self.client.response_to_binary(response)?)
+        Ok(self.client.response_to_binary_large(response, url)?)
     }
 
     fn get_text(&self, url: &str) -> Result<String> {
         let response = self
             .client
             .build_request(HttpMethod::Get, url, None)
+            .with_timeout(DOWNLOAD_TIMEOUT)
             .send()?;
-        Ok(self.client.response_to_string(response)?)
+        Ok(self.client.response_to_string_large(response, url)?)
     }
 
     fn box_clone(&self) -> Box<dyn HttpClient> {

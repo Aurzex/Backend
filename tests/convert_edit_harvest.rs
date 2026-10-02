@@ -23,7 +23,7 @@
 use std::path::PathBuf;
 
 use backend::prelude::*;
-use backend::utils::requests::BaseKey;
+use backend::utils::requests::{BaseKey, DOWNLOAD_TIMEOUT};
 
 #[test]
 #[ignore = "需要网络 + 账号:抓平台原始编辑格式(`/kitten/work/ide/load`)到 download/compile/k4edit/"]
@@ -172,6 +172,11 @@ fn count_bcm4(dir: &std::path::Path) -> usize {
 /// 走本库自己的请求器:`build_url` 对**绝对 URL** 直接放行(`requests.rs:662`),
 /// 于是同一套超时/日志/身份槽都能复用。
 fn fetch_bytes(client: &CodeMaoClient, url: &str) -> MewResult<Vec<u8>> {
-    let response = client.build_request(HttpMethod::Get, url, None).send()?;
-    client.response_to_binary(response)
+    // 编辑格式文件实测到 61 MB(`download/compile/raw/`),且 CDN 慢网可能超 30 s ⇒
+    // 请求级放宽超时 + 走大体读取(默认 10 MB 上限会在**超时之前**先失败)
+    let response = client
+        .build_request(HttpMethod::Get, url, None)
+        .with_timeout(DOWNLOAD_TIMEOUT)
+        .send()?;
+    client.response_to_binary_large(response, url)
 }

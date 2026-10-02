@@ -1,5 +1,6 @@
 use serde_json::Value;
 use std::fmt;
+use std::io::Read;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::{
@@ -33,6 +34,17 @@ pub enum MewError {
     /// 调用方参数非法(客户端前置条件错误)
     #[error("Invalid argument: {0}")]
     InvalidArgument(String),
+    /// 下载体超过内存护栏上限(见 `MAX_DOWNLOAD_BODY_BYTES`):不是协议限制,
+    /// 报错带定位信息(URL / 上限 / 已读字节),便于判断要不要调大护栏
+    #[error(
+        "响应体过大: {url} 读到 {received} 字节,超过下载体上限 {limit} 字节\
+         (内存护栏,非协议限制)"
+    )]
+    ResponseTooLarge {
+        url: String,
+        limit: u64,
+        received: u64,
+    },
 }
 
 pub type MewResult<T> = std::result::Result<T, MewError>;
@@ -513,6 +525,8 @@ impl MewRequestBuilder {
     /// 用途:**大请求体**——上传一个 9 MB 的作品产物在慢网上就要 30 s 以上,
     /// 而客户端全局超时是 30 s(`ClientConfig::default`),不覆盖就是必失败
     /// (实测 31.2 s / 35.5 s 超时,见 `docs/rounds/21` §8.4 N1、`docs/goals/pending-decisions.md` A1)。
+    ///
+    /// 下载侧同理(**大响应体**):见 [`DOWNLOAD_TIMEOUT`]。
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
@@ -941,6 +955,59 @@ impl KittyCore {
         }
         Ok(data)
     }
+
+    /// 把响应体读进内存,硬上限 `max` 字节(内存护栏)。
+    ///
+    /// 与 [`Self::response_to_binary`] 等默认助手的区别:后者走 ureq 的
+    /// `Body::read_to_vec`/`read_to_string`,自带 **10 MB** 上限;作品/资源动辄几十 MB
+    /// 会先撞它。这里用**显式自管**的上限读取:不依赖 ureq 的内部护栏,并把定位信息
+    /// (URL / 上限 / 已读字节)带进错误,超限时报 [`MewError::ResponseTooLarge`]。
+    fn read_body_capped(response: Response<Body>, url: &str, max: u64) -> MewResult<Vec<u8>> {
+        let mut reader = response.into_body().into_reader();
+        let mut data: Vec<u8> = Vec::new();
+        let mut buf = [0u8; 64 * 1024];
+        loop {
+            let read = reader.read(&mut buf)?;
+            if read == 0 {
+                break;
+            }
+            data.extend_from_slice(&buf[..read]);
+            if data.len() as u64 > max {
+                return Err(MewError::ResponseTooLarge {
+                    url: url.to_string(),
+                    limit: max,
+                    received: data.len() as u64,
+                });
+            }
+        }
+        Ok(data)
+    }
+
+    /// 读取**大体量**二进制响应体(作品/资源字节),上限 [`MAX_DOWNLOAD_BODY_BYTES`]
+    fn response_to_binary_large(&self, response: Response<Body>, url: &str) -> MewResult<Vec<u8>> {
+        let data = Self::read_body_capped(response, url, MAX_DOWNLOAD_BODY_BYTES)?;
+        if self.config.log_requests && log::log_enabled!(log::Level::Debug) {
+            debug!("---------- 响应体 (二进制, 大体) ----------");
+            debug!("  大小: {} 字节", data.len());
+            debug!("----------------------------------------");
+        }
+        Ok(data)
+    }
+
+    /// 读取**大体量**文本响应体(如 NEKO 密文体),上限 [`MAX_DOWNLOAD_BODY_BYTES`]
+    fn response_to_string_large(&self, response: Response<Body>, url: &str) -> MewResult<String> {
+        let data = Self::read_body_capped(response, url, MAX_DOWNLOAD_BODY_BYTES)?;
+        Ok(String::from_utf8_lossy(&data).into_owned())
+    }
+
+    /// 读取**大体量** JSON 响应体(作品文档),上限 [`MAX_DOWNLOAD_BODY_BYTES`]
+    fn response_to_json_large(&self, response: Response<Body>, url: &str) -> MewResult<Value> {
+        let data = Self::read_body_capped(response, url, MAX_DOWNLOAD_BODY_BYTES)?;
+        if data.is_empty() {
+            return Ok(Value::Null);
+        }
+        Ok(serde_json::from_slice(&data)?)
+    }
 }
 
 // 公开的 CodeMaoClient
@@ -1028,6 +1095,30 @@ impl CodeMaoClient {
     /// 将响应体读取为二进制数据
     pub fn response_to_binary(&self, response: Response<Body>) -> MewResult<Vec<u8>> {
         self.inner.response_to_binary(response)
+    }
+
+    /// 读取**大体量**二进制响应体(作品/资源下载),上限 [`MAX_DOWNLOAD_BODY_BYTES`]
+    /// 超限时报 [`MewError::ResponseTooLarge`](带 URL / 上限 / 已读字节)
+    pub fn response_to_binary_large(
+        &self,
+        response: Response<Body>,
+        url: &str,
+    ) -> MewResult<Vec<u8>> {
+        self.inner.response_to_binary_large(response, url)
+    }
+
+    /// 读取**大体量**文本响应体,上限 [`MAX_DOWNLOAD_BODY_BYTES`]
+    pub fn response_to_string_large(
+        &self,
+        response: Response<Body>,
+        url: &str,
+    ) -> MewResult<String> {
+        self.inner.response_to_string_large(response, url)
+    }
+
+    /// 读取**大体量** JSON 响应体,上限 [`MAX_DOWNLOAD_BODY_BYTES`]
+    pub fn response_to_json_large(&self, response: Response<Body>, url: &str) -> MewResult<Value> {
+        self.inner.response_to_json_large(response, url)
     }
 
     /// 创建分页迭代器
@@ -1544,8 +1635,31 @@ impl Iterator for PaginatedIter {
 ///
 /// 实测:9 MB 作品产物在慢网上要 31~35 s(全局 30 s ⇒ 必失败)。
 /// 真实作品最大到 63 MB,按同一带宽约 4 分钟;留足余量取 10 分钟。
-/// 只作用于**上传请求**(下载与普通接口请求仍用客户端全局 30 s 超时)。
+/// 只作用于**上传请求**;下载侧的同类覆盖见 [`DOWNLOAD_TIMEOUT`],
+/// 普通接口请求仍用客户端全局 30 s 超时。
 const UPLOAD_TIMEOUT: Duration = Duration::from_secs(600);
+
+/// 下载请求的超时上限(请求级覆盖,**不改**全局默认)
+///
+/// 全局默认是 30 s(`ClientConfig::default`,普通接口的量级);作品文档/资源单请求
+/// 可达几十 MB,慢网上必然超时。量级换算:实测 30 MB 上传 ≈ 228 s ⇒ 约 130 KB/s
+/// (A1,`docs/rounds/21` §8.4 N1);按更保守的 100 KB/s,63 MB 级也要 ≈ 645 s,
+/// 故取 **900 s**(15 min),留约 40% 余量。
+///
+/// 使用方:`core::convert::shared` 的 `CodeMaoHttpClient`(转换域取作品/资源的地基)
+/// 与采集工具。不动全局默认,也不动上传侧的 [`UPLOAD_TIMEOUT`]。
+pub const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(900);
+
+/// 下载响应体的内存护栏上限(**不是**协议限制)
+///
+/// 为什么需要:ureq 的 `Body::read_to_vec`/`read_to_string` 自带 **10 MB** 上限
+/// (`MAX_BODY_SIZE`),而作品/资源动辄几十 MB —— 会**先撞这道上限**、根本轮不到超时
+/// (实测平台编辑格式 `.bcm4` 到 61 MB,见 `download/compile/raw/`)。所以普通 API
+/// 响应继续用 10 MB 护栏,下载侧另给一条**显式、有界**的大体通路。
+///
+/// 量级取 **256 MB**:约为 63 MB 级作品的 4× 余量,既兜住更大的作品,又给内存一个
+/// 硬边界 —— 超限说明遇到异常大的响应,应报 [`MewError::ResponseTooLarge`] 而不是继续吃内存。
+pub const MAX_DOWNLOAD_BODY_BYTES: u64 = 256 * 1024 * 1024;
 
 // 文件上传器
 pub struct FileUploader {
