@@ -355,3 +355,10 @@ W10 落地(`66c0b6b`)后,**"内联对象形态影子 ⇒ 拒收该作品"这条�
   - **根因线索**:`docs/rounds/01-websocket-pitfalls.md:791`(为让库可被测试引用,把 `"rlib"` **加进** `crate-type`)与 `:809`(「`crate-type = ["cdylib"]` 的库不参与测试…加了 `"rlib"` 后测试才运行」)。此后 `cdylib` 从 `crate-type` 里消失,而 CI 的 `libname` 列表没跟上。
   - **正确(已决并落地,2026-10-02,`f68c2e6`)**:取方案 ② 的删法 —— **删掉 artifact 上传步**及矩阵里的 `artifact:`/`libname:` 键。理由:本仓 `[lib] crate-type=["rlib"]` **只产 rlib**、`src/main.rs` 又是需账号的**交互式管理控制台**、仓内无消费方 ⇒ **没有可分发产物**,不恢复 `cdylib`。五目标 `cargo build --release` 矩阵保留;另新增 `offline-gate` job(fmt --check + clippy -D warnings + 逐目标点名的离线测试)。CI 口径(含**刻意不跑**真机门与吃 `download/` 的语料扫描器)见 `knowledge/repo-conventions.md` §6。
   - 出处:`.github/workflows/CI.yml`、`Cargo.toml:8`、`docs/rounds/01` 附录「空的 lib」两节;登记在 `docs/goals/infra-backlog.md` §1。
+
+## 第三十一轮 §3.6 N4 的"同一约定"结论(2026-10-02 核实)
+
+- **错**:`docs/rounds/31-convert-layout-consolidation-plan.md` §3.6 N4 引 `translate/model.rs` 的注释「`XmlBlockWriter` 的约定:首根 80、每根 +220」,据此把两边当作**同一约定**、只把起点差异记作"疑似漂移",并提出"若确认是同一约定,则把 220/80 提到一处(可能需要放到 shared.rs)"。
+  - **为何错**:两边不是同一约定,是**同名不同物** —— `decompile` 侧 `XmlBlockWriter` 写 **Kitten2/3 blocksXML**(根块 `x=0, y=0.0 + 220·i`);`translate/model.rs` 的 `ROOT_LAYOUT_Y`/`ROOT_LAYOUT_STEP` 写 **Kitten4 `block_data_json` 的 `location`**(`[0, 80 + 220·i]`,且只在 KN 侧根块缺 `location` 时兜底)。格式、编辑器、方向三者皆不同 ⇒ 不存在可提的"共享常量"。且平台侧实测:编辑器亲手写出的编辑格式里(711 个含根块的实体)根块坐标是用户拖出来的任意值,编辑器自己排的网格是 **0 + 80·k**(起点 0 出现 257/711,起点 80 零次)⇒ 那对 220 与"平台约定"也不沾边。
+  - **正确**:① 根块坐标属**非语义**(`location` 就在 `nemo_mapping` 语义 diff 的 allow-list 里),两处唯一的硬要求是"根块互不重叠";② 因此**不做共享常量、也不改数值** —— 改数值(`80 → 0`)零行为收益(实测该样本产物 SHA256 `0d3cf2e3…` → `15d7d050…`)却要重刷 `kn-3.7MB-kitten4` 基线键;③ 只把 `model.rs` 那句自称"一致"的注释改准(`4072846`),并把 0/80 的平台读数写在那里。
+  - 出处:docs/rounds/31-convert-layout-consolidation-plan.md §3.6 N4(⚠️ 它点名的 `model.rs:706-708`、`editors.rs:625-626` 已随文件增长**行号漂移**,请按符号定位:`ROOT_LAYOUT_Y`/`ROOT_LAYOUT_STEP` 及其文档注释、`XmlBlockWriter::write_blocks`)、src/core/convert/translate/model.rs、src/core/convert/decompile/editors.rs;语料 `download/compile/k4edit/*.bcm4`、`download/compile/raw/*.bcm4`(取证脚本为只读的一次性解析,未入库)。

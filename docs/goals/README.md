@@ -30,7 +30,7 @@
 | - | ---- | ---- | ----------- |
 | **R1** | **CI 产物步不再可能"空着绿" + 离线门进 CI** | ✅ **已完成(2026-10-02,`f68c2e6`)** | 删掉 artifact 上传步及其矩阵 `artifact:`/`libname:` 键(本仓只有 rlib、bin 是需账号的交互式控制台、无消费方 ⇒ 没有可分发产物;旧步期待 `.so/.dll/.dylib`,`if-no-files-found` 默认 `warn` ⇒ 一直静默绿);新增 `offline-gate`:`fmt --check` + `clippy --all-targets -D warnings` + **逐目标点名**的离线测试(`--lib`/`--test repo_hygiene`/`--test convert_bench`)。**刻意不跑**真机门、不设 `BACKEND_REQUIRE_LIVE`(理由见 `../knowledge/repo-conventions.md` §6) |
 | **R2** | **`unused` 告警分阶段放开** | ⏳ 待做 | 实测清单 **50 条**:19 机械(`unused_imports` 13 / `unused_variables` 2 / `unused_mut` 2 / `unused_assignments` 1 / `unused_must_use` 1)+ 31 `dead_code`(逐条判"删 / 接线 / 留 `#[allow]` + 理由";**删 `pub` 面是红线,先取授权**)。数字与口径见 `infra-backlog.md` §1.1 |
-| **R3** | **根块纵向布局 `0 vs 80` 是否真 bug** | 🚧 进行中(取证中) | 反编译侧 `XmlBlockWriter` 根块从 `y=0.0` 起、`translate/model.rs` 另有 `ROOT_LAYOUT_Y=80`;先对官方产物取样核实哪个对,再决定共享常量或修一边(见 `convert-backlog.md` §2 第 8 条) |
+| **R3** | **根块纵向布局 `0 vs 80` 是否真 bug** | ✅ **已完成(2026-10-02,`4072846`)** | 结论:**不是行为缺陷** —— 两者不是同一约定(**同名不同物**),错的是 `model.rs` 那句自称"一致"的注释(已改准)。平台取证(711 个含根块实体):编辑器自排网格是 `0 + 80·k`(起点 0 出现 257/711,起点 80 **零次**),平台步长 80 与我们 220 也不是一套,而根块坐标**非语义**(在语义 diff 的 allow-list 里);A/B 实测把 80 改 0 只让 `kn-3.7MB` 一个基线键变 SHA ⇒ 零行为收益,**数值刻意保持 80/220**。见 `convert-backlog.md` §2 第 8 条 |
 | **R4** | **反编译域补离线测试** | ⏳ 待做(第二优先域) | `decompile/` 的回归现在几乎只能靠真机门 ⇒ 给纯函数(`XmlBlockWriter::write_blocks`、`referenced_ids`、`child_input_name` …)补离机断言(`rounds/37` §0.4) |
 | **R5** | **加载门离线化**(原 `convert-backlog` §6.3 G5) | ⏳ 待做(**需拍板**) | `validateBcm` headless 进常规测试 + 一个**入库的最小夹具**;`download/` 与官方 bundle 都不入库 ⇒ 先决定夹具形态 |
 | **R6** | **先量"少建中间 `Value` 树"的上界** | ⏳ 待做 | 用 `alloc_*` 那把尺子先量;不显著就判不做并**关掉该方向**(避免被反复提起) |
