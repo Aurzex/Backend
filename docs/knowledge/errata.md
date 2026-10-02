@@ -360,7 +360,7 @@ W10 落地(`66c0b6b`)后,**"内联对象形态影子 ⇒ 拒收该作品"这条�
 
 - **错**:`docs/rounds/31-convert-layout-consolidation-plan.md` §3.6 N4 引 `translate/model.rs` 的注释「`XmlBlockWriter` 的约定:首根 80、每根 +220」,据此把两边当作**同一约定**,只把起点差异记作"疑似漂移",并提出"若确认是同一约定,则把 220/80 提到一处"。
   - **为何错**:两边是**同名不同物**(`decompile` 侧写 Kitten2/3 blocksXML 的 `y=0.0 + 220·i`;`translate/model.rs` 写 Kitten4 `block_data_json` 的 `location`,且只在缺 `location` 时兜底)⇒ 不存在可提的"共享常量";平台侧读数也不支持"起点 80 是平台约定"。
-  - **正确**:根块坐标**非语义**(`location` 就在语义 diff 的 allow-list 里),两处唯一的硬要求是"根块互不重叠"⇒ **不做共享常量、也不改数值**;只把 `model.rs` 那句自称"一致"的注释改准(`4072846`)。**平台取数(711 个含根块实体 / 起点 0 出现 257 / 起点 80 零次)与 A/B 实测的 SHA 数字只在 `../goals/convert-backlog.md` §2 第 8 条展开。**
+  - **正确**:根块坐标**非语义**(`location` 就在语义 diff 的 allow-list 里),两处唯一的硬要求是"根块互不重叠"⇒ **不做共享常量、也不改数值**;只把 `model.rs` 那句自称"一致"的注释改准(`4072846`)。**平台取数与 A/B 实测的具体数字只在 `../goals/convert-backlog.md` §2 第 8 条展开。**
   - 出处:docs/rounds/31-convert-layout-consolidation-plan.md §3.6 N4(⚠️ 它点名的 `model.rs:706-708`、`editors.rs:625-626` 已随文件增长**行号漂移**,请按符号定位:`ROOT_LAYOUT_Y`/`ROOT_LAYOUT_STEP` 及其文档注释、`XmlBlockWriter::write_blocks`)。
 
 ## 第 40 轮 R2 的 `unused` 读数(2026-10-02)
