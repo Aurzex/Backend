@@ -12,7 +12,7 @@
 
 - **整改:LoginBuilder**(auth.rs):`execute(mut self)` 直接在 Builder 上执行网络(调 `auth_manager.login`),违反协议。
   - 新增 `LoginSession`(持 `AuthManager` + `LoginCredentials` + `prefer_method`),`LoginBuilder::build(self) -> LoginSession`(仅构造,无副作用),`LoginSession::execute(&mut self) -> MewResult<LoginResult>` 执行网络。
-  - 调用点:pipeline.rs:968 `login_student` 改 `...build()` + `session.execute()?`;README 示例 1 同步。
+  - 调用点:`pipeline.rs` 的 `login_student` 改为 `...build()` 加 `session.execute()?`;README 示例 1 同步。
 - **已合规**:CloudBuilder/ChatBuilder(new 必选 + 链式 + build 返回实例,无网络);LoginBuilder 其余链式方法保留。
 
 ### 2. 执行协议 — 网络操作由实例方法触发,返回 MewResult<T>,构造无副作用
@@ -21,15 +21,15 @@
 
 ### 3. 分页协议 — 分页数据源实现 Iterator<Item = MewResult<T>>,for 循环遍历,错误 Err 不中断,不暴露 next_chunk
 
-- PaginatedIter(acquire.rs)/CommunityReplyStream(retrieve.rs)已实现 Iterator<Item = Result<_,_>> ✓。
+- PaginatedIter(acquire.rs)/CommunityReplyStream(retrieve.rs)已实现 Iterator<Item = Result<_,_>>,符合要求。
 - **整改:PendingSession**(services.rs):`pub fn next_chunk` 对外暴露,违反"不暴露 next_chunk"。
   - `next_chunk` 降为私有 `fn next_chunk`;新增 `impl Iterator for PendingSession<'_>`(`type Item = (Vec<BatchGroup>, Vec<Value>)`,`next()` 调 next_chunk)。
-  - terminal.rs:300 `while let Some(...) = session.next_chunk()` 改 `for (groups, non_group) in session.by_ref()`(循环后 `leftover_groups()` 需 session 存活,by_ref 正确)。
-- 验证:`grep "pub fn next_chunk" src/` 返回 0。
+  - `terminal.rs`:原 `while let Some(...) = session.next_chunk()` 改为 `for (groups, non_group) in session.by_ref()`(循环后 `leftover_groups()` 需 session 存活,by_ref 正确)。
+  - 验证:`grep "pub fn next_chunk" src/` 返回 0。
 
 ### 4. 回调协议 — 回调注册统一 on_ 前缀
 
-- **整改:ChatClient::add_stream_callback**(converse.rs:441)→ `on_stream`(签名不变,仅改名)。无外部调用;README 示例 4 同步。
+- **整改:ChatClient::add_stream_callback**(converse.rs):重命名为 `on_stream`(签名不变,仅改名)。无外部调用;README 示例 4 同步。
 - 已合规:cloudvar 的 on_change/on_ranking/on_connection/on_data_ready/on_online_users_change/on_ranking_received/on_operation。
 - 验证:`grep add_stream_callback src/ README.md` 返回 0。
 
@@ -49,7 +49,7 @@
 
 ## Critical files & anchors（执行后）
 
-- `src/api/auth.rs` — `LoginBuilder::build` + `LoginSession`(1308 附近):构造协议落点。
+- `src/api/auth.rs` — `LoginBuilder::build` + `LoginSession`:构造协议落点。
 - `src/core/converse.rs` — `ChatBuilder` 超时字段(connect_timeout/sync_timeout/start_timeout)+ `send_and_wait` 无参 + `on_stream`。
 - `src/core/cloudvar.rs` — `CloudBuilder` 超时字段 + `connect_and_wait()` 无参。
 - `src/core/services.rs` — `PendingSession` 实现 Iterator,next_chunk 私有。
@@ -60,8 +60,8 @@
 
 - 每步 `cargo check` 0 error;最终 `cargo check --all-targets` 通过,`cargo test` 3 passed,`cargo clippy --all-targets` 0 warning。
 - 协议符合性 grep:
-  - `grep "pub fn next_chunk" src/` → 0(不暴露)
-  - `grep "add_stream_callback" src/ README.md` → 0(on_ 前缀)
+  - `grep "pub fn next_chunk" src/` 返回 0(不暴露)
+  - `grep "add_stream_callback" src/ README.md` 返回 0(on_ 前缀)
   - `connect_and_wait()`/`send_and_wait(message, mode)` 无 Duration 参数(超时在 Builder)
   - `LoginBuilder` 无 execute(在 LoginSession)
 - 行为等价声明:

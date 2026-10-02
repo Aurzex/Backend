@@ -10,13 +10,13 @@
 
 ## 1. 为什么值得做(实测分布)
 
-本机真作品样本,按"我方能独立处理的子树"统计(统计脚本:读编辑版 JSON,数各实体
+本机真作品样本,按"本项目方能独立处理的子树"统计(统计脚本:读编辑版 JSON,数各实体
 `block_data_json.blocks` / `nekoBlockJsonList` 条数,以及 `procedures.proceduresDict` 各定义):
 
 | 样本 | 方向 | 工作项(实体 / 程序集定义) | 积木合计 | **最大工作项占比** | 判断 |
-| ---- | ---- | ------------------------ | -------- | ----------------- | ---- |
-| `原气骑士 且听风吟_136021231.bcm4`(10.8 MB) | Kitten4 → KN | **209 个实体**(0 个程序集) | 12 764 | **4%**(555 块) | 极均衡,8 线程理论 ≈ 5–7× |
-| `Phigros 自制谱模拟器_195038626.kn.bcmkn`(9.4 MB) | KN → Kitten4 | 59 个实体 + **4 个程序集定义** | 5 235 | **≈97% 在 `proceduresDict`**(实体侧仅 153 块) | 必须**并行程序集定义**,只并行实体几乎无收益 |
+| --- | --- | --- | --- | --- | --- |
+| `原气骑士 且听风吟_136021231.bcm4`(10.8 MB) | Kitten4 -> KN | **209 个实体**(0 个程序集) | 12 764 | **4%**(555 块) | 极均衡,8 线程理论 ≈ 5–7× |
+| `Phigros 自制谱模拟器_195038626.kn.bcmkn`(9.4 MB) | KN -> Kitten4 | 59 个实体 + **4 个程序集定义** | 5 235 | **≈97% 在 `proceduresDict`**(实体侧仅 153 块) | 必须**并行程序集定义**,只并行实体几乎无收益 |
 
 结论:两个方向都要拆工作项 —— 正向按实体、反向按"实体 + 程序集定义"。
 
@@ -30,12 +30,12 @@
 
 ## 2. 拦路石:`IdSource` 与 `TranslateReport` 是共享可变状态
 
-- `model::IdSource { deterministic, counter, chars }`(`model.rs:321`):全流程**一个**
+- `model::IdSource { deterministic, counter, chars }`(``model.rs::IdSource::new``):全流程**一个**
   `&mut`,每铸一个 id 就 `counter += 1`(`uuid()` 334 / `short()` 361)。产物里的新铸 id
   (影子、参数、程序集调用点)的**值**依赖"全局第几次铸造"。
 - `TranslateReport.warnings: Vec<TranslateWarning>`:按发生顺序 push,`warnings()` 是**公开**
   访问器,顺序可观察。
-- 因此"每实体一个线程 + 各自铸 id"会直接改变产物 id 与告警顺序 → 逐字节对齐失败。
+- 因此"每实体一个线程 + 各自铸 id"会直接改变产物 id 与告警顺序 -> 逐字节对齐失败。
 
 ---
 
@@ -55,22 +55,22 @@
 
 **阶段 B(串行,零成本)**:按工作项顺序求前缀和 —— 第 i 项起点
 `base_i = Σ_{j<i} mints_j`(mints 数由阶段 A 记录,确定性成立:同一棵树、同一映射代码
-→ 同样的铸造序列与种类)。于是
-`临时 id (i, seq, kind)` → 最终 id = `counter = base_i + seq` 处 `IdSource` 的取值
-(`uuid()`/`short()` 都是 counter 的纯函数,见 `model.rs:334/361`)。
+-> 同样的铸造序列与种类)。于是
+`临时 id (i, seq, kind)` -> 最终 id = `counter = base_i + seq` 处 `IdSource` 的取值
+(`uuid()`/`short()` 都是 counter 的纯函数,见 ``model.rs::IdSource::recording`/361`)。
 
 **阶段 C(串行/可并行,改写)**:把各工作项树与已编码块里的临时 id 替换为最终 id
 (遍历替换字符串;临时 id 带哨兵前缀,不与真实 id 冲突)。随后 `rewrite_calls`(正向
 第二遍,需要全局 `procedures`)**同样**按项并行、用同一临时 id 方案(它的铸造顺序
-也要拼进全局序列,位置在阶段 A 之后 ✓ 与今天串行代码的顺序一致)。
+也要拼进全局序列,位置在阶段 A 之后  与今天串行代码的顺序一致)。
 
 **阶段 D(装配)**:仍按今天的顺序装配(`assembly::build_document` /
 `build_kitten4_document`,后者已在上一次提交改成按值消费)。
 
-**告警顺序**:阶段 A 的局部报告按工作项顺序拼接,等价于串行 push 顺序 ✓
+**告警顺序**:阶段 A 的局部报告按工作项顺序拼接,等价于串行 push 顺序 
 (`TranslateReport::warnings()` 顺序不变,`counts()` 是聚合,天然无关)。
 
-**并发入口**:`TranslateOptions::entity_concurrency(usize)`(新增,默认 1 ⇒ 默认行为、
+**并发入口**:`TranslateOptions::entity_concurrency(usize)`(新增,默认 1 => 默认行为、
 产物、性能完全不变);`std::thread::scope` + 手工分块(与 `translate_works` 同风格,
 不引 rayon)。分块策略:按"积木数"降序贪心装箱(最大工作项 4% 的正向样本几乎线性)。
 
@@ -95,8 +95,8 @@
 ## 5. 风险与缓解
 
 | 风险 | 证据/缓解 |
-| ---- | -------- |
-| **有绕过 `IdSource` 的直接铸 id** | 先全仓 `grep` `IdGenerator`、`fastrand` 在 `translate/**` 的使用;发现直接铸造点必须先收口到 `IdSource`(否则临时 id 方案漏改 → 产物不一致,基准会立刻抓到) |
+| --- | --- |
+| **有绕过 `IdSource` 的直接铸 id** | 先全仓 `grep` `IdGenerator`、`fastrand` 在 `translate/**` 的使用;发现直接铸造点必须先收口到 `IdSource`(否则临时 id 方案漏改 -> 产物不一致,基准会立刻抓到) |
 | 铸造序列不可复现(依赖 map 迭代顺序) | 现有实现已假定 `serde_json::Map` 有序(BTreeMap)且遍历顺序固定(正向按 id 排序取根,见 `kitten.rs` `parse_parts`);单测"1 vs 8"若不一致即说明还有隐式顺序依赖,先定位再并行 |
 | 改写临时 id 漏改(某些 id 已被写进字符串内部,如 mutation XML) | 临时 id 只在 **id 字段/引用**里出现;改写按节点字段走,并加"产物中不得残留哨兵前缀"的断言(便宜的兜底) |
 | 线程数爆掉(作品级 × 实体级) | 两级预算:`translate_works` 的 `batch_concurrency` × `entity_concurrency`,在 `translate_works` 里按 `min(可用并发, 作品数)` 折算,并在文档写明(方案 23 §3 P2-11) |
@@ -118,20 +118,20 @@
 以下逐条记评审给的证据与修法(均已核对到 `文件:行号`)。
 
 | # | 阻塞问题 | 证据 | 修法 |
-| - | -------- | ---- | ---- |
-| 1 | **反向管线在方案里缺席**:阶段 A 只写 `translate_kn_to_kitten` + `split_procedures`,而反向没有 `split_procedures`;`unrewrite_calls` 逐实体/逐程序集**按全局顺序**铸 id 且依赖全局 `call_targets`;`def_root_from_entry` 把程序集定义根 **push 进宿主实体的树**(跨工作项改树);`build_block_data_json` 在合并后按宿主实体编码并铸 id | `assembly.rs:864-870/878-886/897`、`neko.rs:692/769`、`kitten.rs:220` | 反向改为三段:**串行** `unrewrite_calls` → **串行** `def_root_from_entry` 合并 → 之后才按"宿主实体(含合并进来的定义)"并行编码;临时 id 全局序列 = 实体遍历 → 程序集遍历的拼接顺序 |
-| 2 | **"counter 纯函数"只在确定性模式成立** | `model.rs:342-368`:`uuid()` 确定性分支 343、非确定性走 `fastrand` 346-350;`short()` 364 vs `chars.generate` 368(`shared/model.rs:160-169`) | 明确:字节一致保证**只承诺 `deterministic_ids(true)`**(基准/测试都在该模式);非确定性模式下阶段 B 改为**串行现铸**随机 id 并建 temp→final 映射(只要求合法+唯一) |
-| 3 | **正向阶段 C 顺序自相矛盾**:`rewrite_calls` 会把 `ProcedureEntry` 的阶段 A 临时 id 复制进实体树,而方案把替换放在 `rewrite_calls` 之前;且临时 id 被用作 `inputs` 的 **BTreeMap 键**,"遍历值替换"覆盖不到 | `neko.rs:381-467`(`fields.NAME` 441、`mutation def_id/name` 433-436、`arg id` 447-449、`node.inputs.insert(param.id.clone(), input)` 467) | 阶段 B 先把 `ProcedureEntry.id/param.id` 换算成最终 id,让 `rewrite_calls` 直接复制**最终** id;或把替换挪到 `rewrite_calls` 之后并同时覆盖"键 + 值 + mutation/shadow XML 字符串",`rewrite_calls` 自身铸的影子 id(`neko.rs:461`)另排一条临时序列 |
-| 4 | **告警顺序无法只靠"阶段 A 按项拼接"复现**:反向 warn 横跨五段(`reverse_node`、`unrewrite_call`、`def_root_from_entry`、`duplicate_ids`、`build_kitten4_document`) | `mapping.rs:1254/1272/1319/1332`、`neko.rs:699-701/725-730`、`assembly.rs:894-895/1084-1087/1125-1128/1160-1163/1322-1325/1372-1375` | 五段各自按串行顺序收集并按序拼接;`warnings()` 是公开访问器,顺序可观察,不能"反正 counts 是聚合" |
-| 5 | **验收基座抓不住"只有某个实体 id 错位"**:基准整测 `#[ignore]` 且依赖 gitignored 样本;正向样本 0 程序集;`diff_tests` 只跑单实体且**逐块比较显式跳过 id** | `tests/convert_bench.rs:39-73`;`mod.rs:690+`;`reverse_tests.rs` 单实体 | 新增**非 ignored** 的自造小文档单测(见 §8) |
-| 6 | **两级并发超订**:`batch_concurrency × entity_concurrency`,方案只限了作品数 | `convert/mod.rs:173-174`;`TranslateOptions` `mod.rs:80-83` | 在 `translate_works` 里把 `entity_concurrency` 按 `batch_concurrency` 折算,并封顶 `available_parallelism`。评审确认翻译内核**不碰**全局客户端、`LazyLock` 只读、`fastrand` 线程本地 ⇒ **无数据竞争/死锁**,只是超订 |
+| --- | --- | --- | --- |
+| 1 | **反向管线在方案里缺席**:阶段 A 只写 `translate_kn_to_kitten` + `split_procedures`,而反向没有 `split_procedures`;`unrewrite_calls` 逐实体/逐程序集**按全局顺序**铸 id 且依赖全局 `call_targets`;`def_root_from_entry` 把程序集定义根 **push 进宿主实体的树**(跨工作项改树);`build_block_data_json` 在合并后按宿主实体编码并铸 id | ``assembly.rs::KITTEN4_TOOLBOX_ORDER`/878-886/897`、``neko.rs`/769`、``kitten.rs`` | 反向改为三段:**串行** `unrewrite_calls` -> **串行** `def_root_from_entry` 合并 -> 之后才按"宿主实体(含合并进来的定义)"并行编码;临时 id 全局序列 = 实体遍历 -> 程序集遍历的拼接顺序 |
+| 2 | **"counter 纯函数"只在确定性模式成立** | ``model.rs::IdSource::recording``:`uuid()` 确定性分支 343、非确定性走 `fastrand` 346-350;`short()` 364 vs `chars.generate` 368(``shared/model.rs::BlockJson::walk``) | 明确:字节一致保证**只承诺 `deterministic_ids(true)`**(基准/测试都在该模式);非确定性模式下阶段 B 改为**串行现铸**随机 id 并建 temp->final 映射(只要求合法+唯一) |
+| 3 | **正向阶段 C 顺序自相矛盾**:`rewrite_calls` 会把 `ProcedureEntry` 的阶段 A 临时 id 复制进实体树,而方案把替换放在 `rewrite_calls` 之前;且临时 id 被用作 `inputs` 的 **BTreeMap 键**,"遍历值替换"覆盖不到 | ``neko.rs``(`fields.NAME` 441、`mutation def_id/name` 433-436、`arg id` 447-449、`node.inputs.insert(param.id.clone(), input)` 467) | 阶段 B 先把 `ProcedureEntry.id/param.id` 换算成最终 id,让 `rewrite_calls` 直接复制**最终** id;或把替换挪到 `rewrite_calls` 之后并同时覆盖"键 + 值 + mutation/shadow XML 字符串",`rewrite_calls` 自身铸的影子 id(``neko.rs``)另排一条临时序列 |
+| 4 | **告警顺序无法只靠"阶段 A 按项拼接"复现**:反向 warn 横跨五段(`reverse_node`、`unrewrite_call`、`def_root_from_entry`、`duplicate_ids`、`build_kitten4_document`) | ``mapping.rs::reverse_kind`/1272/1319/1332`、``neko.rs`/725-730`、``assembly.rs::MARKER_OUTPUT`/1084-1087/1125-1128/1160-1163/1322-1325/1372-1375` | 五段各自按串行顺序收集并按序拼接;`warnings()` 是公开访问器,顺序可观察,不能"反正 counts 是聚合" |
+| 5 | **验收基座抓不住"只有某个实体 id 错位"**:基准整测 `#[ignore]` 且依赖 gitignored 样本;正向样本 0 程序集;`diff_tests` 只跑单实体且**逐块比较显式跳过 id** | ``tests/convert_bench.rs``;``mod.rs`+`;`reverse_tests.rs` 单实体 | 新增**非 ignored** 的自造小文档单测(见 §8) |
+| 6 | **两级并发超订**:`batch_concurrency × entity_concurrency`,方案只限了作品数 | ``convert/mod.rs``;`TranslateOptions` ``mod.rs`` | 在 `translate_works` 里把 `entity_concurrency` 按 `batch_concurrency` 折算,并封顶 `available_parallelism`。评审确认翻译内核**不碰**全局客户端、`LazyLock` 只读、`fastrand` 线程本地 => **无数据竞争/死锁**,只是超订 |
 
 > 评审另有正面结论:并发本身安全(无共享可变全局被翻译期触碰),失败模式是"产物不一致"而非 UB。
 
 ## 8. 执行前置(评审要求补的检查,先写测试再动并行)
 
 1. **正向**:自造 ≥2 实体文档 —— 实体 A 定义 `procedures_2_defnoreturn`(带返回值路径以触发
-   `neko.rs:229` 的 `round.id` 铸 id),实体 B 有 `procedures_2_callnoreturn` 调用它;
+   ``neko.rs`` 的 `round.id` 铸 id),实体 B 有 `procedures_2_callnoreturn` 调用它;
    断言 `entity_concurrency = 1` 与 `8` 下 `serde_json::to_string` **逐字节相同**、
    `report.warnings()` **逐条同序**。
 2. **反向**:自造 KN 文档 —— `procedures.proceduresDict` ≥2 条定义(含形参与调用点)+ ≥2 实体
@@ -140,22 +140,22 @@
 
 > **进度(2026-09-25)**:已落地**一条**合并守门测试
 > `reverse_tests::multi_entity_with_procedures_is_deterministic`(自造 KN 文档:2 实体 +
-> `proceduresDict` 定义,不依赖样本)。它断言:① 反向两次转换**逐字节一致** + 告警**逐条同序**;
-> ② 程序集定义根确实挂到宿主实体(`procedures_2_defnoreturn` 出现在角色积木里);
-> ③ 反向产物再走**正向闭环**,正向也逐字节可重复、告警同序,且源里的定义被抽成
-> `procedures.proceduresDict`(⇒ 正向 `split_procedures` 路径被真实走到)。
+> `proceduresDict` 定义,不依赖样本)。它断言:1)  反向两次转换**逐字节一致** + 告警**逐条同序**;
+> 2)  程序集定义根确实挂到宿主实体(`procedures_2_defnoreturn` 出现在角色积木里);
+> 3)  反向产物再走**正向闭环**,正向也逐字节可重复、告警同序,且源里的定义被抽成
+> `procedures.proceduresDict`(=> 正向 `split_procedures` 路径被真实走到)。
 >
 > **仍未覆盖**(执行并行前应补):正向的**调用点重写**(`rewrite_calls` 把临时 id 写进
 > `fields.NAME`/`mutation`/`inputs` **键** —— 评审阻塞问题 #3 的正向场景)需要构造带
 > KN 调用积木(引用某条定义)的输入;目前只有单实体层面的
 > `neko::tests::rewrites_call_sites_and_leaves_unknown_calls_untouched` 部分覆盖。
 
-**结论:执行顺序改为** —— ① 先落地 §8 两条测试(今天就能跑,且是并行的守门);② 正向并行(修 #2/#3/#6);
-③ 反向按 #1 的三段重设计(§7 表);④ 告警顺序按 #4 逐段建模。**未过 §8 之前不合并并行实现。**
+**结论:执行顺序改为** —— 1)  先落地 §8 两条测试(今天就能跑,且是并行的守门);2)  正向并行(修 #2/#3/#6);
+3)  反向按 #1 的三段重设计(§7 表);4)  告警顺序按 #4 逐段建模。**未过 §8 之前不合并并行实现。**
 
-> **进度(2026-09-25,后续提交)**:② **正向并行已落地**,详见 §9(含实现中发现的一个评审未预见的
-> 真问题:临时 id 的记账槽位必须按阶段错开)。① 的正向守门测试也一并落地(自造文档,不依赖样本)。
-> ③④ 反向仍**未动**。
+> **进度(2026-09-25,后续提交)**:2)  **正向并行已落地**,详见 §9(含实现中发现的一个评审未预见的
+> 真问题:临时 id 的记账槽位必须按阶段错开)。1)  的正向守门测试也一并落地(自造文档,不依赖样本)。
+> 3) 4)  反向仍**未动**。
 
 ---
 
@@ -167,7 +167,7 @@
 ### 9.1 改了什么(文件 / 函数)
 
 | 文件 | 内容 |
-| ---- | ---- |
+| --- | --- |
 | `src/core/convert/translate/model.rs` | `MintKind`(uuid/short)、`TEMP_ID_PREFIX`(哨兵 `\u{1}`)、`is_temp_id_char`;`IdSource::recording(slot)` / `into_log()`(记录模式:产临时 id、记账、不推进全局计数)。**串行模式代码路径逐字未动** |
 | `src/core/convert/translate/remint.rs`(**新**) | `run_items`(贪心装箱 + `thread::scope`,按项序返回)、`workers`(夹取请求/项数/可用核数)、`remap_tree` / `remap_entry` / `remap_json` / `remap_text`(单遍改写:值 + BTreeMap 键 + mutation/shadow XML)、`merge_report`(局部报告按项序并入,告警串同表改写) |
 | `src/core/convert/translate/mod.rs` | 新增 `TranslateOptions::entity_concurrency(usize)`(默认 1,公开 API 只做加法)与 `fold_entity_concurrency`;`TranslateReport::take_warnings`;`convert_kitten4_document` 改五段(§9.2);`collect_forward_items` / `restore_forward_items`(阶段 0 取走 `block_data_json`,结束后原样放回) |
@@ -187,20 +187,20 @@
 装配          build_document(未动)
 ```
 
-- **铸造序列可复现**:全局第 k 次铸造 = 串行顺序下的第 k 次铸造 ⇒ 确定性模式下 id 逐字节相同;
-- **告警顺序**:阶段 1 全项 → 阶段 2 全项,与旧实现两次循环的 push 顺序逐条对应;
+- **铸造序列可复现**:全局第 k 次铸造 = 串行顺序下的第 k 次铸造 => 确定性模式下 id 逐字节相同;
+- **告警顺序**:阶段 1 全项 -> 阶段 2 全项,与旧实现两次循环的 push 顺序逐条对应;
 - **错误**:`.collect::<Result<Vec<_>,_>>()` 按项序取首个错误(与串行一致);
-- **并发 1**:三个阶段都在当前线程按项序跑,但走同一条临时 id 路径 ⇒ 基线 SHA256 直接守默认行为。
+- **并发 1**:三个阶段都在当前线程按项序跑,但走同一条临时 id 路径 => 基线 SHA256 直接守默认行为。
 
 ### 9.3 实现中发现的真问题(评审未预见)
 
 **临时 id 的记账槽位必须按"阶段"错开。** 第一版里阶段 1 与阶段 2 都用"实体序号"当槽位,
 于是同一实体在阶段 1 的第 `seq` 次铸造与阶段 2 的第 `seq` 次铸造撞成**同一个临时 id**
-(`\u{1}prov:{槽位}:{seq}:{形态}`),账本 `insert` 时后者覆盖前者 ⇒ 产物 id 静默错位。
+(`\u{1}prov:{槽位}:{seq}:{形态}`),账本 `insert` 时后者覆盖前者 => 产物 id 静默错位。
 **基线门当场抓住**(默认并发 1 也走同一条临时 id 路径,所以这步没被并行掩盖):
 
-- 10.8 MB 正向样本:SHA256 `bafeb50c…` → `f412dd47…`;
-- 0.3 MB 正向样本:`d653a8a5…` → `fe02c032…`;
+- 10.8 MB 正向样本:SHA256 `bafeb50c…` -> `f412dd47…`;
+- 0.3 MB 正向样本:`d653a8a5…` -> `fe02c032…`;
 - 两个反向样本**逐字未变**(证明差异确实来自正向改动)。
 
 定位手法(已固化为测试):测试内保留一份**实体级并行前的串行参考实现**,对真作品跑两份产物、
@@ -231,8 +231,8 @@
 ### 9.5 命令与输出摘录
 
 **绑核口径的坑(踩到了,记下来)**:`taskset -c 2` 把进程钉在 **1 个核**上,而
-`std::thread::available_parallelism()` 是**按亲和掩码**算的 ⇒ 返回 1 ⇒ `remint::workers`
-夹到 1 ⇒ 并发退化成串行,于是"1 vs 8 同 SHA256"成了**空门**(第一轮就有这个现象:
+`std::thread::available_parallelism()` 是**按亲和掩码**算的 => 返回 1 => `remint::workers`
+夹到 1 => 并发退化成串行,于是"1 vs 8 同 SHA256"成了**空门**(第一轮就有这个现象:
 输出里写着 `可用核数 1`,加速比 0.63×)。所以验收要分两跑:
 
 - **基线守门**(默认并发 1,不需要多核):`taskset -c 2`,噪声最小;
@@ -251,17 +251,17 @@ $ taskset -c 2 target/bench_perf/deps/convert_bench-<hash> --ignored --nocapture
 实体级并发对照(方案 25 S3a):可用核数 1,请求并发 8
   10.8 MB 正向:core 281 → 290 ms(0.97×),实际线程 1 → 1,SHA256 bafeb50c0a8e4eeb…(与基线一致)
   0.3 MB 正向:SHA256 d653a8a5…;反向 9.4 MB:SHA256 e7680dcc…;反向 3.7 MB:SHA256 bfde1fc1…
-  —— 四个样本逐字与基线一致,且每样本「实体并发 1」与「=8」的 SHA256 相同 ✅
-[convert_bench] 产物 SHA256 与基线一致 ✅;实体级并发 1 vs 8 同 SHA256 ✅
+  —— 四个样本逐字与基线一致,且每样本「实体并发 1」与「=8」的 SHA256 相同 
+[convert_bench] 产物 SHA256 与基线一致 ;实体级并发 1 vs 8 同 SHA256 
 (此环境核数=1,并发对照退化为串行 —— 见上面的坑;真正验并行的输出见下一条)
 
 $ taskset -c 0-3 target/bench_perf/deps/convert_bench-<hash> --ignored --nocapture
 实体级并发对照(方案 25 S3a):可用核数 4,请求并发 8
-  10.8 MB 正向:core 265 → 171 ms(1.55×),e2e 566 → 581 ms(0.97×),实际线程 1 → 4,SHA256 与基线相同 ✅
-  0.3 MB 正向:core 7 → 7 ms(1.00×),实际线程 1 → 4,SHA256 与基线相同 ✅
-  反向 9.4 MB:core 203 → 213 ms(0.95×),实际线程 1 → 1,SHA256 与基线相同 ✅
-  反向 3.7 MB:core 57 → 59 ms(0.97×),实际线程 1 → 1,SHA256 与基线相同 ✅
-[convert_bench] 产物 SHA256 与基线一致 ✅;实体级并发 1 vs 8 同 SHA256 ✅
+  10.8 MB 正向:core 265 → 171 ms(1.55×),e2e 566 → 581 ms(0.97×),实际线程 1 → 4,SHA256 与基线相同 
+  0.3 MB 正向:core 7 → 7 ms(1.00×),实际线程 1 → 4,SHA256 与基线相同 
+  反向 9.4 MB:core 203 → 213 ms(0.95×),实际线程 1 → 1,SHA256 与基线相同 
+  反向 3.7 MB:core 57 → 59 ms(0.97×),实际线程 1 → 1,SHA256 与基线相同 
+[convert_bench] 产物 SHA256 与基线一致 ;实体级并发 1 vs 8 同 SHA256 
 ```
 
 ### 9.6 实测加速比(绑核、5 轮取最小)与"为什么不是 3×"
@@ -278,10 +278,10 @@ $ taskset -c 0-3 target/bench_perf/deps/convert_bench-<hash> --ignored --nocaptu
 只改 `taskset` 核集):
 
 | 实际线程 | 10.8 MB 正向 `core_ms` | 相对 1 线程 | `e2e_ms` | 产物 SHA256 |
-| -------- | --------------------- | ----------- | -------- | ----------- |
-| 1(`taskset -c 0`) | 290 | 1.00× | 704 | = 基线 ✅ |
-| 2(`taskset -c 0-1`) | 225 | **1.28×** | 668 | = 基线 ✅ |
-| 4(`taskset -c 0-3`) | 171 | **1.55×** | 581 | = 基线 ✅ |
+| --- | --- | --- | --- | --- |
+| 1(`taskset -c 0`) | 290 | 1.00× | 704 | = 基线 已完成 |
+| 2(`taskset -c 0-1`) | 225 | **1.28×** | 668 | = 基线 已完成 |
+| 4(`taskset -c 0-3`) | 171 | **1.55×** | 581 | = 基线 已完成 |
 
 - 反向两个样本在 4 线程下 0.95–1.03×、**逐字与基线一致**(它们没走并行路径,符合预期);
 - 0.3 MB 正向样本 1.00×(工作太小,线程调度开销吃掉了收益);
@@ -291,7 +291,7 @@ $ taskset -c 0-3 target/bench_perf/deps/convert_bench-<hash> --ignored --nocaptu
 同一次运行内比较 1 线程与 4 线程(row 1 与 row 2 同热状态,各 6 次取最小;10.8 MB 正向):
 
 | 阶段 | 1 线程 | 4 线程 | 加速 |
-| ---- | ------ | ------ | ---- |
+| --- | --- | --- | --- |
 | 0 拆工作项(串行) | 0.58 ms | 0.58 ms | 1.0×(设计如此) |
 | 1 `parse` + `mapping` + `split_procedures`(并行) | 176.0 ms | **101.7 ms** | **1.73×** |
 | 2 `rewrite_calls`(并行) | 1.7 ms | 1.5 ms | —(该样本 0 个程序集) |
@@ -321,21 +321,21 @@ $ taskset -c 0-3 target/bench_perf/deps/convert_bench-<hash> --ignored --nocaptu
 (实体 + `proceduresDict` 定义,按每项的积木节点数):
 
 | 口径 | 数值 |
-| ---- | ---- |
+| --- | --- |
 | 工作项数 | 63(实体 59 + 定义 4) |
 | 节点合计 | 436(实体侧 **99.1%** / 程序集侧 0.9%) |
 | **最大工作项占比** | **36.7%**(160 节点) |
 | 前 6 大 | 160 / 31 / 12 / 11 / 11 / 10 |
 
-**Amdahl 上限**:`1/(0.367 + 0.633/N)` ⇒ 4 线程理论 **1.9×**,8 线程 2.4×;而这还没算
+**Amdahl 上限**:`1/(0.367 + 0.633/N)` => 4 线程理论 **1.9×**,8 线程 2.4×;而这还没算
 §7 #1 的两段**必须串行**的阶段(`unrewrite_calls` 依赖全局 `call_targets`;
 `def_root_from_entry` 把定义根挂进宿主实体)。叠加后实际上限远低于 1.5×,
 而反向单作品当前只有 ~200–350 ms(`docs/rounds/23` §7)。
 
 **结论:S3b 不做。** 理由三条,都有证据:
-① 拆解不成立(§7 #1,三段耦合,重设计成本高);
-② 收益上限低(最大工作项 36.7%,且两段串行);
-③ 该方向本来就不是瓶颈(反向 9.4 MB `core` 约 200 ms,已在 S1 里减掉 24%)。
+1)  拆解不成立(§7 #1,三段耦合,重设计成本高);
+2)  收益上限低(最大工作项 36.7%,且两段串行);
+3)  该方向本来就不是瓶颈(反向 9.4 MB `core` 约 200 ms,已在 S1 里减掉 24%)。
 
 若将来要再评估,先做的是"把 `unrewrite_calls` / `def_root_from_entry` 的**必要性**研究清楚"
 (能否改成各实体自足),而不是先写并行。

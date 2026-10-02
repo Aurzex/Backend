@@ -1,8 +1,8 @@
-# 第六轮评审 — 客户端注入重构:消除全局单例硬编码 + 相关去重
+# 第六轮评审 — 客户端注入重构:消除全局单例硬编码及相关去重
 
-审阅日期:2026-08-29 · 基线:HEAD `119d10f` · 范围:`src/api/{account,captcha,clouddb,codegame,community,education,forum,library,shop,user,whale,work}.rs` + `src/core/{compiler,cloudvar,converse}.rs` + `src/utils/{requests,socketio}.rs`
+审阅日期:2026-08-29 · 基线:HEAD `119d10f` · 范围:`src/api/{account,captcha,clouddb,codegame,community,education,forum,library,shop,user,whale,work}.rs`、`src/core/{compiler,cloudvar,converse}.rs`、`src/utils/{requests,socketio}.rs`
 
-> 方案先行(本文档),随后落地代码;`Verification` 为计划校验项,实际执行结果见文末「Verification(实际执行结果)」。与前五轮不同:本轮**允许破坏性 pub API 变更**(用户明确授权)。`auth.rs`(已用 `ClientProvider` 依赖注入)与 `core/{retrieve,registry,services}.rs`(举报引擎,见下「不落地」)不在范围。**Phase 4(去重 WorkType/KittenVersion)经用户决定不执行**;Phase 1/2/3/5 已落地。
+> 方案先行(本文档),随后落地代码;`Verification` 为计划校验项,实际执行结果见文末「Verification(实际执行结果)」。与前五轮不同:2026-08-29 **允许破坏性 pub API 变更**(用户明确授权)。`auth.rs`(已用 `ClientProvider` 依赖注入)与 `core/{retrieve,registry,services}.rs`(举报引擎,见下「不落地」)不在范围。**Phase 4(去重 WorkType/KittenVersion)经用户决定不执行**;Phase 1/2/3/5 已落地。
 
 ## Context
 
@@ -10,7 +10,7 @@
 
 1. **业务层硬编码全局客户端**:13 个 api 域的全部 Manager 字段都是 `client: &'static CodeMaoClient`,构造函数 `new()` 一律 `Self { client: CodeMaoClient::global() }`(全仓 ≈37 处)。调用方**无法**用独立/自定义客户端构造任何 Manager——「可替换边界」在业务层不可达。
 2. **反编译器硬编码全局**:`core/compiler.rs` 的 `CodemaoDecompiler::global()`,内部 `KittyFactory::global_client().clone()`。
-3. **举报引擎硬编码全局**:`core/retrieve.rs` 直调 `CodeMaoClient::global()`(第 627、1071 行)。
+3. **举报引擎硬编码全局**:`core/retrieve.rs` 的 `count_comments` 与 `stream_edu_accounts_with_reset_passwords` 直调 `CodeMaoClient::global()`。
 4. **六套错误枚举**:`MewError`(utils)、`CloudError`(cloudvar)、`ChatError`(converse)、`DecompilerError`(compiler)、`ProcessorError`(registry)、`DataQueryError`(retrieve)。其中 `CloudError` 与 `ChatError` 有 7 个完全相同的变体(WebSocket/Handshake/Json/Send/NotConnected/Auth/Thread),重复维护。
 5. **跨模块类型重复**:`WorkType { Kitten=1, Nemo=3, CodeGame=5 }` 与 `KittenVersion { V3, V4 }` 在 `api/user.rs` 与 `api/work.rs` 各定义一份(变体、判别值、`as_str` 映射完全一致;`work.rs` 的 `WorkType` 实为死代码,全仓零调用点)。
 6. **冗余向后兼容分发**:`CodeMaoClient::new(config)` 依 `config.use_global_auth` 分发,`KittyConfig.use_global_auth`/`with_independent_auth()` 已无存在意义(构造函数已显式化为 `new_with_global_auth`/`new_independent`),两者全仓零调用点。
@@ -19,7 +19,7 @@
 
 ## Approach
 
-五个阶段彼此独立,可按任意顺序执行;建议按下述顺序,每个阶段结束 `cargo check --all-targets` + `cargo test` 均须绿。
+五个阶段彼此独立,可按任意顺序执行;建议按下述顺序,每个阶段结束 `cargo check --all-targets` 与 `cargo test` 均须绿。
 
 ### Phase 1 — 业务 Manager 客户端注入
 
@@ -31,7 +31,7 @@
 
 对每个命中结构体做三件事:
 
-1. 字段类型 `client: &'static CodeMaoClient` → `client: CodeMaoClient`。
+1. 字段类型 `client: &'static CodeMaoClient` 改为 `client: CodeMaoClient`。
 2. `new()` 改为委托 `Self::new_with_client(CodeMaoClient::global().clone())`(保留全局默认,README 与测试的 `Xxx::new()` 调用不受影响)。
 3. 新增构造函数(每个 Manager 一份,签名逐字一致):
 
@@ -43,7 +43,7 @@ pub fn new_with_client(client: CodeMaoClient) -> Self {
 
 `ClientAccess` trait 签名不变:`fn client(&self) -> &CodeMaoClient` 返回 `&self.client`(按值字段可直接借用)。
 
-**特例** — 组合结构体:`work.rs` 的 `KittenWorkManager`(418 行附近)与 `NekoWorkManager`(580 行附近)持有公开字段 `pub operations: BaseWorkOperations`、`pub comments: CommentOperations`。其 `new_with_client` 必须把同一个 client 传播给子 Manager:
+**特例** — 组合结构体:`work.rs` 的 `KittenWorkManager` 与 `NekoWorkManager` 持有公开字段 `pub operations: BaseWorkOperations`、`pub comments: CommentOperations`。其 `new_with_client` 必须把同一个 client 传播给子 Manager:
 
 ```rust
 pub fn new_with_client(client: CodeMaoClient) -> Self {
@@ -65,13 +65,13 @@ pub fn new_with_client(client: CodeMaoClient) -> Self {
 
 **改动**:
 
-1. `pub(crate) struct CodemaoDecompiler` → `pub struct CodemaoDecompiler`;字段 `client: Arc<CodeMaoClient>` 保持不变。
+1. `pub(crate) struct CodemaoDecompiler` 改为 `pub struct CodemaoDecompiler`;字段 `client: Arc<CodeMaoClient>` 保持不变。
 2. 构造函数改为公开的 `pub fn new(client: CodeMaoClient) -> Self`;原 `pub(crate) fn new(config: Option<DecompilerConfig>, client: Arc<CodeMaoClient>)` 改名私有 `fn new_inner(config: Option<DecompilerConfig>, client: Arc<CodeMaoClient>) -> Self`,`new` 内部直接 `Self::new_inner(None, Arc::new(client))`(不保留双签名,避免二义)。
-3. `pub(crate) fn global()` → `pub fn global() -> &'static Self`,内部把 `KittyFactory::global_client().clone()` 改为 `CodeMaoClient::global().clone()`。
-4. `pub(crate) fn decompile` / `decompile_with_options` / `decompile_batch` → 全部改为 `pub`。
-5. 模块级三个自由函数 `decompile_work`(4098)、`decompile_work_with`(4103)、`decompile_works`(4108)保留为 `CodemaoDecompiler::global()` 的薄委托(README 示例与 `tests/compile_live.rs`、`tests/live_features.rs` 均依赖 `decompile_work_with`),仅更新其 doc 注明「自定义客户端请用 `CodemaoDecompiler::new(client)`」。
+3. `pub(crate) fn global()` 改为 `pub fn global() -> &'static Self`,内部把 `KittyFactory::global_client().clone()` 改为 `CodeMaoClient::global().clone()`。
+4. `pub(crate) fn decompile` / `decompile_with_options` / `decompile_batch` 全部改为 `pub`。
+5. 模块级三个自由函数 `decompile_work`、`decompile_work_with`、`decompile_works` 保留为 `CodemaoDecompiler::global()` 的薄委托(README 示例与 `tests/compile_live.rs`、`tests/live_features.rs` 均依赖 `decompile_work_with`),仅更新其 doc 注明「自定义客户端请用 `CodemaoDecompiler::new(client)`」。
 
-`decompile_work(work_id, output_dir: Option<&Path>) -> Result<String>` 的「`None` 返回 JSON 字符串 / `Some` 返回文件路径」返回类型重载为既有已文档化行为(README 示例 5),本轮**不改**其签名。
+`decompile_work(work_id, output_dir: Option<&Path>) -> Result<String>` 的「`None` 返回 JSON 字符串 / `Some` 返回文件路径」返回类型重载为既有已文档化行为(README 示例 5),2026-08-29 **不改**其签名。
 
 ### Phase 3 — 清理冗余的 `CodeMaoClient::new` 与 `use_global_auth`
 
@@ -79,14 +79,14 @@ pub fn new_with_client(client: CodeMaoClient) -> Self {
 
 **改动**:
 
-1. 删除 `KittyConfig` 字段 `use_global_auth: bool`(260 行)、`Default` 中的 `use_global_auth: true`(269 行)、方法 `with_independent_auth`(300-303 行)。
-2. 删除 `CodeMaoClient::new(config: KittyConfig)`(957-963 行)——已 grep 确证全仓零调用点(`CodeMaoClient::new(` 只命中该定义本身)。三个显式构造函数 `global` / `new_with_global_auth` / `new_independent` / `new_with_auth` 全部保留。
+1. 删除 `KittyConfig` 的字段 `use_global_auth: bool`、`Default` 中的 `use_global_auth: true`、方法 `with_independent_auth`。
+2. 删除 `CodeMaoClient::new(config: KittyConfig)`,已 grep 确证全仓零调用点(`CodeMaoClient::new(` 只命中该定义本身)。三个显式构造函数 `global` / `new_with_global_auth` / `new_independent` / `new_with_auth` 全部保留。
 
 无需改 README(README 未提及 `new()` 与 `with_independent_auth`)。
 
 ### Phase 4 — 去重 `WorkType` / `KittenVersion`(已取消 — 用户决定不执行,方案保留备查)
 
-**位置**:`src/api/user.rs` + `src/api/work.rs`。
+**位置**:`src/api/user.rs` 与 `src/api/work.rs`。
 
 **改动**:新建 `src/api/types.rs`,并在 `src/api.rs` 加一行 `pub mod types;`。内容:
 
@@ -129,11 +129,11 @@ impl KittenVersion {
 ```
 
 - `WorkType::as_str` 用 `pub`(原 `user.rs` 为 `pub fn`,保持可见性);`KittenVersion::as_str` 用 `pub(crate)`(原两处均为私有 `fn`,但移动到 sibling 模块后 `user.rs`/`work.rs` 需调用,必须至少 `pub(crate)`)。
-- `src/api/user.rs`:删除 `WorkType`(16-31 行)与 `KittenVersion`(84-97 行)定义,顶部加 `use crate::api::types::{KittenVersion, WorkType};`。两个 `WorkType` 调用点(636、677 行的 `types: Vec<WorkType>`)与一个 `KittenVersion` 调用点(472 行)无需改动(仅类型路径变化)。
-- `src/api/work.rs`:删除 `WorkType` 定义(16-21 行,死代码,全仓零调用点,`grep WorkType` 只命中定义本身)与 `KittenVersion` 定义(24-37 行),顶部加 `use crate::api::types::KittenVersion;`。`KittenVersion` 调用点(2058 行)无需改动。
-- 注意:`core/compiler.rs` 有**另一个**同名 `pub(crate) enum WorkType { Kitten2..Wood }`(560 行),与 api 层的 `WorkType` 语义完全不同,**不合并、不改名**。
+- `src/api/user.rs`:删除 `WorkType` 与 `KittenVersion` 定义,顶部加 `use crate::api::types::{KittenVersion, WorkType};`。两个 `WorkType` 调用点(`types: Vec<WorkType>`)与一个 `KittenVersion` 调用点无需改动(仅类型路径变化)。
+- `src/api/work.rs`:删除 `WorkType` 定义(死代码,全仓零调用点,`grep WorkType` 只命中定义本身)与 `KittenVersion` 定义,顶部加 `use crate::api::types::KittenVersion;`。`KittenVersion` 调用点无需改动。
+- 注意:`core/compiler.rs` 有**另一个**同名 `pub(crate) enum WorkType { Kitten2..Wood }`,与 api 层的 `WorkType` 语义完全不同,**不合并、不改名**。
 
-### Phase 5 — 合并 `CloudError` + `ChatError` → `SocketError`
+### Phase 5 — 合并 `CloudError` 与 `ChatError` 为 `SocketError`
 
 **问题**:`CloudError` 与 `ChatError` 的 7 个公共变体完全重复。
 
@@ -180,27 +180,27 @@ impl From<tungstenite::Error> for SocketError {
 }
 ```
 
-2. `src/core/cloudvar.rs`:删除 `enum CloudError`(63-85 行)与 `impl From<tungstenite::Error> for CloudError`(87-91 行);`pub(crate) type Result<T> = std::result::Result<T, CloudError>` → `= std::result::Result<T, SocketError>`;加 `use crate::utils::socketio::SocketError;`;把文件中所有 `CloudError`/`CloudError::` 出现处(用 `grep CloudError src/core/cloudvar.rs` 穷举)替换为 `SocketError`/`SocketError::`。变体名逐一对应(WebSocket/Handshake/Json/Send/NotConnected/VariableNotFound/ListNotFound/InvalidArgument/Auth/Thread 全部同名)。
+2. `src/core/cloudvar.rs`:删除 `enum CloudError` 与 `impl From<tungstenite::Error> for CloudError`;`pub(crate) type Result<T> = std::result::Result<T, CloudError>` 改为 `= std::result::Result<T, SocketError>`;加 `use crate::utils::socketio::SocketError;`;把文件中所有 `CloudError`/`CloudError::` 出现处(用 `grep CloudError src/core/cloudvar.rs` 穷举)替换为 `SocketError`/`SocketError::`。变体名逐一对应(WebSocket/Handshake/Json/Send/NotConnected/VariableNotFound/ListNotFound/InvalidArgument/Auth/Thread 全部同名)。
 
-3. `src/core/converse.rs`:同法删除 `enum ChatError`(42-64 行)与 `impl From<tungstenite::Error> for ChatError`(66-70 行),`Result` 别名改 `SocketError`,替换全部 `ChatError` 出现处(Busy/Timeout/MissingToken 是 converse 独有但已并入 `SocketError`,其余同名)。
+3. `src/core/converse.rs`:同法删除 `enum ChatError` 与 `impl From<tungstenite::Error> for ChatError`,`Result` 别名改 `SocketError`,替换全部 `ChatError` 出现处(Busy/Timeout/MissingToken 是 converse 独有但已并入 `SocketError`,其余同名)。
 
-**边界**:其余四套错误(`MewError` / `DecompilerError` / `ProcessorError` / `DataQueryError`)**不做扁平化合并**:`ProcessorError`、`DataQueryError` 已通过 `#[from] MewError` 正确包装传输层;`DecompilerError` 携带反编译专属结构化变体(MissingField/TypeMismatch 等),强行并入一个巨型枚举会破坏内聚、违反「包装错误时保留底层变体」——本轮只消除最明确的 `CloudError`/`ChatError` 重复。
+**边界**:其余四套错误(`MewError` / `DecompilerError` / `ProcessorError` / `DataQueryError`)**不做扁平化合并**:`ProcessorError`、`DataQueryError` 已通过 `#[from] MewError` 正确包装传输层;`DecompilerError` 携带反编译专属结构化变体(MissingField/TypeMismatch 等),强行并入一个巨型枚举会破坏内聚、违反「包装错误时保留底层变体」——2026-08-29 只消除最明确的 `CloudError`/`ChatError` 重复。
 
 ## 不落地(记录在案)
 
 - **`core/retrieve.rs` 的全局硬编码**(`DataQuery` 是单元结构体、`CommentQueryBuilder` 无 client 字段,却硬编码 `CodeMaoClient::global()`;`stream_edu_accounts_with_reset_passwords` 内 `EduDataFetcher::new()` 与 `switch_identity` 直调全局):其注入需给两个类型新增 `client: CodeMaoClient` 字段并贯穿全部请求构造,与 api 层机械替换不同,连同 `core/{registry,services}.rs` 举报引擎的同类硬编码,归入后续单独一轮。
-- **`decompile_work` 返回类型重载**(`None` 返回 JSON 字符串 / `Some` 返回文件路径):既有已文档化行为,拆分为独立 `decompile_to_json`/`decompile_to_file` 属另一处 API 语义重构,不在本轮。
+- **`decompile_work` 返回类型重载**(`None` 返回 JSON 字符串 / `Some` 返回文件路径):既有已文档化行为,拆分为独立 `decompile_to_json`/`decompile_to_file` 属另一处 API 语义重构,不列入 2026-08-29 的范围。
 - **Phase 4 去重 `WorkType`/`KittenVersion`**:用户决定不执行(2026-08-29),方案保留在 Approach 备查;`user.rs`/`work.rs` 的两处重复定义维持现状。
 
 ## Critical files & anchors
 
-| 文件                                            | 锚点                                                                                 | 原因                                                                 |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
-| `src/utils/requests.rs`                         | `CodeMaoClient`(925)、`new()`(957)、`KittyConfig`(255)、`ClientAccess`(1913)         | Phase 1/3 落点;`CodeMaoClient::global().clone()` 是 `new()` 委托目标 |
-| `src/api/work.rs`                               | `KittenWorkManager`(418)、`NekoWorkManager`(580)、`WorkType`(17)/`KittenVersion`(25) | 组合体需传播 client;死代码删除点                                     |
-| `src/core/compiler.rs`                          | `CodemaoDecompiler`(≈3920)、`global()`(3933)、自由函数(4098-4110)                    | Phase 2 落点                                                         |
-| `src/core/cloudvar.rs` / `src/core/converse.rs` | `CloudError`(63)/`ChatError`(42)、`Result` 别名(94/73)                               | Phase 5 落点                                                         |
-| `src/api/user.rs`                               | `WorkType`(17)/`KittenVersion`(85) 定义与 472/636/677 调用点                         | Phase 4 落点                                                         |
+| 文件 | 锚点 | 原因 |
+| --- | --- | --- |
+| `src/utils/requests.rs` | `CodeMaoClient`、`CodeMaoClient::new`、`KittyConfig`、`ClientAccess` | Phase 1/3 落点;`CodeMaoClient::global().clone()` 是 `new()` 委托目标 |
+| `src/api/work.rs` | `KittenWorkManager`、`NekoWorkManager`、`WorkType` / `KittenVersion` | 组合体需传播 client;死代码删除点 |
+| `src/core/compiler.rs` | `CodemaoDecompiler`、`global()`、自由函数 `decompile_work` / `decompile_work_with` / `decompile_works` | Phase 2 落点 |
+| `src/core/cloudvar.rs` / `src/core/converse.rs` | `CloudError` / `ChatError`、`Result` 别名 | Phase 5 落点 |
+| `src/api/user.rs` | `WorkType` / `KittenVersion` 定义与调用点 | Phase 4 落点 |
 
 ## Verification
 
@@ -208,10 +208,10 @@ impl From<tungstenite::Error> for SocketError {
 
 归零 grep 验证(最终态):
 
-1. **Phase 1**:`grep -rn "client: &'static CodeMaoClient" src/` → 0;`grep -rn "pub fn new_with_client" src/api/` 命中数 == `grep -rn "client: &'static" src/api/`(改前)的结构体数。
-2. **Phase 3**:`grep -rn "CodeMaoClient::new(" src/` → 0(仅剩 `new_with_*`);`grep -rn "use_global_auth\|with_independent_auth" src/` → 0。
-3. **Phase 4**:`grep -rn "enum WorkType\|enum KittenVersion" src/api/` → 仅 `src/api/types.rs` 命中;`grep -rn "WorkType" src/api/work.rs` → 0(死代码已删)。
-4. **Phase 5**:`grep -rn "CloudError\|ChatError" src/` → 0,仅剩 `SocketError`。
+1. **Phase 1**:`grep -rn "client: &'static CodeMaoClient" src/` 命中 0 处;`grep -rn "pub fn new_with_client" src/api/` 的命中数等于 `grep -rn "client: &'static" src/api/`(改前)的结构体数。
+2. **Phase 3**:`grep -rn "CodeMaoClient::new(" src/` 命中 0 处(仅剩 `new_with_*`);`grep -rn "use_global_auth\|with_independent_auth" src/` 命中 0 处。
+3. **Phase 4**:`grep -rn "enum WorkType\|enum KittenVersion" src/api/` 仅 `src/api/types.rs` 命中;`grep -rn "WorkType" src/api/work.rs` 命中 0 处(死代码已删)。
+4. **Phase 5**:`grep -rn "CloudError\|ChatError" src/` 命中 0 处,仅剩 `SocketError`。
 
 新行为检查(Phase 1 的契约测试,加到 `src/api/account.rs` 的 `#[cfg(test)]` 模块):
 
@@ -237,9 +237,9 @@ fn manager_new_with_client_uses_injected_client() {
 - `cargo clippy --all-targets` 0 warning。
 - `cargo test` 全绿:库单测 5 passed(含新增 `manager_new_with_client_uses_injected_client` + 既有 4)、`compile_live` 1 passed(NEMO 1 ignored)、`live_features` 3 passed(`login_and_ai_chat` / `cloud_variables` / `decompile_works`,真机命中 codemao 服务)、doc-tests 0。
 - 归零验证:
-    - `grep "client: &'static CodeMaoClient" src/` → 0(Phase 1)。
-    - `grep "CodeMaoClient::new(\|use_global_auth\|with_independent_auth" src/` → 0(Phase 3)。
-    - `grep "CloudError\|ChatError" src/` → 0,仅剩 `SocketError`(Phase 5)。
+    - `grep "client: &'static CodeMaoClient" src/` 命中 0 处(Phase 1)。
+    - `grep "CodeMaoClient::new(\|use_global_auth\|with_independent_auth" src/` 命中 0 处(Phase 3)。
+    - `grep "CloudError\|ChatError" src/` 命中 0 处,仅剩 `SocketError`(Phase 5)。
 - `KittyFactory` 仍被 `core/{pipeline,services}.rs` 引用(非死代码),保留;仅清理了 `compiler.rs` 中因 Phase 2 失效的 `KittyFactory` import。
 
 ## Assumptions & contingencies

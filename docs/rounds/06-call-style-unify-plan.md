@@ -13,7 +13,7 @@
 各文件顶部新增分页常量(端点服务端契约),替换 `with_limit(limit.unwrap_or(N))` 与手写 `with_param("limit", ...)` 的散落字面量:
 
 | 文件         | 新增常量                                                                                                                                 | 替换值                |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------- | --------------------- |
+| --- | --- | --- |
 | community.rs | `MESSAGE_PAGE_SIZE=15` `COURSE_LIST_PAGE_SIZE=10` `COURSE_PACKAGE_PAGE_SIZE=50` `STUDIO_POST_PAGE_SIZE=24` `STUDIO_COURSE_PAGE_SIZE=100` | 15/10/50/24/100(9 处) |
 | forum.rs     | `REPLY_PAGE_SIZE=10` `POST_DETAIL_PAGE_SIZE=4`                                                                                           | 15/10/20/4(7 处)      |
 | shop.rs      | `WORKSHOP_SEARCH_PAGE_SIZE=14` `WORKSHOP_MEMBER_PAGE_SIZE=40`                                                                            | 14/40/15/20(6 处)     |
@@ -34,28 +34,28 @@
 
 ### P0-4: send_maybe_parse 传参统一（education.rs）
 
-- `education.rs:862` `self.send_maybe_parse(builder, method == HttpMethod::Get, ...)` → 提取局部 `let return_data = method == HttpMethod::Get;` 后传变量,与其余 13 处 `return_data` 变量形态一致。
+- ``education.rs::get_or_delete_custom_package`` `self.send_maybe_parse(builder, method == HttpMethod::Get, ...)` -> 提取局部 `let return_data = method == HttpMethod::Get;` 后传变量,与其余 13 处 `return_data` 变量形态一致。
 
 ### P0-5: map 函数引用改闭包（5 文件 6 处）
 
-- `std::string::ToString::to_string` / `ToString::to_string` 函数引用 → `|v| v.to_string()`(forum:149、shop:154、retrieve:772/778/782、cloudvar:1382、converse:615)。
+- `std::string::ToString::to_string` / `ToString::to_string` 函数引用 -> `|v| v.to_string()`(forum:149、shop:154、retrieve:772/778/782、cloudvar:1382、converse:615)。
 
 ### P0-6: unwrap_or_else 字面量改 unwrap_or（3 文件 4 处）
 
-- `unwrap_or_else(|| "-created_at".to_string())` → `unwrap_or("-created_at".to_string())` 等(forum:182、shop:185/208、compiler:666)。字面量无闭包求值,`unwrap_or` 语义等价。
+- `unwrap_or_else(|| "-created_at".to_string())` -> `unwrap_or("-created_at".to_string())` 等(forum:182、shop:185/208、compiler:666)。字面量无闭包求值,`unwrap_or` 语义等价。
 
 ### 附加优化 2: core 评论默认值四层收敛（retrieve.rs）
 
-- 模块常量:`DEFAULT_COMMENT_STREAM_LIMIT=500`、`MAX_COMMENT_STREAM_LIMIT=1000`、`COMMENT_DETAIL_PER_WORK=20`;替换 `unwrap_or(500)`/`1000`/`Some(20)`;`with_page_size(15)` → `DEFAULT_PAGE_SIZE`(3 处)。
+- 模块常量:`DEFAULT_COMMENT_STREAM_LIMIT=500`、`MAX_COMMENT_STREAM_LIMIT=1000`、`COMMENT_DETAIL_PER_WORK=20`;替换 `unwrap_or(500)`/`1000`/`Some(20)`;`with_page_size(15)` -> `DEFAULT_PAGE_SIZE`(3 处)。
 - 保留:`pipeline.rs` `comment_fetch_default_limit: 100` 是 CheckConfig 配置字段(与 retrieve 用户上限语义不同)。
 
 ## 判定不执行项（核实后记录理由）
 
 | 条目                         | 判定       | 理由                                                                                                                                                                                                                                                 |
-| ---------------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| --- | --- | --- |
 | P1-1 分页构造统一 with_page  | **不执行** | 全仓 6 处 limit+offset 配对均为必填 i32 直接 to_string(无 Option 默认语义),`with_page` 需 `Some()` 包装反而更啰嗦;14 处异键(page/amount_items/page_number/current_page/page_size)服务端契约不同,`with_page` 固定产出 limit/offset 无法替换。零净收益 |
 | P1-2 链式形态统一            | **不执行** | 9 处 `let mut builder` 全部是条件追加(`if let Some`/`if` 分支续接),`let mut` 是必要形态;全内联(85)与中间变量(67)是等价排版差异,rustfmt 已处理                                                                                                        |
-| P1-3 错误构造调用侧统一      | **不执行** | 核实 forum.rs:144/419、auth.rs:314/329/422/473/601-678 全部是真分支错误(长度校验/非法 action/HTTP 状态/登录失败),直接 `Err(...)` 符合"仅真分支错误用 Err"规则;无字段缺失误用                                                                         |
+| P1-3 错误构造调用侧统一      | **不执行** | 核实 `forum.rs::ForumDataFetcher::fetch_single_post_details`/419、`auth.rs::LocalClientProvider::determine_admin_login_method`/329/422/473/601-678 全部是真分支错误(长度校验/非法 action/HTTP 状态/登录失败),直接 `Err(...)` 符合"仅真分支错误用 Err"规则;无字段缺失误用                                                                         |
 | 附加 1 fetcher 实例化复用    | **不执行** | `FetchTotal`/`FetchGenerator` 是 fn 指针(`fn(ReportStatus) -> ...`),闭包必须无捕获,`XxxFetcher::new()` 在闭包内是唯一可行形态;fetcher 无状态(仅持 &'static CodeMaoClient),new() 零开销                                                               |
 | 附加 3 apply_action 消费形态 | **不执行** | 三处语义不同:452 官方自动通过用 `?`(失败应中断)、485/507 单条/批量用 match(失败记录继续),统一会破坏错误处理语义                                                                                                                                      |
 | 附加 4 ParseError 构造形态   | **不执行** | 四种形态对应不同语义:ok_or_else(Option 缺失)/map_err(i32 转换)/vec![Err](惰性流内)/直接 Err(线程 panic),全部正确;同形 i32 转换 2 处已一致                                                                                                            |

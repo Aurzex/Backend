@@ -1,12 +1,14 @@
-# backend(喵)
+<!-- AI 助手注意：开始任何任务前，必须先读取根目录下的 AGENTS.md 并严格遵守其规范 -->
 
-Rust 写的同步 HTTP / WebSocket 客户端库,专门和编程猫(codemao)社区服务贴贴。
+# backend
 
-整只项目以库为主体(`lib.rs`,crate 类型 `rlib`),账号、认证、人机验证、云变量、作品反编译、AI 对话、举报引擎……业务面全都有,可以像小零件一样直接嵌进别的 Rust 项目。
+Rust 写的同步 HTTP / WebSocket 客户端库,面向编程猫(codemao)社区服务。
+
+本项目以库为主体(`lib.rs`,crate 类型 `rlib`),涵盖账号、认证、人机验证、云变量、作品反编译、AI 对话、举报引擎等业务,可直接嵌入其他 Rust 项目使用。
 
 ## 项目定位
 
-面向编程猫社区服务的 **Rust 同步客户端库(喵)**。给社区自动化、数据治理和作品生态工具提供开箱即用的 API 封装:登录与身份管理、业务接口调用、WebSocket 实时通道(云变量 / AI 对话)、作品反编译、举报内容治理。设计取向是「简单直接、零异步负担」,主打嵌入式使用(作为依赖引入),不是独立服务。
+面向编程猫社区服务的 **Rust 同步客户端库**。给社区自动化、数据治理和作品生态工具提供开箱即用的 API 封装:登录与身份管理、业务接口调用、WebSocket 实时通道(云变量 / AI 对话)、作品反编译、举报内容治理。设计取向是「简单直接、零异步负担」,主打嵌入式使用(作为依赖引入),不是独立服务。
 
 典型使用方:
 
@@ -17,19 +19,19 @@ Rust 写的同步 HTTP / WebSocket 客户端库,专门和编程猫(codemao)社�
 ## 核心能力
 
 | 能力            | 说明                                                                                                                                |
-| --------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| --- | --- |
 | 统一认证        | 普通用户 / 教育 / 评审三种身份登录(密码 v0/v1/v2、Token、管理员令牌/密码、验证码票据),小鱼干(令牌)写进全局身份槽,之后的请求自动携带 |
-| 业务 API 全覆盖 | 13 个业务域:账号、认证、人机验证、云数据库、代码岛、社区、教育、论坛、小说、工作室、用户、举报、作品                                |
+| 业务 API 全覆盖 | 业务域共 13 个:账号、认证、人机验证、云数据库、代码岛、社区、教育、论坛、小说、工作室、用户、举报、作品                                |
 | 云变量实时同步  | WebSocket 客户端:断线自动重连、命令批量合并、变量 / 列表 / 排行榜 / 在线人数事件回调                                                |
 | 作品反编译      | Kitten2/3/4、Coco、Neko、Nemo、Wood 七种编辑器,含 `.bcm` / `.bcm4` / `.bcmkn` 解密与 Blockly XML 输出;产物可**另行上传到当前账号**(建一份标「可删」的草稿) |
-| 作品文件互相转化 | Kitten4 `.bcm4` ⇄ KittenN `.bcmkn`(双向)、NEMO → KittenN;官方算法逐块对齐 + 反向自建,降级/丢弃逐类报告,产物过官方 `validateBcm` 硬门 |
+| 作品文件互相转化 | Kitten4 `.bcm4` 与 KittenN `.bcmkn` 双向互转、NEMO 转 KittenN;官方算法逐块对齐 + 反向自建,降级/丢弃逐类报告,产物过官方 `validateBcm` 硬门 |
 | AI 对话         | 流式回复客户端(Start / Text / End / Error 事件),同步等完整回复                                                                      |
 | 举报治理引擎    | 分块拉取、批量分组、逐条 / 一键决策、多账号自动举报、违规检查、处理统计                                                             |
 
 ## 技术栈
 
 | 类别        | 选型                                                           |
-| ----------- | -------------------------------------------------------------- |
+| --- | --- |
 | 语言        | Rust(edition 2024,stable),同步阻塞模型,无 async 运行时         |
 | HTTP 客户端 | `ureq` 3(JSON / multipart / gzip)                              |
 | WebSocket   | `tungstenite` 0.30(rustls-tls-webpki-roots)                    |
@@ -41,18 +43,18 @@ Rust 写的同步 HTTP / WebSocket 客户端库,专门和编程猫(codemao)社�
 
 ## 构建
 
-需要 Rust stable(edition 2024),一只即可。构建期依赖见 `Cargo.toml`,没有第三方运行依赖。
+需要 Rust stable(edition 2024)。构建期依赖见 `Cargo.toml`,没有第三方运行依赖。
 
 ```bash
 cargo build --release
 cargo test          # 跑库单测
 ```
 
-`[profile.release]` 已配置 `lto`、`opt-level = "z"`、`strip` 与 `panic = "abort"`,产物最小最瘦。
+`[profile.release]` 已配置 `lto`、`opt-level = "z"`、`strip` 与 `panic = "abort"`,产物体积最小。
 
 ## 模块一览
 
-- **api/** — 13 个业务域(都实现了 `ClientAccess`,请求走统一客户端):
+- **api/** — 业务域(都实现了 `ClientAccess`,请求走统一客户端):
   `account` 账号 · `auth` 认证 · `captcha` 人机验证 · `clouddb` 云数据库 · `codegame` 代码岛 · `community` 社区 · `education` 教育 · `forum` 论坛 · `library` 小说 · `shop` 工作室 · `user` 用户 · `whale` 举报 · `work` 作品
 - **core/** — 业务引擎:
   `cloudvar` 云变量 WS 客户端 · `convert` 作品文件转换域(`decompile` 反编译七种编辑器 / `translate` 编辑器间互相转化) · `converse` AI 对话 · `pipeline` / `services` / `registry` / `retrieve` 举报处理引擎 · `terminal` 交互式 UI(演示用)
@@ -160,7 +162,7 @@ for result in results {
 }
 ```
 
-**6. 作品文件互相转化**(Kitten4 `.bcm4` ⇄ KittenN `.bcmkn`;加载器/编辑器间搬运积木与资源引用):
+**6. 作品文件互相转化**(Kitten4 `.bcm4` 与 KittenN `.bcmkn` 双向互转;加载器/编辑器间搬运积木与资源引用):
 
 ```rust
 use backend::core::convert::translate::{TargetEditor, TranslateOptions, translate_file};
@@ -180,7 +182,7 @@ let out = translate_work(123456.into(), TargetEditor::KittenN, TranslateOptions:
 println!("草稿作品 id = {:?}", out.work_id);
 ```
 
-- 方向:当前支持 **Kitten4 编辑版 → KN**(与编辑器官方算法逐块对齐,产物通过编辑器自带的 `validateBcm`)与**反向 KN → Kitten4**(官方无此方向,由本库自建;不可逆项进报告)。
+- 方向:当前支持 **Kitten4 编辑版转为 KN**(与编辑器官方算法逐块对齐,产物通过编辑器自带的 `validateBcm`)与**反向由 KN 转为 Kitten4**(官方无此方向,由本库自建;不可逆项进报告)。
 - 不支持:`.bcm`(Kitten2/3,`blocksXML`)——编辑器本身也拒绝该方向(会引导去 Kitten V4.0)。
 - 有损项(`TranslateWarning`)与覆盖率写在 `TranslateReport` 里,`TranslateOptions::strict(true)` 可让**真损失**(未映射/降级/丢字段)直接失败;新铸 id 与「官方导入时会重传资源」不算损失。
 
@@ -211,8 +213,8 @@ for group in session.leftover_groups() {
 路径由 `PathConfig`(`src/utils/filedata.rs`)管理,默认以当前工作目录为根,可以用 `with_root` 自定义:
 
 | 路径                | 用途                                                                                      |
-| ------------------- | ----------------------------------------------------------------------------------------- |
-| `data/password.txt` | 学生账号(自动举报用)。每行 `用户名:密码`,`#` 开头是注释,空行忽略;缺失时自动举报会喵喵报错 |
+| --- | --- |
+| `data/password.txt` | 学生账号(自动举报用)。每行 `用户名:密码`,`#` 开头是注释,空行忽略;缺失时自动举报会报错 |
 | `data/token.txt`    | 小鱼干(令牌)持久化                                                                        |
 | `cache/captcha.jpg` | 登录验证码图片(登录流程自动写入)                                                          |
 | `download/compile/` | 作品反编译输出目录                                                                        |
@@ -235,12 +237,12 @@ for group in session.leftover_groups() {
 - **同步阻塞、零异步运行时**:没有 tokio / async 依赖;WebSocket 用线程 + 通道封装成同步接口。嵌进任何项目(包括非 async 环境)零成本,调用栈和错误传播都是普通 Rust 函数。
 - **全局客户端 + 身份槽**:`CodeMaoClient::global()` 单例拿着 `IdentityIdentity`(普通用户 `Fluffy` / 教育 `Scholar` / 评审 `Judge` / 空白 `Blanky`)身份和令牌槽。登录一次写入身份,之后所有请求自动带上对应身份的小鱼干——调用方不用手动拼 `Authorization` 头,也不用把 token 传来传去。
 - **样板收敛到 `ClientAccess`**:每个业务 Manager 只需要实现 `fn client()`,`send_and_parse` / `check_status` / `send_maybe_parse` 由默认实现提供,4xx/5xx 还会自动带上服务端错误体——几十个 Manager 的请求代码只剩下「端点 + 参数」。
-- **分页统一为 `PaginatedIter`**:惰性初始化、翻页、总数/上限终止、页大小兜底全部内聚,调用方一个 `for` 循环就完事,不关心 offset/page 怎么算。`.with_limit(n)` 设上限,`.with_limit(FETCH_ALL)` 显式全量拉取(直到服务端空页或总数耗尽)。
+- **分页统一为 `PaginatedIter`**:惰性初始化、翻页、总数/上限终止、页大小兜底全部内聚,调用方只需一个 `for` 循环,不关心 offset/page 怎么算。`.with_limit(n)` 设上限,`.with_limit(FETCH_ALL)` 显式全量拉取(直到服务端空页或总数耗尽)。
 - **可替换边界**:`CodeMaoClient` 支持全局单例 / 独立实例(`new_with_global_auth` / `new_independent` / `new_with_auth`)和自定义 `AuthProviderAuthProvider` 认证提供者;业务 Manager、反编译器、举报引擎与登录(`LoginBuilder::new_with_client`)均提供 `new_with_client(client)`(默认 `new()` 走全局),`ClientProvider`(auth 域)与 `PathConfig::with_root`(路径)——核心逻辑不绑定具体 HTTP 实现和目录,方便测试和定制。
 
 - **错误模型分层**:传输层 / 通用错误归 `MewError`(`Http` / `Io` / `Json` / `HttpStatus` 结构化 4xx/5xx,外加域类别 `Auth` 凭据错误与 `InvalidArgument` 调用方参数错误);WS 客户端共享 `SocketError`(cloudvar / converse);业务域错误(`DecompilerError` / `ProcessorError` / `DataQueryError`)包装 `MewError`,不重复传输层变体。
 - **WS 状态机封装成回调 + 等待原语**:cloudvar / converse 把帧解析、握手、重连、批量合并全部收进库内,外部通过 `on_change` / `on_connection` / `on_stream` 回调和 `connect_and_wait` / `send_and_wait` 同步原语交互;Socket.IO 帧解析与回调存储由 `utils/socketio` 统一提供。
-- **分层单向依赖**:`api → utils`,`core → api / utils`,上层不反向依赖;业务域模块之间互不引用,可以按需单独使用。
+- **分层单向依赖**:`api` 依赖 `utils`,`core` 依赖 `api` 与 `utils`,上层不反向依赖;业务域模块之间互不引用,可以按需单独使用。
 
 ## 目录结构
 
@@ -326,7 +328,7 @@ WORK_ID=273988379 cargo test --test convert_work -- --ignored --nocapture      #
 产物**有意**变化时用 `BACKEND_BENCH_REFRESH=1` 重刷,并在提交信息里写清原因。
 
 - 库单测覆盖:`AdminInfo::from_details` 固定字段提取(正常 / 缺失字段)、`manager_new_with_client_uses_injected_client`(客户端注入契约)、`header_override_is_case_insensitive`(请求头大小写覆盖)、分块迭代器终止性(数据量超过 chunk 大小不重复、不丢失)。
-- 转化/反编译的**产物级门**:官方 `validateBcm` 校验器(产物能否被编辑器加载)、KN→Kitten4→KN 往返积木类型多重集守恒、`deterministic_ids` 下并发 1 与并发 N 产物**逐字节一致**、与官方产物/串行参考的语义 diff。
+- 转化/反编译的**产物级门**:官方 `validateBcm` 校验器(产物能否被编辑器加载)、KN 转 Kitten4 再转回 KN 的往返积木类型多重集守恒、`deterministic_ids` 下并发 1 与并发 N 产物**逐字节一致**、与官方产物/串行参考的语义 diff。
 - 集成测试配置和代码分离:把 `tests/fixtures/test-config.example.json` 复制成 `data/test-config.json` 再填好;`data/` 已被 `.gitignore` 忽略,账号密码不会入库。没配置时测试打印提示并跳过,不会导致失败;也可以用 `BACKEND_TEST_CONFIG` 环境变量覆盖配置文件路径。
 
 ## CI
@@ -339,4 +341,4 @@ GitHub Actions(`.github/workflows/CI.yml`):main/master 推送、tag、PR 和手�
 - `docs/README.md` — 文档总入口(知识库 / 目标库 / 轮次记录)
 - `docs/knowledge/` — **知识库**:平台接口与实时协议、作品文件格式、转换语义、性能基线、仓库约定、历史勘误
 - `docs/goals/` — **目标库**:待决策、待实现、待核验、已决不做
-- `docs/rounds/` — 历史轮次记录(37 轮:方案/评审/真机实测证据;索引见 `docs/rounds/README.md`,读前先看 `docs/knowledge/errata.md`)
+- `docs/rounds/` — 历史轮次记录(`docs/rounds/01`–`docs/rounds/40`:方案/评审/真机实测证据;索引见 `docs/rounds/README.md`,读前先看 `docs/knowledge/errata.md`;现至第 40 轮)

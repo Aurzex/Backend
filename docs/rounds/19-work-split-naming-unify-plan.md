@@ -2,14 +2,14 @@
 
 审阅日期:2026-08-30 · 基线:HEAD `f8d394a`(第十轮已落地) · 范围:`src/core/{unpacker,compiler}.rs` + `src/utils/requests.rs` + `src/prelude.rs` + `README.md` + `CONTRIBUTING.md` + tests
 
-> 方案先行(本文档),随后落地代码。第十轮已完成:登录流精简、compiler 拆门面/引擎(unpacker.rs)、converse 活性修复、错误模型(Other→InvalidArgument)、pub(crate) 收紧、`_gen`→`_iter`、unwrap 硬化、prelude。本轮承接剩余项,**按团队决策调整**:① `work.rs` **不切分**(2533 行维持单文件);② `MewError`/`MewResult` **保留不改**,其余萌化名照改;③ README/CONTRIBUTING 同步优化。**延续允许破坏性 pub API 变更**(0.1.0 窗口)。
+> 方案先行(本文档),随后落地代码。第十轮已完成:登录流精简、compiler 拆门面/引擎(unpacker.rs)、converse 活性修复、错误模型(Other->InvalidArgument)、pub(crate) 收紧、`_gen`->`_iter`、unwrap 硬化、prelude。本轮承接剩余项,**按团队决策调整**:1)  `work.rs` **不切分**(2533 行维持单文件);2)  `MewError`/`MewResult` **保留不改**,其余萌化名照改;3)  README/CONTRIBUTING 同步优化。**延续允许破坏性 pub API 变更**(0.1.0 窗口)。
 
 ## Context
 
 第十轮后重新摸底(25,376 行):
 
 | 文件                               | 行数        | 状态                                         |
-| ---------------------------------- | ----------- | -------------------------------------------- |
+| --- | --- | --- |
 | `core/unpacker.rs`                 | 3759        | **本轮再切**(框架 / 编辑器实现)              |
 | `api/work.rs`                      | 2533        | **不切分**(团队决策,维持单文件,见「不落地」) |
 | `core/cloudvar.rs`                 | 2495        | 浅切收益小,深拆成本高,**不切**(见「不落地」) |
@@ -19,7 +19,7 @@
 **命名统一影响面量化**(本轮改名的下游可见标识符):`HTTPStatus` 131、`Catsona` 62、`KittyAuth` 19、`KittyRequestBuilder` 15、`KittyConfig` 12;README 出现点:Catsona(L78/210)、KittyAuth(L213)、MewResult(L80/84/97,保留)、MewError(L215,保留)。**`MewError`/`MewResult` 按团队决策保留**(crate 品牌名,下游已习惯),其余萌化名改直白。
 
 | 文件                               | 行数        | 状态                                         |
-| ---------------------------------- | ----------- | -------------------------------------------- |
+| --- | --- | --- |
 | `core/unpacker.rs`                 | 3759        | **本轮再切**(框架 / 编辑器实现)              |
 | `api/work.rs`                      | 2533        | **不切分**(团队决策,维持单文件,见「不落地」) |
 | `core/cloudvar.rs`                 | 2495        | 浅切收益小,深拆成本高,**不切**(见「不落地」) |
@@ -33,9 +33,9 @@
 ### 优先级总表
 
 | 优先级 | 编号 | 建议                                                        | 破坏 API?    | 性质         |
-| ------ | ---- | ----------------------------------------------------------- | ------------ | ------------ |
+| --- | --- | --- | --- | --- |
 | P1     | #1   | unpacker.rs 再切(框架 / 编辑器实现)                         | 否(路径不变) | 可读性       |
-| P1     | #2   | 公开 API 萌化名→直白名(6 个;`MewError`/`MewResult` 保留)    | 是           | DX/命名      |
+| P1     | #2   | 公开 API 萌化名->直白名(6 个;`MewError`/`MewResult` 保留)    | 是           | DX/命名      |
 | P1     | #3   | `WorkId` newtype 试点(反编译链)                             | 是           | 类型安全     |
 | P2     | #4   | README/CONTRIBUTING 同步优化(目录结构/命名/锁条款)          | 否           | 文档         |
 | 不做   | #5   | work.rs / cloudvar 切分、retrieve / pipeline、#11 HTTP 注入 | —            | 见「不落地」 |
@@ -55,7 +55,7 @@
 **`src/core/unpacker.rs`(保留,共享框架)** — L1-1597 + L3708-3765:
 
 - use 块(L1-21)+ 错误(L22-156)/ 配置(L158-565)/ 模型(L566-679)/ 文件与 id(L680-756)/ 加密(L756-853)/ 积木块核心(`ShadowBuilder`/`BlockBehavior`/`BlockContext`/`BlockDecompilerCore`,L854-1450)/ 上下文(`DecompilerContext`/`Builder`,L1452-1532)/ 契约(`DecompileResult`/`RawWorkData`/`WorkFetcher`/`WorkDecompiler`/`save_json_result`/`save_path_result`,L1533-1596)+ `HttpClient`/`CodeMaoHttpClient`(L3709-3765)。
-- `save_json_result`(L1561)/`save_path_result`(L1587)两个私有 fn 被 decoders 调用 → 升 `pub(crate)`(2 处可见性提升,与第十轮 compiler 切分同款)。
+- `save_json_result`(L1561)/`save_path_result`(L1587)两个私有 fn 被 decoders 调用 -> 升 `pub(crate)`(2 处可见性提升,与第十轮 compiler 切分同款)。
 
 **`src/core/decoders.rs`(新,各编辑器实现,8 字母)** — L1598-3707(连续):
 
@@ -68,23 +68,23 @@
 
 **影响面与风险**
 
-- 公开路径不变(unpacker/decoders 均私有,公开面仅 compiler.rs 的 `pub use DecompilerError` 等);依赖单向 decoders → unpacker(**实测框架段 L1-1597 对 decoders 内容零反向引用**);纯移动无逻辑变更。
-- 风险:compiler 门面 use 分流遗漏 → `cargo check` 定位;`save_json_result`/`save_path_result` 可见性提升 2 处。
+- 公开路径不变(unpacker/decoders 均私有,公开面仅 compiler.rs 的 `pub use DecompilerError` 等);依赖单向 decoders -> unpacker(**实测框架段 L1-1597 对 decoders 内容零反向引用**);纯移动无逻辑变更。
+- 风险:compiler 门面 use 分流遗漏 -> `cargo check` 定位;`save_json_result`/`save_path_result` 可见性提升 2 处。
 
 **验证**:`cargo check --all-targets`;`grep -n "CocoFetcher\|KittenFetcher\|NekoFetcher\|NemoFetcher\|WoodFetcher" src/core/compiler.rs` 均从 `decoders` 导入;`use backend::core::compiler::{DecompileOptions, decompile_work, decompile_works}` 在 tests 仍编译。
 
 ---
 
-### Phase 22 — 公开 API 萌化名→直白名(6 个;`MewError`/`MewResult` 保留)(P1,0.1.0 窗口)
+### Phase 22 — 公开 API 萌化名->直白名(6 个;`MewError`/`MewResult` 保留)(P1,0.1.0 窗口)
 
 **问题定位**:萌化名泄漏进公开 API,下游必写面(身份、认证 trait、builder、状态码)「猜不中」,违 DX First「清晰优于简洁」。**`MewError`/`MewResult` 按团队决策保留**(crate 品牌名,错误模型段落与示例已稳定,改名破坏面大而收益低)。
 
 **改动 — 映射表**(全仓机械改名,方法体/逻辑不动):
 
 | 现名                                    | 新名              | 全仓计数 | 说明                                                                                                                                                                    |
-| --------------------------------------- | ----------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Catsona`                               | `Identity`        | 62       | 成员 `Fluffy/Scholar/Judge/Blanky` 保留;辅助项同步:`Catsona::ALL`(requests.rs:355)、`index()`(247/375/388)、`FromStr`(209)、`AccountStatus::to_identity()`(auth.rs:133) |
-| `HTTPStatus`                            | `HttpStatus`      | 131      | RFC 命名惯例(HTTP→Http)                                                                                                                                                 |
+| --- | --- | --- | --- |
+| `Catsona`                               | `Identity`        | 62       | 成员 `Fluffy/Scholar/Judge/Blanky` 保留;辅助项同步:`Catsona::ALL`(`requests.rs::From::auth_header`)、`index()`(247/375/388)、`FromStr`(209)、`AccountStatus::to_identity()`(`auth.rs::LoginCredentials::default`) |
+| `HTTPStatus`                            | `HttpStatus`      | 131      | RFC 命名惯例(HTTP->Http)                                                                                                                                                 |
 | `KittyAuth`                             | `AuthProvider`    | 19       | 认证提供者 trait                                                                                                                                                        |
 | `KittyConfig`                           | `ClientConfig`    | 12       | 客户端配置                                                                                                                                                              |
 | `KittyRequestBuilder`                   | `RequestBuilder`  | 15       | 请求构建器                                                                                                                                                              |
@@ -94,17 +94,17 @@
 
 **改名顺序**(每步 `cargo check` 零残留):
 
-1. 身份:`Catsona`→`Identity`、`KittyIdentityManager`→`IdentityManager`(requests.rs + auth.rs `status.to_identity()` + pipeline.rs `switch_identity(Catsona::Judge)` 等全仓 use/构造点)。
-2. 认证与配置:`KittyAuth`→`AuthProvider`、`KittyConfig`→`ClientConfig`。
-3. 请求与状态码:`KittyRequestBuilder`→`RequestBuilder`、`HTTPStatus`→`HttpStatus`。
-4. 同步 `src/prelude.rs` 重导出(保留 `MewError`/`MewResult`,`KittyRequestBuilder`→`RequestBuilder` 等)。
+1. 身份:`Catsona`->`Identity`、`KittyIdentityManager`->`IdentityManager`(requests.rs + auth.rs `status.to_identity()` + pipeline.rs `switch_identity(Catsona::Judge)` 等全仓 use/构造点)。
+2. 认证与配置:`KittyAuth`->`AuthProvider`、`KittyConfig`->`ClientConfig`。
+3. 请求与状态码:`KittyRequestBuilder`->`RequestBuilder`、`HTTPStatus`->`HttpStatus`。
+4. 同步 `src/prelude.rs` 重导出(保留 `MewError`/`MewResult`,`KittyRequestBuilder`->`RequestBuilder` 等)。
 
 **影响面与风险**
 
 - 公开 API 改名(SemVer breaking),0.1.0 窗口内做;`cargo check` 逐残留定位,机械可逆。`MewError`/`MewResult` 不动,错误模型段落/示例零连带。
 - 风险:`Catsona` 成员名与 `ALL` 数组同步;`HTTPStatus` 131 处含 `as u16`/`From<HTTPStatus> for u16` 等 impl,纯标识符替换无逻辑改动。
 
-**验证**:`grep -rn "Catsona\|KittyAuth\|KittyRequestBuilder\|KittyConfig\|HTTPStatus" src/ tests/ README.md` → 0;`grep -rn "MewError\|MewResult" src/` 保持原样计数(64/509,不归零);`cargo check --all-targets` + `cargo test` + `cargo clippy` 零新增警告。
+**验证**:`grep -rn "Catsona\|KittyAuth\|KittyRequestBuilder\|KittyConfig\|HTTPStatus" src/ tests/ README.md` -> 0;`grep -rn "MewError\|MewResult" src/` 保持原样计数(64/509,不归零);`cargo check --all-targets` + `cargo test` + `cargo clippy` 零新增警告。
 
 ---
 
@@ -130,9 +130,9 @@ impl From<WorkId> for i64 { fn from(id: WorkId) -> i64 { id.0 } }
 impl std::fmt::Display for WorkId { … }
 ```
 
-2. 签名收窄:unpacker.rs 框架段的 `WorkInfo.id`/`fetch_work_info` 与 decoders.rs 各 fetcher 的 `work_id: i64` → `WorkId`(以 `cargo check` 定位全链);`compiler.rs` 的 `decompile_work(work_id: WorkId, …)`、`decompile_works(work_ids: &[WorkId], …)`、`CodemaoDecompiler::decompile(work_id: WorkId, …)`、`fetch_work_info(&self, http_client, work_id: WorkId)`。
+2. 签名收窄:unpacker.rs 框架段的 `WorkInfo.id`/`fetch_work_info` 与 decoders.rs 各 fetcher 的 `work_id: i64` -> `WorkId`(以 `cargo check` 定位全链);`compiler.rs` 的 `decompile_work(work_id: WorkId, …)`、`decompile_works(work_ids: &[WorkId], …)`、`CodemaoDecompiler::decompile(work_id: WorkId, …)`、`fetch_work_info(&self, http_client, work_id: WorkId)`。
 
-3. 调用点:README 示例 5 `decompile_work(123456, None)` → `decompile_work(123456.into(), None)`(或 `WorkId::new(123456)`);`tests/compile_live.rs`/`live_features.rs` 的 `decompile_work_with`/`decompile_works` 调用点同步;URL 拼接处 `format!("…/works/{}", work_id)` 经 `Display` 自动适配。
+3. 调用点:README 示例 5 `decompile_work(123456, None)` -> `decompile_work(123456.into(), None)`(或 `WorkId::new(123456)`);`tests/compile_live.rs`/`live_features.rs` 的 `decompile_work_with`/`decompile_works` 调用点同步;URL 拼接处 `format!("…/works/{}", work_id)` 经 `Display` 自动适配。
 
 **影响面与风险**
 
@@ -150,12 +150,12 @@ impl std::fmt::Display for WorkId { … }
 **改动 — README.md**:
 
 1. **目录结构段(L229-248)**:
-    - `lib.rs` 注释 `# 库入口(公开 api/core/utils)` → `# 库入口(公开 api/core/prelude/utils)`。
+    - `lib.rs` 注释 `# 库入口(公开 api/core/utils)` -> `# 库入口(公开 api/core/prelude/utils)`。
     - `core/` 下列出实际文件:`cloudvar.rs`、`compiler.rs # 作品反编译门面(DecompileOptions/CodemaoDecompiler/便捷函数)`、`unpacker.rs # 反编译引擎:抓取/解密/积木块反编译/序列化`、`decoders.rs # 各编辑器实现(Neko/Kitten/Nemo/Wood/Coco)`(Phase 1 后)、`converse.rs`、`pipeline.rs`、`registry.rs`、`retrieve.rs`、`services.rs`、`terminal.rs`。
     - `src/` 级补一行 `prelude.rs # 常用类型与 trait 预导入`。
-2. **设计要点段**:L210 `Catsona`(普通用户 Fluffy / 教育 Scholar / 评审 Judge / 空白 Blanky)→ `Identity`;L213 `KittyAuth` → `AuthProvider`;L215 错误模型段落保留 `MewError`/`MewResult`(已含 `Auth`/`InvalidArgument`),不动。
-3. **示例 1(L78-97)**:注释「映射到 `Catsona::Scholar`」→「映射到 `Identity::Scholar`」;`MewResult<Value>` 保留。
-4. **示例 5**(反编译):`decompile_work(123456, None)` → `decompile_work(123456.into(), None)`(与 Phase 3 同步)。
+2. **设计要点段**:L210 `Catsona`(普通用户 Fluffy / 教育 Scholar / 评审 Judge / 空白 Blanky)-> `Identity`;L213 `KittyAuth` -> `AuthProvider`;L215 错误模型段落保留 `MewError`/`MewResult`(已含 `Auth`/`InvalidArgument`),不动。
+3. **示例 1(L78-97)**:注释「映射到 `Catsona::Scholar`」->「映射到 `Identity::Scholar`」;`MewResult<Value>` 保留。
+4. **示例 5**(反编译):`decompile_work(123456, None)` -> `decompile_work(123456.into(), None)`(与 Phase 3 同步)。
 
 **改动 — CONTRIBUTING.md**:
 
@@ -163,9 +163,9 @@ impl std::fmt::Display for WorkId { … }
 2. **锁条款(L29)**:追加第十轮澄清——「默认使用标准库锁;仅当测量证明出现竞争/中毒热点时,经评审可对粗粒度令牌(`connect_lock`/`network_lock`)引入 `parking_lot::Mutex`,对读多写少 Map 引入 `RwLock`。」
 3. **错误条款(L35)**:与 L38 错误模型段一致,补「`Auth`/`InvalidArgument` 用于域错误,不用裸字符串」——已含,微调措辞即可(可选)。
 
-**影响面与风险**:纯文档;与代码保持同步,无行为影响。README 示例需与 Phase 22/33 的改名/签名一致(执行顺序:Phase 22/33 改代码 → Phase 44 同步文档)。
+**影响面与风险**:纯文档;与代码保持同步,无行为影响。README 示例需与 Phase 22/33 的改名/签名一致(执行顺序:Phase 22/33 改代码 -> Phase 44 同步文档)。
 
-**验证**:`cargo test` 的 doc-test 通过(README 示例非 doc-test,以人工核对 + `cargo check` 为准);`grep -n "Catsona\|KittyAuth" README.md CONTRIBUTING.md` → 0。
+**验证**:`cargo test` 的 doc-test 通过(README 示例非 doc-test,以人工核对 + `cargo check` 为准);`grep -n "Catsona\|KittyAuth" README.md CONTRIBUTING.md` -> 0。
 
 ---
 
@@ -182,11 +182,11 @@ impl std::fmt::Display for WorkId { … }
 ## Critical files & anchors
 
 | 文件                                                                   | 锚点                                                                   | 原因                                          |
-| ---------------------------------------------------------------------- | ---------------------------------------------------------------------- | --------------------------------------------- |
-| `src/core/unpacker.rs:1-1597,1598-3191,3195-3707,3708-3765`            | 框架段 / 编辑器段 / BlockDecompiler 段 / HTTP 段                       | Phase 1 切分边界 + WorkId 落点                |
-| `src/core/compiler.rs:1-15`(use 列表)+ `src/core.rs`                   | 门面 use 分流 + `mod decoders;`                                        | Phase 1 同步点                                |
-| `src/utils/requests.rs:183-227,258-298,333-342,483,1713-1796`          | `Catsona`/`KittyConfig`/`KittyAuth`/`KittyRequestBuilder`/`HTTPStatus` | Phase 2 改名落点(`MewError`/`MewResult` 不动) |
-| `README.md:78-97,149-161,210-215,229-248` / `CONTRIBUTING.md:28-29,35` | 示例/设计要点/目录结构 + 命名/锁/错误条款                              | Phase 3/4 落点                                |
+| --- | --- | --- |
+| ``src/core/unpacker.rs`,1598-3191,3195-3707,3708-3765`            | 框架段 / 编辑器段 / BlockDecompiler 段 / HTTP 段                       | Phase 1 切分边界 + WorkId 落点                |
+| ``src/core/compiler.rs``(use 列表)+ `src/core.rs`                   | 门面 use 分流 + `mod decoders;`                                        | Phase 1 同步点                                |
+| ``src/utils/requests.rs::BaseKey::KITTY_HEADERS`,258-298,333-342,483,1713-1796`          | `Catsona`/`KittyConfig`/`KittyAuth`/`KittyRequestBuilder`/`HTTPStatus` | Phase 2 改名落点(`MewError`/`MewResult` 不动) |
+| ``README.md` §示例代码,149-161,210-215,229-248` / ``CONTRIBUTING.md` §常用命令,35` | 示例/设计要点/目录结构 + 命名/锁/错误条款                              | Phase 3/4 落点                                |
 | `src/prelude.rs`                                                       | 重导出同步(保留 `MewError`/`MewResult`)                                | Phase 2 同步点                                |
 
 ## Verification
@@ -195,10 +195,10 @@ impl std::fmt::Display for WorkId { … }
 
 归零 grep 验证(最终态):
 
-1. **Phase 1**:`grep -n "CocoFetcher\|KittenFetcher\|NekoFetcher\|NemoFetcher\|WoodFetcher" src/core/compiler.rs` 均从 `decoders` 导入;`wc -l src/core/unpacker.rs src/core/decoders.rs` 两文件各 <2200 行;`sed -n '1,1597p' src/core/unpacker.rs | grep -c "NekoFetcher\|BlockDecompiler\b\|XmlBlockWriter"` → 0(框架段零反向引用)。
-2. **Phase 2**:`grep -rn "Catsona\|KittyAuth\|KittyRequestBuilder\|KittyConfig\|HTTPStatus" src/ tests/ README.md` → 0;`grep -rn "MewError\|MewResult" src/` 计数保持(64/509,未误改)。
-3. **Phase 3**:`grep -n "decompile_work" README.md tests/` 为 `WorkId` 参数形态;`grep -n "work_id: i64\|work_id: &i64" src/core/unpacker.rs src/core/decoders.rs` → 0。
-4. **Phase 4**:`grep -n "Catsona\|KittyAuth" README.md CONTRIBUTING.md` → 0;`grep -n "unpacker.rs\|decoders.rs\|prelude.rs" README.md` 命中目录结构段;`grep -n "parking_lot" CONTRIBUTING.md` 命中锁条款。
+1. **Phase 1**:`grep -n "CocoFetcher\|KittenFetcher\|NekoFetcher\|NemoFetcher\|WoodFetcher" src/core/compiler.rs` 均从 `decoders` 导入;`wc -l src/core/unpacker.rs src/core/decoders.rs` 两文件各 <2200 行;`sed -n '1,1597p' src/core/unpacker.rs | grep -c "NekoFetcher\|BlockDecompiler\b\|XmlBlockWriter"` -> 0(框架段零反向引用)。
+2. **Phase 2**:`grep -rn "Catsona\|KittyAuth\|KittyRequestBuilder\|KittyConfig\|HTTPStatus" src/ tests/ README.md` -> 0;`grep -rn "MewError\|MewResult" src/` 计数保持(64/509,未误改)。
+3. **Phase 3**:`grep -n "decompile_work" README.md tests/` 为 `WorkId` 参数形态;`grep -n "work_id: i64\|work_id: &i64" src/core/unpacker.rs src/core/decoders.rs` -> 0。
+4. **Phase 4**:`grep -n "Catsona\|KittyAuth" README.md CONTRIBUTING.md` -> 0;`grep -n "unpacker.rs\|decoders.rs\|prelude.rs" README.md` 命中目录结构段;`grep -n "parking_lot" CONTRIBUTING.md` 命中锁条款。
 
 新行为检查:
 
@@ -210,7 +210,7 @@ impl std::fmt::Display for WorkId { … }
 
 - **0.1.0 破坏窗口**:Phase 22(6 个标识符)、Phase 33(`WorkId`)属 SemVer breaking,假设 1.0 前可接受;**若不可接受**,Phase 22/33 降级为「doc 标注 deprecated 别名,1.0 移除」(Phase 1/44 不受影响,照做)。
 - **work.rs 维持单文件维持单文件**:团队已决策不切分,后续如需再切 `WorkDataFetcher`(纯搬迁,re-export 保路径保路径)。
-- **`Identity` 命名异议**:若团队不认可 `Catsona`→`Identity`,可保留 `Catsona`(身份是领域概念)——但 0.1.0 窗口错过即永久,默认按映射表改。
+- **`Identity` 命名异议**:若团队不认可 `Catsona`->`Identity`,可保留 `Catsona`(身份是领域概念)——但 0.1.0 窗口错过即永久,默认按映射表改。
 - **unpacker 再切命名**:默认 `decoders`(8 字母,「解密+反编译」语义);备选 `blockdec`(8,侧重积木块)。以 `cargo check` 确认 10 个编辑器项从 decoders 导入后零残留。
 - **`WorkId` 定义位置**:默认 `unpacker.rs` 框架段定义 + `compiler.rs` `pub use`;若实现时发现门面更合适(无 unpacker 内部引用),就地定义,以 `cargo check` 为准。
 - **`WorkInfo.id` 类型**:unpacker 内 `WorkInfo.id: i64`(服务端返回)改 `WorkId` 需在 `from_api_response` 处转换(用 `WorkId::new(v.as_i64()…)`),保持 `WorkId` 只作类型边界、内部计算用 `.get()`。
@@ -221,13 +221,13 @@ impl std::fmt::Display for WorkId { … }
 
 - `cargo check --all-targets` 0 error;`cargo clippy --all-targets` 0 warning。
 - `cargo test` 全绿:库单测 5+5 passed、`compile_live` 1 passed(NEMO 1 ignored)、`live_features` 3 passed(真机命中 codemao 服务)、doc-tests 0。
-- 归零验证:6 个旧名(`Catsona`/`KittyAuth`/`KittyConfig`/`KittyRequestBuilder`/`HTTPStatus`/`KittyIdentityManager`)src/tests/README/CONTRIBUTING → 0(实际 240 处替换);`MewError`(64)/`MewResult`(506)保留未动。
-- 文件规模:`unpacker.rs` 3759 → 1296 行(框架),`decoders.rs` 2491 行(编辑器实现 + BlockDecompilerCore)。
+- 归零验证:6 个旧名(`Catsona`/`KittyAuth`/`KittyConfig`/`KittyRequestBuilder`/`HTTPStatus`/`KittyIdentityManager`)src/tests/README/CONTRIBUTING -> 0(实际 240 处替换);`MewError`(64)/`MewResult`(506)保留未动。
+- 文件规模:`unpacker.rs` 3759 -> 1296 行(框架),`decoders.rs` 2491 行(编辑器实现 + BlockDecompilerCore)。
 - `WorkId` 全链收窄:compiler.rs 7 处签名 + unpacker/decoders 字段,`decompile_work(123456.into(), None)` 编译通过。
 
 ## 范围偏差(实际执行中确定,记录在案)
 
 - **`BlockDecompilerCore` 一并移去 decoders**:方案假设「框架段零反向引用」,实测 `BlockDecompilerCore`(框架段)内部调用 `create_block_decompiler`(decoders),框架不能自洽。修正:将 `BlockDecompilerCore` 段(L1095-1448,355 行)也移去 decoders(与 BlockDecompiler trait/impls/factory 同族),框架段不再引用 decoders,单向依赖成立。use 清单相应调整(删 `BlockDecompilerCore` 导入、加 `BlockDecompilerBehavior` trait——`get_child_input_name` 是它的方法)。
-- **`KittyRequestBuilder` → `MewRequestBuilder`(非 `RequestBuilder`)**:`RequestBuilder` 已被 `ureq::RequestBuilder`(requests.rs:14 import + 7 处类型引用)占用,改名 `RequestBuilder` 会冲突;改 `MewRequestBuilder` 与 `MewError`/`MewResult` 同品牌族,直白度仍提升。
-- **`HTTPStatus` → `StatusCode`(非 `HttpStatus`)**:`HttpStatus` 与 `MewError::HttpStatus`(结构化错误变体,requests.rs:26)同名易混;改 `StatusCode`(http crate 标准名),`check_status(builder, StatusCode::Ok)` 更直觉。
+- **`KittyRequestBuilder` -> `MewRequestBuilder`(非 `RequestBuilder`)**:`RequestBuilder` 已被 `ureq::RequestBuilder`(`requests.rs` import + 7 处类型引用)占用,改名 `RequestBuilder` 会冲突;改 `MewRequestBuilder` 与 `MewError`/`MewResult` 同品牌族,直白度仍提升。
+- **`HTTPStatus` -> `StatusCode`(非 `HttpStatus`)**:`HttpStatus` 与 `MewError::HttpStatus`(结构化错误变体,`requests.rs::MewError`)同名易混;改 `StatusCode`(http crate 标准名),`check_status(builder, StatusCode::Ok)` 更直觉。
 - **decoders 曾出现 `BlockDecompilerCore` 双份定义**(第一次移动时插入逻辑造成),已删除第二份副本,归零确认 1 份。

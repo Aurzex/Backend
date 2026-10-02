@@ -1,51 +1,51 @@
 # NEMO 作品的运行与上传(知识)
 
-> 知识库条目:**NEMO 作品在平台上是怎么被打开/创建/存储的**,以及我们能不能绕过"下载 40 MB"。
+> 知识库条目:**NEMO 作品在平台上如何被打开、创建与存储**,以及本库能否绕过"下载 40 MB"。
 > 方案与取证过程见 `../rounds/22-*` §5/§6、`../rounds/24-*`、`../rounds/27-*` §9–§12。
 
 ## 1. NEMO 是什么
 
-- NEMO 是 KN 的前身编辑器;作品文件由**资源包(`resourceZip`)+ 积木文档**组成,体积可达 40 MB 级。
+- NEMO 是 KN 的前身编辑器;作品文件由**资源包(`resourceZip`)与积木文档**组成,体积可达 40 MB 级。
 - 本库对 NEMO 的反编译是**明文 JSON 直取**(fetcher),**没有解密步骤**;慢的原因是**资源要逐个下载**(见 `convert-performance.md` §2)。
-- 平台侧 `work_type` 判别:Kitten 系 = 1、Nemo = 3、CodeGame = 5、KN = 15(创作侧)。
+- 平台侧 `work_type` 判别:Kitten 系为 1、Nemo 为 3、CodeGame 为 5、KN 为 15(创作侧)。
 
 **官方的完整"保存/新建"链路是四步**(第三份抓包逐字段解出):
 
 ```text
-1. GET  /cdn/qi-niu/tokens/uploading?projectName=nemo_android_ios&cdnName=qiniu&filePaths=<b64 文件名>   → 上传凭证
-2. POST <七牛 upload_url>(.bcm 字节) → work_url;封面另走 upload.qiniup.com/putb64/-1/key/<b64>.cover
-3. POST /nemo/v3/works/upload/<1|2>  {name, work_url, preview, bcm_version, …}   → **返回新作品 id**
-4. POST /nemo/qiniu/upload/business/bind  {business_id: <新 id>, url_list: [cover]}  → 绑封面
+1. GET  /cdn/qi-niu/tokens/uploading?projectName=nemo_android_ios&cdnName=qiniu&filePaths=<b64 文件名>   得到上传凭证
+2. POST <七牛 upload_url>(.bcm 字节) 得到 work_url;封面另走 upload.qiniup.com/putb64/-1/key/<b64>.cover
+3. POST /nemo/v3/works/upload/<1|2>  {name, work_url, preview, bcm_version, …}   **返回新作品 id**
+4. POST /nemo/qiniu/upload/business/bind  {business_id: <新 id>, url_list: [cover]}  绑定封面
 ```
 
-⇒ **作品 id 由第 3 步返回**(第 4 步只是绑封面)。本库已实现第 3 步(`NemoWorkManager::create_nemo_work`)与第 4 步;
+因此**作品 id 由第 3 步返回**(第 4 步只是绑封面)。本库已实现第 3 步(`NemoWorkManager::create_nemo_work`)与第 4 步;
 第 1/2 步现由 `UploadChannel::Nemo` 提供(`projectName=nemo_android_ios`),**但没有真机验证过**
-(NEMO 侧删除端点未知 ⇒ 建了草稿擦不掉;见 `../rounds/30` §4)。
+(NEMO 侧删除端点未知,故建立的草稿无法删除;见 `../rounds/30` §4)。
 
 ## 2. 决定性证据:**建作品不需要资源字节**
 
-第三份抓包(nemo App + KN 编辑器混合)里找到了 **NEMO 建作品**调用:`POST /nemo/v2/works` 是**表单**提交(`orientation` 等),**不含资源字节**,返回作品 id / previewUrl。
-⇒ "把作品建起来"与"作品里的资源"在协议上是**两件事**;资源由平台侧按 URL 拉取或后续上传补齐。
+第三份抓包(nemo App 与 KN 编辑器混合)里找到了 **NEMO 建作品**调用:`POST /nemo/v2/works` 是**表单**提交(`orientation` 等),**不含资源字节**,返回作品 id / previewUrl。
+因此"把作品建起来"与"作品里的资源"在协议上是**两件事**;资源由平台侧按 URL 拉取或后续上传补齐。
 
 > 本库已据此实现 `create_nemo_work`(真机验证建出草稿并回读成功)。KN 侧对应的是 `create_kn_work`(同样真机验证)。
 
 ## 3. 资源上传走 Qiniu
 
-抓包实测:上行总共 1.99 MB,其中上传渠道是 `upload.qiniup.com`(14 条 / 249 KB)+ `up.qiniup.com`(1 条 / 39 KB)—— **全是小文件**。控制面 `api.codemao.cn` 反而占 **249 条连接** / 1.46 MB。
-⇒ 慢的是**请求数**,不是带宽。这也是"资源下载并发封顶 16"的依据。
+抓包实测:上行总共 1.99 MB,其中上传渠道是 `upload.qiniup.com`(14 条 / 249 KB)与 `up.qiniup.com`(1 条 / 39 KB)—— **全是小文件**。控制面 `api.codemao.cn` 反而占 **249 条连接** / 1.46 MB。
+因此慢的是**请求数**,不是带宽。这也是"资源下载并发封顶 16"的依据。
 
 ## 4. 两条路线的现实形态
 
 | 路线 | 形态 | 状态 |
-| ---- | ---- | ---- |
-| **A. 下载 + 本地重编译** | 反编译 NEMO(含资源)→ 转 KN → 上传产物建 KN 作品 | ✅ 已完成(`convert_live` 真机通过) |
-| **B. 不下载,直接建作品** | 上传**已有的** `.bcm`/资源引用 + `create_nemo_work(work_url, bcm_version)` | ❌ 判不做(端点已备好;但**要产出合法 NEMO 文件**才能把我们的产物塞回去 ⇒ 依赖 KN→NEMO,而平台无对照实现、**已判不做**) |
+| --- | --- | --- |
+| **A. 下载与本地重编译** | 反编译 NEMO(含资源)后转 KN 并上传产物建 KN 作品 | 已完成(`convert_live` 真机通过) |
+| **B. 不下载,直接建作品** | 上传**已有的** `.bcm`/资源引用,调用 `create_nemo_work(work_url, bcm_version)` | 判不做(端点已备好;但**要产出合法 NEMO 文件**才能把本库产物写回,故依赖 KN 到 NEMO,而平台无对照实现、**已判不做**) |
 
-⇒ 路线 B 的现实用法是**把 NEMO 作品转出来**(NEMO→KN→Kitten4),而不是把产物塞回 NEMO。
+因此路线 B 的现实用法是**把 NEMO 作品转出来**(NEMO 到 KN 再转 Kitten4),而不是把产物写回 NEMO。
 
 ## 5. 编译耗时与上传无关
 
-官方 App 打开同一作品时的编译发生在**设备侧**;我们的反编译耗时(NEMO 2m42s → 13s)全部来自"取字节 + 找资源 + 下载资源",与上传/编译无关。**不要**用"减少编译"的思路去优化上传路线。
+官方 App 打开同一作品时的编译发生在**设备侧**;本库的反编译耗时(NEMO 由 2m42s 降至 13s)全部来自"取字节、找资源与下载资源",与上传/编译无关。不应以"减少编译"的思路优化上传路线。
 
 ## 6. 与 KN 作品的关系(KN 侧的事实)
 
@@ -56,11 +56,11 @@
   其余请求仍走全局 30 s。
 - 下载侧同类问题**已修**(2026-10-02,`afca96c`):转换域取作品/资源的唯一通路 `CodeMaoHttpClient`
   (`src/core/convert/shared.rs`)三个方法都带请求级超时并改走显式有界的大体通路;普通接口请求仍走全局 30 s。
-- 另修一层**更硬的**下载限制:`ureq::Body::read_to_vec`/`read_to_string` 默认**只吃 10 MB**,大作品会在
+- 另修一层**更严格的**下载限制:`ureq::Body::read_to_vec`/`read_to_string` 默认**上限为 10 MB**,大作品会在
   **超时之前**先 `BodyExceedsLimit` 失败。
-- ⚠ 实测细节:`ureq` 的 `timeout_global` 只覆盖到**响应头**,不覆盖 body 流式读取 ⇒ 上述改动解决的是
+- 注意:实测细节,`ureq` 的 `timeout_global` 只覆盖到**响应头**,不覆盖 body 流式读取,故上述改动解决的是
   "**首字节/响应头 > 30 s**"与"**单个响应体 > 10 MB**"两类失败;真正慢的 body 传输属**另一类"无 body 读超时"问题**(未修)。
-  ⇒ **常量值(`DOWNLOAD_TIMEOUT` / `MAX_DOWNLOAD_BODY_BYTES`)、逐路径枚举与一次性证明只在
+  因此**常量值(`DOWNLOAD_TIMEOUT` / `MAX_DOWNLOAD_BODY_BYTES`)、逐路径枚举与一次性证明只在
   `../rounds/40-gates-cleanup-and-real-defects.md` §7 展开**。
 
 ## 依据

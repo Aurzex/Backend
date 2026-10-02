@@ -9,7 +9,7 @@
 ### 明确不做(用户指令 + 因此放弃的评审条目)
 
 | 指令                                                    | 落实                                                                                                                                                                                                                                                               |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| --- | --- |
 | 1 回退 impl_api_manager                                 | 不定义宏;各 struct 的 `new()/Default/ClientAccess` 保持手写                                                                                                                                                                                                        |
 | 2 回退 post_empty/request/get_json/build_report_iter 等 | api 层不新增任何私有辅助函数;重复样板统一改用 acquire.rs 既有 `ClientAccess` 默认方法(见 Phase 2 替换规则)                                                                                                                                                         |
 | 3 管理员信息固定字段                                    | 只读 `/admins/info` 响应的 `admin.id / admin.username / admin.role_name / admin.full_name`,无形态回退链                                                                                                                                                            |
@@ -34,7 +34,7 @@
 
 同一编译单元的三处联动,由主代理一次完成,随后 `cargo check` 验证:
 
-1. **`src/utils/data.rs`**:新增 `pub fn value_to_i64(v: &serde_json::Value) -> Option<i64>`,函数体从 `src/core/registry.rs:41-47` 原样搬入(逐字复制,含注释)。
+1. **`src/utils/data.rs`**:新增 `pub fn value_to_i64(v: &serde_json::Value) -> Option<i64>`,函数体从 ``src/core/registry.rs::value_to_string`` 原样搬入(逐字复制,含注释)。
 2. **`src/core/registry.rs`**:删除 `value_to_i64` 定义(约 41-47 行)。
 3. **`src/core/services.rs` 第 21 行**:`use crate::core::registry::{…, value_to_i64, …}` 中移除 `value_to_i64`,新增 `use crate::utils::data::value_to_i64;`。
 4. **`src/api/auth.rs`**:新增管理员信息结构(放在"数据结构"区,`LoginResult` 附近):
@@ -97,9 +97,9 @@ impl AdminInfo {
 - 禁止格式化/整理无关代码;只改任务清单内的点。
 - 不新增私有辅助函数、不新增宏、不改任何 `pub` 签名(清单内注明的除外)、不动 `temp/` 下文件。
 - 替换模式(api 层样板统一改用原生 `ClientAccess`,见各代理清单):
-    - **模式 A(send_and_parse)**:`let response = <builder 表达式/变量>.send()?;` 紧接 `self.client.response_to_json(response)`(或 `client.response_to_json(response)`),两语句相邻、之间无其他逻辑 → `self.send_and_parse(<builder>)`。builder 可跨多行,可含 `.with_error_body()`(属 builder 配置,等价)。
-    - **模式 B(check_status)**:`let response = <builder>.send()?;` 紧接 `Ok(response.status() == HTTPStatus::X as u16)` → `self.check_status(<builder>, HTTPStatus::X)`。
-    - **模式 C(send_maybe_parse)**:`let response = <builder>.send()?;` 紧接 `if <cond> { self.client.response_to_json(response) } else { Ok(json!({"success": response.status() == HTTPStatus::X as u16})) }`,且 `<cond>` 为 `return_data` 或 `method == HttpMethod::Get` → `self.send_maybe_parse(<builder>, <cond>, HTTPStatus::X)`。
+    - **模式 A(send_and_parse)**:`let response = <builder 表达式/变量>.send()?;` 紧接 `self.client.response_to_json(response)`(或 `client.response_to_json(response)`),两语句相邻、之间无其他逻辑 -> `self.send_and_parse(<builder>)`。builder 可跨多行,可含 `.with_error_body()`(属 builder 配置,等价)。
+    - **模式 B(check_status)**:`let response = <builder>.send()?;` 紧接 `Ok(response.status() == HTTPStatus::X as u16)` -> `self.check_status(<builder>, HTTPStatus::X)`。
+    - **模式 C(send_maybe_parse)**:`let response = <builder>.send()?;` 紧接 `if <cond> { self.client.response_to_json(response) } else { Ok(json!({"success": response.status() == HTTPStatus::X as u16})) }`,且 `<cond>` 为 `return_data` 或 `method == HttpMethod::Get` -> `self.send_maybe_parse(<builder>, <cond>, HTTPStatus::X)`。
     - **豁免(原样保留)**:任何含 `read_to_vec/read_to_string/into_body()`、状态码分支后继续读 body、`json["data"]` 二次提取、`with_header("Cookie", …)` 的站点;`auth.rs` 的 `fetch_auth_details`(用户指令 #4)、`get_login_security_info`、`fetch_admin_captcha`、`fetch_current_timestamp_with_provider` 与三个 logout(204 检查);`account.rs` 的 `phone_login_silence` 等已用 `send_and_parse` 的站点不动。
     - 每个替换点先读原代码确认与模式逐字等价(else 分支、状态码常量),不等价就跳过。
 
@@ -110,16 +110,16 @@ impl AdminInfo {
     - `extract_page_data(json: &Value, data_pointer: &str) -> Vec<Value>` 改为 `fn take_page_data(json: &mut Value, data_pointer: &str) -> Vec<Value>`,体:`json.pointer_mut(data_pointer).and_then(|v| v.as_array_mut()).map(std::mem::take).unwrap_or_default()`(整页数组移动而非克隆)。
     - `initialize`:`let json = self.request_page(0)?;` 后先做 total 提取与 `response_amount_key` 覆盖(两者只借用),再 `let data = Self::take_page_data(&mut json, &self.data_pointer);`,最后构造 `Ready`。
     - `next_item` 翻页分支:`let mut json = match self.request_page(next_page) { … };` 后 `let data = Self::take_page_data(&mut json, &self.data_pointer);`(原 `extract_page_data` 调用)。
-    - `next_item` 元素产出:`let item = current_page_data[current_index].clone();` → `let item = std::mem::replace(&mut current_page_data[current_index], Value::Null);`。
+    - `next_item` 元素产出:`let item = current_page_data[current_index].clone();` -> `let item = std::mem::replace(&mut current_page_data[current_index], Value::Null);`。
 3. **不删任何东西**:`with_config`、`with_response_offset_key`、`current_page_number`、`yielded_count`、`total_pages`、`page_size`、`remaining_items`、`PaginationConfig.response_offset_key`、`KittyFactory` 5 个方法、`generate_meow_id`、`HTTPStatus` 枚举全部原样保留。
 
 #### Agent B — `src/core/pipeline.rs`(2 条严重缺陷 + 1 效率)
 
 1. **多账号身份错配(缺陷 1)**:`ensure_account_login`(约 885-899)删除前三行短路 `if account_usage.get(&idx).copied().unwrap_or(0) > 0 { return true; }` —— 每次选中账号都重新 `login_student`,token 全局单槽语义下身份不再错配。`account_usage` 参数保留(失败移除用)。
-2. **usage 下标错位(缺陷 7)**:`account_usage` 类型 `HashMap<usize, usize>` → `HashMap<String, usize>`(键 = 用户名):
+2. **usage 下标错位(缺陷 7)**:`account_usage` 类型 `HashMap<usize, usize>` -> `HashMap<String, usize>`(键 = 用户名):
     - `select_report_account`:`let usage = account_usage.get(&accounts[idx].0).copied().unwrap_or(0);`(`accounts[idx].0` 即用户名)。
-    - `ensure_account_login` 失败分支:`account_usage.remove(&idx)` → `account_usage.remove(&user)`(`user` 是上方已 clone 的元组首元素)。
-    - `report_violations` 成功分支:`*account_usage.entry(chosen_idx).or_insert(0) += 1;` → `*account_usage.entry(accounts[chosen_idx].0.clone()).or_insert(0) += 1;`。
+    - `ensure_account_login` 失败分支:`account_usage.remove(&idx)` -> `account_usage.remove(&user)`(`user` 是上方已 clone 的元组首元素)。
+    - `report_violations` 成功分支:`*account_usage.entry(chosen_idx).or_insert(0) += 1;` -> `*account_usage.entry(accounts[chosen_idx].0.clone()).or_insert(0) += 1;`。
     - `current_idx` 的移除补偿逻辑(921-924)不动。
 3. **`check_spam_posts` 阈值提前终止**(784-822):改为边收边匹配——遍历 `search_posts_gen` 流,命中 `user.id == user_id` 即 `matches += 1` 并立即 push 违规串,`matches >= self.config.spam_threshold` 时 `break`;循环后 `matches >= threshold` 才 `warn!` 并返回 violations,否则返回空 Vec。错误分支(`error!` + break)保留。行为变化(有意):violations 上限 = 阈值,不再收集超阈值部分。
 
@@ -142,15 +142,15 @@ impl AdminInfo {
 2. **`connect()` 并发双建(缺陷 3)**(约 762-780):
     - 把现 `fn establish(inner: &Arc<CloudInner>) -> Result<()>` 的函数体(2269 起,不含锁行)抽为 `fn establish_locked(inner: &Arc<CloudInner>) -> Result<()>`;`establish` 改为 `{ let _connect_guard = inner.connect_lock.lock().unwrap(); establish_locked(inner) }`。
     - `connect()` 开头(第一行)加 `let _connect_guard = self.inner.connect_lock.lock().unwrap();`,`connected` 检查、`reset_state()`、`establish_locked(&self.inner)?`、flush 线程启动全部在锁内执行。`on_connection_lost` 重连循环仍调 `establish`(内部加锁),不变。
-3. **`DataStore` 单次哈希**(420-464):`variable_in`/`list_mut` 的 `if vars.contains_key(key) { return vars.get_mut(key); }` → `if let Some(v) = vars.get_mut(key) { return Some(v); }`;`variable_ref`/`list` 的 `if let Some(l) = …get(key) { return Some(l); }` 保持(已单次),`variable_ref` 中 `if vars.contains_key(key) { return vars.get(key); }` → `if let Some(v) = vars.get(key) { return Some(v); }`。
+3. **`DataStore` 单次哈希**(420-464):`variable_in`/`list_mut` 的 `if vars.contains_key(key) { return vars.get_mut(key); }` -> `if let Some(v) = vars.get_mut(key) { return Some(v); }`;`variable_ref`/`list` 的 `if let Some(l) = …get(key) { return Some(l); }` 保持(已单次),`variable_ref` 中 `if vars.contains_key(key) { return vars.get(key); }` -> `if let Some(v) = vars.get(key) { return Some(v); }`。
 
-#### Agent D — `src/core/retrieve.rs`(2 处 N+1 → 有界并行,复用本文件 `compute_admin_report_stats` 的 `thread::scope` 先例)
+#### Agent D — `src/core/retrieve.rs`(2 处 N+1 -> 有界并行,复用本文件 `compute_admin_report_stats` 的 `thread::scope` 先例)
 
 1. **`compute_fans_by_like_threshold`**(865-930):两段式。
     - 第一段(串行,无 HTTP):遍历 `fetch_followers_gen` 流,保留流序,收集 `total_likes >= like_threshold` 的 `(id: i64, fan: Value, total_likes: i64)` 到 `Vec`;`total_fans` 计数照旧。
     - 第二段:`let results: Vec<Option<JsonObject>> = vec![None; qualified.len()];` + `thread::scope` 按 chunk=16 分片,每线程内对每粉丝执行现有"honors 尽力而为"逻辑(逐字搬入: `i32::try_from(id).ok().and_then(|id32| UserDataFetcher::new().fetch_user_honors(id32).ok())` + N/A 回退 + nickname/total_likes/n_works 字段组装),按 `start + i` 写回 `results`。线程内各自 `UserDataFetcher::new()`。
     - scope 后 `qualified_fans = results.into_iter().flatten().collect()`。字段与错误语义与现状完全一致(仅顺序保持,无并发写共享状态)。
-2. **`aggregate_user_comments_from_works`**(679-740):先串行把 `stream_works_from_both_sources(work_limit)` 的错误处理完、作品收集进 `Vec<Value>`(任一流错误 → 直接 `Err` 返回,与现状一致);再 `thread::scope` 按 chunk=8 分片,每线程建本地 `HashMap<String,(String,String,Vec<String>,i32)>`,对每作品执行现有 `stream_detailed_comments` 提取逻辑(逐字搬入);每线程返回 `Result<本地map, DataQueryError>`(作品流错误记入 Err)。scope 后按原顺序合并各线程 map(`entry(uid).or_insert_with(…)`,comments 追加、count 累加);若任一线程 Err,返回第一个 Err(按线程顺序)。最终 `into_values()` + 按 `comment_count` 降序排序逻辑不动。
+2. **`aggregate_user_comments_from_works`**(679-740):先串行把 `stream_works_from_both_sources(work_limit)` 的错误处理完、作品收集进 `Vec<Value>`(任一流错误 -> 直接 `Err` 返回,与现状一致);再 `thread::scope` 按 chunk=8 分片,每线程建本地 `HashMap<String,(String,String,Vec<String>,i32)>`,对每作品执行现有 `stream_detailed_comments` 提取逻辑(逐字搬入);每线程返回 `Result<本地map, DataQueryError>`(作品流错误记入 Err)。scope 后按原顺序合并各线程 map(`entry(uid).or_insert_with(…)`,comments 追加、count 累加);若任一线程 Err,返回第一个 Err(按线程顺序)。最终 `into_values()` + 按 `comment_count` 降序排序逻辑不动。
 
 #### Agent E — `src/core/services.rs` + `src/core/registry.rs`
 
@@ -165,7 +165,7 @@ impl AdminInfo {
 2. 按总规则替换样板(全部为模式 A):
     - community.rs:约 20 处,覆盖 163-166、185-188、199-202、215-218、239-242、249-252、259-262、277-280、295-298、313-316、331-334、346-349、361-364、372-375、386-389、400-403、410-413、420-423、430-433、444-447(以 `grep '\.send()\?;' src/api/community.rs` 实际清单为准)。
     - clouddb.rs:约 17 处,覆盖 29-32、44-47、60-63、85-88、100-103、113-116、163-166、175-178、186-189、197-200、209-212、226-229、249-252、264-267、281-284、292-295、304-307、320-323、332-335、376-378。
-    - codegame.rs:24-27、34-37 → 模式 A;107-110(`Ok(response.status() == HTTPStatus::Created as u16)`)与 135-138(`HTTPStatus::Ok`) → 模式 B(`check_status(builder, HTTPStatus::Created / Ok)`)。
+    - `codegame.rs::OverseaDataClient::fetch_tiger_accounts`、34-37 -> 模式 A;107-110(`Ok(response.status() == HTTPStatus::Created as u16)`)与 135-138(`HTTPStatus::Ok`) -> 模式 B(`check_status(builder, HTTPStatus::Created / Ok)`)。
 3. 不做:`fetch_editor_update`、`fetch_config` 合并、URL 拼接改 builder、`fetch_nemo_messages` 枚举化、`ReportReasonId` 合并、`list_user_databases` 合并。
 
 #### Agent F2 — `src/api/education.rs` + `forum.rs` + `library.rs` + `shop.rs`
@@ -175,19 +175,19 @@ impl AdminInfo {
     - 模式 C:187-192(`return_data` 分支,先确认 else 分支为 `Ok(json!({"success": response.status() == HTTPStatus::Ok as u16}))`)与 840-844(`get_or_delete_custom_package`,cond = `method == HttpMethod::Get`,expected `HTTPStatus::Ok`)。
     - `add_timestamp_to_builder`/`add_timestamp_to_paginated`、`build_paginated`(393)、CMTIME、`pacakgeEntryType` 等全部原样。
 2. forum.rs:模式 A 共约 10 处:169-172、180-183、221-224、231-234、242-245、252-255、263-266、275-278、291-294、301-304(以 grep 清单为准)。`build_paginated`(138)原样。
-3. library.rs:652-656 → 模式 C(`return_data`,`HTTPStatus::Ok`,先确认 else 分支)。`build_paginated`(132)原样。
-4. shop.rs:331-334 → 模式 A。**不做** `join_or_default`;88/177 空注释段与 `create_workshop` 不动。
+3. `library.rs::BookDataFetcher::client` -> 模式 C(`return_data`,`HTTPStatus::Ok`,先确认 else 分支)。`build_paginated`(132)原样。
+4. `shop.rs::WorkshopActionHandler::update_workshop_details` -> 模式 A。**不做** `join_or_default`;88/177 空注释段与 `create_workshop` 不动。
 5. 不做:`fetch_lesson_topics/tags` 合并、`fetch_edu_get`、`ReportReasonId` 合并、`PublishStatus` 相关。
 
 #### Agent F3 — `src/api/account.rs` + `src/api/whale.rs` + `src/api/work.rs`
 
-1. **account.rs 手机号 i32→&str(缺陷 5)**:`update_phone_number(&self, captcha: i32, phonenum: &str)`、`validate_phone_number(&self, phone_num: &str)`、`execute_request_phone_change_verification(&self, old_phonenum: &str, new_phonenum: &str)`。体内:`with_param("phone_number", phone_num.to_string())` → `with_param("phone_number", phone_num)`(Into<String> 支持 &str);payload 的 `"phone_number": phonenum` 不变(serde_json 序列化 &str 等价)。全仓 grep 确认这三个函数无调用方(已核实),无需改调用点。
-2. **account.rs 样板**:369-371、435-437 → 模式 A。
-3. **whale.rs**:补 `impl ClientAccess for WhaleReportFetcher` + `impl ClientAccess for ReportHandler`;删除死代码 `add_timestamp_to_builder`(161-164,全文件无调用,且与 education.rs 同名函数重复);329-331 → 模式 B(`check_status(builder, HTTPStatus::NoContent)`)。`build_report_paginated`/`add_timestamp_to_paginated`/`apply_optional_filter` 与 4 个举报迭代器(202-296)原样。
+1. **account.rs 手机号 i32->&str(缺陷 5)**:`update_phone_number(&self, captcha: i32, phonenum: &str)`、`validate_phone_number(&self, phone_num: &str)`、`execute_request_phone_change_verification(&self, old_phonenum: &str, new_phonenum: &str)`。体内:`with_param("phone_number", phone_num.to_string())` -> `with_param("phone_number", phone_num)`(Into<String> 支持 &str);payload 的 `"phone_number": phonenum` 不变(serde_json 序列化 &str 等价)。全仓 grep 确认这三个函数无调用方(已核实),无需改调用点。
+2. **account.rs 样板**:369-371、435-437 -> 模式 A。
+3. **whale.rs**:补 `impl ClientAccess for WhaleReportFetcher` + `impl ClientAccess for ReportHandler`;删除死代码 `add_timestamp_to_builder`(161-164,全文件无调用,且与 education.rs 同名函数重复);329-331 -> 模式 B(`check_status(builder, HTTPStatus::NoContent)`)。`build_report_paginated`/`add_timestamp_to_paginated`/`apply_optional_filter` 与 4 个举报迭代器(202-296)原样。
 4. **work.rs 死代码删除**:
-    - `fetch_kn_work_state`(1714-1721):与 `fetch_work_status`(1760-1767)请求同一端点 `/neko/works/status/{id}`、体逐字相同、全仓无调用 → 删除。删除前 `grep fetch_kn_work_state` 全仓确认 0 调用。
-    - `fetch_sample_detail`(1594-1609):全仓无调用、`params: Vec<(String,String)>` 形参迫使调用方堆分配 → 删除。
-    - `PublishStatus` 枚举 + impl(32-45):全仓无使用(user.rs 另有同名枚举) → 删除。删除前 `grep PublishStatus` 全仓确认 work.rs 版 0 使用。
+    - `fetch_kn_work_state`(1714-1721):与 `fetch_work_status`(1760-1767)请求同一端点 `/neko/works/status/{id}`、体逐字相同、全仓无调用 -> 删除。删除前 `grep fetch_kn_work_state` 全仓确认 0 调用。
+    - `fetch_sample_detail`(1594-1609):全仓无调用、`params: Vec<(String,String)>` 形参迫使调用方堆分配 -> 删除。
+    - `PublishStatus` 枚举 + impl(32-45):全仓无使用(user.rs 另有同名枚举) -> 删除。删除前 `grep PublishStatus` 全仓确认 work.rs 版 0 使用。
 5. 不做:`toggle`、`with_time`、`build_page_paginated`、KN 迭代器合并、package list 合一、`fetch_work_status` 不动。
 
 ### Phase 3 — 收尾验证(主代理)
@@ -200,7 +200,7 @@ impl AdminInfo {
 ## Critical files & anchors
 
 | 文件                   | 锚点                                                                                                                                                                            | 原因                                                                                      |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| --- | --- | --- |
 | `src/utils/acquire.rs` | `KittyCore::log_request/log_response/response_to_json/response_to_string/response_to_binary`(约 658-920)、`PaginatedIter::extract_page_data/initialize/next_item`(约 1252-1370) | 日志守卫 + 克隆消除都在此;同时是"不删 PaginatedIter/KittyFactory/generate_meow_id"的边界  |
 | `src/core/cloudvar.rs` | `connect()`(762-780)、`establish`(2269)、`flush_loop`(2457-2490)、`merge_commands`(291)、`DataStore` 4 函数(420-464)                                                            | 两条严重缺陷 + 单次哈希;establish 拆 `_locked` 的调用方只有 connect 与 on_connection_lost |
 | `src/core/pipeline.rs` | `ensure_account_login`(885-899)、`select_report_account`(约 865-884)、`report_violations`(906-960)、`check_spam_posts`(784-822)                                                 | 两条严重缺陷 + 阈值提前终止                                                               |
@@ -239,14 +239,14 @@ mod tests {
 ```
 
 4. **grep 断言**(全仓):
-    - `fetch_kn_work_state|fetch_sample_detail` → 0 命中(work.rs 死代码);
-    - `get_total_reports` → 0 命中(registry 删除);
+    - `fetch_kn_work_state|fetch_sample_detail` -> 0 命中(work.rs 死代码);
+    - `get_total_reports` -> 0 命中(registry 删除);
     - `add_timestamp_to_builder` 仅 education.rs 1 处定义 + 其调用点(whale.rs 副本已删);
-    - `impl_api_manager|post_empty|build_report_iter|fetch_follows_gen|build_page_paginated|with_iter_time|join_or_default|extract_admin_id` → 0 命中(约束落实);
+    - `impl_api_manager|post_empty|build_report_iter|fetch_follows_gen|build_page_paginated|with_iter_time|join_or_default|extract_admin_id` -> 0 命中(约束落实);
     - `PublishStatus` 仅 user.rs 定义 + 其使用点;
     - `\.send\(\)\?;` 在 api/ 下只剩豁免清单:auth.rs 的 `fetch_auth_details`/`get_login_security_info`/`fetch_admin_captcha`/`fetch_current_timestamp_with_provider`/3 个 logout、education.rs 0 处、其余文件 0 处(以 grep 结果与豁免清单比对);
     - `value_to_i64` 定义仅在 `src/utils/data.rs`;main.rs 与 services.rs 不再从 `core::registry` 引用。
-5. **7 条缺陷逐条 diff 复审**:对照 REVIEW.md 第 6 节,确认修复点语义(尤其 pipeline 登录短路删除、flush_loop 回退、connect 锁内检查、phone &str、write_blocks 未包含在本方案 → 见下)。**compiler.rs write_blocks 缺陷不在本方案范围**(它要求给 `block_xml` 增加字符串 next 链支持,属行为扩展而非缺陷修复,且触发依赖仓库内未出现的数据形态;放弃并记录)。
+5. **7 条缺陷逐条 diff 复审**:对照 REVIEW.md 第 6 节,确认修复点语义(尤其 pipeline 登录短路删除、flush_loop 回退、connect 锁内检查、phone &str、write_blocks 未包含在本方案 -> 见下)。**compiler.rs write_blocks 缺陷不在本方案范围**(它要求给 `block_xml` 增加字符串 next 链支持,属行为扩展而非缺陷修复,且触发依赖仓库内未出现的数据形态;放弃并记录)。
 
 > 注意:7 条严重缺陷中 6 条在本方案修复(1、2、3、4、5、7);第 6 条(compiler.rs `write_blocks` 字符串引用形态)按上述理由放弃。
 
@@ -255,7 +255,7 @@ mod tests {
 ## Assumptions & contingencies
 
 - **基线**:假设 `cargo check` 在 8e87466 通过。若实际失败,先修基线(与本次改动无关的存量问题)再执行 Phase 1。
-- **代理失败**:任一 Phase 2 代理交付物编译失败或未按清单完成 → 只重跑该代理,不重跑整波。
+- **代理失败**:任一 Phase 2 代理交付物编译失败或未按清单完成 -> 只重跑该代理,不重跑整波。
 - **grep 清单偏差**:各文件 `.send()?` 站点行号以实施时 grep 结果为准(清单行号来自 2026-08-10 阅读);替换只按"模式逐字等价"规则判定,不等价即跳过并记录。
 - **`check_spam_posts` 行为变化**(达到阈值即停)为有意改动,符合评审建议;若需保留"收集全部用于日志计数"的行为,则在循环内继续计数但不收集,阈值后 break——实施时采用本方案的简化版(break),不做日志计数增强。
 - **flush_loop 失败回退的重复发送边界**(见 Agent C):接受;若实施中发现 `merge_commands(batch.clone())` 造成可见性能问题(批内命令数极大),改法:先取 tx 再 drain,失败回退仍 clone——保持 clone 方案即可,不引入新结构。

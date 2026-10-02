@@ -18,7 +18,7 @@
 ## 1. 冲突核对(结论已按文档修正)
 
 | 上轮发现                                         | 既有文档裁决                                 | 本轮处理                                                                            |
-| ------------------------------------------------ | -------------------------------------------- | ----------------------------------------------------------------------------------- |
+| --- | --- | --- |
 | `DataStore` 双哈希查找(`contains_key`+`get_mut`) | 02 效率 #8 曾列整改;04 行 149"回退保持现状"  | **采纳后回退**:单次哈希因借用检查 E0499/E0500 无法实现,保持双哈希,原注释属实(见 P1) |
 | `merge_commands(batch.clone())` 每 100ms 深克隆  | 03 §Agent C + 04 F1/P3:保留 clone 供失败回退 | **不列入**                                                                          |
 | `fire_list_outcome` 多次持锁 + 整表双克隆        | 02 行 115 已记录;04 行 149 回退              | **不列入**                                                                          |
@@ -34,7 +34,7 @@
 
 ### P0 — `pop/shift/remove` 空/越界返回 `Err` 与 `Result<Option<_>>` 契约冲突(落实 04 Phase 2-7,扩展 remove)
 
-**问题**:`CloudList::pop/shift/remove` 与 `CloudConnection::list_pop/list_shift/list_remove` 签名均为 `Result<Option<CloudValue>>`,但当列表为空(或下标越界)时,`list_apply_local` 经 `execute_list_action` 的 `items.pop()?` / `*index >= items.len()` 返回 `None` → 映射为 `Err(InvalidArgument)`,`Ok(None)` 分支永远不可达。
+**问题**:`CloudList::pop/shift/remove` 与 `CloudConnection::list_pop/list_shift/list_remove` 签名均为 `Result<Option<CloudValue>>`,但当列表为空(或下标越界)时,`list_apply_local` 经 `execute_list_action` 的 `items.pop()?` / `*index >= items.len()` 返回 `None` -> 映射为 `Err(InvalidArgument)`,`Ok(None)` 分支永远不可达。
 
 **位置**:`CloudList::pop` 1332-1343、`shift` 1350-1361、`remove` 1368-1379;`CloudConnection::list_pop` 1108-1118、`list_shift` 1125-1135、`list_remove` 1147-1150;根因 `execute_list_action` 1537-1547(`DeleteLast`)、1556-1569(`DeleteAt`)。
 
@@ -58,10 +58,10 @@ pub fn pop(&self) -> Result<Option<CloudValue>> {
 
 ### P1 — `DataStore` 双哈希查找改单次哈希(采纳后回退:借用检查限制)
 
-**结论**:`variable_in` / `list_mut` 的"按名 → 按 cvid"回退查找,在签名 `fn<'a>(&'a mut HashMap) -> Option<&'a mut VariableData>` 下**无法用单次 `get_mut` 实现**。执行时逐一验证:
+**结论**:`variable_in` / `list_mut` 的"按名 -> 按 cvid"回退查找,在签名 `fn<'a>(&'a mut HashMap) -> Option<&'a mut VariableData>` 下**无法用单次 `get_mut` 实现**。执行时逐一验证:
 
-- `if let Some(v) = vars.get_mut(key) { return Some(v); }` + 回退 `and_then` → **E0500**(闭包需独占 `*vars`,但已被首个 `get_mut` 借走);
-- 嵌套 `match vars.get_mut(key) { Some(v) => Some(v), None => … vars.get_mut(name) }` → **E0499**(`Some` 分支返回把首个可变借拉长为 `'a`,与 `None` 分支第二次 `get_mut` 冲突)。
+- `if let Some(v) = vars.get_mut(key) { return Some(v); }` + 回退 `and_then` -> **E0500**(闭包需独占 `*vars`,但已被首个 `get_mut` 借走);
+- 嵌套 `match vars.get_mut(key) { Some(v) => Some(v), None => … vars.get_mut(name) }` -> **E0499**(`Some` 分支返回把首个可变借拉长为 `'a`,与 `None` 分支第二次 `get_mut` 冲突)。
 
 **根因**:`Some(v) => Some(v)` 要求 `vars` 被独占借满 `'a`(整个函数),与回退路径上的第二次可变借互斥。`contains_key`(不可变借,随即结束)+ `get_mut` 是唯一可编译写法;原代码注释属实,03 行 145 的 `if let` 方案本身无法编译。
 
@@ -100,8 +100,8 @@ pub fn pop(&self) -> Result<Option<CloudValue>> {
 
 若看重"通用原语未来可被非 WS 模块复用":
 
-- 通用并发原语 `CallbackStore<T>`/`Notify`/`wait_flag`/`truncate` → 新增 `src/utils/sync.rs`(或 `src/utils/` 下新文件);
-- WS 专用 `WsStream`/`Ws`/Socket.IO 常量/`Frame`/`parse_frame`/`set_stream_read_timeout` → `src/core/socketio.rs`。
+- 通用并发原语 `CallbackStore<T>`/`Notify`/`wait_flag`/`truncate` -> 新增 `src/utils/sync.rs`(或 `src/utils/` 下新文件);
+- WS 专用 `WsStream`/`Ws`/Socket.IO 常量/`Frame`/`parse_frame`/`set_stream_read_timeout` -> `src/core/socketio.rs`。
 
 **代价**:拆成两个新模块,比方案 A 多一层;且这些"通用原语"当前仅 WS 客户端在用,过早拆分属 YAGNI。**结论:首选方案 A;若未来 `CallbackStore`/`Notify` 被非 WS 模块复用,再上移 utils,不做超前拆分。**
 
@@ -136,12 +136,12 @@ src/utils/net/            (或 src/net/,二选一)
 成本/收益对比:
 
 |           | 方案 A(`core/socketio.rs`)    | 方案 C′(net 子模块)                                                            |
-| --------- | ----------------------------- | ------------------------------------------------------------------------------ |
+| --- | --- | --- |
 | 新增/搬迁 | 新增 1 个文件,零动既有 import | 搬迁 acquire(3500 行)+ 新增 sync/socketio + 动 19 文件 import(或 pub use shim) |
 | 收益      | 消除 WS 重复,边界清晰         | 统一"网络接入层" + 萌化命名 + 消除 WS 重复                                     |
 | 风险      | 极低                          | 高(触达全仓 import 最广的模块)                                                 |
 
-**推荐:消除 WS 重复 → 方案 A 成本最低、边界最清晰;若目标是"建立统一网络接入层 + 萌化命名"这一更大的架构愿景 → 方案 C′ 是正确形态,但它是跨 19 文件的独立重构,应单独立项(如 `docs/rounds/12-*`),不与本轮 P0/P1/P4 混批。**
+**推荐:消除 WS 重复 -> 方案 A 成本最低、边界最清晰;若目标是"建立统一网络接入层 + 萌化命名"这一更大的架构愿景 -> 方案 C′ 是正确形态,但它是跨 19 文件的独立重构,应单独立项(如 `docs/rounds/12-*`),不与本轮 P0/P1/P4 混批。**
 
 #### 3.5 方案 D(已选定)— WS 迁入 `utils/socketio.rs` + `acquire` 重命名 `requests.rs`
 
@@ -160,7 +160,7 @@ src/utils/
 
 **改动范围**:
 
-1. 重命名 `src/utils/acquire.rs` → `src/utils/requests.rs`(用 `lsp rename_file` 一次性改写全部引用):`src/utils.rs` 的 `pub mod acquire;` → `pub mod requests;`;19 个文件的 `use crate::utils::acquire::{…}` / `use crate::utils::acquire;` → 对应 `requests` 路径;`grep -rn "utils::acquire\|utils/acquire" src/ README.md` 复核无残留(历史评审文档 docs/ 不动)。
+1. 重命名 `src/utils/acquire.rs` -> `src/utils/requests.rs`(用 `lsp rename_file` 一次性改写全部引用):`src/utils.rs` 的 `pub mod acquire;` -> `pub mod requests;`;19 个文件的 `use crate::utils::acquire::{…}` / `use crate::utils::acquire;` -> 对应 `requests` 路径;`grep -rn "utils::acquire\|utils/acquire" src/ README.md` 复核无残留(历史评审文档 docs/ 不动)。
 2. 新增 `src/utils/socketio.rs`,下沉约 150 行纯基础设施(`WsStream`/`Ws` 别名、Socket.IO 常量、`Frame`、`parse_frame`、`set_stream_read_timeout`、`CallbackStore<T>`、`Notify`、`wait_flag`、`truncate`)。
 3. 删重:cloudvar.rs / converse.rs 删除本地副本,改 `use crate::utils::socketio::*`(或逐项导入)。
 
@@ -169,7 +169,7 @@ src/utils/
 - 通用原语暂留 socketio.rs:`CallbackStore`/`Notify`/`wait_flag`/`truncate` 是通用并发/字符串原语,严格说非 WS 专用;但当前仅 WS 客户端在用,单模块放下更简单(YAGNI)。若未来被非 WS 模块复用,再拆 `utils/sync.rs`(即方案 B 的 utils 版)。此取舍与 acquire 内部同样混放 `generate_random_id`/`current_timestamp_*` 等通用工具一致。
 - 萌化边界:`requests.rs` 保留既有萌化;`socketio.rs` 的协议概念(Frame/parse_frame)保持现有清晰命名即可,通用原语(CallbackStore/Notify)保持中性——与 acquire 内部从未萌化 `Mutex`/`Condvar` 一致。不做强制萌化。
 
-**与方案 A/C′ 的关系**:方案 D 是"utils 作为基础设施层"方向的平铺最简版——比 C′ 少一层 `net/` 目录与 `mod.rs` 重导出、无需拆分 `sync.rs`,且把 `acquire`→`requests` 的语义澄清(HTTP 层名比 acquire 更准确)与 8 字母约定一并纳入。唯一新增成本是 19 文件 import 改写(机械、低风险,`lsp rename_file` 自动完成)。
+**与方案 A/C′ 的关系**:方案 D 是"utils 作为基础设施层"方向的平铺最简版——比 C′ 少一层 `net/` 目录与 `mod.rs` 重导出、无需拆分 `sync.rs`,且把 `acquire`->`requests` 的语义澄清(HTTP 层名比 acquire 更准确)与 8 字母约定一并纳入。唯一新增成本是 19 文件 import 改写(机械、低风险,`lsp rename_file` 自动完成)。
 
 #### 3.6 决策状态
 
@@ -178,13 +178,13 @@ src/utils/
 ### P4 — 低优先级项(升格为修改目标)
 
 | #   | 项                                              | 位置                                    | 改动                                                                                                                                                                                                                                                                                      |
-| --- | ----------------------------------------------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| --- | --- | --- | --- |
 | 4-1 | `truncate` 三次 `chars().count()`               | cloudvar 2354-2364 / converse 1045-1055 | `count()` 一次并复用:`let count = text.chars().count(); if count <= max {…}` `tail: text.chars().skip(count - half).collect()`                                                                                                                                                            |
 | 4-2 | `CloudList::join` 中间 `Vec<String>`            | cloudvar 1410-1424                      | 手写循环 + `use std::fmt::Write as _; write!(out, "{v}")`,避免 `collect::<Vec<_>>().join()` 的中间分配                                                                                                                                                                                    |
 | 4-3 | `parse_frame` 二次解析不对称(converse 侧缺注释) | converse 593-617                        | 在 converse `parse_frame` 加注释说明:chat 事件无字符串化载荷,刻意不二次解析(与 cloudvar 不同),防未来误改                                                                                                                                                                                  |
 | 4-4 | `emit_variable_change` 的 `key` 入参语义游移    | cloudvar 1759(name)vs 2030/2065(cvid)   | 补 doc-comment:入参 `key` 可为 name 或 cvid,`variable_mut` 双路径解析                                                                                                                                                                                                                     |
 | 4-5 | `CommandFactory` 空结构体命名空间               | cloudvar 259-294;调用点 1657、1767-1770 | 删 `CommandFactory`,三函数改自由函数(如 `private_update_command`/`public_update_command`/`list_update_command`),3 处调用点同步                                                                                                                                                            |
-| 4-6 | `CallbackHandle(usize::MAX)` 哨兵               | cloudvar 1244、1272、1436、1455         | 四方法(`CloudVariable::on_change/on_ranking`、`CloudList::on_change/on_operation`)返回类型 `CallbackHandle` → `Option<CallbackHandle>`,`map_or(sentinel, …)` → `map(…)`;`remove_*_callback` 无需改(其 `retain` 对不存在句柄本就是 no-op)。属破坏性签名变更,与 07 先例一致,README/示例同步 |
+| 4-6 | `CallbackHandle(usize::MAX)` 哨兵               | cloudvar 1244、1272、1436、1455         | 四方法(`CloudVariable::on_change/on_ranking`、`CloudList::on_change/on_operation`)返回类型 `CallbackHandle` -> `Option<CallbackHandle>`,`map_or(sentinel, …)` -> `map(…)`;`remove_*_callback` 无需改(其 `retain` 对不存在句柄本就是 no-op)。属破坏性签名变更,与 07 先例一致,README/示例同步 |
 
 ## Verification
 
