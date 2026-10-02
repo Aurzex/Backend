@@ -80,7 +80,7 @@
 2. **可选字段不可假设齐全**:同一节点模型在真实作品里字段有无不一(HEX Editor 的 359 个节点:`location` 16、`mutation` 19、`comment` 0)。解析/比较要容忍缺失,写出时按模板给全。
 3. **shadow XML 有多形态**:带/不带 `xmlns`、带/不带 `id`、约束字面量 `-Infinity,Infinity,0,` vs `1,Infinity,1,` —— 语义等价、字节不同。产出要**稳定**(带 `xmlns` + 显式 `id`),比较用语义 diff。
 4. **脏键会传染**:`broadcasts.broadcastsDict` 里出现过 `"toJSON"` 这类键,本库反编译产物里也有 ⇒ 转换前应过滤/告警。
-5. **大文件是常态**:真实作品 3.7 MB(HEX Editor)到 63 MB(`原气骑士 且听风吟-编辑版.bcm4`)。构建"邻接表→树"要用 `HashMap` 一次归并,禁止线性查找父节点。
+5. **大文件是常态**:真实作品 3.7 MB(HEX Editor)到 63 598 143 B(≈60.6 MiB,`原气骑士 且听风吟-编辑版.bcm4`)。构建"邻接表→树"要用 `HashMap` 一次归并,禁止线性查找父节点。
 6. **资源(造型/音频)必须是可访问 URL**:官方导入时会 `fetch` + 重新 `upload` 并归一化 `centerPoint`,失败是 `try/catch` + 继续。
 7. **`source` 字段是"保留原件"**:KN 编辑器导入 Kitten 作品时,把**原始 Kitten 文件字节**当 `bcm4` 重新上传,URL 写进 KN 作品的 `source`。
 

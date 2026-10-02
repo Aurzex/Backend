@@ -3,7 +3,7 @@
 > **知识库条目。** 这里列出历史轮次(`docs/rounds/`)里**已经过时或写错**的表述及其正确值。
 >
 > 为什么不在原文档上直接改:`docs/rounds/20` §6.1 定为**历史保真** —— 轮次记录不改写,只在本篇集中勘误。
-> 每条的「正确」列都已对**当前源码**核过(2026-09-25)。
+> 每条的「正确」列都已在**写下时的**当前源码上核过(总表初版 2026-09-25;**此后各节按各自标注日期增补**,最新 2026-10-02)。
 >
 > 常见失效类型:① 文件被重命名/搬迁(`utils/acquire.rs` → `utils/requests.rs`、`core/compiler.rs` → `core/convert/**`、
 > `utils/data.rs` → `utils/filedata.rs`);② 类型改名(`HTTPStatus` → `StatusCode`、`CloudError`/`ChatError` → `SocketError`);③ 行号漂移;
@@ -322,7 +322,7 @@ pub struct LocalClientProvider {
 | rounds/34 §4nonies 末段 | "**仍未解决**:产品在编辑器里作品名与变量能进,但 3 个角色一个都不出现(⇒ 画布 0 块)" | **已解决**(rounds/35):根因是缺 `theatre.groups` + 场景 `group_order`;KN 侧没有分组概念 ⇒ 反向必须合成"一角色一组" |
 | rounds/34 §4nonies 的挑名描述 | "歧义挑选:候选里编辑器认识的优先 → KN 名本身认识就保留 → 再退非云优先" | 这段只描述**多候选(歧义)**分支;**单候选分支当时完全没做判据** ⇒ KN `text` 被写成 Kitten3 口径的 `get_split_options` 而被剔掉。现块与影子**共用**同一判据。见 rounds/36 |
 | `src/core/convert/translate/assembly.rs` 旧注释 / rounds/31 审计 | "反向没有 groups 概念,写回 `scene.actors` 即可" | **不完整**:`scene.actors` 之外还必须有 `theatre.groups` 与 `group_order`(编辑器靠它们列角色)。见 rounds/35 |
-| 一般印象:"积木数对得上就能打开" | — | **错**:见 `knowledge/convert-semantics.md` §5bis 的四条隐性契约(骨架键 / groups / 词汇表 / 表是 Kitten3 口径) |
+| 一般印象:"积木数对得上就能打开" | — | **错**:见 `knowledge/convert-semantics.md` §5bis 的**五条**隐性契约(骨架键 / groups / 词汇表 / 表是 Kitten3 口径 / 不认识的块改「未收录积木」标记;第 5 条为 rounds/38 增补) |
 
 ## 第三十八轮的结论变更(2026-10-01)
 
@@ -368,3 +368,8 @@ W10 落地(`66c0b6b`)后,**"内联对象形态影子 ⇒ 拒收该作品"这条�
 - **易误**:"`--bins` **946**(其中 `main.rs` **896**)/ `--tests` **551**"看起来像**现在能跑出来**的数。
   - **正确**:这是 **`47a8c5e`(bin 改走库 crate、去掉第二个 crate root)之前**的旧读数(`src/main.rs` 当时还把 `mod api/core/utils` 再编一遍)—— 它被那次**重写**清掉,**不是**"清 `unused`"清的;现行 `--bins` = **0**,当前树**不可复现**该数字。R2 开工时(`47a8c5e` 之后)的同口径读数是 `--lib` 50 / `--bins` 50(bin 自身 0)/ `--tests` 98,终态三选择 **0/0/0**。
   - **权威口径**:`docs/goals/infra-backlog.md` §1.1 的"两棵树"分层与 `docs/goals/README.md` 第 40 轮 R2 行;另 `docs/rounds/39` §0.3 W5 行 / §W5 落地段 / 回填段也在**就地标注**(标注日期 **2026-10-02** —— 该文按纪律本不改写,只因它仍是**在用中的计划文档**才接受这种临时处理,故在此登记)。
+
+## 2026-10-02 文档巡检(阶段 1:准确性)发现的两处
+
+- **渲染硬错误(已修,在此登记)**:`docs/rounds/37-convert-architecture-refactor-plan.md` §3.2 的表格在 Q5 与 Q6 两行之间夹了一个空行 ⇒ Markdown 把它断成两张表(Q6 那一行掉到表外、渲染异常)。已**只删该空行**(不改任何正文文字)。同批的同类空行断表另有两处:`docs/goals/pending-decisions.md` A 组表(A4/A5 之间)与 `docs/rounds/README.md` 第 40 轮两行之前,均已并回。
+- **失效目录(只登记,按"历史保真"不改正文)**:`docs/rounds/33-corpus-sweeps-and-format-split.md` §1、§3 与 §4 的命令示例把正向语料目录写成 `download/compile/k4raw/`(§3 还写"落盘到该目录")—— **该目录不存在**;平台原件编辑格式现在落在 `download/compile/k4edit/`(由 rounds/37 §12 的采集器写入),正向扫描器实际吃 `download/compile/*.bcm4`。`docs/goals/convert-backlog.md` §2 第 1 条与 `docs/rounds/37` §10.3 已改正,轮次正文按纪律不动。

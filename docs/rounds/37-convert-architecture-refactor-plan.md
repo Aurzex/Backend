@@ -103,7 +103,6 @@ nemo_mapping   ≈ 2580 NEMO 解析 + 映射 + 表
 | Q3 | `decompile/mod.rs` 的 8 个专用 `BlockDecompiler` impl(1356-1830)用函数指针表替掉 | **先不做**:能把"每个特殊块的差异点"藏进表里,可读性未必更好;仓库明令"不过度抽象、不加宏"。先补 Phase 0.4 的单测再评估 | 若后续 decompile 侧要频繁加块类型,再议 |
 | Q4 | `tree_to_json` 两份(nemo.rs:1445 vs model.rs:1779) | **不合并**:model 那份会补 `shield:false`(官方有、我们 NEMO 产物没有)⇒ 合并 = 改字节,而 NEMO 现在**没有 SHA 门**。先做两件低风险事:nemo 那份 `filter_map(ok())` 改成进报告;`fill_shield` 显式化为 `ShieldMode` 参数 | Phase 0.5 之后 |
 | Q5 | `escape_text`(nemo_mapping.rs:2098)在**属性位置**漏转 `"` | **本轮不改**:补转义 = 改产物字节,须先确认是"照抄官方"还是疏漏(bundle 锚点)+ NEMO SHA 门 | 作为**独立裁决**记录,不塞进重构 |
-
 | Q6 ✅ **已核实(2026-09-26):不合并** | **两套批处理执行器**是否同构:`assembly::run_items`(assembly.rs:2191)与 `shared::batch_map`(shared.rs:1100) | 逐行比对后**四项语义不同**:① 装箱方式 —— `run_items` 是**加权贪心装箱**(LPT,重活优先)vs `batch_map` 是**按并发等分 chunk**;② panic —— `run_items` 让 worker panic **冒泡**(`thread::scope` 默认)vs `batch_map` 用 `on_panic` **折成调用方错误**;③ 入参所有权 —— `Vec<I>` 按值 vs `&[T]` 借用;④ 返回 —— 直接 `Vec<T>` vs `Vec<Result<R,E>>`。合并只能二选一丢功能(丢掉装箱均衡会伤大作品并行度)⇒ 违"不过度抽象"约定 | **不做**(结论已记入 §3.3) |
 
 ### 3.3 明确不做(防重开,已决/已论证)

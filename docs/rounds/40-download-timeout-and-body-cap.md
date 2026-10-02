@@ -12,7 +12,7 @@
 1. **超时**:下载请求受全局 30 s 限制。
 2. **体量(更硬)**:`ureq::Body::read_to_vec` / `read_to_string` 自带 **10 MB** 上限
    (`MAX_BODY_SIZE`,ureq 3.4.0)—— 大作品**在超时之前**就 `BodyExceedsLimit` 失败,只放宽超时没用。
-   证据:本机语料 `download/compile/raw/原气骑士 且听风吟-编辑版.bcm4` = **61 MB**。
+   证据:本机语料 `download/compile/raw/原气骑士 且听风吟-编辑版.bcm4` = **63 598 143 B(≈60.6 MiB)**。
 
 ## 3. 改动(`afca96c`)
 
@@ -21,7 +21,7 @@
   `.with_timeout(DOWNLOAD_TIMEOUT)` + 大体读取。
 - `src/utils/requests.rs` 新增:
   - `pub const DOWNLOAD_TIMEOUT: Duration` = 900 s(换算:30 MB 上传 228 s ⇒ ~130 KB/s;
-    63 MB 按 100 KB/s ≈ 645 s ⇒ 900 s 留 ~40% 余量)。
+    63 598 143 B 按 100 KB/s ≈ 636 s ⇒ 900 s 留 ~40% 余量)。
   - `pub const MAX_DOWNLOAD_BODY_BYTES: u64` = 256 MiB(内存护栏,**不是**协议限制)。
   - `CodeMaoClient::response_to_{binary,string,json}_large(response, url)`:显式自管上限读取,
     超限报可操作的 `MewError::ResponseTooLarge { url, limit, received }`。
@@ -62,7 +62,7 @@
 | — | 上传侧 `utils/requests.rs` | 上传(已 A1 修过) | `UPLOAD_TIMEOUT` 600 s(**未动**) | 同前 |
 
 **哪些当前就可能超过 10 MB**:#2 / #4 / #7 / #9 / #10 / #13(作品文档)、#11(单个大素材)、
-#15(编辑格式 `.bcm4`,语料实测 61 MB)。修复前它们会先撞 10 MB 上限。
+#15(编辑格式 `.bcm4`,语料实测 ≈60.6 MiB / 63 598 143 B)。修复前它们会先撞 10 MB 上限。
 
 ## 6. 未做
 

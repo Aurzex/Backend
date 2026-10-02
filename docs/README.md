@@ -1,6 +1,6 @@
 # docs 导航
 
-本目录按**用途**分成两块库 + 一块历史记录。原来的 `NN-*.md`(32 篇演进式轮次文档)**原样保留**在 `rounds/`,
+本目录按**用途**分成两块库 + 一块历史记录。迁移前已有的 `NN-*.md`(32 篇:`01`–`32`)演进式轮次文档**原样保留**在 `rounds/`,
 只做搬迁与交叉引用重写,内容不改写(约定见 `rounds/20` §6.1「历史保真」)。
 
 ## 知识库 `knowledge/`(是什么 / 为什么)
@@ -31,12 +31,12 @@
 
 ## 历史记录 `rounds/`(过程)
 
-`rounds/01-websocket-pitfalls.md` … `rounds/37-convert-architecture-refactor-plan.md` —— 每轮一份的方案/评审/整改记录。
-**入口先看 [`rounds/README.md`](rounds/README.md)**(28–36 轮的索引 + "该看哪几篇"),再看本篇。
+`rounds/01-websocket-pitfalls.md` … `rounds/40-bench-fixture-discipline.md`(第 40 轮有两篇)—— 每轮一份的方案/评审/整改记录。
+**入口先看 [`rounds/README.md`](rounds/README.md)**(28–40 轮的索引 + "该看哪几篇"),再看本篇。
 价值在**证据链**(真机实测、抓包、官方 bundle 逆向、逐条评审),以及"为什么当初这么决定"。
 读它们时先看 `knowledge/errata.md`:早期文档里的文件名/类型名/行号多数已经漂移。
 
-**文件分布**:知识库 7 篇(`knowledge/`)、目标库 5 篇(`goals/`)、轮次记录 36 篇(`rounds/`,第 33–36 轮是转换域最近的工作)。
+**文件分布**:知识库 7 篇(`knowledge/`)、目标库 5 篇(`goals/`)、轮次记录 41 篇编号文档(`rounds/`,另有 1 篇 `README.md`;第 38–40 轮是转换域最近的工作)。
 
 > **读老轮次前先做的两件事**:① 查 `knowledge/errata.md`(它集中列出已过时/写错的表述及正确值,
 > 含"第三十三至三十六轮的结论变更"一节);② 转换相关的问题先读 `knowledge/convert-semantics.md` 的

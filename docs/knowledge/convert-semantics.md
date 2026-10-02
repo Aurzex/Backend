@@ -77,7 +77,7 @@ NEMO → KN 是另一条前端(`hI.parseBlocksXML`),官方管线共 12 步(`main
 
 ## 5bis. Kitten4 **编辑器的隐性契约**(实机验证得出,改写出器前必读)
 
-这一节是 rounds/34–36 的产物:**积木数对得上 ≠ 编辑器能打开**。四条,每条都有实机证据。
+这一节是 rounds/34–36(第 1–4 条)与 rounds/38(第 5 条)的产物:**积木数对得上 ≠ 编辑器能打开**。五条,每条都有实机证据。
 
 1. **顶层平台骨架键必须齐**(15 个):`toolbox` / `toolbox_order` / `last_toolbox_order` / `ai_lab` / `matrix` /
    `models` / `midi_order` / `midimusic` / `is_partial` / `sample_id` / `codemao_value` / `work_source_label` /

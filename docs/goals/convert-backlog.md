@@ -59,7 +59,7 @@
      实测 654→13),`kitten/r2/work/edit/load/*` 与 `kitten/work/ide/load/*` 都 404,`source/public` 对 Kitten 报 422;
      编辑格式只存在于**编辑器保存时的载荷**里 ⇒ 需要浏览器会话抓包(形态与两次误判见 rounds/33 §2;
      扫描器已加"缺 `block_data_json` 即跳过"的形态守卫)。
-2. **NEMO 侧内存入口**:按 `docs/rounds/27` §2,应像 KN 侧一样把编辑版 `Value` 直接交给 translate,避免"落盘→读回"。落地情况 **[待核验]**。
+2. **NEMO 侧内存入口**:按 `docs/rounds/27` §2,应像 KN 侧一样把编辑版 `Value` 直接交给 translate,避免"落盘→读回"。✅ **已落地**:NEMO 走 `WorkDecompiler::editable_document` 直接给明文编辑版(不落盘、不下资源),域门面再交 `translate_value`(见 `src/core/convert/decompile/mod.rs` 与 `src/core/convert/mod.rs` 的"方案 23 P0-2"注释;rounds/37 §10.1 P10)。
 2a. ✅ **已完成(2026-09-26)**:单包上传上限实测 **20 MB 可传 / 24 MB 413**(同渠道逐档),并加了
    `shared::ensure_single_package_fits` 提前报错闸(>20 MB 直接给出"上限 + 实测值"的错误)。
    要传更大作品需**分片上传**(qiniu 支持),目前无此需求(真实 KN 产物 3~9 MB)。

@@ -33,8 +33,9 @@
 - ✅ **已完成(2026-09-26)**:`cloudvar.rs` 的 `detect_editor` 原用全局 `WorkDataFetcher::new()` —— 现改为
   `CloudBuilder::new_with_client(work_id, client)` + `CloudConnection` 暴露 `client()`(`impl ClientAccess`),
   缺省构造仍走 `CodeMaoClient::global()`(对既有使用方行为不变)。回归测试见 `cloudvar::tests::cloud_builder_uses_injected_client`。
-- **仍未注入的一处(已知,记在目标库)**:`src/core/convert/mod.rs` 上传前取作品 `preview` 用 `WorkDataFetcher::new()`
-  (全局);要注入得让 `DecompileOptions`/`TranslateOptions` 持有客户端 ⇒ 独立决策。
+- ✅ **已完成(2026-09-26,`915c8ff`)**:`src/core/convert/mod.rs` 上传前取作品 `preview` 原用全局 `WorkDataFetcher::new()`
+  —— 现改由 `DecompiledArtifact::Document` 随产物带出 `preview`(反编译阶段本就拿到),建草稿不再重拉详情
+  ⇒ 那处全局客户端依赖随之消失(rounds/37 §10.1 P10)。
 
 ## 3bis. `.gitignore` 的一个坑(已修,读到这里先知道)
 
@@ -69,7 +70,7 @@
 - 删除/合并**必须有零调用点证据**(全仓 grep 命中 0 才删);测试模块一律放**文件末尾**。
 - `src/prelude.rs` 只 re-export `utils::requests`;`utils.rs` 现导出 `requests`/`filedata`/`socketio`(`acquire.rs`/`data.rs` 已成历史名)。
 - **`core/convert/` 是"作品文件转换域"的唯一边界**:读(反编译)与写(互转)共用同一地基;域外不再有平铺的 `compiler.rs`/`unpacker.rs`/`decoders.rs`。
-- **域内文件组织(以 `docs/rounds/31-convert-layout-consolidation-plan.md` §2.1 为准)**:一个文件一个职责;
+- **域内文件组织(以 `docs/rounds/31-convert-layout-consolidation-plan.md` §2「目标结构」的模块图 + §2.3「组织规则」为准;该文没有 §2.1)**:一个文件一个职责;
   生成物单独一处(`translate/tables_gen.rs`,**不可与手写表混放**);测试默认内联在被测文件末尾,
   「本体 + 测试 > 3 000 行」时才独立成 `*_tests.rs`;**单文件上限 ≈ 2 500 行**。
   当前布局:`mod.rs` + `shared.rs` + `upload.rs` + `decompile/{mod,editors,config,shadow,work}.rs` + `translate/{mod,model,mapping,assembly,pipeline,options,report,xml,nemo,nemo_mapping,tables_gen,kitten4_vocab,reverse_tests,nemo_tests}.rs`(**22 文件**;W2 后新增 4 个:`upload.rs` 是**域级工具层**(与门面同级,`shared.rs` 零反向依赖),`decompile/{config,shadow,work}.rs` 是反编译**私有件**。权威清单见 `docs/rounds/39` §W2 落地段;其 §1.1 的表是 W2 之前的快照)。

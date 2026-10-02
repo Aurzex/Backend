@@ -12,13 +12,13 @@
 | 云存储事件帧是否容忍**无空格** `42[…]` | 现实现无空格且工作正常,但 `docs/rounds/01` 坑 5 要求"统一带空格" ⇒ 以真机为准定论(不要盲改) | `docs/rounds/01` 坑 5 |
 | WS 连接行为 | 并发 `connect` 串行化、断连**不发虚假 `Error`** 需真实 WS 服务人工验证 | `docs/rounds/04` Phase 4 |
 
-## 2. 待核验(文档称已完成,但证据不足)
+## 2. 已核验(3 条全 ✅;原先怀疑的"证据不足"已消)
 
 1. ✅ **已核对,早已办妥**:`fetch_organization_ids` 的绝对 URL 调用点只有一处且传 `None` —— `src/api/education.rs` 的 `build_request(..., None)`;全仓绝对 URL 调用点均为 `None`(`docs/rounds/13` §P3-5)。
 2. ✅ **已核对,早已办妥**:`fetch_7day_hot_posts_iter`(`src/api/forum.rs`)端点固定为 `"/web/forums/boards/posts/7dayHot"`,`board_id` 走 `with_iter_param`(`docs/rounds/13` §P3-6)。
 3. ✅ **已完成(`60d5358`)**:`src/core/converse.rs` 补注释「chat 事件无字符串化载荷,刻意不二次解析(与 cloudvar 不同),勿改」(`docs/rounds/11` §P4-3),零行为改动。
 
-## 3. 待方案 + 评审
+## 3. 待方案 + 评审(5 行中 3 行已 ✅,剩 2 项待方案)
 
 | 项 | 说明 | 出处 |
 | -- | ---- | ---- |
