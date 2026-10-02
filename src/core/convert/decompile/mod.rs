@@ -892,10 +892,6 @@ pub(crate) fn child_input_name(block_type: &str, index: usize, conditions_count:
 pub(crate) struct BlockContext {
     pub(crate) actor_data: Value,
     pub(crate) functions: Arc<HashMap<String, Value>>,
-    // 只写不读:由 `with_capacity` 注入,当前无读取方。删它要连带 9 处(字段 + 两个签名参数 +
-    // 3 处调用点 + 每个角色的 map 构造),属 decompile 内部清理 ⇒ 登记给 R4(decompile 补离线测试)一并做。
-    #[allow(dead_code)]
-    pub(crate) variable_map: Arc<HashMap<String, String>>, // UUID -> 变量名
     pub(crate) shadow_builder: ShadowBuilder,
     pub(crate) blocks: HashMap<String, Value>,
     pub(crate) connections: HashMap<String, HashMap<String, Value>>,
@@ -909,14 +905,12 @@ impl BlockContext {
         actor_data: Value,
         functions: Arc<HashMap<String, Value>>,
         shadow_builder: ShadowBuilder,
-        variable_map: Arc<HashMap<String, String>>,
         blocks_cap: usize,
         connections_cap: usize,
     ) -> Self {
         Self {
             actor_data,
             functions,
-            variable_map,
             shadow_builder,
             blocks: HashMap::with_capacity(blocks_cap),
             connections: HashMap::with_capacity(connections_cap),
@@ -1941,6 +1935,47 @@ mod block_helper_tests {
                 "错误信息应点名出错的字段 {field},实际:{msg}"
             );
         }
+    }
+
+    /// 反编译上下文(不联网):未知块类型走兜底分派时要有一个能用的 `BlockContext`。
+    fn test_block_context() -> BlockContext {
+        let config = Arc::new(DecompilerConfig::default());
+        BlockContext::with_capacity(
+            json!({}),
+            Arc::new(HashMap::new()),
+            ShadowBuilder::new(config, IdGenerator::new(), EditorType::Neko),
+            16,
+            16,
+        )
+    }
+
+    /// 未知块类型走**兜底分派**(`create_block_decompiler` 的 `_` 分支 ⇒ `DefaultBlockDecompiler`):
+    /// 类型与标量字段**原样保留**。
+    ///
+    /// 守的是"不静默丢积木":兜底分支若被改成丢弃/跳过,未来编辑器新增的块在反编译产物里会**整体消失**
+    /// (用户看不到它、也拿不到任何提示,比"形状不对"更糟)。顺带钉住标量参数进 `fields` ——
+    /// 而不是被误当成块 id 去解析(`referenced_ids` 的误报方向)。
+    #[test]
+    fn unknown_block_type_is_passed_through_with_its_fields() {
+        let compiled = json!({
+            "type": "brand_new_block_from_future_editor",
+            "id": "u1",
+            "params": {"FOO": "bar", "BOOL": true, "VAR": "uuid-1"}
+        });
+        let mut context = test_block_context();
+        let block = create_block_decompiler(&compiled)
+            .decompile(&mut context)
+            .expect("未知类型必须走兜底分支反编译,而不是报错或丢弃");
+        assert_eq!(block["type"], "brand_new_block_from_future_editor");
+        assert_eq!(block["id"], "u1");
+        // 标量参数进 fields(编辑版据此渲染);变量 UUID 引用同样落 fields
+        assert_eq!(block["fields"]["FOO"], "bar", "{block}");
+        assert_eq!(block["fields"]["VAR"], "uuid-1", "{block}");
+        // 布尔开关参数在编辑版里不呈现(无 shadow、无 field),与既有行为一致
+        assert!(
+            block["fields"].get("BOOL").is_none(),
+            "布尔开关参数不进 fields:{block}"
+        );
     }
 }
 

@@ -213,18 +213,6 @@ impl WorkDecompiler for KittenDecompiler {
             .map(std::mem::take)
             .ok_or_else(|| DecompilerError::InvalidResponse("compile_result不存在".to_string()))?;
 
-        // 从全局 variables 构建 UUID -> 变量名映射
-        let mut global_variable_map = HashMap::new();
-        if let Some(vars) = work.get("variables").and_then(|v| v.as_object()) {
-            for (uuid, var_info) in vars {
-                if let Some(name) = var_info.get("name").and_then(|v| v.as_str()) {
-                    global_variable_map.insert(uuid.clone(), name.to_string());
-                }
-            }
-        }
-        // 所有角色/场景共享同一份映射,避免每角色深拷贝
-        let global_variable_map = Arc::new(global_variable_map);
-
         let work_type = context.work_info.work_type;
         // Kitten2/3 编辑版用 blocksXML(Blockly XML 字符串),Kitten4 用 block_data_json
         let use_blocks_xml = matches!(work_type, EditorType::Kitten2 | EditorType::Kitten3);
@@ -313,7 +301,6 @@ impl WorkDecompiler for KittenDecompiler {
                         actor_compiled,
                         &global_functions,
                         actor_info,
-                        Arc::clone(&global_variable_map),
                         work_type,
                     )
                     .with_context(|| format!("反编译角色 {} 失败", actor_id))?;
@@ -435,7 +422,6 @@ impl KittenDecompiler {
         actor_compiled: &Value,
         functions: &Arc<HashMap<String, Value>>,
         actor_info: Value,
-        variable_map: Arc<HashMap<String, String>>,
         work_type: EditorType,
     ) -> Result<Value> {
         let shadow_builder = ShadowBuilder::new(config.clone(), id_generator.clone(), work_type);
@@ -453,7 +439,6 @@ impl KittenDecompiler {
             actor_info,
             functions_arc,
             shadow_builder,
-            variable_map,
             estimated_blocks,
             estimated_blocks * 2,
         );
@@ -513,7 +498,6 @@ impl KittenDecompiler {
             json!({}),
             Arc::clone(functions),
             shadow_builder,
-            Arc::new(HashMap::new()), // 场景没有变量映射
             estimated_blocks,
             estimated_blocks * 2,
         );
@@ -1775,6 +1759,366 @@ mod xml_writer_tests {
         assert!(
             xml.contains(r#"<field name="EMPTY"></field>"#),
             "空字段被丢掉了:{xml}"
+        );
+    }
+
+    /// 多个根块的自动布局必须**两两不重叠**、**首个落在约定起点 `(0,0)`**、且**逐次稳定**。
+    ///
+    /// - 不重叠是硬不变量:所有根块坐标相同 ⇒ 编辑器里叠成一摞,**用户只看得见最上面一块**
+    ///   (积木"少"了,但计数一块不少 —— 正是"数量对得上 ≠ 能看见"这一类)。
+    /// - 起点 `(0,0)` 是 Kitten2/3 blocksXML 的既有约定(编辑器据此把根块摆进画布可见区)。
+    /// - **刻意不钉步长/首根以外的具体 y**:那是 `translate/model.rs` 里注明为自定、刻意保持的
+    ///   布局常量,换版本就可能变;而且根块坐标本就**非语义**(在语义 diff 的 allow-list 里,
+    ///   见 `docs/knowledge/convert-semantics.md` §6)。要门就门"不重叠 + 起点 + 稳定"。
+    #[test]
+    fn write_blocks_lays_roots_out_without_overlap_from_the_origin() {
+        let config = DecompilerConfig::default();
+        let writer = XmlBlockWriter::new(&config);
+        let actor = json!({
+            "compiled_block_map": {
+                "r1": {"type": "motion_movesteps", "id": "r1", "params": {"STEPS": 1}},
+                "r2": {"type": "motion_turnright", "id": "r2", "params": {"DEGREES": 2}},
+                "r3": {"type": "motion_gotoxy", "id": "r3", "params": {"X": 3}}
+            }
+        });
+        let xml = writer.write_blocks(&actor).unwrap();
+
+        let positions = root_positions(&xml);
+        assert_eq!(positions.len(), 3, "三个根块各输出一次:{xml}");
+        assert_eq!(
+            positions[0],
+            (0.0, 0.0),
+            "首个根块必须落在约定起点 (0,0):{xml}"
+        );
+        for i in 0..positions.len() {
+            for j in (i + 1)..positions.len() {
+                assert_ne!(
+                    positions[i], positions[j],
+                    "根块 {i}/{j} 坐标相同 ⇒ 编辑器里叠在一起、只看得见一块:{xml}"
+                );
+            }
+        }
+        // 稳定:同一输入两次序列化逐字节相同(布局不得依赖全局游标/随机)
+        assert_eq!(xml, writer.write_blocks(&actor).unwrap());
+    }
+
+    /// 取根块标签的 `(x, y)`:根块带 `x`/`y`(嵌套块不带),故按"有没有 x 属性"过滤。
+    fn root_positions(xml: &str) -> Vec<(f64, f64)> {
+        xml.split("<block type=")
+            .skip(1)
+            .filter_map(|rest| {
+                let tag = &rest[..rest.find('>')?];
+                Some((tag_attr(tag, "x")?, tag_attr(tag, "y")?))
+            })
+            .collect()
+    }
+
+    fn tag_attr(tag: &str, name: &str) -> Option<f64> {
+        let key = format!("{name}=\"");
+        let start = tag.find(&key)? + key.len();
+        let end = start + tag[start..].find('"')?;
+        tag[start..end].parse().ok()
+    }
+}
+
+// ===========================================================================
+// 离线单测(不联网、不落盘):七家编辑器分派处的**畸形/边界输入**与资源/文件失败路径。
+//
+// 纪律:每条断言的是"消费者看得见的行为"(返回哪种类型化错误、点名了哪个字段/角色,
+// 或者压根不留半成品),不是"函数被调用过"或"没 panic"这种空断言。
+// 客户端一律走注入缝(`HttpClient` 桩),不碰全局单例。
+// ===========================================================================
+#[cfg(test)]
+mod error_path_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// 注入的 HTTP 桩:要么把所有请求答成同一份 JSON,要么一律失败。
+    #[derive(Clone)]
+    enum StubReply {
+        Json(Value),
+        Fail,
+    }
+
+    #[derive(Clone)]
+    struct StubHttp {
+        reply: StubReply,
+    }
+
+    impl HttpClient for StubHttp {
+        fn get_json(&self, _url: &str, _headers: Option<Vec<(String, String)>>) -> Result<Value> {
+            match &self.reply {
+                StubReply::Json(v) => Ok(v.clone()),
+                StubReply::Fail => {
+                    Err(DecompilerError::InvalidResponse("测试桩:网络不可达".into()))
+                }
+            }
+        }
+
+        fn get_binary(&self, _url: &str) -> Result<Vec<u8>> {
+            Err(DecompilerError::InvalidResponse(
+                "测试桩:不提供二进制".into(),
+            ))
+        }
+
+        fn get_text(&self, _url: &str) -> Result<String> {
+            Err(DecompilerError::InvalidResponse("测试桩:不提供文本".into()))
+        }
+
+        fn box_clone(&self) -> Box<dyn HttpClient> {
+            Box::new(self.clone())
+        }
+    }
+
+    fn stub_json(v: Value) -> Box<dyn HttpClient> {
+        Box::new(StubHttp {
+            reply: StubReply::Json(v),
+        })
+    }
+
+    fn work_info(work_type: EditorType) -> WorkInfo {
+        WorkInfo {
+            id: WorkId::new(1),
+            name: "t".into(),
+            work_type,
+            user_id: 0,
+            bcm_version: String::new(),
+            preview: None,
+        }
+    }
+
+    fn context(work_type: EditorType, output_dir: Option<PathBuf>) -> DecompilerContext {
+        DecompilerContext {
+            output_dir,
+            resource_concurrency: 1,
+            download_resources: false,
+            work_info: work_info(work_type),
+            http_client: Box::new(StubHttp {
+                reply: StubReply::Fail,
+            }),
+            id_generator: IdGenerator::new(),
+            config: Arc::new(DecompilerConfig::default()),
+        }
+    }
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "backend-decompile-{tag}-{}-{:08x}",
+            std::process::id(),
+            fastrand::u32(..)
+        ));
+        std::fs::create_dir_all(&dir).expect("建临时目录");
+        dir
+    }
+
+    /// 把抓取器的 `Result<RawWorkData>` 展开成错误(桩下必然失败;
+    /// `RawWorkData` 未实现 `Debug`,不能用 `expect_err`)。
+    fn expect_fetch_err(result: Result<RawWorkData>) -> DecompilerError {
+        match result {
+            Ok(_) => panic!("缺关键字段时必须报错"),
+            Err(e) => e,
+        }
+    }
+
+    /// 编译块树:一个根块通过**字符串 id** 引用下一个块(编译格式漂移的形态)。
+    fn drifted_compiled_actor(actor_id: &str) -> Value {
+        json!({
+            "id": actor_id,
+            "compiled_block_map": {
+                "root": {"type": "motion_movesteps", "id": "root", "next_block": "leaf"},
+                "leaf": {"type": "motion_movesteps", "id": "leaf"}
+            }
+        })
+    }
+
+    // ---- Kitten4:block_data_json 分支 ----
+
+    /// Kitten4:作品缺 `compile_result`(编译产物数组)时必须返回**点明字段的类型化错误**。
+    /// 静默当成空作品 ⇒ 反编译"成功"却产出空作品,调用方无从分辨;`unwrap` 则让整批反编译一起挂。
+    #[test]
+    fn kitten4_without_compile_result_is_typed_error() {
+        let ctx = context(EditorType::Kitten4, None);
+        for bad in [json!({}), json!({"compile_result": "not-an-array"})] {
+            let err = KittenDecompiler
+                .decompile(RawWorkData::Kitten(Arc::new(bad)), &ctx)
+                .expect_err("缺/坏 compile_result 必须报错");
+            assert!(
+                matches!(&err, DecompilerError::InvalidResponse(m) if m.contains("compile_result")),
+                "应为点明 compile_result 的 InvalidResponse,实际:{err:?}"
+            );
+        }
+    }
+
+    /// Kitten4:块表里出现字符串 id 引用时,错误要**点名是哪个角色**失败的、内层原因**点明字段**。
+    /// 下游只看到"某次反编译失败"定位不了;而静默漏掉引用会把子块当根块 ⇒ 产物多出散块。
+    #[test]
+    fn kitten4_malformed_block_reference_names_actor_and_field() {
+        let ctx = context(EditorType::Kitten4, None);
+        let work = json!({"compile_result": [drifted_compiled_actor("actor-x")]});
+        let err = KittenDecompiler
+            .decompile(RawWorkData::Kitten(Arc::new(work)), &ctx)
+            .expect_err("字符串引用必须报错");
+        assert!(
+            matches!(err, DecompilerError::Other { .. }),
+            "应带 with_context 的 Other,实际:{err:?}"
+        );
+        let text = format!("{err:?}");
+        assert!(text.contains("actor-x"), "错误要点名角色,实际:{text}");
+        assert!(
+            text.contains("next_block"),
+            "内层原因要点名字段,实际:{text}"
+        );
+    }
+
+    // ---- Kitten2 / Kitten3:blocksXML 分支 ----
+
+    /// Kitten2/3 走 **blocksXML 分支**(与 Kitten4 的 `block_data_json` 是两条路),
+    /// 同一畸形引用也必须报错并点名角色 —— 该分支静默吞掉同样会让产物出现散块。
+    #[test]
+    fn kitten2_and_3_blocksxml_branch_reports_malformed_reference() {
+        for work_type in [EditorType::Kitten2, EditorType::Kitten3] {
+            let ctx = context(work_type, None);
+            let work = json!({"compile_result": [drifted_compiled_actor("actor-y")]});
+            let err = KittenDecompiler
+                .decompile(RawWorkData::Kitten(Arc::new(work)), &ctx)
+                .expect_err("blocksXML 分支也要对畸形引用报错");
+            let text = format!("{err:?}");
+            assert!(text.contains("actor-y"), "{work_type:?} 要点名角色:{text}");
+            assert!(
+                text.contains("next_block"),
+                "{work_type:?} 要点名字段:{text}"
+            );
+        }
+    }
+
+    // ---- COCO ----
+
+    /// COCO:来源文档畸形时(整屏不是对象 / 屏缺 id)必须返回类型化错误。
+    /// 这是"平台数据漂移"的第一现场 —— 裸索引/`unwrap` 会 panic 掉整个批量反编译。
+    #[test]
+    fn coco_malformed_screens_are_typed_errors() {
+        let ctx = context(EditorType::Coco, None);
+        for (bad, needle) in [
+            (json!({"screenList": [42]}), "screen不是对象"),
+            (
+                json!({"screenList": [{"id": "s1"}, {"name": "缺 id"}]}),
+                "screen缺少id",
+            ),
+        ] {
+            let err = CocoDecompiler
+                .decompile(RawWorkData::Coco(Arc::new(bad)), &ctx)
+                .expect_err("畸形屏数据必须报错");
+            assert!(
+                err.to_string().contains(needle),
+                "应为点明 `{needle}` 的错误,实际:{err:?}"
+            );
+        }
+    }
+
+    // ---- NEKO ----
+
+    /// NEKO:密文损坏(base64 解不开 / 长度不足)必须是 `Crypto` 错误,而不是 panic
+    /// 或返回半个文档 —— 后者会让调用方把损坏的作品当成"空作品"继续转换。
+    #[test]
+    fn neko_corrupt_payload_is_crypto_error() {
+        let ctx = context(EditorType::Neko, None);
+        for bad in ["***不是 base64***", "AAAA"] {
+            let err = NekoDecompiler::new(&[7u8; 16])
+                .decompile(RawWorkData::NekoEncrypted(bad.to_string()), &ctx)
+                .expect_err("损坏密文必须报错");
+            assert!(
+                matches!(err, DecompilerError::Crypto(_)),
+                "应为 Crypto,实际:{err:?}"
+            );
+        }
+    }
+
+    // ---- NEMO / WOOD:文件/资源失败路径 ----
+
+    /// NEMO:输出路径被同名**文件**占用(真实世界的"路径不可写")时必须报类型化错误,
+    /// 且**不留下半成品目录** —— 静默产出空目录会让调用方以为"反编译成功但作品是空的"。
+    #[test]
+    fn nemo_blocked_output_dir_is_typed_error_without_partial_artifact() {
+        let base = temp_dir("nemo-blocked");
+        // 工作目录名 = safe_filename("t", 1, "") == "t_1":把它占成文件
+        let blocked = base.join("t_1");
+        std::fs::write(&blocked, b"occupied").expect("占位文件");
+        let ctx = context(EditorType::Nemo, Some(base.clone()));
+
+        let err = NemoDecompiler
+            .decompile(
+                RawWorkData::Nemo(
+                    Arc::new(json!({"styles": {"styles_dict": {}}})),
+                    Arc::new(json!({"name": "t"})),
+                ),
+                &ctx,
+            )
+            .expect_err("不可写的输出路径必须报错");
+
+        assert!(
+            matches!(err, DecompilerError::Mew(_)),
+            "应为 I/O 类错误,实际:{err:?}"
+        );
+        assert!(blocked.is_file(), "占位文件不得被覆盖/删除");
+        assert!(
+            !blocked.join("user_material").exists(),
+            "失败路径不得留下部分产物目录"
+        );
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    /// WOOD:同一条"输出路径不可写"的失败路径,同样要类型化报错、不留半成品。
+    #[test]
+    fn wood_blocked_output_dir_is_typed_error_without_partial_artifact() {
+        let base = temp_dir("wood-blocked");
+        let blocked = base.join("t_1");
+        std::fs::write(&blocked, b"occupied").expect("占位文件");
+        let ctx = context(EditorType::Wood, Some(base.clone()));
+
+        let err = WoodDecompiler
+            .decompile(RawWorkData::Wood(Arc::new(json!({}))), &ctx)
+            .expect_err("不可写的输出路径必须报错");
+
+        assert!(
+            matches!(err, DecompilerError::Mew(_)),
+            "应为 I/O 类错误,实际:{err:?}"
+        );
+        assert!(blocked.is_file(), "占位文件不得被覆盖/删除");
+        assert!(!blocked.join("images").exists(), "失败路径不得留下部分产物");
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    // ---- 抓取器:源文档缺关键字段 ----
+
+    /// 抓取器在源文档缺关键字段时必须返回**点名缺失字段**的 `InvalidResponse`。
+    /// 这正是"作品详情拿得到、源文件地址拿不到"的真实情形;静默返回空文档 ⇒ 反编译产出空作品。
+    /// 三家(取源地址的 Kitten / Nemo / Coco)各一条注入桩,不碰全局客户端。
+    #[test]
+    fn fetchers_report_missing_source_field_instead_of_empty_document() {
+        let config = Arc::new(DecompilerConfig::default());
+        let empty = || stub_json(json!({}));
+
+        let err = expect_fetch_err(
+            KittenFetcher::new(empty(), config.clone()).fetch(&work_info(EditorType::Kitten4)),
+        );
+        assert!(
+            matches!(&err, DecompilerError::InvalidResponse(m) if m.contains("source_urls")),
+            "Kitten:{err:?}"
+        );
+
+        let err = expect_fetch_err(
+            NemoFetcher::new(empty(), config.clone()).fetch(&work_info(EditorType::Nemo)),
+        );
+        assert!(
+            matches!(&err, DecompilerError::InvalidResponse(m) if m.contains("work_urls")),
+            "Nemo:{err:?}"
+        );
+
+        let err =
+            expect_fetch_err(CocoFetcher::new(empty(), config).fetch(&work_info(EditorType::Coco)));
+        assert!(
+            matches!(&err, DecompilerError::InvalidResponse(m) if m.contains("bcmc_url")),
+            "Coco:{err:?}"
         );
     }
 }

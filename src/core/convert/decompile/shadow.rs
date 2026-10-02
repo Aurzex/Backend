@@ -157,3 +157,49 @@ impl ShadowBuilder {
         xml
     }
 }
+
+// ===========================================================================
+// 离线单测(不联网、不落盘):未知影子类型的告警回退
+// ===========================================================================
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 未知影子类型必须走**告警回退**成 `logic_empty` 占位,而不是静默产出空值、也不是把未知类型名
+    /// 原样写出去。消费者可见的后果有两头:**Kitten4 编辑器遇到注册表外的类型会让整份工作区加载失败**
+    /// (见 `docs/knowledge/convert-semantics.md` §5bis 第 3 条),而丢空则让输入槽没有占位默认值。
+    /// JSON(NEMO/NEKO/COCO/WOOD)与 XML(Kitten 系)两条回退点各钉一遍。
+    #[test]
+    fn unknown_shadow_type_falls_back_to_logic_empty_placeholder() {
+        let config = Arc::new(DecompilerConfig::default());
+
+        // JSON 形态:回退成 logic_empty 对象,id 现铸非空
+        for work_type in [EditorType::Nemo, EditorType::Coco] {
+            let builder = ShadowBuilder::new(config.clone(), IdGenerator::new(), work_type);
+            let v = builder.create("totally_unknown_shadow", None, None);
+            assert_eq!(v["type"], "logic_empty", "{work_type:?}: {v:?}");
+            assert_eq!(v["editable"], false, "{work_type:?}: {v:?}");
+            assert!(
+                v["id"].as_str().is_some_and(|s| !s.is_empty()),
+                "{work_type:?}: 回退影子也要有 id:{v:?}"
+            );
+        }
+
+        // XML 形态:回退成 logic_empty 影子,传入的 id 原样使用
+        for work_type in [
+            EditorType::Kitten2,
+            EditorType::Kitten3,
+            EditorType::Kitten4,
+        ] {
+            let builder = ShadowBuilder::new(config.clone(), IdGenerator::new(), work_type);
+            let v = builder.create("totally_unknown_shadow", Some("fixed".to_string()), None);
+            assert_eq!(
+                v,
+                json!(
+                    r#"<shadow type="logic_empty" id="fixed" visible="visible" editable="false"></shadow>"#
+                ),
+                "{work_type:?}"
+            );
+        }
+    }
+}
