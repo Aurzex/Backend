@@ -4,7 +4,7 @@
 
 ## 1. 总览
 
-同步客户端/控制台后端:主流程在 `main.rs`(管理员登录 -> 举报处理控制台),API 层(`api/`,13 个业务域)通过 `utils/acquire.rs` 的 HTTP/WS 客户端访问远程服务,`core/` 承载编译器/云变量/检索/流水线等核心逻辑。三层边界基本清晰,但存在三类系统性问题:
+同步客户端/控制台后端:主流程在 `main.rs`(管理员登录 到 举报处理控制台),API 层(`api/`,13 个业务域)通过 `utils/acquire.rs` 的 HTTP/WS 客户端访问远程服务,`core/` 承载编译器/云变量/检索/流水线等核心逻辑。三层边界基本清晰,但存在三类系统性问题:
 
 - **冗余**:api 层约 80 处手写"send + parse"样板绕过已有的 `ClientAccess` 默认方法;同构函数/枚举/管理器样板大量复制。
 - **效率**:日志路径在 Info 级别下仍做 pretty-print;分页迭代双重克隆;多处 N+1 串行 HTTP 请求。
@@ -34,11 +34,11 @@
 - **``api/work.rs::PackageManager::update_package`` 与 `:1760-1767`** — `fetch_kn_work_state` 与 `fetch_work_status` 请求同一端点 `/neko/works/status/{id}`,方法体逐行相同,且全仓无调用点。删除其一(保留 `fetch_work_status`)。已核实。
 - **``api/work.rs::BaseWorkOperations::toggle_like``(+335-377、517-537、1151-1163)** — 10 处"空负载 toggle"样板(`build_request + with_payload(json!({})) + check_status`,仅端点和期望状态码不同)。抽私有 `fn toggle(&self, method, endpoint, expected) -> MewResult<bool>`。
 - **``core/compiler.rs``** — `create_block_decompiler` 把 text_join/ask_and_choose/text_select_changeable 分派到 3 个结构体,其 `decompile` 体(3261-3388)与 `MutationDecompiler`(3617-3640)逐字相同。删除 3 结构体,统一构造 `MutationDecompiler`。
-- **``core/compiler.rs``** — `process_next/process_children/process_conditions/process_params/FunctionCallDecompiler` 五处重复"`blocks.insert` -> `get_mut` 补 parent_id -> insert_connection"收尾,`layout_col` 缩进包裹另重复 4 次。在 `BlockContext` 加 `insert_child_block(parent_id, block, conn)`。
+- **``core/compiler.rs``** — `process_next/process_children/process_conditions/process_params/FunctionCallDecompiler` 五处重复"`blocks.insert` 改为 `get_mut` 补 parent_id -> insert_connection"收尾,`layout_col` 缩进包裹另重复 4 次。在 `BlockContext` 加 `insert_child_block(parent_id, block, conn)`。
 - **``core/compiler.rs``** — `decompile_actor_blocks` 与 `decompile_scene_blocks` 前半段几乎逐行重复(仅 actor_info/variable_map 不同)。参数化合并为一个 `decompile_entity_blocks`。
-- **``core/cloudvar.rs::AllDataHandler::handle`` 与 `:1946-1983`** — `UpdatePrivateVarHandler` 与 `UpdatePublicVarHandler` 的核心更新逻辑(取 cvid/value -> `CloudValue::from_json` -> `mem::replace` -> `emit_variable_change`)逐字重复(外层:单条 vs 数组+`"fail"` 分支)。抽按 `VarKind` 参数化的共享函数,两个 handler 只做外层形状处理。已核实。
+- **``core/cloudvar.rs::AllDataHandler::handle`` 与 `:1946-1983`** — `UpdatePrivateVarHandler` 与 `UpdatePublicVarHandler` 的核心更新逻辑(取 cvid/value、`CloudValue::from_json`、`mem::replace`、`emit_variable_change`)逐字重复(外层:单条 vs 数组+`"fail"` 分支)。抽按 `VarKind` 参数化的共享函数,两个 handler 只做外层形状处理。已核实。
 - **``api/account.rs::AccountManager::verify_universal_captcha``** — 10 个"`POST + json!({}) + send_and_parse`"同构包装(send_login_captcha、register_by_phone、login_by_phone 等),约 100 行。抽 `fn post_empty(&self, endpoint) -> MewResult<Value>`。已核实。
-- **``api/auth.rs::LoginHandler::new_with_provider``** — `handle_password_v0/v1/v2` 结构相同(switch_identity -> processor -> 提取 token -> set_token_and_identity -> 构造 LoginResult),v1/v2 仅登录方式名不同,三段 `Err(MewError::Auth(format!("vN 登录失败…")))` 重复。抽公共私有方法(processor 闭包 + token 提取路径 + LoginMethod 参数)。
+- **``api/auth.rs::LoginHandler::new_with_provider``** — `handle_password_v0/v1/v2` 结构相同(switch_identity -> processor、提取 token -> set_token_and_identity、构造 LoginResult),v1/v2 仅登录方式名不同,三段 `Err(MewError::Auth(format!("vN 登录失败…")))` 重复。抽公共私有方法(processor 闭包 + token 提取路径 + LoginMethod 参数)。
 - **``api/auth.rs::LocalClientProvider::determine_admin_login_method``(+460-480)** — `AuthProcessor` 6 处手写 `build_request(...).send()?` + `response_to_json`,与 `ClientAccess::send_and_parse` 等价;`get_login_security_info` 又手写状态码检查+`read_to_string`+`from_str`。为 `AuthProcessor` 实现 `ClientAccess`,补 `send_and_parse_with_error_body` 默认方法。见 §6.1。
 - **``api/clouddb.rs::CoconutCloudAdmin::list_user_databases``** — `list_user_databases` 与 `list_user_databases_detail` 函数体逐字相同,仅 endpoint 不同。合并为 `list_user_databases(db_type, detail: bool)`。已核实。
 - **``api/community.rs::CommunityDataFetcher::fetch_replies``** — `fetch_nemo_messages(types: &str)` 用 `if types == "like" { "1" } else { "3" }` 映射 URL 段,非 "like" 输入静默按评论处理。定义 `NemoMessageType { Like, Comment }` 枚举 + `as_str()`,参数改枚举。
@@ -50,7 +50,7 @@
 
 - **``core/cloudvar.rs::DataStore::variable_in``** — `create_private/create_public/create_list` 结构相同(插 cvid->name 映射,再更新或新建);新建路径 name 克隆两次。参数化合并 + `HashMap::entry` 消除多余克隆。
 - **``core/cloudvar.rs::CloudList::execute_list_action``** — `list_apply_local` 与 `list_apply_cloud` 重复"仅在有变更回调时克隆旧表 + execute_list_action"块。抽 `fn apply_action(store, key, action)` 共享。
-- **``core/cloudvar.rs::CloudConnection::get_all_lists`` 与 `:1282-1310`** — `CloudConnection::list_pop/list_shift` 与 `CloudList::pop/shift` 的"锁内读 -> 解锁 -> 删除"两段式完全重复,且读-删间存在 TOCTOU 竞态。在 `CloudInner` 提供原子"读+执行动作"辅助。
+- **``core/cloudvar.rs::CloudConnection::get_all_lists`` 与 `:1282-1310`** — `CloudConnection::list_pop/list_shift` 与 `CloudList::pop/shift` 的"锁内读、解锁、删除"两段式完全重复,且读-删间存在 TOCTOU 竞态。在 `CloudInner` 提供原子"读+执行动作"辅助。
 - **``core/cloudvar.rs::IllegalEventHandler::dispatch_message``(+2474-2490)** — `"42" + serde_json::to_string((name, payload))` 事件帧构造重复 4 处,`flush_loop` 内 `unwrap` 绕过错误路径。抽 `fn event_frame(name, payload) -> Result<String, _>`。
 - **``core/cloudvar.rs::CloudConnection::remove_callback``** — `get_all_private_variables` 与 `get_all_public_variables` 除映射字段外完全相同。合并为 `get_all_variables(kind: VarKind)`。
 - **``core/cloudvar.rs::IllegalEventHandler::establish``(另 1827)** — `ConnectionEvent::Opened` 在 establish(WS 升级成功)与收到 `"40"` 两处各触发一次,订阅方每次连接收到两次 Opened。只保留一处(建议保留 `"40"` 确认处)。
@@ -146,7 +146,7 @@
 
 - **``core/services.rs::ReportProcessor::apply_action``(+494-498、517-520、533-536、548-551、760-763)** — 提交 8e87466 声明锁处理统一为 `PoisonError::into_inner`,实际只改了 1 处,其余 6 处仍是 `lock().unwrap()`。全部改 `unwrap_or_else(PoisonError::into_inner)` 或抽 `fn lock_batch(&self)`。
 - **``core/terminal.rs::ReportConsole::ask_action``** — `view_done` 单函数 160+ 行,糅合懒加载/过滤/分页渲染/命令分发四层。拆分渲染表头、应用过滤、命令分发。
-- **``src/main.rs::ConsoleLogger::MAX_ATTEMPTS``** — `admin_login_with_retry` 手工编排登录(取验证码 -> `handle_admin_password` -> 重试),绕过 api/auth.rs 已提供的 `AuthManager`(765)/`LoginBuilder`(1186)统一入口,参数校验/令牌设置/错误映射在 main 与 api 层重复。main 只保留验证码重试循环,单次尝试委托 `AuthManager::login`。
+- **``src/main.rs::ConsoleLogger::MAX_ATTEMPTS``** — `admin_login_with_retry` 手工编排登录(取验证码、`handle_admin_password`、重试),绕过 api/auth.rs 已提供的 `AuthManager`(765)/`LoginBuilder`(1186)统一入口,参数校验/令牌设置/错误映射在 main 与 api 层重复。main 只保留验证码重试循环,单次尝试委托 `AuthManager::login`。
 - **``src/main.rs``(+58-66)** — 入口层持有本应属于 api 层的管理员信息解析:本地 `extract_admin_id` 与 `full_name` 提取硬编码 `/admins/info` 响应结构(`auth.rs::AuthManager::admin_login` 也各自解析一次)。在 auth.rs 提供 `AdminInfo::from_details(&Value) -> Option<AdminInfo{id, full_name}>`,main.rs 删除本地解析。
 - **``src/main.rs`,141-155`** — 入口直接 `use crate::core::registry::value_to_i64`(core 内部工具),分层倒挂。将 `value_to_i64` 移到 `utils/data.rs`,core 与 main 统一从 utils 引用。
 - **``src/main.rs::ConsoleLogger::flush``** — main() 单函数 60+ 行承担登录编排/三段打印/ID 提取/控制台启动。抽 `print_login_result(&LoginResult)` 等,main 只留流程调用。

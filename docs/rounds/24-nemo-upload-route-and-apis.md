@@ -33,8 +33,8 @@ t+70.2s  upload.qiniup.com   2.2 KB↑
 
 它仍然给了两条结论:
 
-1. **上传通道 = 七牛**(`uc.qbox.me` 取配置 -> `up.qiniup.com` 传载荷 -> `upload.qiniup.com` 收尾),与本项目已有实现同族:
-   - 本项目:`GET /cdn/qi-niu/tokens/uploading`(`BaseKey::OpenService`,即 `open-service.codemao.cn`)取凭证 -> `POST <upload_url>`(服务端下发,退化值 `https://upload.qiniup.com`)-> URL = `bucket_url + key`(``src/utils/requests.rs::PaginatedIter::total_pages`/1645/1597`);
+1. **上传通道 = 七牛**(`uc.qbox.me` 取配置、`up.qiniup.com` 传载荷、`upload.qiniup.com` 收尾),与本项目已有实现同族:
+   - 本项目:`GET /cdn/qi-niu/tokens/uploading`(`BaseKey::OpenService`,即 `open-service.codemao.cn`)取凭证 到 `POST <upload_url>`(服务端下发,退化值 `https://upload.qiniup.com`)-> URL = `bucket_url + key`(``src/utils/requests.rs::PaginatedIter::total_pages`/1645/1597`);
    - 官方 App 只是多了一步直接用七牛 SDK 的 `uc.qbox.me`。
    - **顺带解答了上一轮"`open-service.codemao.cn` 用途不明"**:它就是**上传凭证**服务。
 2. **路径不可从抓包取得**(全 h2/TLS)—— 要拿 create 端点只能走 bundle 反编译(§5)。
@@ -111,7 +111,7 @@ CreateNemoWorkArgs {
    `works`、`create`、`import`、`bcm_url`、`bcm_version`、`business_id`、`upload`、`fork`;
 2. **对照已知三例**:`/kitten/r2/work`、`/neko/works`、`/wood/project` 的 payload 字段名,先猜 NEMO 的字段(§3.1);
 3. **抓包当辅助**:对同一次"建作品"操作跑 PCAPdroid,看那一刻新增的连接落在 `api.codemao.cn` 还是 `api-creation.codemao.cn`(能确认主机,不能确认路径),缩小猜测范围;
-4. **真机最小验证**:建一个草稿 -> 回读 `work-details` 断言 `bcm_url`/`n_brick`/资源可加载 -> 删除;
+4. **真机最小验证**:建一个草稿、回读 `work-details` 断言 `bcm_url`/`n_brick`/资源可加载、删除;
 5. 通过后按现有风格落成 `NemoWorkManager::create_nemo_work`,并接进 `convert::translate_work`(与 `create_draft_work` 并列)。
 
 ## 6. 验收口径与风险
@@ -193,7 +193,7 @@ sudo pacman -S wireshark-cli                      # 提供 tshark
 tshark -r temp/PCAPdroid_25_9月_13_59_21.pcap \
        -o tls.keylog_file:temp/PCAPdroid_25_9月_13_59_21.keylog \
        -Y http2 -c 5
-# 2) 端点清单(这才是我们要的)
+# 2) 端点清单(本方案所需)
 tshark -r temp/PCAPdroid_25_9月_13_59_21.pcap \
        -o tls.keylog_file:temp/PCAPdroid_25_9月_13_59_21.keylog \
        -Y 'http2.headers.path' -T fields -e http2.headers.path | sort -u
@@ -212,7 +212,7 @@ tshark -r temp/PCAPdroid_25_9月_13_59_21.pcap \
 | 文件 | 用途 |
 | --- | --- |
 | `temp/pcap_v4.py` / `pcap_upload.py` / `pcap_conn3.py` | 纯标准库 pcap 解析:主机/连接/时序/七牛上传链 |
-| `temp/dec/decrypt.js` + `match.js` | TLS 解密尝试(keylog -> 记录解密 -> HPACK 解 h2);`match.js` 做 keylog<->pcap 配对量化 |
+| `temp/dec/decrypt.js` + `match.js` | TLS 解密尝试(keylog 到 记录解密 -> HPACK 解 h2);`match.js` 做 keylog<->pcap 配对量化 |
 | `temp/web_dig.py` | 前端入口 bundle 抓取 + 关键词抽取(本轮用它挖了 nemoy 与 tools-entry) |
 
 ---
@@ -284,7 +284,7 @@ TLS-keylog 导出。拿到后优先在这几个族里找:`/nemo/v2/**`、`/nemo/
 
 ### 11.4 对"方案 B"(上传建作品)的影响
 
-- **链路已明确 3/4**:token(`nemo_android_ios`)-> 上传 `.bcm` -> 传 `.cover` -> `bind`。
+- **链路已明确 3/4**:token(`nemo_android_ios`)、上传 `.bcm`、传 `.cover`、`bind`。
 - 缺的只有**第 0 步:作品 id 从哪来**。拿到它之后,`bind` 的参数已经逐字段清楚,
   实现是一层薄封装(现在不实现,避免造出"能上传但落不到作品"的半成品)。
 - 顺带新增两个**可用于转换功能**的读接口:`/nemo/v2/works/list/user`(草稿,需令牌)、
@@ -326,12 +326,12 @@ TLS-keylog 导出。拿到后优先在这几个族里找:`/nemo/v2/**`、`/nemo/
 
 ### 12.2 探测记录
 
-无鉴权 `GET /nemo/v3/works/upload/1` -> `404 + 40103015`(请求方式不支持):与 §11.2 的判别器一致
+无鉴权 `GET /nemo/v3/works/upload/1` 改为 `404 + 40103015`(请求方式不支持):与 §11.2 的判别器一致
 (抓包已证实存在 => 应得"方法不对"类错误码),可作 §9 判别器的第二个对照点。
 
 ### 12.3 对方案 B 的意义
 
-- 现在**四步齐全**:token(`nemo_android_ios`)-> 上传 `.bcm` -> 上传 `.cover` -> `POST /nemo/v3/works/upload/<n>` -> `bind`。
+- 现在**四步齐全**:token(`nemo_android_ios`)、上传 `.bcm`、上传 `.cover`、`POST /nemo/v3/works/upload/<n>`、`bind`。
 - 但要注意:第 3 步要求 `work_url` 指向一个**合法 NEMO `.bcm`**;本项目自己能产出的只有
   KN/Kitten4 文件 => 走"上传"路线回到 NEMO 还缺 **KN->NEMO** 这个方向(平台**不存在**,
   见 `docs/rounds/27`)。所以方案 B 的现实用法是:**把 NEMO 作品转出来**(NEMO->KN->Kitten4),

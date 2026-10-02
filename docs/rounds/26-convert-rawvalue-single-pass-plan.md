@@ -10,7 +10,7 @@
 
 ### 1.1 P1-6 `RawValue` 零拷贝透传(方案 23 §3 P1-6)
 
-现状(`translate/mod.rs` `translate_value` 的输入形态):整份编辑版 JSON 一进来就被
+现状(`translate/mod.rs` `translate_value` 的输入形态):整份编辑版 JSON 一经输入即被
 `serde_json::from_str` 解析成 `Value`,装配时再把整份文档序列化回去。文档里**大部分字段
 只透传不修改**(`styles` / `audios` / `variables` / `cloud_variables` / `broadcasts` /
 `scenes_order` / `size` / `stageSize` / `aiImageUrls` …),却付出完整的解析与重编码代价。
@@ -22,7 +22,7 @@
 RootShell { theatre: TheatreShell, styles: Box<RawValue>, audios: Box<RawValue>, … }
 ```
 
-只对必须重写的部分(`theatre.actors[*].block_data_json` / `theatre.scenes[*]…`)真解析。
+仅对必须重写的部分(`theatre.actors[*].block_data_json` / `theatre.scenes[*]…`)做实际解析。
 
 ### 1.2 P1-7 单遍后序遍历(方案 23 §3 P1-7)
 
@@ -30,7 +30,7 @@ RootShell { theatre: TheatreShell, styles: Box<RawValue>, audios: Box<RawValue>,
 `unwrap_arithmetic_wrappers`、`fold_pure_list_get`;且部分步骤(如 `gc_node`)依赖"子树已被前一步改过"。
 
 方案:先写**步骤依赖表**(哪一步读哪些字段、依赖哪些子步骤已完成),再按依赖分层合并成
-1–2 趟后序遍历。属于"改对了更快、改错了产物就变"的高风险项。
+1–2 趟后序遍历。属于"改对则更快、改错则产物改变"的高风险项。
 
 ---
 
@@ -64,7 +64,7 @@ RootShell { theatre: TheatreShell, styles: Box<RawValue>, audios: Box<RawValue>,
 2. 差分门与往返多重集守恒、真机门(`tests/convert_live.rs`)全部通过;
 3. 绑核基准:`core_ms` 与 `e2e_ms` 都必须可复现地下降(单遍遍历按趟数预期 20–40%;
    `RawValue` 按预研 A 的占比外推),否则回滚;
-4. `RawValue` 路径需要一条"**未触碰字段原样透传**"的单测(构造含奇怪键序/空白的输入,
+4. `RawValue` 路径需要一条"**未触碰字段原样透传**"的单测(构造含异常键序与空白的输入,
    断言产物里该字段逐字节等于输入切片)。
 
 ## 4. 风险

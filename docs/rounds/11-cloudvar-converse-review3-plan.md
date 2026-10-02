@@ -34,7 +34,7 @@
 
 ### P0 — `pop/shift/remove` 空/越界返回 `Err` 与 `Result<Option<_>>` 契约冲突(落实 04 Phase 2-7,扩展 remove)
 
-**问题**:`CloudList::pop/shift/remove` 与 `CloudConnection::list_pop/list_shift/list_remove` 签名均为 `Result<Option<CloudValue>>`,但当列表为空(或下标越界)时,`list_apply_local` 经 `execute_list_action` 的 `items.pop()?` / `*index >= items.len()` 返回 `None` -> 映射为 `Err(InvalidArgument)`,`Ok(None)` 分支永远不可达。
+**问题**:`CloudList::pop/shift/remove` 与 `CloudConnection::list_pop/list_shift/list_remove` 签名均为 `Result<Option<CloudValue>>`,但当列表为空(或下标越界)时,`list_apply_local` 经 `execute_list_action` 的 `items.pop()?` / `*index >= items.len()` 返回 `None` 到 映射为 `Err(InvalidArgument)`,`Ok(None)` 分支永远不可达。
 
 **位置**:`CloudList::pop` 1332-1343、`shift` 1350-1361、`remove` 1368-1379;`CloudConnection::list_pop` 1108-1118、`list_shift` 1125-1135、`list_remove` 1147-1150;根因 `execute_list_action` 1537-1547(`DeleteLast`)、1556-1569(`DeleteAt`)。
 
@@ -58,7 +58,7 @@ pub fn pop(&self) -> Result<Option<CloudValue>> {
 
 ### P1 — `DataStore` 双哈希查找改单次哈希(采纳后回退:借用检查限制)
 
-**结论**:`variable_in` / `list_mut` 的"按名 -> 按 cvid"回退查找,在签名 `fn<'a>(&'a mut HashMap) -> Option<&'a mut VariableData>` 下**无法用单次 `get_mut` 实现**。执行时逐一验证:
+**结论**:`variable_in` / `list_mut` 的"按名 到 按 cvid"回退查找,在签名 `fn<'a>(&'a mut HashMap) -> Option<&'a mut VariableData>` 下**无法用单次 `get_mut` 实现**。执行时逐一验证:
 
 - `if let Some(v) = vars.get_mut(key) { return Some(v); }` + 回退 `and_then` -> **E0500**(闭包需独占 `*vars`,但已被首个 `get_mut` 借走);
 - 嵌套 `match vars.get_mut(key) { Some(v) => Some(v), None => … vars.get_mut(name) }` -> **E0499**(`Some` 分支返回把首个可变借拉长为 `'a`,与 `None` 分支第二次 `get_mut` 冲突)。
@@ -100,8 +100,8 @@ pub fn pop(&self) -> Result<Option<CloudValue>> {
 
 若看重"通用原语未来可被非 WS 模块复用":
 
-- 通用并发原语 `CallbackStore<T>`/`Notify`/`wait_flag`/`truncate` -> 新增 `src/utils/sync.rs`(或 `src/utils/` 下新文件);
-- WS 专用 `WsStream`/`Ws`/Socket.IO 常量/`Frame`/`parse_frame`/`set_stream_read_timeout` -> `src/core/socketio.rs`。
+- 通用并发原语 `CallbackStore<T>`/`Notify`/`wait_flag`/`truncate` 到 新增 `src/utils/sync.rs`(或 `src/utils/` 下新文件);
+- WS 专用 `WsStream`/`Ws`/Socket.IO 常量/`Frame`/`parse_frame`/`set_stream_read_timeout` 改为 `src/core/socketio.rs`。
 
 **代价**:拆成两个新模块,比方案 A 多一层;且这些"通用原语"当前仅 WS 客户端在用,过早拆分属 YAGNI。**结论:首选方案 A;若未来 `CallbackStore`/`Notify` 被非 WS 模块复用,再上移 utils,不做超前拆分。**
 
@@ -141,7 +141,7 @@ src/utils/net/            (或 src/net/,二选一)
 | 收益      | 消除 WS 重复,边界清晰         | 统一"网络接入层" + 萌化命名 + 消除 WS 重复                                     |
 | 风险      | 极低                          | 高(触达全仓 import 最广的模块)                                                 |
 
-**推荐:消除 WS 重复 -> 方案 A 成本最低、边界最清晰;若目标是"建立统一网络接入层 + 萌化命名"这一更大的架构愿景 -> 方案 C′ 是正确形态,但它是跨 19 文件的独立重构,应单独立项(如 `docs/rounds/12-*`),不与本轮 P0/P1/P4 混批。**
+**推荐:消除 WS 重复、方案 A 成本最低、边界最清晰;若目标是"建立统一网络接入层 + 萌化命名"这一更大的架构愿景、方案 C′ 是正确形态,但它是跨 19 文件的独立重构,应单独立项(如 `docs/rounds/12-*`),不与本轮 P0/P1/P4 混批。**
 
 #### 3.5 方案 D(已选定)— WS 迁入 `utils/socketio.rs` + `acquire` 重命名 `requests.rs`
 
@@ -160,7 +160,7 @@ src/utils/
 
 **改动范围**:
 
-1. 重命名 `src/utils/acquire.rs` -> `src/utils/requests.rs`(用 `lsp rename_file` 一次性改写全部引用):`src/utils.rs` 的 `pub mod acquire;` -> `pub mod requests;`;19 个文件的 `use crate::utils::acquire::{…}` / `use crate::utils::acquire;` -> 对应 `requests` 路径;`grep -rn "utils::acquire\|utils/acquire" src/ README.md` 复核无残留(历史评审文档 docs/ 不动)。
+1. 重命名 `src/utils/acquire.rs`、`src/utils/requests.rs`(用 `lsp rename_file` 一次性改写全部引用):`src/utils.rs` 的 `pub mod acquire;`、`pub mod requests;`;19 个文件的 `use crate::utils::acquire::{…}` / `use crate::utils::acquire;`、对应 `requests` 路径;`grep -rn "utils::acquire\|utils/acquire" src/ README.md` 复核无残留(历史评审文档 docs/ 不动)。
 2. 新增 `src/utils/socketio.rs`,下沉约 150 行纯基础设施(`WsStream`/`Ws` 别名、Socket.IO 常量、`Frame`、`parse_frame`、`set_stream_read_timeout`、`CallbackStore<T>`、`Notify`、`wait_flag`、`truncate`)。
 3. 删重:cloudvar.rs / converse.rs 删除本地副本,改 `use crate::utils::socketio::*`(或逐项导入)。
 
@@ -169,7 +169,7 @@ src/utils/
 - 通用原语暂留 socketio.rs:`CallbackStore`/`Notify`/`wait_flag`/`truncate` 是通用并发/字符串原语,严格说非 WS 专用;但当前仅 WS 客户端在用,单模块放下更简单(YAGNI)。若未来被非 WS 模块复用,再拆 `utils/sync.rs`(即方案 B 的 utils 版)。此取舍与 acquire 内部同样混放 `generate_random_id`/`current_timestamp_*` 等通用工具一致。
 - 萌化边界:`requests.rs` 保留既有萌化;`socketio.rs` 的协议概念(Frame/parse_frame)保持现有清晰命名即可,通用原语(CallbackStore/Notify)保持中性——与 acquire 内部从未萌化 `Mutex`/`Condvar` 一致。不做强制萌化。
 
-**与方案 A/C′ 的关系**:方案 D 是"utils 作为基础设施层"方向的平铺最简版——比 C′ 少一层 `net/` 目录与 `mod.rs` 重导出、无需拆分 `sync.rs`,且把 `acquire`->`requests` 的语义澄清(HTTP 层名比 acquire 更准确)与 8 字母约定一并纳入。唯一新增成本是 19 文件 import 改写(机械、低风险,`lsp rename_file` 自动完成)。
+**与方案 A/C′ 的关系**:方案 D 是"utils 作为基础设施层"方向的平铺最简版——比 C′ 少一层 `net/` 目录与 `mod.rs` 重导出、无需拆分 `sync.rs`,且把 `acquire` 改为 `requests` 的语义澄清(HTTP 层名比 acquire 更准确)与 8 字母约定一并纳入。唯一新增成本是 19 文件 import 改写(机械、低风险,`lsp rename_file` 自动完成)。
 
 #### 3.6 决策状态
 

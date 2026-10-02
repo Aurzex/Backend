@@ -2,23 +2,23 @@
 
 审阅日期:2026-08-29 · 基线:HEAD `9d7b4d9` · 范围:`src/api/auth.rs` 与 `src/core/{pipeline,services}.rs`
 
-> 方案先行(本文档),随后落地代码。第七轮已注入举报引擎的**查询/取数**路径(`DataQuery`/`CommentQueryBuilder`/`ReportFetcher`/`ViolationChecker` 查询方法/`ReportProcessor`/`FileProcessor`),但**登录流**与**动作分发**仍硬编码全局。第八轮打通这两条剩余路径,使自动举报(多账号登录、举报与身份恢复)与动作处理(execute_process_*)可用注入的客户端。**延续允许破坏性 pub API 变更**。
+> 方案先行(本文档),随后落地代码。第七轮已注入举报引擎的**查询/取数**路径(`DataQuery`/`CommentQueryBuilder`/`ReportFetcher`/`ViolationChecker` 查询方法/`ReportProcessor`/`FileProcessor`),但**登录流**与**动作分发**仍硬编码全局。第八轮完成这两条剩余路径的客户端注入,使自动举报(多账号登录、举报与身份恢复)与动作处理(execute_process_*)可用注入的客户端。**延续允许破坏性 pub API 变更**。
 
 ## Context
 
 第七轮落地后,`core` 层剩余的全局硬编码集中在两条「全局身份」与「全局单例」路径:
 
 1. **自动举报登录流**(`pipeline.rs`):
-    - `login_student`(关联函数)调用 `LoginBuilder::new()`,经 `AuthManager::new()`、`GlobalClientProvider` 到 `CodeMaoClient::global()`,把学生令牌写进**全局身份槽**。
+    - `login_student`(关联函数)调用 `LoginBuilder::new()`,该调用链依次经 `AuthManager::new()` 与 `GlobalClientProvider`,最终落到 `CodeMaoClient::global()`,把学生令牌写进**全局身份槽**。
     - `switch_identity(Catsona::Judge)` 调用 `CodeMaoClient::global()`,把身份切回管理员。
-    - `execute_single_report` 的 5 处 api-Manager `.new()`(`ForumActionHandler`/`BaseWorkOperations`/`CommentOperations`/`WorkshopActionHandler`)仍走全局默认。
-    - 三者必须**同一身份源**(登录写入全局,举报携带学生令牌,随后切回管理员),第七轮因此**整体保持全局**,第八轮一次性打通。
+    - `execute_single_report` 的 5 处 api-Manager `.new()`(`ForumActionHandler`/`BaseWorkOperations`/`CommentOperations`/`WorkshopActionHandler`)仍使用全局默认。
+    - 三者必须**同一身份源**(登录写入全局,举报携带学生令牌,随后切回管理员),第七轮因此**整体保持全局**,第八轮一次性完成注入。
 
 2. **动作分发**(`pipeline.rs` 与 `services.rs`):
     - `ActionFn` 是 `fn` 指针(`fn(i32, i32, Resolution) -> Result<bool, ProcessorError>`),不可捕获 client。
-    - `ActionRegistry` 是全局 `LazyLock` 单例(`static ACTION_REGISTRY`),`global_action_registry()` 供 `apply_action_by_key` 分发 `execute_process_*` 动作,内部 `ReportHandler::new()` 走全局。
+    - `ActionRegistry` 是全局 `LazyLock` 单例(`static ACTION_REGISTRY`),`global_action_registry()` 供 `apply_action_by_key` 分发 `execute_process_*` 动作,内部 `ReportHandler::new()` 使用全局客户端。
 
-`auth.rs` 已具备 `ClientProvider` 依赖注入(`GlobalClientProvider` 返回全局,`AuthManager::new_with_provider(Box<dyn ClientProvider>)` 存在),但缺一个「持有 `CodeMaoClient` 的本地 provider」,且 `LoginBuilder::new()` 硬编码 `AuthManager::new()`(全局)。补齐这两个缺口即可让登录流可注入。
+`auth.rs` 已具备 `ClientProvider` 依赖注入(`GlobalClientProvider` 返回全局,`AuthManager::new_with_provider(Box<dyn ClientProvider>)` 存在),但缺少一个「持有 `CodeMaoClient` 的本地 provider」,且 `LoginBuilder::new()` 硬编码 `AuthManager::new()`(全局)。完成上述两项即可让登录流可注入。
 
 目标:给 `LoginBuilder` 增加客户端注入入口,让 `login_student`/`switch_identity`/`execute_single_report` 改用 `self.client`;把 `ActionFn` 改为可捕获闭包、`ActionRegistry` 改为注入实例,消除全局 `LazyLock` 单例。原则沿用 `CONTRIBUTING.md`。
 
@@ -66,7 +66,7 @@ impl ClientProvider for LocalClientProvider {
 4. `switch_identity` 中 `CodeMaoClient::global().switch_identity(Catsona::Judge)` 改为 `self.client.switch_identity(Catsona::Judge)`。
 5. `execute_single_report` 内 5 处 api-Manager `.new()` 改为 `.new_with_client(self.client.clone())`,涉及 `ForumActionHandler`、`BaseWorkOperations`、`CommentOperations`、`WorkshopActionHandler`。
 
-至此自动举报全链路(登录、举报、恢复身份)统一走 `self.client`,第七轮「保持全局」的限制解除。
+至此自动举报全链路(登录、举报、恢复身份)统一使用 `self.client`,第七轮「保持全局」的限制解除。
 
 ### Phase 2 — 动作分发注入(`pipeline.rs` 与 `services.rs`)
 
@@ -86,8 +86,8 @@ impl ClientProvider for LocalClientProvider {
 
 ## 不落地(记录在案)
 
-- **`cloudvar.rs` 的 `detect_editor`**:自由函数用 `WorkDataFetcher::new()`(全局)自动识别编辑器类型。注入需让 `CloudBuilder` 额外持有 `CodeMaoClient`(当前只持 `authorization_token`),牵涉 WS 客户端与 HTTP 客户端的关系,属另一处设计决策。
-- **`pipeline.rs` 的 `forum_post_content_line`**:展示助手用 `ForumDataFetcher::new()`。注入需改 `ReportDisplay` trait 签名并贯穿展示注册表(`LazyLock` 全局),收益低,不在第八轮。
+- **`cloudvar.rs` 的 `detect_editor`**:自由函数使用 `WorkDataFetcher::new()`(全局)自动识别编辑器类型。注入需让 `CloudBuilder` 额外持有 `CodeMaoClient`(当前只持 `authorization_token`),牵涉 WS 客户端与 HTTP 客户端的关系,属另一处设计决策。
+- **`pipeline.rs` 的 `forum_post_content_line`**:展示助手使用 `ForumDataFetcher::new()`。注入需改 `ReportDisplay` trait 签名并贯穿展示注册表(`LazyLock` 全局),收益有限,不列入第八轮。
 - **类型化返回(`MewResult<Value>` 改为 DTO)**:api 层 351 处返回 `serde_json::Value`,独立大轮。
 - **`DecompilerError` 包装 `MewError`**:消除其自带 Io/Json/Http 重复,独立小改。
 
@@ -106,13 +106,13 @@ impl ClientProvider for LocalClientProvider {
 归零 grep 验证(最终态):
 
 1. `grep -rn "global_action_registry" src/` 结果为 0(全局单例已删)。
-2. `grep -rn "LoginBuilder::new()" src/` 仅命中 `LoginBuilder::new_with_client` 内部,无裸 `new()` 调用;`grep -rn "CodeMaoClient::global()" src/core/pipeline.rs` 结果为 0(登录、举报与身份恢复全走 `self.client`)。
+2. `grep -rn "LoginBuilder::new()" src/` 仅命中 `LoginBuilder::new_with_client` 内部,无直接 `new()` 调用;`grep -rn "CodeMaoClient::global()" src/core/pipeline.rs` 结果为 0(登录、举报与身份恢复全部使用 `self.client`)。
 3. `grep -rn "ActionHandler::new()\|Operations::new()\|ReportHandler::new()" src/core/pipeline.rs` 结果为 0(全部为 `new_with_client`)。
 4. `grep -rn "new_with_client" src/core/pipeline.rs` 命中 `ActionRegistry` 定义与 `login_student`/`execute_single_report` 内 5 处。
 
 新行为检查:仿第六/七轮契约测试,在 `pipeline.rs` 的 `#[cfg(test)]` 增加一条 `action_registry_new_with_client_uses_injected_client`(用 `ActionRegistry::new_with_client(CodeMaoClient::new_independent(KittyConfig::default()))`,断言 `apply` 对未注册 method 的报错行为与全局一致——仅验证构造不 panic 且可分发;实际动作需真机接口,以 code review 与编译为准)。
 
-其余行为以 code review 与编译为准:第八轮为等价重写(登录、举报与动作分发从全局默认改为可注入,`new()` 仍走全局),不改动任何端点、参数与请求体。
+其余行为以 code review 与编译为准:第八轮为等价重写(登录、举报与动作分发从全局默认改为可注入,`new()` 仍使用全局客户端),不改动任何端点、参数与请求体。
 
 ## Verification(实际执行结果)
 

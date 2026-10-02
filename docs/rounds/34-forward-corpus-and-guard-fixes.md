@@ -4,7 +4,7 @@
 
 | 症状 | 根因 | 处置 |
 | --- | --- | --- |
-| `捕鱼达人_259694808.bcm4`(Kitten4)被拒:"源作品没有 size 字段,这看起来是 Kitten2/3" | `convert_kitten4_document` 强要求顶层 `size`,而该作品只有顶层 `width`/`height` | 改用与装配**同一套回退**(`assembly::source_stage_size`:`size.*` -> `width`/`height` -> 562×900),`source_stage_size` 提为 `pub(super)` 复用 |
+| `捕鱼达人_259694808.bcm4`(Kitten4)被拒:"源作品没有 size 字段,这看起来是 Kitten2/3" | `convert_kitten4_document` 强要求顶层 `size`,而该作品只有顶层 `width`/`height` | 改用与装配**同一套回退**(`assembly::source_stage_size`:`size.*` 改为 `width`/`height` -> 562×900),`source_stage_size` 提为 `pub(super)` 复用 |
 | 放松判据后 `春风得意_324995084.bcm`(Kitten3)**静默**当空作品转换(源积木=0) | 画布字段不能区分 Kitten3/Kitten4(Kitten3 也有 `width`/`height`) | 判据换成"实体里有没有 `block_data_json`",没有就报明确错误 |
 | `A28社区-开幕_174408420.bcm4` 报 `invalid type: map, expected a string` | 平台上有作品的 `shadows` 是**内联对象**(实测 3653 处),本库只吃 XML 字符串形态 | 前置拦截,报"内联影子是对象形态(块 `X` 的槽 `Y`),暂不支持该作品" |
 
@@ -56,9 +56,9 @@
 
 读法:
 
-- **正向腿**:`lists_get`(768)-> `pure_list_get`(**682**),因此 **丢 86**;同一条腿上 `lists_get_value` 505 -> `list_item` 480(−25)、
-  `lists_replace` 266 -> `replace_list_item` 205(−61);
-- **反向腿**:`pure_list_get`(682)-> `lists_get`(**490**),因此 **再丢 192**;而 `list_item`/`replace_list_item`
+- **正向腿**:`lists_get`(768)、`pure_list_get`(**682**),因此 **丢 86**;同一条腿上 `lists_get_value` 505、`list_item` 480(−25)、
+  `lists_replace` 266 到 `replace_list_item` 205(−61);
+- **反向腿**:`pure_list_get`(682) 到 `lists_get`(**490**),因此 **再丢 192**;而 `list_item`/`replace_list_item`
   反向**原样保留**(不回改成源里的名字 —— 但同义,已被扫描器的等价类口径抵消);
 -,因此 **两条腿都在丢**(86 + 192 = 278),不是单侧问题。
 
@@ -167,7 +167,7 @@ Kitten4 侧的列表引用挂在**父块的 `fields.VAR`** 上(见 `FIELD_NAME_M
 
 新增工具 `tests/convert_work.rs`(`WORK_ID=<id> cargo test --test convert_work -- --ignored`):
 按作品类型自动选方向(`NEKO -> Kitten4`、`KITTEN4 -> KittenN`),调 `translate_work`
-(抓取 -> 反编译到编辑版 -> 重排 -> 落盘),产物写 `download/converted/`(**不塞进** `download/compile/`
+(抓取、反编译到编辑版、重排、落盘),产物写 `download/converted/`(**不塞进** `download/compile/`
 ——那里是往返扫描器的语料,混进手工产物会破坏"每件都是真作品"的前提)。**只转换、不上传**。
 
 实测:
@@ -215,7 +215,7 @@ Kitten4 侧的列表引用挂在**父块的 `fields.VAR`** 上(见 `FIELD_NAME_M
 
 **验证**:转换产物相对平台原件现在**只缺 `painter`** —— 与"编辑器能读"的反编译产物**同档** 。
 
-**顺手核对反方向**:扫 10 份平台 KN 文档取顶层键并集,因此本项目的 KN 产物**不缺**(`classifyModels`
+**一并核对反方向**:扫 10 份平台 KN 文档取顶层键并集,因此本项目的 KN 产物**不缺**(`classifyModels`
 只在 5/10 出现,是"用了 AI 模型"的作品才有的功能键,不是必需),因此 KN 侧不用改 。
 
 > **教训**:跨编辑器转换要**对着平台真实文件比"顶层键集合"**,不能只比积木;两个写出器
@@ -266,7 +266,7 @@ Kitten4 侧的列表引用挂在**父块的 `fields.VAR`** 上(见 `FIELD_NAME_M
 
 `cargo clippy --all-targets -- -D warnings`(CONTRIBUTING 要求)此前被 **7 条工具链新 lint** 挡着,
 且都在本轮改动范围之外的文件里 —— 一并修掉,门恢复可用:`nemo_mapping` 文档空行 ×2、
-`shared` 文档列表缩进(`+` 开头被当成列表项)、`nemo_tests` 的 `&String`->`&str` 与 `filter().next_back()`、
+`shared` 文档列表缩进(`+` 开头被当成列表项)、`nemo_tests` 的 `&String` 改为 `&str` 与 `filter().next_back()`、
 `api/auth` 测试模块后置项、`reverse_tests` 本项目新写的文档注释(降级为普通注释)。
 
 ## 6. 下一步
@@ -283,7 +283,7 @@ Kitten4 侧的列表引用挂在**父块的 `fields.VAR`** 上(见 `FIELD_NAME_M
 
 | 规则 | 结果 | 证据 |
 | --- | --- | --- |
-| **HEAD**(候选里认识的优先 -> KN 名认识就保留 -> 非云 -> 第一个) | **保真无损**  | 定义体守恒门不报缺口 |
+| **HEAD**(候选里认识的优先 -> KN 名认识就保留、非云、第一个) | **保真无损**  | 定义体守恒门不报缺口 |
 | 线 1) (**KN 名认识就保留**放第一位) |  掉块 | `real_bcmkn` 定义 `controls_if: 1 -> 0`;`procedure_library` 38/51 定义净减 **3237** 块 |
 | 线 2) (**非云优先**+`contains("cloud")`) |  掉块 | 同上(净减 3237) |
 
@@ -293,7 +293,7 @@ Kitten4 侧的列表引用挂在**父块的 `fields.VAR`** 上(见 `FIELD_NAME_M
 
 ### 7.2 判据修正(7 条红全部消化)
 
-1. **过期名字钉子 -> 契约断言**:几处 `assert_eq!(node.kind, "旧名字")` 改为断言
+1. **过期名字钉子 到 契约断言**:几处 `assert_eq!(node.kind, "旧名字")` 改为断言
    **"挑出来的名字编辑器必须认识"**(这就是 §4nonies 的契约);
 2. **已文档化清单**:契约断言允许 §4nonies 的"编辑器不认识"类型(`get_split_options`/`temporary_list`/
    `script_variables`/`traverse_number`),实测**新增一个** `coordinate_of_sprite`(§4nonies 的 12 种来自
@@ -307,9 +307,9 @@ Kitten4 侧的列表引用挂在**父块的 `fields.VAR`** 上(见 `FIELD_NAME_M
 
 `cargo fmt --check` / `cargo clippy --all-targets -- -D warnings` / `cargo test`
 **全绿**:单测 **100 过 / 0 红 / 1 忽略**,`repo_hygiene`(含凭据扫描)2 过。
-顺手修掉 `HEAD` 里 `src` 测试**编译不过**的 `WorkInfo { preview: None }`(字段已加、字面量漏补),
+一并修复 `HEAD` 里 `src` 测试**编译不过**的 `WorkInfo { preview: None }`(字段已加、字面量漏补),
 以及 `cargo fmt` 在若干文件上的既有偏差。
 
 > **方法教训(再记一次)**:扫描器/门给出的"差异"要先**分诊**再改代码 —— 本轮 7 条红里,只有 0 条是
 > 实现缺陷,其余全是"判据没跟上有意变更";反过来说,**判据一旦放宽,就必须换成同强度的新判据**
-> (这里:类型名钉子 -> 编辑器认识的契约;0/0 -> 预算 + 只减不增),否则放宽等于放弃。
+> (这里:类型名钉子、编辑器认识的契约;0/0、预算 + 只减不增),否则放宽等于放弃。

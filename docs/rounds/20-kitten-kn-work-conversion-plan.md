@@ -82,7 +82,7 @@
 }
 ```
 
-- `blocks` 是 **id -> 积木对象** 的字典(不是 XML 字符串);`connections` 是父子邻接表,**根积木 = 从未作为子键出现的 id**。
+- `blocks` 是 **id 到 积木对象** 的字典(不是 XML 字符串);`connections` 是父子邻接表,**根积木 = 从未作为子键出现的 id**。
 - `shadows` 的值仍然是 **XML 字符串**(Kitten4 沿用 XML shadow),这点对双向转换很关键:影子在 KN 里也是同一套 XML 字符串。
 - `connections` 实测 188 个积木 <-> 188 个条目(86 个非空),值形如 `{"type":"next"|"input","input_type":"value"|"statement","input_name":…}`;空对象 `{}` = 叶子节点。反向写 `.bcm4` 时 `blocks`/`connections`/`parent_id`/`location` **都要重建**。
 
@@ -200,7 +200,7 @@ GN(kittenBcm)
 2. `styles.stylesDict`:对每个造型图片 `fetch -> blob`,**必要时重新上传**(`ServiceApi.uploadUserFiles`)并把 `center_point/rotate_center` 归一成 `centerPoint`;
 3. 坐标换算 `b(x,y,w,h,W,H) = { x:(x + w/2) * W/w, y:(H/2 - y) * H/h }`,把 Kitten 的舞台坐标/尺寸换算到 KN 的 `562×900`(或横屏 `900×562`);
 4. `variables.variablesDict` <- Kitten `variables` 数组:`name/value/visible/position/isGlobal(<-is_global)/createTime/scale/currentEntityId(<-current_entity)`,**样式图标**由 `theme` 决定:`score->ICON_MEDAL`、`HP->ICON_HEART`、`clock->ICON_HOURGLASS`、`coin->ICON_COIN`、`pure->TEXT`、其他 `DEFAULT`;
-5. `cloud_variables` -> 全局变量(`private->type:"any"`, `public_list->type:"list"`,初值 `[]`/`0`);
+5. `cloud_variables` 到 全局变量(`private->type:"any"`, `public_list->type:"list"`,初值 `[]`/`0`);
 6. `stageSize`(按原画布长宽比归一为 `562×900`/`900×562`)、`projectName`(缺省「空白作品」)、`toolMode`、`isHideStage`、`broadcasts`、`procedures` 落位;
 7. 不做:积木树本身(由 §3.2 完成)、`.bcm`(Kitten2/3)`blocksXML`(编辑器直接拒绝,见 §3.1)。
 
@@ -295,9 +295,9 @@ GN(kittenBcm)
 > 本节是**结构重构方案**:允许大规模搬迁,但要求**零行为变更**(只搬文件与改可见性,不改签名、不改逻辑)。它先于功能实现落地;功能方案从 §6.2 起。
 > **2026-09-25 更新(第二十一轮收敛后,见 `docs/rounds/21-convert-domain-consolidation-plan.md` §8.2)**:
 > 本节的目录树是第二轮重构(域化)时的布局,此后文件已合并 —— `shared/` 9 -> 5(`infra/model/config/error/mod`)、
-> `decompile/{context,contract}` 并入 `decompile/mod.rs`、`blocks/` 三文件 -> `blocks.rs`、
-> `editors/kitten/` 三文件 -> `kitten.rs`、`editors/{coco,neko,wood}` -> `simple.rs`、
-> `translate/{report}` 并入 `mod.rs`、`{blockjson,ids}` -> `model.rs`、`{finish,kitten4_finish}` -> `assembly.rs`。
+> `decompile/{context,contract}` 并入 `decompile/mod.rs`、`blocks/` 三文件 到 `blocks.rs`、
+> `editors/kitten/` 三文件、`kitten.rs`、`editors/{coco,neko,wood}`、`simple.rs`、
+> `translate/{report}` 并入 `mod.rs`、`{blockjson,ids}`、`model.rs`、`{finish,kitten4_finish}`、`assembly.rs`。
 > 生产文件 34 -> 18。**当前布局以 docs/rounds/21 §8.2 为准**,下表的"重构前/重构后"对应关系仍然有效。
 
 > 重构后 `convert/` 成为**作品文件转换域**的唯一边界:读(反编译)与写(互相转化)共用一套地基,域外不再有平铺的 `compiler.rs` / `unpacker.rs` / `decoders.rs`。
@@ -425,13 +425,13 @@ backend::core::convert::translate::{TargetEditor, TranslateOptions, TranslateRep
 
 **公开路径形态(已定)**:子域路径(`convert::decompile::*` / `convert::translate::*`),不采用扁平门面——将来加 Nemo、加编辑器时不用挤在一层。
 
-**破坏性变更**:`backend::core::compiler::*` -> `backend::core::convert::decompile::*`。这是 0.1.0 窗口内的公开路径变更(doc 19 已确立"允许破坏性 pub API 变更"的先例),按 CONTRIBUTING 的 cutover 规则**不做兼容别名/旧路径 re-export**,直接改调用点(§影响面清单)。若评审要求保号,则退一步:`core::convert` 顶层 `pub use` 一份扁平门面(单一入口、无旧路径),但那时子域模块必须 `pub(crate)`,否则又出现双路径。
+**破坏性变更**:`backend::core::compiler::*` 改为 `backend::core::convert::decompile::*`。这是 0.1.0 窗口内的公开路径变更(doc 19 已确立"允许破坏性 pub API 变更"的先例),按 CONTRIBUTING 的 cutover 规则**不做兼容别名/旧路径 re-export**,直接改调用点(§影响面清单)。若评审要求保号,则退一步:`core::convert` 顶层 `pub use` 一份扁平门面(单一入口、无旧路径),但那时子域模块必须 `pub(crate)`,否则又出现双路径。
 
 #### 拆分阈值与依赖规则
 
 1. **单文件 ≤ 600 行**;超过且职责可切,就开子目录(本方案里 `blocks/`、`editors/kitten/` 正是照这条规则切的)。
 2. **一个文件一件事**:一个编辑器一个文件;一张大表一个文件或直接由生成脚本产出(`tables_gen.rs` 打 `// @generated`,人工只改生成脚本)。
-3. **依赖单向**:`convert/ -> api/ + utils/`;`translate` 与 `decompile` **互不 `use`**,两子域只依赖 `shared`;跨子域编排(如"作品 id -> 直接转成另一编辑器"这类链条)写在 `convert/mod.rs`。
+3. **依赖单向**:`convert/ -> api/ + utils/`;`translate` 与 `decompile` **互不 `use`**,两子域只依赖 `shared`;跨子域编排(如"作品 id 到 直接转成另一编辑器"这类链条)写在 `convert/mod.rs`。
 4. **`shared` 里不许出现编辑器名**(`kitten`/`neko`/`nemo`/…);一旦出现,说明那东西该下移到对应 `editors/*`。
 5. 可见性:`shared` 与子域实现一律 `pub(crate)`;只有门面项 `pub`,并由 `convert::mod.rs` / 子域 `mod.rs` 再导出,保证 `#![warn(unreachable_pub)]` 不误报(现有 `core::compiler` 就是靠 re-export 让 `DecompilerError` 可达的,同一手法)。
 
@@ -518,7 +518,7 @@ flowchart LR
   G -->|上传+建作品| I[FileUploader.upload → create_kn_work]
 ```
 
-**反向 KN -> Kitten4**:输入 `.bcmkn`(本地明文,或经 `BCMKNDecryptor` 解密)-> `NekoFrontend` -> 反向表(`sI` 反转 + `mapping.rs` 特例)-> `Kitten4Backend` -> `.bcm4`(可选:再编译成 `compile_result` 供播放器)。
+**反向 KN -> Kitten4**:输入 `.bcmkn`(本地明文,或经 `BCMKNDecryptor` 解密)、`NekoFrontend`、反向表(`sI` 反转 + `mapping.rs` 特例)、`Kitten4Backend`、`.bcm4`(可选:再编译成 `compile_result` 供播放器)。
 
 ### 6.5 建议的公开 API(草案,待评审)
 
@@ -557,7 +557,7 @@ pub fn translate_works(work_ids: &[WorkId], target: TargetEditor, options: Trans
 
 ### 6.6 映射表的来源与生成
 
-`LC`(Kitten->KN)、`sI`(KN->文本/DC 用)、`Jm`(208 中文 token)、`$m`(积木签名)、`cy`(shadow 模板)、`Cm/wm/Am/qm/Xm` 枚举都硬编码在 module 41888 里(无远程块定义 JSON)。生成方式:
+`LC`(Kitten->KN)、`sI`(KN 到 文本/DC 用)、`Jm`(208 中文 token)、`$m`(积木签名)、`cy`(shadow 模板)、`Cm/wm/Am/qm/Xm` 枚举都硬编码在 module 41888 里(无远程块定义 JSON)。生成方式:
 
 1. 用一个最小 webpack 运行时在 Node 里加载 bundle,**把表当数据 dump 成 JSON**(运行时已跑通,见附录 C;注意两个硬要求:1)  `main.14802dc2.js` 的 `var __webpack_modules__` 内联注册表必须单独收割——module 69875 只在那里;2)  转换本身只需 `DOMParser`+`XMLSerializer`,`jsdom` 即可,不需要完整 DOM);
 2. 脚本把 JSON 渲染成 `tables_gen.rs` 的 `const`(类型:`&[(&str,&str)]` 或 `phf`-free 的 `match` 生成,按仓库“不过度抽象”约定,直接生成 `fn translate_kitten_to_kn(&str)->&str` 的大 `match`);
@@ -577,11 +577,11 @@ pub fn translate_works(work_ids: &[WorkId], target: TargetEditor, options: Trans
 | 阶段    | 内容                                                                                                     | 验收                                                                                                 |
 | --- | --- | --- |
 | R1–R4   | 域结构重构:三文件平移 -> 拆 `shared/` -> 拆 `decompile/` -> 门面收口(§6.1 迁移步骤)                         | 每步 `cargo check --all-targets` + `cargo test` + `cargo clippy --all-targets` 全绿;旧路径 grep 为空 |
-| 0       | 表提取:从编辑器 bundle dump `LC/sI/Jm/$m/cy/Cm/wm/Am` -> JSON -> `tables_gen.rs`;做 `$m − LC值域` 差集统计 | `cargo test -p backend convert::tables`(表非空、无重复键);差集报告落 `docs/` 或常量注释              |
+| 0       | 表提取:从编辑器 bundle dump `LC/sI/Jm/$m/cy/Cm/wm/Am` -> JSON 到 `tables_gen.rs`;做 `$m − LC值域` 差集统计 | `cargo test -p backend convert::tables`(表非空、无重复键);差集报告落 `docs/` 或常量注释              |
 | 1       | `blockjson.rs` + `Kitten4Frontend` + 单测(邻接表->树、根判定、shadow 搬运)                                | 把 `几何对战-联机.bcm4` 全量解成 `BlockJson[]`,积木计数与 `blocks` 数一致                            |
 | 2       | `NekoBackend` + 映射表 + 降级策略 + `TranslateReport`                                                    | 对同一文件产出 `.bcmkn`,**与官方 JS 输出逐字段 diff**(用 harness 跑 `GN` 做基准)                     |
 | 3       | 工程化收尾(变量/云变量/audios/styles/坐标/stageSize/projectName)                                         | 产出物能被编辑器 `validateBcm` 通过(人工打开验证)                                                    |
-| 4       | 反向:`NekoFrontend` + `sI` 反转 + `Kitten4Backend`(含 `connections`/`location` 重建)                     | KN 样例 -> `.bcm4`,与官方 Kitten4 编辑器打开无语法错误;往返(KN->K4->KN)结构 diff 报告                   |
+| 4       | 反向:`NekoFrontend` + `sI` 反转 + `Kitten4Backend`(含 `connections`/`location` 重建)                     | KN 样例 到 `.bcm4`,与官方 Kitten4 编辑器打开无语法错误;往返(KN->K4->KN)结构 diff 报告                   |
 | 5       | 文件/网络集成:`translate_*` 公开面、可选上传 + `create_kn_work`/`create_kitten_work`、`.bcmkn` 加密写出  | 真机集成测试(登录 + 转换 + 建作品 + 编辑器打开)                                                      |
 | 6(可选) | Nemo 路径(`gI` 移植)与 `.bcm`(Kitten2/3 `blocksXML`)前置转换                                             | 各自样例端到端                                                                                       |
 
@@ -599,12 +599,12 @@ pub fn translate_works(work_ids: &[WorkId], target: TargetEditor, options: Trans
 6. **shadow XML 归一化**:官方两种形态(带/不带 `xmlns`、带/不带 `id`、约束字面量 `-Infinity,Infinity,0,` vs `1,Infinity,1,`)语义等价但字节不同;本项目的**输出要稳定**(推荐生成带 `xmlns` + 显式 `id` 的形式),比较时用语义 diff 而非字符串 diff。
 7. **`nekoBlockJsonList` 节点的可选字段**:实测两份真实作品(0.24.3 / 0.27.1)是**同一模型**,差异只在于可选字段的有无——`location` 分别出现 0 / 16 次,`field_constraints`、`is_shadow`、`mutation`、`comment` 都可能有也可能没有(HEX Editor 的 359 个节点里:`location` 16、`mutation` 19、`comment` 0)。解析/比较时**不要假设字段齐全**;写出时按当前模板给全(最小必需集在 Phase 3 用真实编辑器逐项确认)。
 8. **`broadcasts.broadcastsDict` 里出现过 `"toJSON"` 这样的脏键**:真实作品样例有,而且**本库反编译出来的 `几何对战-联机.bcm4` 里也有**(`toJSON:["Hi"]`,来自上游数据/反编译链路)——转换前应过滤/告警,否则会原样带到 KN 作品里。
-9. **资源图片**:KN 造型必须可访问的 URL;官方做法是重新 `fetch+upload` 并归一化 `centerPoint`。本库有 `FileUploader`,但下载->上传的链路要显式做(且注意失败回退,官方是 `try/catch + console.error` 后继续)。
+9. **资源图片**:KN 造型必须可访问的 URL;官方做法是重新 `fetch+upload` 并归一化 `centerPoint`。本库有 `FileUploader`,但下载 到 上传的链路要显式做(且注意失败回退,官方是 `try/catch + console.error` 后继续)。
 10. **id 生成**:KN 用 `crypto.randomUUID()`;本库 `fastrand` 为主,新增 UUID v4 生成(UUID 是 36 字符,和 Kitten 的 22 字符 nanoid **不是**同一体系:KN 里 `id` 两种都能见到,以 **UUID 为准**,与 `kn-default-*.bcmkn` 模板一致)。
 11. **文本层不是必须的**;但它是低成本高价值的**调试/人工校验**通道(可把 KN 作品导出成中文积木文本供人眼审查)。
-12. **大文件**:真实作品 3.7 MB(HEX Editor)/ 63 MB(`原气骑士 且听风吟-编辑版.bcm4`);`parse -> convert -> serialize` 要避免 O(n²)(邻接表->树的构建用 `HashMap` 一次性归并,不要线性查找父节点)。文本层实测 3.7 MB -> 4.9M 字符 Markdown,如果实现文本导出要有大小上限。
+12. **大文件**:真实作品 3.7 MB(HEX Editor)/ 63 MB(`原气骑士 且听风吟-编辑版.bcm4`);`parse -> convert -> serialize` 要避免 O(n²)(邻接表 到 树的构建用 `HashMap` 一次性归并,不要线性查找父节点)。文本层实测 3.7 MB -> 4.9M 字符 Markdown,如果实现文本导出要有大小上限。
 13. **合规**:转换产物若上传建作品,等同发布行为,需明确用户授权;`TranslateOptions.upload` 默认 `false`。
-14. **确定性 id**:官方每次运行现铸 UUID(实测同一输入两次运行有 28 个 id 不同),本项目的实现要有 `deterministic ids` 开关(顺序化 id 或注入 `IdGenerator`),否则基准对齐与往返测试无法做逐字节比较;同时注意官方 `KC` 会复制输入而**保留 shadow id -> 输出重复 id**(实测 49 个),本项目应改成重新铸 id 或显式容忍。
+14. **确定性 id**:官方每次运行现铸 UUID(实测同一输入两次运行有 28 个 id 不同),本项目的实现要有 `deterministic ids` 开关(顺序化 id 或注入 `IdGenerator`),否则基准对齐与往返测试无法做逐字节比较;同时注意官方 `KC` 会复制输入而**保留 shadow id 到 输出重复 id**(实测 49 个),本项目应改成重新铸 id 或显式容忍。
 15. **不要原地改入参**:官方 `GN` 会回写源 `block_data_json`(实测 12 处)且返回同一对象引用;Rust 侧按值转换,不做原地修改。
 16. **性能**:Nemo 路径逐条 XML 解析在 Node 下 3.5 MB 要 4-5 分钟;Kitten4 路径 754 KB 只要 355 ms。本项目的 Rust 实现要按后者量级设计(单文件秒级),并在报告里给耗时。
 
@@ -614,7 +614,7 @@ pub fn translate_works(work_ids: &[WorkId], target: TargetEditor, options: Trans
 
 | 层级     | 手段                                                                                                                                                                                                                                  |
 | --- | --- |
-| 单测     | 邻接表<->树双向一致;程序集抽取/回填一致(名字<->id);未知积木->降级/报告;映射表无重复键;Kitten4 影子搬运保真;空作品边界(空 `nekoBlockJsonList`)                                                                                              |
+| 单测     | 邻接表<->树双向一致;程序集抽取/回填一致(名字<->id);未知积木 到 降级/报告;映射表无重复键;Kitten4 影子搬运保真;空作品边界(空 `nekoBlockJsonList`)                                                                                              |
 | 基准对齐 | 用 Node harness 跑官方 `GN` + `De`,与本项目的输出做**语义 diff**(忽略 id/location/uuid),作为 Phase 2 的验收门(差值必须可解释);**官方校验器 `BcmHelpers.validateBcm`(bundle module 87123)可 headless 运行,作为「产物是否可加载」的硬门** |
 | 往返     | KN->Kitten4->KN 的积木类型多重集必须一致(误差仅限白名单内的降级项);Kitten4->KN->Kitten4 同理                                                                                                                                              |
 | 真机     | `tests/convert_live.rs`(新增):登录 -> `decompile_work` 取真作品 -> 转换 -> `FileUploader.upload` -> `create_kn_work` -> 用 KN 详情接口回读校验;反向同理用 Kitten 作品的 IDE 源码接口回读                                                   |
@@ -655,10 +655,10 @@ pub fn translate_works(work_ids: &[WorkId], target: TargetEditor, options: Trans
 **Kitten4 -> KN(阶段 1:GN)** — 输入 `几何对战-联机.bcm4`(754 KB,`version=25`,`size=960×720`):
 
 - 355 ms 返回(原地改写入参),0 warn/error;顶层 29 键 -> 30 键(只**新增** `procedures`,无删除:`size/theatre/project_name/audio/toolbox/…` 等 Kitten4 噪声字段**全部留着**)。
-- 积木:输入 `block_data_json.blocks` 字典 4 个实体共 374 个 -> 输出 17 个根(13 实体根 + 4 程序集根)/ 展开 439 个节点;命中的类型 44 种;**151 个积木被改名**(`start_on_click->on_running_group_activated`、`self_disappear->self_appear`、`set_costume->set_sprite_style`、`get_audios->get_play_audio`、`math_single->math_function`、`default_value->math_number`、`get_3->coordinate_of_sprite|appearance_of_sprite|effect_of_sprite`(按 `fields.attribute` 分流)…),字段改名如 `math_arithmetic.fields.OP:"MULTIPLY" -> fields.type:"multiply"`。
+- 积木:输入 `block_data_json.blocks` 字典 4 个实体共 374 个 到 输出 17 个根(13 实体根 + 4 程序集根)/ 展开 439 个节点;命中的类型 44 种;**151 个积木被改名**(`start_on_click->on_running_group_activated`、`self_disappear->self_appear`、`set_costume->set_sprite_style`、`get_audios->get_play_audio`、`math_single->math_function`、`default_value->math_number`、`get_3->coordinate_of_sprite|appearance_of_sprite|effect_of_sprite`(按 `fields.attribute` 分流)…),字段改名如 `math_arithmetic.fields.OP:"MULTIPLY" -> fields.type:"multiply"`。
 - 程序集:4 个 `procedures_2_defnoreturn` 从 actor `Function` 抽出到 `proceduresDict`,全部 `type:"NORMAL"`,条目形如 `{id,name,type,params,nekoBlockJsonList}`,`params` 元素 `{id,type,name}` 与真实 `.bcmkn` 完全一致。
 - **`block_data_json` 确实还在**(§8.3 已验证:omit 被随后的 cloneDeep 展开盖回);转换还**回写了原 `block_data_json`**(12 处,如 `get_3` 补 `fields.coordinate/effect/appearance`),Rust 实现要注意别改入参。
-- 阴影:XML 原样保留,同时物化成嵌套 `inputs`(177 个积木两者都有,且 id 可能不同);KC 复制输入时保留 shadow id -> 输出出现 **49 个重复 id**。
+- 阴影:XML 原样保留,同时物化成嵌套 `inputs`(177 个积木两者都有,且 id 可能不同);KC 复制输入时保留 shadow id 到 输出出现 **49 个重复 id**。
 - 非确定性:同输入两次运行结构一致但 **28 个 UUID 型 id 每次不同**(`BC()` 现铸 UUID)。-> 本项目实现要提供**确定性 id 模式**(测试/对齐必需)。
 
 **Kitten3(`blocksXML`)-> GN**:三级递进验证全部失败——原文件抛 `TypeError: … reading 'width'`(GN 第一行读 `e.size`);补 `size` 后抛 `TypeError: … reading 'blocks'`(`HC` 读 `block_data_json`);再补空 `block_data_json` 则**静默返回空结果**(根 0 / 展开 0 / 程序集 0 / 0 warning,**静默丢数据**)。结论:**Kitten3 必须另写 `blocksXML` 解析路径**(内部 `dI.parseBlocksXML` 走的正是这条,但未导出)。

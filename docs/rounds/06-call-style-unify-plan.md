@@ -4,7 +4,7 @@
 
 ## Context
 
-在定义侧整改(3a799cb)后审阅**外部调用侧**一致性(传参/构造/链式/消费形态),并执行 P0/P1 整改 + 4 项附加优化。审阅方法:3 个 scout 按簇审查 + 主代理核实关键计数。全部改动 `cargo check --all-targets` 通过,`cargo test` 3 passed。
+在定义侧整改(3a799cb)后审阅**外部调用侧**一致性(传参/构造/链式/消费形态),并执行 P0/P1 整改与 4 项附加优化。审阅方法:3 个 scout 按簇审查,主代理核实关键计数。全部改动 `cargo check --all-targets` 通过,`cargo test` 3 passed。
 
 ## 已执行改动
 
@@ -21,32 +21,32 @@
 | library.rs   | `NOVEL_LIST_PAGE_SIZE=10` `NOVEL_DETAIL_ITEMS=200`                                                                                       | 20/10/200(7 处)       |
 | education.rs | `NOTICE_PAGE_SIZE=10` `CLASS_STUDENT_PAGE_SIZE=100` `MANAGED_WORK_PAGE_SIZE=50` `LESSON_PACKAGE_PAGE_SIZE=100`                           | 10/20/50/100(11 处)   |
 
-- 通用默认 15/20 引用 `DEFAULT_PAGE_SIZE`/`DEFAULT_LIMIT`(acquire.rs);域特定值用文件常量。
+- 通用默认值 15 与 20 引用 `DEFAULT_PAGE_SIZE`/`DEFAULT_LIMIT`(acquire.rs);域特定值用文件常量。
 - 手写分页处(`Option<i32>` 参数)常量加 `as i32` 转换;`with_limit` 处(Option<usize>)不加。
-- `unwrap_or(0)`/`unwrap_or(1)`(offset/page/status 默认)非分页上限,未动。
+- `unwrap_or(0)`/`unwrap_or(1)`(offset/page/status 默认)非分页上限,未作改动。
 
 ### P0-2 + P0-3: whale 辅助收敛,TIME 置首（whale.rs）
 
 - `whale.rs`:`build_report_paginated` 内部新增链首 `.with_iter_param("TIME", current_timestamp_13().to_string())`,删 `add_timestamp_to_paginated` 辅助与 4 处调用点追加;保留 `default_limit: usize` 参数(调用点传 `limit.unwrap_or(15)`,与 3a799cb 前的 API 契约一致)。
-- 效果:TIME 由"辅助末尾追加"统一为"构造入口链首",4 调用点不再重复。
+- 效果:TIME 由"辅助末尾追加"统一为"构造入口链首",4 处调用点不再重复。
 - **education.rs 保留辅助**(add_timestamp_to_builder/add_timestamp_to_paginated):31+10 个调用点依赖,删辅助全内联会产生 41 处重复代码(负优化);辅助是教育域唯一一致形态,记录为域约定。
-- work.rs 39 处已置首,未动。
+- work.rs 39 处已置首,未作改动。
 
 ### P0-4: send_maybe_parse 传参统一（education.rs）
 
-- ``education.rs::get_or_delete_custom_package`` `self.send_maybe_parse(builder, method == HttpMethod::Get, ...)` -> 提取局部 `let return_data = method == HttpMethod::Get;` 后传变量,与其余 13 处 `return_data` 变量形态一致。
+- ``education.rs::get_or_delete_custom_package`` `self.send_maybe_parse(builder, method == HttpMethod::Get, ...)` 改为提取局部 `let return_data = method == HttpMethod::Get;` 后传变量,与其余 13 处 `return_data` 变量形态一致。
 
 ### P0-5: map 函数引用改闭包（5 文件 6 处）
 
-- `std::string::ToString::to_string` / `ToString::to_string` 函数引用 -> `|v| v.to_string()`(forum:149、shop:154、retrieve:772/778/782、cloudvar:1382、converse:615)。
+- `std::string::ToString::to_string` / `ToString::to_string` 函数引用改为 `|v| v.to_string()`(forum:149、shop:154、retrieve:772/778/782、cloudvar:1382、converse:615)。
 
 ### P0-6: unwrap_or_else 字面量改 unwrap_or（3 文件 4 处）
 
-- `unwrap_or_else(|| "-created_at".to_string())` -> `unwrap_or("-created_at".to_string())` 等(forum:182、shop:185/208、compiler:666)。字面量无闭包求值,`unwrap_or` 语义等价。
+- `unwrap_or_else(|| "-created_at".to_string())` 改为 `unwrap_or("-created_at".to_string())` 等(forum:182、shop:185/208、compiler:666)。字面量无闭包求值,`unwrap_or` 语义等价。
 
 ### 附加优化 2: core 评论默认值四层收敛（retrieve.rs）
 
-- 模块常量:`DEFAULT_COMMENT_STREAM_LIMIT=500`、`MAX_COMMENT_STREAM_LIMIT=1000`、`COMMENT_DETAIL_PER_WORK=20`;替换 `unwrap_or(500)`/`1000`/`Some(20)`;`with_page_size(15)` -> `DEFAULT_PAGE_SIZE`(3 处)。
+- 模块常量:`DEFAULT_COMMENT_STREAM_LIMIT=500`、`MAX_COMMENT_STREAM_LIMIT=1000`、`COMMENT_DETAIL_PER_WORK=20`;替换 `unwrap_or(500)`/`1000`/`Some(20)`;`with_page_size(15)` 改为 `DEFAULT_PAGE_SIZE`(3 处)。
 - 保留:`pipeline.rs` `comment_fetch_default_limit: 100` 是 CheckConfig 配置字段(与 retrieve 用户上限语义不同)。
 
 ## 判定不执行项（核实后记录理由）
@@ -64,13 +64,13 @@
 ## Critical files & anchors（执行后）
 
 - `src/api/{community,forum,shop,user,library,education}.rs` — 文件顶部新增分页常量区,替换散落字面量。
-- `src/api/whale.rs` — `build_report_paginated`(161)TIME 置首 + default_limit 参数;`add_timestamp_to_paginated` 已删。
-- `src/core/retrieve.rs` — 模块常量区(评论流默认/上限/每作品抽样)+ `DEFAULT_PAGE_SIZE` 引用。
+- `src/api/whale.rs` — `build_report_paginated`(161)TIME 置首,default_limit 参数保留;`add_timestamp_to_paginated` 已删。
+- `src/core/retrieve.rs` — 模块常量区(评论流默认/上限/每作品抽样)与 `DEFAULT_PAGE_SIZE` 引用。
 
 ## Verification（实际执行结果）
 
 - 每步 `cargo check` 0 error;最终 `cargo check --all-targets` 通过,`cargo test` 3 passed。
-- 行为等价声明:P0-1 仅替换字面量为等值常量;P0-2/3 TIME 位置变化(查询参数顺序对服务端无影响,已核实同端点其余参数不变);P0-4 计算式提局部变量;P0-5/6 纯形态改写。
+- 行为等价声明:P0-1 仅替换字面量为等值常量;P0-2/3 TIME 位置变化(查询参数顺序对服务端无影响,已核实同端点其余参数不变);P0-4 计算式提取为局部变量;P0-5/6 纯形态改写。
 - 验证命令:`grep -rn "unwrap_or(4)\|unwrap_or(24)\|unwrap_or(200)" src/api/` 应返回 0(常量替换完成);`grep -rn "ToString::to_string" src/` 应返回 0(闭包替换完成)。
 
 ## Assumptions

@@ -48,11 +48,11 @@
 
 - `work.rs` 中 9 行 `project["..."]` 索引改为 `.get("...")`(双层 `["addition"]["isTurnOnDebug"]` 改为 `.get("addition").and_then(|v| v.get(...))`)。
 - `auth.rs`、`community.rs` 的索引改写为 `.get(...).and_then(...)`。
-- `compiler.rs` 的数组字面量与 json! 宏键不动。
+- `compiler.rs` 的数组字面量与 json! 宏键未作改动。
 
 ### 6. P0-3: 错误消息中文化(4 处)
 
-- `forum.rs` 的英文错误消息改为中文(同时被 P1-4 重构吸收)。
+- `forum.rs` 的英文错误消息改为中文(同时并入 P1-4 重构)。
 - `acquire.rs` 中 "invalid base key"/"does not support"/"requires a request body" 三条英文消息改为中文。
 
 ### 7. P0-4: 日志 import 统一(3 文件)
@@ -97,7 +97,7 @@
 ### 13. WorkType / KittenVersion — 回退到原文件(按用户指令,接受重复)
 
 - 撤销"上移 api.rs 根"方案:`src/api.rs` 恢复纯 mod 声明;work.rs 恢复本地 WorkType(V3,V4 顺序)/KittenVersion;user.rs 恢复本地 WorkType(含 pub as_str,原 V4,V3 顺序)/KittenVersion。
-- 现状:两文件各持一份重复定义(与改动前一致),compiler.rs 的独立 WorkType 从未动。
+- 现状:两文件各持一份重复定义(与改动前一致),compiler.rs 的独立 WorkType 始终未作改动。
 
 ## Critical files & anchors(执行后)
 
@@ -113,7 +113,7 @@
     - build_paginated:内联链与原私有副本逐方法一致。
     - 随机 ID:字符集/长度/位数不变。
     - ChangeSource:枚举 as_str 输出与字面量一致。
-    - execute_ 改名:纯重命名,方法体未动;registry 动作键字符串保留,宏方法标识同步。
+    - execute_ 改名:纯重命名,方法体未作改动;registry 动作键字符串保留,宏方法标识同步。
     - 时间戳:系统时间异常从崩溃变为返回 0(行为改善)。
     - workshop_id/clouddb 前缀:纯签名/改名,format! 与 json! 自动适配。
 

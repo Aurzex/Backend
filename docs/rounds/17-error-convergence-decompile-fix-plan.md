@@ -2,17 +2,17 @@
 
 审阅日期:2026-08-29 · 基线:HEAD `5d76687` · 范围:`src/utils/requests.rs`、`src/core/compiler.rs`、`README.md`、`tests/{compile_live,live_features}.rs`
 
-> 方案先行(本文档),随后落地代码。前八轮已打通客户端注入(api 层、反编译器、举报引擎、登录/动作分发)与部分错误合并(CloudError/ChatError 合并为 SocketError)。第九轮收敛剩余错误模型并修正反编译返回语义。**延续允许破坏性 pub API 变更**。
+> 方案先行(本文档),随后落地代码。前八轮已完成客户端注入(api 层、反编译器、举报引擎、登录/动作分发)与部分错误合并(CloudError 与 ChatError 合并为 SocketError)。第九轮收敛剩余错误模型并修正反编译返回语义。**延续允许破坏性 pub API 变更**。
 
 ## Context
 
 剩余可优化点中,第九轮聚焦三处确定性缺陷(其余如 `compiler.rs` 4115 行分解、Manager 命名统一、剩余 `LazyLock` 全局单例、类型化 DTO 归入后续):
 
-1. **`MewError` 丢失结构化 HTTP 错误**:`send_checked` 把 4xx/5xx 压成 `MewError::Other(format!("HTTP {status}: {body}"))`,调用方无法用 `status`/`body` 分支处理,只能 `to_string()` 匹配。
-2. **`DecompilerError` 重复传输层变体**:自带 `Io`/`Json`/`Http(String)` 与 `MewError` 的 `Io`/`Json`/`Http` 重复(已 grep 确证 `DecompilerError::Io`/`::Json` 从不显式构造,只经 `?`;`Http(String)` 仅在 `CodeMaoHttpClient` 的 get_json/get_binary/get_text 6 处 `map_err` 出现)。
-3. **`decompile_work` 返回语义与文档矛盾**:doc 注释与 README 示例 5 声称「`output_dir` 传 `None` 表示不落盘,仅返回 JSON 字符串」,但 `decompile_inner` 对 `None` 回退 `default_output_dir` 并总是 `save_result` 写盘返回**文件路径**——「返回 JSON 字符串」模式从未实现,返回类型 `Result<String>` 实际恒为路径。
+1. **`MewError` 丢失结构化 HTTP 错误**:`send_checked` 将 4xx/5xx 压缩为 `MewError::Other(format!("HTTP {status}: {body}"))`,调用方无法按 `status`/`body` 分支处理,只能 `to_string()` 匹配。
+2. **`DecompilerError` 重复传输层变体**:自带 `Io`/`Json`/`Http(String)` 与 `MewError` 的 `Io`/`Json`/`Http` 重复(已由 grep 确认 `DecompilerError::Io`/`::Json` 从不显式构造,仅经 `?` 传播;`Http(String)` 仅出现在 `CodeMaoHttpClient` 的 get_json/get_binary/get_text 6 处 `map_err` 中)。
+3. **`decompile_work` 返回语义与文档矛盾**:文档注释与 README 示例 5 声称「`output_dir` 传 `None` 表示不落盘,仅返回 JSON 字符串」,但 `decompile_inner` 对 `None` 回退到 `default_output_dir`,并始终调用 `save_result` 写盘,返回**文件路径**——「返回 JSON 字符串」模式从未实现,返回类型 `Result<String>` 实际恒为路径。
 
-目标:给 `MewError` 加结构化 HTTP 状态变体;让 `DecompilerError` 包装 `MewError`(消除传输层重复);把 `decompile_work*` 返回类型改为 `PathBuf` 并修正文档。原则沿用 `CONTRIBUTING.md`(thiserror 保留底层变体、简洁可读、不引入新依赖)。
+目标:为 `MewError` 新增结构化 HTTP 状态变体;使 `DecompilerError` 包装 `MewError`(消除传输层重复);将 `decompile_work*` 返回类型改为 `PathBuf` 并修正文档。原则沿用 `CONTRIBUTING.md`(thiserror 保留底层变体、简洁可读、不引入新依赖)。
 
 ## Approach
 
@@ -43,7 +43,7 @@ Mew(#[from] MewError),
 
 2. 保留 `Crypto`/`Decompile`/`UnsupportedType`/`InvalidResponse`/`MissingField`/`TypeMismatch`/`Other`(反编译专属变体)。
 
-3. 为保住既有 `?` 链(文件内大量 `io::Error`/`serde_json::Error` 经 `?` 冒泡),新增两条 `From` 透传(enum 定义后):
+3. 为保留既有 `?` 传播链(文件内大量 `io::Error`/`serde_json::Error` 经 `?` 冒泡),新增两条 `From` 透传实现(enum 定义后):
 
 ```rust
 impl From<std::io::Error> for DecompilerError {
@@ -59,7 +59,7 @@ impl From<serde_json::Error> for DecompilerError {
 }
 ```
 
-4. `CodeMaoHttpClient` 的 6 处 `map_err(|e| DecompilerError::Http(...))` 改为直接 `?`:`self.client.build_request(...).send()?` 与 `self.client.response_to_json(response)?` 等。顶部补 `use crate::utils::requests::{CodeMaoClient, HttpMethod, MewError};`(当前只有 `CodeMaoClient, HttpMethod`)。
+4. `CodeMaoHttpClient` 的 6 处 `map_err(|e| DecompilerError::Http(...))` 改为直接 `?`:`self.client.build_request(...).send()?` 与 `self.client.response_to_json(response)?` 等。顶部补充 `use crate::utils::requests::{CodeMaoClient, HttpMethod, MewError};`(当前只有 `CodeMaoClient, HttpMethod`)。
 
 验证此步无残留:`grep -n "DecompilerError::Http\|DecompilerError::Io\|DecompilerError::Json" src/core/compiler.rs` 结果为 0。
 
@@ -69,8 +69,8 @@ impl From<serde_json::Error> for DecompilerError {
 2. `save_json_result` 与 `save_path_result` 返回类型由 `Result<String>` 改为 `Result<PathBuf>`;`save_json_result` 内 `Ok(filename)` 改为 `Ok(output_path.join(filename))`;`save_path_result` 内 `Ok(path.clone())` 改为 `Ok(PathBuf::from(path))`。
 3. 7 个反编译器 impl 的 `save_result` 签名与 3 处 `save_json_result`/`save_path_result` 调用同步返回 `PathBuf`。
 4. `decompile_inner`、`decompile`、`decompile_with_options`、`decompile_batch` 与 3 个自由函数 `decompile_work`/`decompile_work_with`/`decompile_works` 的返回类型由 `Result<String>`/`Vec<Result<String>>` 改为 `Result<PathBuf>`/`Vec<Result<PathBuf>>`。
-5. 修正文档:删掉 `decompile_work` 文档注释中的「`output_dir` 传 `None` 表示不落盘,仅返回 JSON 字符串」,改为「`output_dir` 传 `None` 时写入 `default_output_dir`,返回产物文件路径」;README 示例 5 的「None = 不写文件,只返回 JSON 字符串」改为「None = 写入默认输出目录,返回文件路径」。
-6. `tests/compile_live.rs` 与 `tests/live_features.rs` 的 `Path::new(&saved).exists()`(`saved` 由 `String` 变 `PathBuf`)改为 `saved.exists()`(若 `Path::new(&saved)` 经 deref 仍可编译则不必改,以 `cargo test --test compile_live` 报错为准)。
+5. 修正文档:删除 `decompile_work` 文档注释中的「`output_dir` 传 `None` 表示不落盘,仅返回 JSON 字符串」,改为「`output_dir` 传 `None` 时写入 `default_output_dir`,返回产物文件路径」;README 示例 5 的「None = 不写文件,只返回 JSON 字符串」改为「None = 写入默认输出目录,返回文件路径」。
+6. `tests/compile_live.rs` 与 `tests/live_features.rs` 的 `Path::new(&saved).exists()`(`saved` 由 `String` 变 `PathBuf`)改为 `saved.exists()`(若 `Path::new(&saved)` 经 deref 仍可编译则无需改动,以 `cargo test --test compile_live` 报错为准)。
 
 ## Critical files & anchors
 

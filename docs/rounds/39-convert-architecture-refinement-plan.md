@@ -15,7 +15,7 @@
 
 ## 0. 结论摘要
 
-**总评(评审与作者一致)**:rounds/37 之后域内**大结构是健康的**(`mod.rs` 门面 -> `decompile`/`translate` 两子域 -> `shared` 地基,子域互不依赖)。剩下的是三类**可逐个落地**的问题:
+**总评(评审与作者一致)**:rounds/37 之后域内**大结构是健康的**(`mod.rs` 门面、`decompile`/`translate` 两子域、`shared` 地基,子域互不依赖)。剩下的是三类**可逐个落地**的问题:
 
 1. **职责错位还没修完**:地基 `shared.rs`(1372 行)里混着**上传编排**(依赖 `api::work`,还反向依赖 `translate::tables_gen`)与**反编译侧私有的影子大表**;`model <-> xml` 这第三处环还在。
 2. **门的可靠性有洞(三处,评审补充了后两处)**:1)  `convert_bench` 默认模式下**基线缺失会静默重建**;2)  **部分样本缺失**时只打印一行警告就继续,`#meta`/SHA 那一档**静默不设防**;3)  `BACKEND_BENCH_REFRESH=1` 写的是 `fresh`,**样本缺失时重刷会把那几个键从基线里永久删掉**;此外报告把**中文文案当协议**解析 —— 改文案就会让预算门静默失效。
@@ -77,7 +77,7 @@
 | W12c 失效注释 / 断链清理 | 已完成 | 两条断链 rustdoc(`e8e19d6`);面包屑家族按"**只改指向不存在模块 / 自相矛盾**的、保留有意溯源标注"复核(`f01a6a8`):改 3 处(`api/auth.rs` 的 `editors/simple.rs`、`decompile/editors.rs` 头部的"本目录…"旧布局、`xml.rs` 的 `neko.rs`)、**保留**约 30 处"来自 src/…"/"原 x.rs"溯源 |
 | W12d `repo-conventions.md` §4 勘误 | 已完成 | 本次文档巡检(§1.3 的"已无 `Io/Json/Http`") |
 | W9 编码端少一趟全树遍历(`fill_shield`) |  **判不做** | 2026-10-02 三探针实测(§W9 落地段):**整趟删掉**的上界只 −1.37%/−1.40% 分配(且仅 2/6 样本);**合并能省的那部分(遍历)实测 0 分配**;不写序列化器的唯一路线(去 `skip_serializing_if`)还会改 4/6 样本字节 => 判不做,`src/` 零改动 |
-| W2 地基重划线(C3 已拍板**做**) | 已完成 | W2a `6027b18`(上传编排 -> 新 `upload.rs`)+ W2b `fb799b6`(反编译私有件 -> `decompile/{config,shadow,work}.rs`);**`shared.rs` 1372 -> 503 行**;两处 grep 归零。详见 §W2 落地段 |
+| W2 地基重划线(C3 已拍板**做**) | 已完成 | W2a `6027b18`(上传编排、新 `upload.rs`)+ W2b `fb799b6`(反编译私有件、`decompile/{config,shadow,work}.rs`);**`shared.rs` 1372 -> 503 行**;两处 grep 归零。详见 §W2 落地段 |
 | W4 报告类型化(C1 已拍板**做**) | 已完成 | `eea82bf`:`UnmappedBlock { kind, marked, cleared_shadows }`;`marker_counts` 改读结构字段(不再反解中文);改前/改后 `[标记量]` 读数逐行相同、活性自检(**人为 +1 => 门变红**)已做。详见 §W4 落地段 |
 | W13 `wrap_arithmetic` 移动不重铸 |  **暂缓并登记** | 2026-10-02 拍板:**不列入执行队列**。收益主要是"本项目自己的往返 id 台账更干净 / 往返 id 更稳",**不是用户可见差异**;代价是**偏离官方实现 + 改产物字节 + 需重做实体机与刷基线** => 待重新立项。证据:`rounds/38 §8`、§W13 |
 
@@ -210,15 +210,15 @@
 
 **落地(2026-10-02,两个提交)** —— `shared.rs` **1372 -> 503 行**(W2a 后 1128 行、W2b 后 505 行、W52)  再删 2 行),两处分层反转归零:
 
-- **W2a(`6027b18`):上传编排出地基 -> 新 `src/core/convert/upload.rs`(`pub(crate)`,253 行)**。搬走 `DraftUpload` /
+- **W2a(`6027b18`):上传编排出地基 到 新 `src/core/convert/upload.rs`(`pub(crate)`,253 行)**。搬走 `DraftUpload` /
   `supports_account_upload` / `draft_name` / `channel_for` / `SINGLE_PACKAGE_LIMIT` / `ensure_single_package_fits` /
   `create_draft` + `upload_tests`;两个调用点(`convert/mod.rs` 门面、`decompile/mod.rs` 反编译侧上传)语义不变。
   - **为什么选"域级工具层"而不是"调用方各传"**:`DraftUpload.bcm_version` 的"空串 => 用本库常量兜底"是**刻意语义**
     (`rounds/30 §4`),而反编译侧的"上传到账号"是它的**第二个调用点**;若改成"调用方必须传",要么给
     `decompile -> translate` 造一条**新的跨子域依赖**(比原来更坏),要么在**两处复制常量**。=> 把 `upload.rs` 定位为
     与域门面 `mod.rs` **同级**的工具层,允许它依赖 `translate::tables_gen`(单一定义源);地基 `shared.rs` 保持**零反向依赖**。
-- **W2b(`fb799b6`):反编译私有件搬回 `decompile/`** —— `DecompilerConfig` + `ShadowTemplate` -> `decompile/config.rs`、
-  `ShadowBuilder` -> `decompile/shadow.rs`、`WorkInfo`/`RawWorkData`/`WorkFetcher` -> `decompile/work.rs`。保留集按
+- **W2b(`fb799b6`):反编译私有件搬回 `decompile/`** —— `DecompilerConfig` + `ShadowTemplate` 改为 `decompile/config.rs`、
+  `ShadowBuilder`、`decompile/shadow.rs`、`WorkInfo`/`RawWorkData`/`WorkFetcher`、`decompile/work.rs`。保留集按
   **实际消费者**划线(留地基的:`EditorType`/`WorkId`/`XHTML`/`DecompilerError`/`Result`/`ResultExt`/`ValueExt`/
   `FileService`/`CryptoService`/`HttpClient`/`CodeMaoHttpClient`/`batch_map`/`IdGenerator`);顺带把 `nemo_tests.rs` 里
   那个其实是 decompile 侧的用例随件迁走(`rounds/37 §0.4` 的建议)。
@@ -237,7 +237,7 @@
 - 做法:`load_baseline()` 的 NotFound 分支改成:严格模式或**非 REFRESH** => panic;`BACKEND_BENCH_REFRESH=1` 时仍返回空 map(允许首跑建基线)。同时删掉 `:395-399` 的"首次运行自动写基线"分支(改为提示"用 `BACKEND_BENCH_REFRESH=1`")。
 - 收益:默认模式下门不可能再被"基线被删/首次检出"静默绕过。
 - 风险:**行为变更(期望的)**:全新检出第一次跑 `convert_bench` 不再绿,须先显式 REFRESH。
-- 验证:临时重命名 fixture -> 默认跑应红、`BACKEND_BENCH_REFRESH=1` 应能建首版;再验证"REFRESH 之外不会写盘"。
+- 验证:临时重命名 fixture 到 默认跑应红、`BACKEND_BENCH_REFRESH=1` 应能建首版;再验证"REFRESH 之外不会写盘"。
 
 **W3b 夹具/样本严格开关,并覆盖"部分缺失"**(证据:`reverse_tests.rs` 的 `real_bcmkn` 族、`:1249-1254`、`:1271-1273`、`:1584-1596`、`:1731-1733`、`:2254-2256`;``convert_facade_bench.rs::convert_facade_flow_bench`` 的 `continue`;``convert_work_bench.rs::sha256_hex`` 自有一份 `strict_mode()`;``convert_bench.rs::std::fmt::BaselineMismatch::baseline_mismatches`/244-246`)
 - 做法:新增 `BACKEND_REQUIRE_FIXTURES=1`,把"缺夹具 return"与"**部分样本缺失只打印**"统一折成 panic;`convert_work_bench.rs` 的 `strict_mode()` 复用它(避免第三个口径)。
@@ -256,7 +256,7 @@
 **W3e `BACKEND_BENCH_REFRESH=1` 不得丢键**(证据:``convert_bench.rs::std::fmt::BaselineMismatch::baseline_mismatches_reports_product_and_every_meta_key_together`` 写的是 `fresh`;`fresh` 只由存在样本构成 `:343/358`)
 - 做法:进入 REFRESH 分支时,若 `!missing.is_empty()`(**待补充:见 §5** —— 或)=> **拒绝写盘**并列出缺失样本与将被删除的键名;要强制刷新需第二个显式开关。
 - 收益:堵住"重刷一次就永久少守一档、事后看不出来"的洞(评审 L1(b),这是本轮最值得修的洞)。
-- 验证:删一个样本 -> `BACKEND_BENCH_REFRESH=1` 应**拒绝写盘并列出键**;样本齐时刷新正常。
+- 验证:删一个样本 到 `BACKEND_BENCH_REFRESH=1` 应**拒绝写盘并列出键**;样本齐时刷新正常。
 
 **工作量**:W3 合计 1 天。**回退**:五个子项各自独立 revert。
 **评审处置**:W3a 注意: **部分采纳**(采纳"必须写成 NotFound 且非 refresh => panic");W3b 已完成 **采纳**(含评审补充的"部分缺失"与 `convert_work_bench`);W3c 注意: **部分采纳**(采纳"直接删、不接线";**不采纳**新增集合门 —— 理由如上);W3d 已完成 **采纳**(含表外兜底口径);W3e 已完成 **新增采纳**(评审 L1(b) 的新发现)。
@@ -266,7 +266,7 @@
 ### W4【架构+功能·P1】报告:把"中文文案当协议"改成结构字段 
 **证据**:``report.rs::TranslateWarning`` 明写"冻结协议"(计数拼进 `kind`);``reverse_tests.rs::KITTEN4_UNKNOWN_BY_DESIGN` marker_counts` 用 `split_once("已改成未收录积木 ")` 反解中文 => **文案一改,读数静默变 0,`MARKER_BUDGET` 变成"永远通过"**;``report.rs::TranslateWarning`` 的类别标签 "未映射积木(**保留原类型名**)" 与 rounds/38 后的语义**相反**。
 **做法**:`TranslateWarning::UnmappedBlock { kind: String, marked: u64, cleared_shadows: u64 }`(`kind` 回归纯类型名);``assembly.rs::KITTEN4_TOOLBOX_ORDER` mark_unknown_blocks` 直接填字段;``pipeline.rs` remap_warning` 同步(穷尽 match);``mapping.rs::reverse_kind`/1349` 两处**纯类型名**发射点填 `0`;`marker_counts` 改读字段;`category()` 标签改对;**把 ``report.rs::TranslateWarning`` 那条注释改写成新协议的结构说明(不要删,它记的教训仍有效)**。
-**收益**:门不再依赖文案;报告可被程序消费(`counts()` 已是结构化聚合);消除"改文案 -> 门失效"。
+**收益**:门不再依赖文案;报告可被程序消费(`counts()` 已是结构化聚合);消除"改文案 到 门失效"。
 **风险**:**动公共 API**(`TranslateWarning` 是 `pub`)。受影响文件:`report.rs`/`assembly.rs`/`pipeline.rs`/`mapping.rs`/`reverse_tests.rs`/`tests/convert_live.rs`(类别聚合)。**必须与改门同批**;且因 `remap_warning` 是穷尽 match,**枚举本身的改动要与 W62)  串行**(评审 §2-2) )。
 **验证**:`cargo test` 全绿(含 `MARKER_BUDGET`)+ 四样本 SHA 不变 + **反向自检**:人为把某类型 `marked` 加 1 => 门必须红。
 **回退**:单提交 revert(字段与文案要一起回)。
@@ -391,7 +391,7 @@
 2. **"走的成本"与"补键的成本"分开量**(探针 P2:保留遍历、只停掉那次插入):6 个样本 × 两条腿与 P1
    **逐位相同** => **遍历本身零分配**;那 −1.37%/−1.40% **全部来自每节点一次 `"shield".to_string()` 插入**。
 3. **"合并两趟"省不掉那一项——直接用实测代答**:把 `BlockJson::shield` 的
-   `skip_serializing_if = "is_false"` 去掉(serde 每节点都写 `shield`,于是 `fill_shield` 可整段删掉;
+   `skip_serializing_if = "is_false"` 去掉(serde 每节点都写 `shield`,故 `fill_shield` 可整段删掉;
    这是**不写序列化器**的唯一落地路线),探针读数(同一次跑,`fill_shield` 已短路):
    `kitten4-10.8MB` **2125796 次**(与基线**一字不差**)、`kitten4-0.3MB` **68665 次**(同样一字不差);
    `kn-9.4MB` 1009679(+13880)、`kn-3.7MB` 267626(+3226)、`nemo-3.4MB` 1652769(+26422)、
@@ -412,7 +412,7 @@
 
 ### W10【功能·P2】容错:内联对象形态的影子 
 **证据**:``pipeline.rs`` 直接拒绝该类作品;`:218-220` 注释自认"支持对象形态 = 把对象转成影子 XML,列在待做里";真实样本 `A28社区-开幕_174408420`(已在 `download/compile/k4edit/` 语料)。
-**做法**:写出"对象影子 -> 影子 XML"的转换,替换拒绝分支;范围只做 **Kitten4 -> KN 正向**。
+**做法**:写出"对象影子 到 影子 XML"的转换,替换拒绝分支;范围只做 **Kitten4 -> KN 正向**。
 **收益**:一类真实作品从"报错拒收"变"可转换";扫描器里"跳过:暂不支持"的计数会变小(可观测判据)。
 **风险**:中(新增写出形态);必须证明**既有样本字节不变**。
 **验证**:该件语料的往返 + 最小复现单测 + 四样本 SHA 不变 +(建议)实机门。
@@ -505,7 +505,7 @@
 | 合并三处 `math_number` 影子字面量 | **锚点更正(评审)**:第三处是 **``model.rs::def_root_from_entry``**(`NUM` + `allow_text`,`rewrite_call` 内),而 ``model.rs::return_value_def_yields_normal_and_round_entries`` 是 **`default_value`** 影子(`:1765 default_value_shadow`);第一处 ``xml.rs::math_number_shadow``、第二处 ``model.rs::rewrite_node` VALUE_SHADOW_XML`(多行、无 xmlns、字段名 `TEXT`)。各处在不同官方上下文里逐字节锚定 => 统一格式化就是改字节。rounds/31 §3.6 D4 记的就是 ``model.rs::def_root_from_entry`` |
 | `translate_file` 的 `read_to_string` -> `from_reader` | 取舍:serde_json 的 `from_reader` 对大文件比 `from_str` 更慢,是"峰值内存换 CPU";当前无内存压力 |
 | 把 convert 公共错误统一成 `MewError` | `MewError`(``utils/requests.rs``)无通用变体 => 会丢 `Lossy{report}`/`Unsupported{from,to}` 语义,且是公共面破坏 |
-| 拆 `convert_nemo_document`(``nemo.rs::convert_nemo_document``,≈510 行) | **暂不做**:NEMO 现无字节门,拆无门的行为更难回归。顺序应是 W6 -> W7 -> 再评估 |
+| 拆 `convert_nemo_document`(``nemo.rs::convert_nemo_document``,≈510 行) | **暂不做**:NEMO 现无字节门,拆无门的行为更难回归。顺序应是 W6 -> W7 到 再评估 |
 | **拆 `nemo_mapping.rs` 的 551 行表**(原 W12a) | **不做**(C2 已决,**2026-10-02**):`rounds/31 §3.52) ` 是**已评审并执行**的决定("表并入本模块、不进生成物文件"),`repo-conventions` §5 的 ≈2500 只是**软**上限、2616 在已批准的容忍带内 => 不重开。文件头已加一行体量记账(见 §5-C2) |
 | 继续合并 5 份 `Fetcher::new` 壳 / 测试里 6 份 `fn walk` | rounds/37 M1 已判("收益是一处定义");测试局部性 > DRY,且各 `walk` 口径不同 |
 | `find_object_shadow` 预扫描惰性化/删除(P4) | rounds/37 §4 已判不做 —— 理由是惰性化会把"对象影子作品"从**拒绝**变成**先尝试解析、可能被接受**,即**悄悄改对外行为**。注意: **该语境已变**:本轮 W10 已**显式**落地这类作品的支持(`66c0b6b`,见 §W10 落地段)=> "接受对象影子作品"是刻意做的,不是惰性化的副作用。**P4 的惰性化本身仍未做**(现在它只是纯性能项,不再是行为改变项) |
@@ -528,7 +528,7 @@
 ### C2 —— W12a 是否把 `nemo_mapping.rs` 的 551 行表拆成新文件
 - **支持拆分(原方案)**:2616 > ≈2500 软上限;`repo-conventions` §5 有"生成物单独一处"的规则。
 - **反对(评审,更强)**:**这不是"方向相反",而是重开一条已决且已执行的条目** —— `rounds/31 §3.52) ` 明写"`tables_gen_nemo` 改并入 `nemo_mapping`(**不进**生成物文件)",`§2` 的目标表就写 `translate/nemo_mapping.rs ~2 675`,并在 `§6` 记了执行(`41470d9`);`repo-conventions` §5 用的也是 "≈ 2 500" => 2616 在**已批准的容忍带**内。拆分还会让 ``nemo_mapping.rs`/2057` 那句指向 `tables_gen_nemo` 的历史注释"重新变成真的",把已否掉的布局复活。
-- **建议**:**不拆**;改为在文件头加一行体量记账,并修掉两条断链注释。若你坚持拆,那是"重开 `rounds/31 §3.52) `",须按仓库纪律写明授权与理由,不当作 W12 的子项顺手做。
+- **建议**:**不拆**;改为在文件头加一行体量记账,并修掉两条断链注释。若你坚持拆,那是"重开 `rounds/31 §3.52) `",须按仓库纪律写明授权与理由,不当作 W12 的子项附带执行。
 - **已决(2026-10-02,按证据拍板):不拆**(采纳评审:`rounds/31 §3.52) ` 是**已评审并执行**的决定,`~2500` 是软上限、2616 在已批准的容忍带内)。收尾动作已做:文件头加了一行体量记账(`nemo_mapping.rs`,本次注释提交);两条断链注释此前已修(`e8e19d6`/`73b749d`)。
 
 ### C3 —— W2 `shared.rs` 重划线是否执行

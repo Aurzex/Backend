@@ -16,7 +16,7 @@
 
 **位置**:`src/core/terminal.rs` 的 `process_item` 中 `if ctx.official[idx]` 分支。
 
-**问题**:官方内容自动通过调用 `processor.apply_action(item, ReportAction::Pass, admin_id)?`,用 `?` 传播错误。`process_pending` 仅对 `ProcessorError::Aborted` 特判,其余 `Err` 一路冒泡——一条官方举报的 PATCH 瞬时失败会让整个待处理会话退出,剩余举报全部不处理;若该条持续失败,每次进入都卡在同一项。这与同函数 Ask 分支用 `match` 逐条记录错误、不中断的语义矛盾,是 docs/rounds/04 F10(Phase 3-2)漏改的分支。
+**问题**:官方内容自动通过调用 `processor.apply_action(item, ReportAction::Pass, admin_id)?`,用 `?` 传播错误。`process_pending` 仅对 `ProcessorError::Aborted` 特判,其余 `Err` 逐层向上传播——一条官方举报的 PATCH 瞬时失败会使整个待处理会话退出,剩余举报全部不处理;若该条持续失败,则每次进入都停留在同一项。这与同函数 Ask 分支用 `match` 逐条记录错误、不中断的语义矛盾,是 docs/rounds/04 F10(Phase 3-2)漏改的分支。
 
 **改动**:把 `?` 改成 `match`,失败时记录错误并返回 `Ok(RunStats::default())`(跳过本条,不中断会话),与 Ask 分支对齐:
 
@@ -75,9 +75,9 @@ if ctx.official[idx] {
 
 **位置**:`src/api/community.rs` 的 `fetch_broadcast_messages_gen`。
 
-**问题**:`.with_page_size(1)` 让每个广播消息一次 HTTP;默认 `with_limit(COURSE_LIST_PAGE_SIZE)`(该常量为 `10`)意味着拉满 10 条要串行发 10 次请求。
+**问题**:`.with_page_size(1)` 使每条广播消息各占一次 HTTP 请求;默认 `with_limit(COURSE_LIST_PAGE_SIZE)`(该常量为 `10`)意味着取满 10 条需串行发出 10 次请求。
 
-**改动**:`with_page_size(1)` 改为 `with_page_size(MESSAGE_PAGE_SIZE)`(该文件已有常量 `MESSAGE_PAGE_SIZE = 15`)。`with_limit(limit.unwrap_or(COURSE_LIST_PAGE_SIZE))` 保持不动(仍是总量上限)。行为:1 次请求拉一批,10 条上限从 10 次往返降到 1 次。
+**改动**:`with_page_size(1)` 改为 `with_page_size(MESSAGE_PAGE_SIZE)`(该文件已有常量 `MESSAGE_PAGE_SIZE = 15`)。`with_limit(limit.unwrap_or(COURSE_LIST_PAGE_SIZE))` 保持不动(仍是总量上限)。行为:单次请求取回一批,10 条上限由 10 次往返降为 1 次。
 
 **边界/风险**:若服务端无视 `limit` 参数、固定每页 1 条,则此改动为无害 no-op(仍 1 条/页,但分页逻辑不变);若服务端按 `limit` 返回批量,则消除 N+1。二者皆行为安全,`[INFERENCE]` 仅为「是否真有收益」。
 
@@ -119,9 +119,9 @@ if ctx.official[idx] {
 
 ## 不落地(记录在案)
 
-- **`create_wood_file` 的每文件一次 GET 与 POST(O(N²) 上传字节)**:属 API 粒度问题,无批量端点可改,收益/成本比差,维持现状(2026-08-14 只修其中的字段丢失,见 P2-1)。
+- **`create_wood_file` 的每文件一次 GET 与 POST(O(N²) 上传字节)**:属 API 粒度问题,无批量端点可改,收益/成本比偏低,维持现状(2026-08-14 只修其中的字段丢失,见 P2-1)。
 - **`terminal.rs view_done` 全量加载与关键字过滤逐条 `serde_json::to_string`**:交互式演示 UI,内存/序列化量受人工会话制约;关键字为空时已短路不序列化;加 memo 需并行 Vec,收益有限,不改。
-- **`terminal.rs` 的「所有举报处理完成」文案在预取流提前截断时略误导**:`registry.rs` 跳过某类型时已 `error!` 打日志,错误已可见,文案不改。
+- **`terminal.rs` 的「所有举报处理完成」文案在预取流提前截断时略误导**:`registry.rs` 跳过某类型时已由 `error!` 记录日志,错误已可见,文案不改。
 - **`registry.rs` 的 `error!` 文案在「最后一页失败、重试遇 EOF」场景称「跳过该类型余下数据」略不精确**:行为正确(有界重试耗尽后放弃),仅文案,不改。
 - **`registry.rs` 的 `fetch_reports_chunked` 是 `fetch_chunked` 的纯转发**:有 3 处调用(`services.rs`),非死代码,保留。
 - **`work.rs` 三个 KN 分页迭代器结构重复 / 13 个 `ClientAccess` impl**:属「抽 helper / 宏」类抽象,违反「不过度抽象、不用宏」约束,不改。
@@ -158,11 +158,11 @@ if ctx.official[idx] {
 
 - `cargo check --all-targets` 0 error。
 - `cargo clippy --all-targets` 0 warning。
-- `cargo test` 全绿:库单测 3 passed(`admin_info_from_details` ×2、`fetch_chunked_terminates_without_duplicates`)、`compile_live` 1 passed(NEMO 1 ignored)、`live_features` 3 passed(`login_and_ai_chat` / `cloud_variables` / `decompile_works`)、doc-tests 0。
+- `cargo test` 全部通过:库单测 3 passed(`admin_info_from_details` ×2、`fetch_chunked_terminates_without_duplicates`)、`compile_live` 1 passed(NEMO 1 ignored)、`live_features` 3 passed(`login_and_ai_chat` / `cloud_variables` / `decompile_works`)、doc-tests 0。
 - 归零验证:
     - `grep -n "create_wood_project(CreateWoodProjectArgs" src/api/work.rs` 命中 0 处(`create_wood_file` 不再重建 payload)。
     - `grep -n "with_page_size(1)" src/api/community.rs` 命中 0 处。
     - `grep -n "offical/packages" src/api/education.rs` 仅剩 `fetch_official_lesson_packages_gen` 与 `fetch_expiring_lessons` 两处官方端点;`fetch_custom_lesson_packages_gen` 已不命中 offical。
     - `fetch_organization_ids` 绝对 URL 处的 `Some(BaseKey::Education)` 已改 `None`。
-- P2-3 `parse_frame` 未新增单测(改动行为等价、非新契约,维持最小测试面),以 `cargo check` 与 code review 及既有测试全绿为准。
+- P2-3 `parse_frame` 未新增单测(改动行为等价、非新契约,维持最小测试面),以 `cargo check` 与 code review 及既有测试全部通过为准。
 - P1 / P2-1 行为依赖真实举报 / Wood 接口,无网络环境下以 code review 为准:均为确定性 bug 修复或等价重写,不改对外 pub 契约。

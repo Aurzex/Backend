@@ -11,44 +11,44 @@
 ### 核心层
 
 1. **ResponseMode 枚举化**(acquire.rs + 6 api 文件)
-    - acquire.rs 新增 `pub enum ResponseMode { Data, Status }`;`ClientAccess::send_maybe_parse(builder, return_data: bool, ...)` -> `(builder, mode: ResponseMode, ...)`。
+    - acquire.rs 新增 `pub enum ResponseMode { Data, Status }`;`ClientAccess::send_maybe_parse(builder, return_data: bool, ...)` 改为 `(builder, mode: ResponseMode, ...)`。
     - 8 处 `return_data: bool` 参数改 `mode: ResponseMode`(account:822/education:175/work:257,279/library:378,395,409,511,536,668/forum:383,401,446,468,521/shop:453,493);education:860 计算式改 `if method == Get { Data } else { Status }`。
     - pipeline.rs 2 处 `report_post/report_item` 传 `false` 改 `ResponseMode::Status`。
     - 残留验证:`grep return_data src/` 返回 0。
 
 2. **HistoryMode 枚举化**(converse.rs)
-    - 新增 `pub enum HistoryMode { Include, Exclude }`;`send_message(message, include_history: bool)` -> `(message, mode: HistoryMode)`;`send_and_wait(message, include_history: bool, timeout)` -> `(message, mode: HistoryMode, timeout)`。
+    - 新增 `pub enum HistoryMode { Include, Exclude }`;`send_message(message, include_history: bool)` 改为 `(message, mode: HistoryMode)`;`send_and_wait(message, include_history: bool, timeout)` 改为 `(message, mode: HistoryMode, timeout)`。
     - 内部 `mode == HistoryMode::Include` 判断;无外部调用点。
 
 3. **RankingOrder 枚举化**(cloudvar.rs)
-    - 新增 `pub enum RankingOrder { Ascending, Descending }` + `as_code()`(1/-1);`get_ranking(variable_name, limit, order: i64)` -> `(..., order: RankingOrder)`。
+    - 新增 `pub enum RankingOrder { Ascending, Descending }` + `as_code()`(1/-1);`get_ranking(variable_name, limit, order: i64)` 改为 `(..., order: RankingOrder)`。
     - 非法 order 运行期校验删除(编译期穷尽,行为改善);`ASCENDING_ORDER`/`DESCENDING_ORDER` 常量保留供 as_code。
 
 ### 外围层
 
 4. **LogoutMethod 接入 logout_v12**(auth.rs)
-    - `logout_v12(method: &str)` -> `logout_v12(method: LogoutMethod)`;内部 match Web->"web"/Mobile->"mobile",V0/Admin 返回 Err;调用点 `logout_v12("web")` -> `logout_v12(LogoutMethod::Web)` 等。
+    - `logout_v12(method: &str)` 改为 `logout_v12(method: LogoutMethod)`;内部 match 将 Web 映射到 "web"、Mobile 映射到 "mobile",V0/Admin 返回 Err;调用点由 `logout_v12("web")` 等改为 `logout_v12(LogoutMethod::Web)`。
     - 非法字符串实参编译期禁止。
 
 5. **ToggleAction 统一**(acquire.rs + work/forum/library)
     - acquire.rs 新增 `pub enum ToggleAction { On, Off }` + `to_http_method(on_method, off_method)`。
-    - work.rs:删 `SelectMethod` 枚举;`toggle_follow/toggle_collection/toggle_like/toggle_comment_like` 的 `method: SelectMethod` -> `action: ToggleAction`(Post/Delete 对);`toggle_comment_pin` 裸 `HttpMethod` 参数 -> `ToggleAction`(Put/Delete 对)。
-    - forum.rs:`toggle_like(action: &str)` -> `(action: ToggleAction)`(Put/Delete 对,删 "like"/"unlike" match);`toggle_comment_top_status(should_top: bool)` -> `(action: ToggleAction)`(Put/Delete 对)。
-    - library.rs:`toggle_novel_favorite/toggle_comment_like/toggle_book_like` 的 `like: bool` -> `action: ToggleAction`(Post/Delete 对)。
+    - work.rs:删 `SelectMethod` 枚举;`toggle_follow/toggle_collection/toggle_like/toggle_comment_like` 的 `method: SelectMethod` 改为 `action: ToggleAction`(Post/Delete 对);`toggle_comment_pin` 裸 `HttpMethod` 参数改为 `ToggleAction`(Put/Delete 对)。
+    - forum.rs:`toggle_like(action: &str)` 改为 `(action: ToggleAction)`(Put/Delete 对,删 "like"/"unlike" match);`toggle_comment_top_status(should_top: bool)` 改为 `(action: ToggleAction)`(Put/Delete 对)。
+    - library.rs:`toggle_novel_favorite/toggle_comment_like/toggle_book_like` 的 `like: bool` 改为 `action: ToggleAction`(Post/Delete 对)。
     - 残留验证:`grep '"like"\|"unlike"' src/api/` 返回 0。
 
 6. **NemoMessageType 枚举化**(community.rs)
-    - 新增 `pub enum NemoMessageType { Like, Comment }` + `as_url_code()`("1"/"3");`fetch_nemo_messages(types: &str)` -> `(message_type: NemoMessageType)`,消除静默 else。
+    - 新增 `pub enum NemoMessageType { Like, Comment }` + `as_url_code()`("1"/"3");`fetch_nemo_messages(types: &str)` 改为 `(message_type: NemoMessageType)`,消除静默 else。
 
 7. **UploadChannel 枚举化**(acquire.rs + services.rs)
-    - acquire.rs 新增 `pub enum UploadChannel { Pgaot, Codegame, Codemao }` + `parse(s) -> Option`;`FileUploader::upload(file_path, method: &str, save_path)` -> `(file_path, channel: UploadChannel, save_path)`,match 穷尽(删 `_` 分支)。
-    - services.rs:`handle_file_upload`/`handle_directory_upload` 的 `method: &str` -> `channel: UploadChannel`;`uploader.upload(file_path, channel, save_path)`。
+    - acquire.rs 新增 `pub enum UploadChannel { Pgaot, Codegame, Codemao }` + `parse(s) -> Option`;`FileUploader::upload(file_path, method: &str, save_path)` 改为 `(file_path, channel: UploadChannel, save_path)`,match 穷尽(删 `_` 分支)。
+    - services.rs:`handle_file_upload`/`handle_directory_upload` 的 `method: &str` 改为 `channel: UploadChannel`;`uploader.upload(file_path, channel, save_path)`。
     - 无字符串调用点,`parse` 为备用 API(非法字符串沿用原错误语义)。
 
 8. **ReportAction 枚举化**(registry.rs + services.rs + terminal.rs)
     - registry.rs 新增 `pub enum ReportAction { Delete, Mute7d, Mute3m, Unpublish, Pass, CheckViolation, Skip }` + `key()`("D".."J") + `from_key(s) -> Option`。
-    - services.rs:`apply_action(item, action: &str, ...)` -> `(item, action: ReportAction, ...)`;`apply_group(group, action: &str, ...)` -> `(group, action: ReportAction, ...)`;`save_group_action(group, action: &str)` -> `(group, action: ReportAction)`;内部传 `action.key()` 给 &str 契约方法(`execute_action`/`is_action_available`/`save_batch_action`)。
-    - terminal.rs:`"P"` -> `ReportAction::Pass`(3 处);`&key`/`&saved` -> `ReportAction::from_key(&key)` 映射,None 时 warn + 跳过(防御注册表扩展);`st.record(action.key(), n)` 保持字符串统计键。
+    - services.rs:`apply_action(item, action: &str, ...)` 改为 `(item, action: ReportAction, ...)`;`apply_group(group, action: &str, ...)` 改为 `(group, action: ReportAction, ...)`;`save_group_action(group, action: &str)` 改为 `(group, action: ReportAction)`;内部传 `action.key()` 给 &str 契约方法(`execute_action`/`is_action_available`/`save_batch_action`)。
+    - terminal.rs:`"P"` 改为 `ReportAction::Pass`(3 处);`&key`/`&saved` 改由 `ReportAction::from_key(&key)` 映射,None 时 warn + 跳过(防御注册表扩展);`st.record(action.key(), n)` 保持字符串统计键。
     - registry 注册键字符串 `actions(&[...])` 保留(注册契约)。
 
 9. **保留 bool**(未改):`auto_reconnect(enabled)`/`save_raw(on)`/`with_log_requests(log)`(纯 builder 配置)。
@@ -68,16 +68,16 @@
 
 - 每步 `cargo check` 0 error;最终 `cargo check --all-targets` 通过,`cargo test` 3 passed,`cargo clippy --all-targets` 0 warning。
 - 归零验证:
-    - `grep -rn "return_data" src/` -> 0
-    - `grep -rn "include_history" src/` -> 0
-    - `grep -rn '"like"\|"unlike"' src/api/` -> 0(仅注释)
-    - `grep -rn "order: i64" src/` -> 0
-    - `grep -rn "SelectMethod" src/` -> 0
+    - `grep -rn "return_data" src/` 返回 0
+    - `grep -rn "include_history" src/` 返回 0
+    - `grep -rn '"like"\|"unlike"' src/api/` 返回 0(仅注释)
+    - `grep -rn "order: i64" src/` 返回 0
+    - `grep -rn "SelectMethod" src/` 返回 0
 - 行为等价声明:
     - ResponseMode/HistoryMode/RankingOrder/ToggleAction/UploadChannel:纯签名替换,内部逻辑逐字等价。
     - ReportAction:apply 系列经 `key()` 转 &str 后与旧逻辑一致;terminal 未知键从"透传"变为"warn 跳过"(防御性改善)。
     - LogoutMethod:v0/admin 字符串实参原本会拼出错误端点,现编译期禁止(行为改善)。
-    - NemoMessageType:消除静默 else("like"->1 保持,其余 2 种语义枚举化)。
+    - NemoMessageType:消除静默 else("like" 映射到 1 的行为保持,其余 2 种语义枚举化)。
 
 ## Critical files & anchors（执行后）
 

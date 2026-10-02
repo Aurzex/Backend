@@ -14,7 +14,7 @@
 
 ### P1-1 `ReportProcessor::totals()` 锁外取数(services.rs)
 
-**问题**:`totals_cache` 互斥锁在 `get_totals_pair`(并发发起 2×N 个 HTTP 请求 + `thread::scope` join)整个网络往返期间被独占;`apply_action` 等触发的 `invalidate_totals()` 会被阻塞。
+**问题**:`totals_cache` 互斥锁在 `get_totals_pair`(并发发起 2×N 个 HTTP 请求与 `thread::scope` join)整个网络往返期间被独占;`apply_action` 等触发的 `invalidate_totals()` 会被阻塞。
 
 **改动**:先短锁查缓存,命中直接返回;未命中则**释放锁**取数,取回后再加锁写缓存。行为等价,消除锁争用。
 
@@ -32,7 +32,7 @@
 
 ### P2-2 `ensure_account_login` 死分支清理(pipeline.rs)
 
-**问题**:`if idx < *current_idx` 恒为 false(`select_report_account` 返回前已 `*current_idx = idx`),是死分支;实际行为靠末尾 `% accounts.len().max(1)` 恰好正确。
+**问题**:`if idx < *current_idx` 恒为 false(`select_report_account` 返回前已 `*current_idx = idx`),是死分支;实际行为依赖末尾的 `% accounts.len().max(1)` 恰好正确。
 
 **改动**:删除死分支,显式处理「账号清空归零 / 否则取模」,并注释说明 remove 后 `current_idx` 指向补位账号即"前进到下一个"的语义。行为不变。
 
@@ -42,12 +42,12 @@
 | --- | --- | --- | --- |
 | P3-1 | `(limit + 1) / 2` 溢出 | retrieve.rs | 改 `limit / 2 + limit % 2`(有符号整数 `div_ceil` 在本工具链仍 unstable,`int_roundings` 未稳定) |
 | P3-2 | `starts_with("http")` 误判 | requests.rs | 改 `starts_with("http://") \|\| starts_with("https://")` |
-| P3-3 | `base64_to_bytes` / `reverse_string` 拿 `&self` 不读 `self` | compiler.rs | 改关联函数(去 `&self`),唯一调用点 `decrypt_bcmkn` 同步改 `Self::` |
-| P3-4 | `generate_random_id` 的 `u8 as char` footgun | requests.rs | 仅补 doc 注释「仅支持单字节 ASCII 字符集」,不改 pub 签名(3 处调用均传 `b"..."`) |
+| P3-3 | `base64_to_bytes` / `reverse_string` 以 `&self` 接收却未读取 `self` | compiler.rs | 改关联函数(去 `&self`),唯一调用点 `decrypt_bcmkn` 同步改 `Self::` |
+| P3-4 | `generate_random_id` 的 `u8 as char` 隐患 | requests.rs | 仅补 doc 注释「仅支持单字节 ASCII 字符集」,不改 pub 签名(3 处调用均传 `b"..."`) |
 
 ## 不落地(记录在案)
 
-- `map_comments_chunked` 每项一线程 + 中间分配(retrieve.rs):行为正确,线程粒度优化需权衡,收益有限。
+- `map_comments_chunked` 每项一线程与中间分配(retrieve.rs):行为正确,线程粒度优化需权衡,收益有限。
 - `auth_header()` 每请求 `format!`(requests.rs):热路径小分配,避免过早优化。
 - `IdGenerator`/`CryptoService` `Clone` 语义(compiler.rs):62 元素拷贝可忽略。
 - `switch_identity` TOCTOU、`unwrap_or(usize::MAX)` 哨兵:边界/契约项,维持「实测前不改」立场。
@@ -57,5 +57,5 @@
 
 1. `cargo check --all-targets` 0 error。
 2. `cargo clippy --all-targets` 不新增警告。
-3. `cargo test` 全绿(库单测:AdminInfo、分块迭代器终止性;集成测试未配置时自动跳过)。
+3. `cargo test` 全部通过(库单测:AdminInfo、分块迭代器终止性;集成测试未配置时自动跳过)。
 4. 行为等价性以 code review 为准:改动均为「等价重写」或「删死分支」,不改变对外契约。

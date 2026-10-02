@@ -12,7 +12,7 @@
 | **真正的架构问题是"职责错位 + 两处真环"** | (1) `translate/mod.rs` 一个文件装了**五件事**(选项/错误、报告层、正/反管线、入口、诊断),导致兄弟模块的 `use super::{TranslateReport,…}` **向上依赖**(实测 `mapping.rs`、`model.rs`、`nemo.rs`、`nemo_mapping.rs` 均在文件头部以 `use super::{…}` 形态向上依赖;`assembly.rs` 经另一路径引用);(2) `model` 与 `mapping` 互成环(model.rs 与 mapping.rs 互相引用);(3) `nemo.rs` 与 `nemo_mapping.rs` 互成环(两者文件头部互相引用) |
 | **合并空间不大,但有两处"真职责重叠"** | 正向管线集中在 `translate/mod.rs` 的文档级编排,反向管线在 `assembly.rs` 的反向装配段,二者共用的**并行机位于 `assembly.rs` 末尾且排在 `assembly_tests` 之后**,因此违反本仓"测试在文件末尾"规则,也是文件超 2500 行的主因 |
 | **死重量/样板可确定删除** | `FileService.config` 字段全仓零读取(见 `shared.rs` 的 `FileService` 定义)+ 它污染的 3 个 `file_service` 字段;`TOP_BLOCKS`/`KN_TYPES`(`tables_gen.rs`)零生产调用点;5 份 Fetcher 壳 + 3 份 `save_result` + 5 份变体错误分支(editors.rs);11 份 `LazyLock` 索引样板;9 个 `pub(crate)` 读取器(`translate/mod.rs` 的 `TranslateOptions`) |
-| **性能上"分配"比"算法"更值得动** | 反向装配有 3~4 次整份积木 JSON 深拷(`assembly.rs` 的 `KnEntity.source` 拷贝与 `strip_unknown_blocks`);`translate_work` 每次白写+删一份与源同量级的 raw JSON(decompile 侧 `save_raw` 默认 true);正向入口有一次**无条件**全文档扫描 + 二次 parse(`translate/mod.rs` 的 `find_object_shadow`) |
+| **性能上"分配"比"算法"更值得动** | 反向装配有 3~4 次整份积木 JSON 深拷(`assembly.rs` 的 `KnEntity.source` 拷贝与 `strip_unknown_blocks`);`translate_work` 每次写入一份与源同量级的 raw JSON 随即删除(decompile 侧 `save_raw` 默认 true);正向入口有一次**无条件**全文档扫描 + 二次 parse(`translate/mod.rs` 的 `find_object_shadow`) |
 | **先决阻塞:现在无法证明"输出不变"** | `cargo test --profile bench_perf --test convert_bench -- --ignored` 实测:两个**反向**样本 SHA 与基线不一致(正向两个一致)——与 34–36 轮刻意改反向输出吻合,但**基线没有同步**:任何重构现在都拿不到"输出不变"的机器证据(详见 §6.2) |
 
 **做法**:4 个阶段,每阶段独立提交、独立回退;先修门(Phase 0),再纯搬迁(Phase 1),再样板/死重量(Phase 2),
@@ -61,7 +61,7 @@ nemo_mapping ≈ 2580 NEMO 解析 + 映射 + 表
 > 要真正回到上限内,必须**连 remint 段(≈256 行)一起搬进 `pipeline.rs`**(2547 减 256 约 2291,回到 2500 行上限内)——
 > 这会**重新决定 rounds/31 §3.5(c)\"remint 并入 assembly\"那条**:当时的动因是"少一个文件、且临时 id 改写的唯一调用方就是管线",
 > 而现在 `pipeline.rs` 存在,因此管线的机器(并行 + 临时 id 兑现 + remap)同处一文件更顺。
-> 这条算**重开已决事项**,所以列为 §9 的 Q2,由人拍板;不拍板则维持 2547(超软上限 47 行,可接受但要在文件头记账)。
+> 这条算**重开已决事项**,所以列为 §9 的 Q2,由人拍板;不拍板则维持 2547 行(超软上限 47 行,可接受但要在文件头记账)。
 
 ### 2.2 每次搬迁:代价与验证
 
@@ -71,7 +71,7 @@ nemo_mapping ≈ 2580 NEMO 解析 + 映射 + 表
 | 选项/错误迁至 `options.rs` | mod.rs 从"什么都装"变回门面;与 `DecompileOptions` 同层同义 | `mod.rs` 必须 `pub use options::{…}` 再导出(**公开路径不变**) | `tests/convert_live.rs`、`convert_bench.rs` 用的就是公开路径,因此编译即证 |
 | 正/反管线 + 并行机迁至 `pipeline.rs` | **唯一一处"真职责重叠"的修复**:正/反编排同层可对照;`assembly.rs` 恢复单一职责且测试回到末尾 | `assembly.rs` 内 9 处引用(`assembly::workers/run_items/IdRemap/remap_*/merge_report`,见 `translate/mod.rs` 的调度调用点)+ 2 条 doc 注释 | 编译 + `forward_parallel_tests`(不依赖 download/)+ `convert_bench` 1 与 8 同 SHA |
 | XML 层迁至 `xml.rs`(两处环) | 断 `model` 与 `mapping`、`nemo` 与 `nemo_mapping` 两处环;**这是分层修复,不是省行数**(净增 1 文件) | `mapping.rs` 的字符串手术与影子构造 + `nemo.rs` 的 DOM 段与 XML 单测整体搬;`model.rs` 的 `VALUE_SHADOW_XML` 是**逐字节照搬官方**形态(含换行缩进)因此不得与 `math_number_shadow` 统一格式化 | 逐字节比 5 处影子模板产物 + `nemo_tests` 的 `value_slot_keeps_shadow_xml_and_override_block` |
-| 通用调度器迁至 `pipeline.rs` | 2644 降至 **2547**(仍超软上限;要 ≤2500 必须连 remint 段一起搬,因此见 §2.1 注与 Q2) | `workers`(2179-2190)/`run_items`(2191-2275)≈97 行 + 3 条调度用例 | 同上 |
+| 通用调度器迁至 `pipeline.rs` | 2644 降至 **2547**(仍超软上限;要 ≤2500 必须连 remint 段一起搬,详见 §2.1 注与 Q2) | `workers`(2179-2190)/`run_items`(2191-2275)≈97 行 + 3 条调度用例 | 同上 |
 
 **不做**:按方向把 `assembly.rs`/`mapping.rs` 切成两份 —— 双向共用工具集中在一处是**防漂移设计**(`assembly.rs` 的模块注释),
 且 rounds/32 的 `pure_list_get` 影子 bug 正是"正向漏了、反向有"的不对称,因此同居是刻意保留的可对照性。
@@ -87,10 +87,10 @@ nemo_mapping ≈ 2580 NEMO 解析 + 映射 + 表
 | M1 | `editors.rs` 的 5 份 Fetcher 壳合并为一个 `HttpFetchCtx` 内嵌 | ≈ −40 行样板 | 低:`fetch` 体一行不动(rounds/31 §3.6 N3 已判"URL 拼装不可合并") |
 | M2 | 3 份 `save_result` 合并为一个 helper + 3 行调用 | ≈ −26 行 | 低:三份函数体**逐字节相同**,只差编译器名字面量 |
 | M3 | 5 份 `RawWorkData` 变体错误分支改为 `expect_variant(name)` | ≈ −25 行 | 低:错误文案逐字保留 |
-| M4 | `NemoResourceConfig` 与 `WoodResourceConfig` 合并为一个 `ResourceConfig`(顺带删死字段) | ≈ −9 行 | 低:字段逐项相同 |
+| M4 | `NemoResourceConfig` 与 `WoodResourceConfig` 合并为一个 `ResourceConfig`(同时删除死字段) | ≈ −9 行 | 低:字段逐项相同 |
 | M5 | **删 `FileService` 的死 `config` 字段 + 3 个 `file_service` 字段**(见 `shared.rs`、`decompile/mod.rs`、`editors.rs`、`nemo_tests.rs` 中的相应字段) | 删掉一个 Arc 深拷贝链与 4 个死字段 | 低:全仓**零读取点**(已 grep 确认)。改动只在 `pub(crate)` 面 |
 | M6 | 11 份 `LazyLock<HashMap>` 索引样板合并为 `flat_index/nested_index` 两个泛型自由函数 | ≈ −55 行 | 低:不用宏、语义(首命中优先)逐键等价 |
-| M7 | `tables_gen.rs` 删 `TOP_BLOCKS` 与 `KN_TYPES`,**并同步改生成器** `src/bin/gen_translate_tables.rs` | ≈ −234 行死数据 | 低:零生产调用点;必须改生成器否则下次重跑复活;顺带改写 2 条提到 `KN_TYPES` 的注释(实测注释位于 `translate/mod.rs` 与 `mapping.rs`) |
+| M7 | `tables_gen.rs` 删 `TOP_BLOCKS` 与 `KN_TYPES`,**并同步改生成器** `src/bin/gen_translate_tables.rs` | ≈ −234 行死数据 | 低:零生产调用点;必须改生成器否则下次重跑复活;同时改写 2 条提到 `KN_TYPES` 的注释(实测注释位于 `translate/mod.rs` 与 `mapping.rs`) |
 | M8 | `ParsedEntity` 单字段 newtype 改为直接返回 `BlockTree` | ≈ −3 行 + 消噪声 | 低:全部调用点都立刻 `.tree` 拆包 |
 | M9 | `parse_int_prefix` 两份合并到 `xml.rs`;整数化助手按 rounds/31 D5 合一 | ≈ −60 行 | 低:`parse_int_prefix` 两份逐字同构 |
 
@@ -112,7 +112,7 @@ nemo_mapping ≈ 2580 NEMO 解析 + 映射 + 表
 - 七处遍历实现强行合一(语义不同;rounds/21 §6 / rounds/31 §3.6 已判);
 - **`BTreeMap` 改为 `HashMap`**(会改产物:反例见 `mapping.rs`(在 `for` 循环里反复覆盖 `node.next`),字典序决定胜出者);
 - `RawValue` 顶层透传 / 单遍遍历合并(rounds/26 §6:透传占比 ≈0%);
-- 反向(KN 到 Kitten4)实体级并行(rounds/25 §10:Amdahl 上限 1.9×);
+- 反向(KN 改为 Kitten4)实体级并行(rounds/25 §10:Amdahl 上限 1.9×);
 - `decompile::download_resources_parallel` 并入 `shared::batch_map`(语义不同:带预过滤 + 失败重试);
 - `nemo_tests.rs` 与其它测试归并(rounds/31 §2.2 已否决:要包一层 mod、`super::` 语义会变);
 - 两套 options 合并(破坏公开面;`upload` vs `upload_to_account` 语义不同)。
@@ -128,16 +128,16 @@ nemo_mapping ≈ 2580 NEMO 解析 + 映射 + 表
 
 | # | 项 | 证据(锚点) | 预期收益 | 验证 | 风险 |
 | --- | --- | --- | --- | --- | --- |
-| **P1** 已完成(2026-09-26,`c55dce7`) | `translate_work` 关掉 `save_raw` | `convert/mod.rs` 的 `translate_work_in` 用 `DecompileOptions::new()`(默认 `save_raw = true`,见 `decompile/mod.rs`),因此每次白写一份与源同量级的 JSON(NEMO 两份)再被 `remove_dir_all` 删掉 | 每次 translate_work **≈20 ms 的无产出 I/O**(实测,3.8 MB 源;见 §6.2ter)—— 收益真实但小一个量级 | 一行改动 + "staging 内无 raw" 断言 + SHA 不变 | **最低**:raw 不是产物 |
+| **P1** 已完成(2026-09-26,`c55dce7`) | `translate_work` 关掉 `save_raw` | `convert/mod.rs` 的 `translate_work_in` 用 `DecompileOptions::new()`(默认 `save_raw = true`,见 `decompile/mod.rs`),因此每次都会写入一份与源同量级的 JSON(NEMO 两份)随即被 `remove_dir_all` 删除 | 每次 translate_work **≈20 ms 的无产出 I/O**(实测,3.8 MB 源;见 §6.2ter)—— 收益真实但小一个量级 | 一行改动 + "staging 内无 raw" 断言 + SHA 不变 | **最低**:raw 不是产物 |
 | **P2** 已完成(2026-09-26,`df92e03`,实测 ≈2–3%) | `KnEntity.source` 不再深拷 `nekoBlockJsonList` | `assembly.rs` 中 `entity.as_object().cloned()`,而装配侧读 `source` 的各处**从不读这个键** | 反向最大的一笔分配(9.4 MB 样本 ≈10⁵ 节点) | convert_bench `core` 列 + SHA | 低:过滤式克隆或改借用 `&'a Map` |
 | **P3** 已完成(2026-09-26,`df92e03`) | `strip_unknown_blocks` 改就地消费 | `assembly.rs` 的 `strip_unknown_blocks` 中三处 `cloned()` 与逐块 `shadows` 双拷(即使无未知类型) | 同一份积木数据**3~4 次深拷降为 0 次** | 同上 | 低:`root.remove` 取所有权;**保持 BTreeMap 键序**,因此字节不变 |
-| **P4** 判不做(2026-09-26 执行时重新裁决) | `find_object_shadow` 惰性化 | `translate/mod.rs` 的 `find_object_shadow` **无条件**全文档扫描 + 字符串形态再做一次 `from_str`;触发形态实测只 1 例 | 正向入口省 3–10% e2e(≈ 一次 read+parse 量级) | SHA 不变 + 错误消息文本兼容(有测试引用) | **不做**:已 grep 确认错误文案无测试断言,但惰性化会把"内联对象影子作品"从**拒绝**变成**先尝试解析**(可能被接受)因此改变了对外行为,而收益只是"3–10% 正向 e2e"的**推断值**,因此按仓库"无数据不做 + 不悄悄改行为"的纪律不做 |
+| **P4** 判不做(2026-09-26 执行时重新裁决) | `find_object_shadow` 惰性化 | `translate/mod.rs` 的 `find_object_shadow` **无条件**全文档扫描 + 字符串形态再做一次 `from_str`;触发形态实测只 1 例 | 正向入口省 3–10% e2e(≈ 一次 read+parse 量级) | SHA 不变 + 错误消息文本兼容(有测试引用) | **不做**:已 grep 确认错误文案无测试断言,但惰性化会把"内联对象影子作品"从**拒绝**变成**先尝试解析**(可能被接受),因此改变了对外行为,而收益只是"3–10% 正向 e2e"的**推断值**,因此按仓库"无数据不做 + 不悄悄改行为"的纪律不做 |
 | **P5** 已完成(2026-09-26,`3f05b0f`) | 逐块线性扫描改为 `LazyLock` 索引 | `mapping.rs` 的 `rc_plain` 在**每个块**上扫 180 条且未命中走满;`is_kitten_side` 扫 367×2(表长实测:`KITTEN_TO_KN` ≈367、`KITTEN_MUTATION_TEXT` ≈180、`_SELECT` 粗计 ≈41 —— 侦察报 17,动手前精确数一次) | 正向 ~2.5M、反向 ~3.8M 次短串比较,因此换成哈希(≈ core 的 1–3%) | bench `core` 列(必须超出噪声才算) | 低:`or_insert` 保持"首命中优先" |
 | **P6** | `#[serde(flatten)] extra` 手写 | `model.rs` 的 `extra` 被 `from_value`/`to_value` **逐节点**调用(调用点分布在 `translate/mod.rs` 与 `model.rs`) | 逐节点 serde 成本 **1.5–3×**,因此是 `core` 的大头 | 先跑 `model_tests/null_tolerance_tests` + 四样本 SHA | **中高**:`extra` 键序与 null 容错必须逐字节复现;且 `extra` 有**生产消费者**——`model.rs` 的 `def.extra.insert`/`body.extra` 与 **`assembly.rs` 中 remint 的 `remap_object(&mut node.extra)`**必须原样可用(只换反序列化机制,field 语义不动) |
 | **P7** 部分(2026-09-26:P7.1 已完成 `915c8ff`;另两条经核实不可行/会改口径,见 §10) | 正向装配解构移动 + `duplicate_ids` 借用 + `count()` 复用 | `assembly.rs` 中 `entity.source.clone()`(按值收却仍克隆,与其后的注释自相矛盾);每节点 `to_string()`;同一棵树数两遍 | 每实体一次深拷 + ~5k 次 String + 一趟 DFS | SHA 不变 | 低(注意 `blocks_total` 取点在映射**前**、`converted` 在编码后,语义不可互换) |
 | **P8** | 告警 String 延迟构造 | 反向 5235 块产 1817 条告警(rounds/23 §2 F);产生点 13 处,分布在 `mapping.rs` 与 `assembly.rs` | 反向 `core` 的 5–15% | 告警**逐条同序**断言(procedure_library) | 低:不改公开枚举形状 |
 | **P9** | NEMO:去重复解析 + 分配 | `nemo.rs` 与 `nemo_mapping.rs` 用 `format!("<root>{xml}</root>")` 再解析;`has_return_blocks` 把同一段**再包一次再解析**;含返回的条目共 3 次解析 + 1 次深拷;`text_content` 每次 2 次堆分配(万级 `<field>`);三趟 `replace_*` 递归 | NEMO 前端解析时间**可省一半到三分之二** | **先补 NEMO SHA 门**(Phase 0.5) | 中:畸形输入下 `<root>` 包装与裸 `Parser::run` 行为不同,因此必须保持同样严格 |
-| **P10** 已完成(2026-09-26,`915c8ff`) | `create_draft_work` 复用已取到的 `preview` | `convert/mod.rs` 的 `create_draft_work` 为拿 preview **重新拉一次详情**;而反编译侧 `WorkInfo.preview` 早已取到(见 `decompile/mod.rs`、`shared.rs`),只是 `DecompiledArtifact::Document` 没带出来 | 每次带上传的 translate_work 省一个 RTT;顺带消掉 backlog 2b 的全局客户端依赖 | 编译 + 真机上传门 | 低 |
+| **P10** 已完成(2026-09-26,`915c8ff`) | `create_draft_work` 复用已取到的 `preview` | `convert/mod.rs` 的 `create_draft_work` 为拿 preview **重新拉一次详情**;而反编译侧 `WorkInfo.preview` 早已取到(见 `decompile/mod.rs`、`shared.rs`),只是 `DecompiledArtifact::Document` 没带出来 | 每次带上传的 translate_work 省一个 RTT;同时消掉 backlog 2b 的全局客户端依赖 | 编译 + 真机上传门 | 低 |
 | **P11** | `parent_id` 改 `Arc<str>` / 临时 id clone | `mapping.rs` 中每子节点一次 String;`translate/mod.rs` 的每个 id 铸造点 clone 一次临时 id | 万级分配,占 `core` 3–8% / <2% | SHA 不变 | 中:动 `BlockJson` 字段类型,排后面 |
 
 **明确不做的性能项**:`BTreeMap` 改为 `HashMap`(改字节)、`kitten4_editor_knows` 换 `HashSet`(实测 ~1.3×10⁵ 次比较,亚毫秒级)、
@@ -175,7 +175,7 @@ nemo_mapping ≈ 2580 NEMO 解析 + 映射 + 表
 
 ### 6.1 分阶段耗时(`--profile bench_perf`,本机 4 核)
 
-| 样本 | 源 MB | read | parse | **core** | ser | e2e | 产物 MB | 块(源至产物) | 告警 |
+| 样本 | 源 MB | read | parse | **core** | ser | e2e | 产物 MB | 块(源转产物) | 告警 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | kitten4-10.8MB(正向) | 10.8 | 4 | 73 | **226** | 61 | 516 | 9.7 | 12764 至 14024 | 209 | <!-- hygiene-allow:基准样本键,非凭据 -->
 | kitten4-0.3MB(正向) | 0.3 | 0 | 2 | 8 | 2 | 22 | 0.3 | 374 至 439 | 0 | <!-- hygiene-allow:基准样本键,非凭据 -->
@@ -183,7 +183,7 @@ nemo_mapping ≈ 2580 NEMO 解析 + 映射 + 表
 | kn-3.7MB(反向) | 3.7 | 2 | 6 | 57 | 11 | 145 | 4.0 | 1597 至 1597 | 508 |
 
 读法:`core` 占 e2e 的 **44%**(正向 226/516)、**45%**(反向 214/474);`ser` ≈ 10–12%;`parse` 6–14%;
-还有 **≈30% 未归类**(写盘 + 报告 + 装配 + 计划外克隆)因此性能工作单里 P2/P3/P7(整份深拷)正落在这 30% 里。
+还有 **≈30% 未归类**(写盘 + 报告 + 装配 + 计划外克隆),因此性能工作单里 P2/P3/P7(整份深拷)正落在这 30% 里。
 实体级并发实测只拿到 **core 1.36× / e2e 1.06×**(正向),反向无并行 —— 与 rounds/25 的 Amdahl 结论一致。
 
 ### 6.2 "输出不变"这门现在的状态(**红**)
@@ -195,7 +195,7 @@ nemo_mapping ≈ 2580 NEMO 解析 + 映射 + 表
 ```
 
 - 不一致的**只有两个反向样本**;两个正向样本 SHA 一致,因此与 rounds/34–36"只改反向输出"完全吻合;
-- 但基线文件(`tests/fixtures/translate/convert_bench_baseline.json`)**没有同步**,因此结论:
+- 但基线文件(`tests/fixtures/translate/convert_bench_baseline.json`)**没有同步**,因此结论是:
  **基线是历史遗留的红,不是新缺陷**;它必须在 Phase 0 有据地重刷(§1 0.1),否则后面分不清因果;
 - 附带发现:`#meta` 只记录不断言、基线缺失会被静默重建、CI 上这条门静默跳过(`download/` 被 gitignore)——
  这三条都在 Phase 0 一并堵掉。
@@ -214,23 +214,23 @@ nemo_mapping ≈ 2580 NEMO 解析 + 映射 + 表
 | kn-3.7MB(反向) | 前 | 64 | 143 | 与后一致 |
 | 同上 | 后 | **62** | 143 | — |
 
-**结论(诚实)**:
+**结论**:
 1. **P2/P3 的收益只有 ≈2–3%(反向 `core` 227 降至 221、`e2e` 481 降至 474),落在本机噪声内**,因此
- 方案把它们排在"收益最大"是**估错了** —— 那几笔深拷贝在 9.4 MB 文档上只值几毫秒;
+ 方案把它们排在"收益最大"是**估计失误** —— 那几笔深拷贝在 9.4 MB 文档上只值几毫秒;
 2. 正向样本"变慢"(212 增至 245)是同轮噪声的证明:它**不经过** P2/P3 改的代码路径,因此该差值只能来自机器波动;
-3. **真正贵的是"逐块"工作**:反向 5235 块花 221 ms(**≈42 µs/块**),正向 12764 块花 212–245 ms(**≈17 µs/块**)
- ,因此反向每块贵 2.5×。因此**队列要改**:把 P6(`#[serde(flatten)]` 逐节点 serde)、P5(逐块线性扫描)、
- P8(告警 String)提到前面;P7/P9–P11 次之;已被否的 P4 不回头。
+3. **真正的开销在"逐块"工作**:反向 5235 块花 221 ms(**≈42 µs/块**),正向 12764 块花 212–245 ms(**≈17 µs/块**),
+故反向每块的耗时高 2.5×。因此**队列要改**:把 P6(`#[serde(flatten)]` 逐节点 serde)、P5(逐块线性扫描)、
+ P8(告警 String)提到前面;P7/P9–P11 次之;已判不做的 P4 不再回头。
 
 ### 6.2ter P1 的量,与"方案的收益估计普遍偏乐观"这个教训
 
 `translate_work` 的端到端实测**不可用**:那条路上抓取要 3~8 s,抖动比本地开销大一个量级
-(实测两轮:前 6901 ms / 后 6463 ms,但第二轮后侧 15.8 s,因此纯网络噪声),而且**产物 SHA 前后完全一致**
-(`d6978f5b…`,因此P1 确实不动产物)。于是改成**直接量 P1 消掉的那件事**(本地探针 `raw_write_cost_probe`):
+(实测两轮:前 6901 ms / 后 6463 ms,但第二轮后侧 15.8 s,属纯网络噪声),而且**产物 SHA 前后完全一致**
+(`d6978f5b…`,即 P1 确实不改动产物)。于是改成**直接量 P1 消掉的那件事**(本地探针 `raw_write_cost_probe`):
 
 | 项 | 方案里的估计 | **实测** | 结论 |
 | --- | --- | --- | --- |
-| P1 关 `save_raw` | "数百 ms~1 s / 次" | **20 ms**(3.8 MB 源,release;一次 `to_string` + 写盘;NEMO 两份,因此≈两倍) | 真实但是**纯浪费的 I/O**,墙钟收益**小一个数量级** |
+| P1 关 `save_raw` | "数百 ms~1 s / 次" | **20 ms**(3.8 MB 源,release;一次 `to_string` + 写盘;NEMO 两份,故约两倍) | 收益真实但属于**纯浪费的 I/O**,墙钟收益**小一个数量级** |
 | P2/P3 深拷消除 | "反向最大的一笔分配" | **≈2–3%**(§6.2bis,且落在噪声内) | 收益可忽略 |
 | §0.5 / M5 | 观测与死代码 | 无耗时影响 | 判断正确 |
 
@@ -239,15 +239,15 @@ nemo_mapping ≈ 2580 NEMO 解析 + 映射 + 表
 因此从现在起:**先量后改**(队列按 §6.1/§6.2ter 的实测重排,而不是按直觉排序)。
 
 **下一步该量什么**(据 §6.2bis 的每块成本):反向 `core` **≈42 µs/块**(5235 块 / 221 ms)、
-正向 **≈17 µs/块**(12764 块 / 212–245 ms)因此嫌疑集中在**逐块路径**:
+正向 **≈17 µs/块**(12764 块 / 212–245 ms),因此嫌疑集中在**逐块路径**:
 `#[serde(flatten)]` 的逐节点 serde(P6)、逐块线性扫描(P5)、告警 String(P8)。
-在动它们之前,先各加一条**本地探针**(像 `raw_write_cost_probe` 那样,脱离网络与噪声)。
+在修改它们之前,先各加一条**本地探针**(做法同 `raw_write_cost_probe`,脱离网络与噪声)。
 
 ### 6.3 证据强弱纪律
 
-- SHA 是**绊线**(能证"变了"),不是**等价证明**(不能证"语义没变")因此每次 SHA 变化必须给逐字段解释;
+- SHA 是**绊线**(能证"变了"),不是**等价证明**(不能证"语义没变"),因此每次 SHA 变化必须给逐字段解释;
 - 没有分配/内存门,因此凡"减少 clone"的优化,一律**必须**用同轮 A/B 的 `core`/`e2e` 数字作证(单轮绝对毫秒会漂 20–40%);
-- 没有性能回归门,因此人工取"5 轮最小、同机同档";Phase 3 可顺手加一条粗门(core/e2e 超基线 1.5× 才失败)以减少人眼负担。
+- 没有性能回归门,因此人工取"5 轮最小、同机同档";Phase 3 可一并添加一条粗门(core/e2e 超基线 1.5× 才失败)以减少人眼负担。
 
 ---
 
@@ -259,7 +259,7 @@ nemo_mapping ≈ 2580 NEMO 解析 + 映射 + 表
 | 两个"会动字节"的改动同批(如 `flatten` + `fill_shield`) | 明确排成两条独立提交,分两次归因 |
 | 公开面被无意改动(rounds/31 §3) | 只搬迁 + `pub use` 再导出;`tests/convert_live.rs`/`convert_bench.rs` 用的是公开路径,因此编译即证 |
 | 与 rounds/31 的"不合并"清单冲突 | §3.3 逐条列出"不重开";Q2/Q3 两条有争议项单列待决 |
-| NEMO 无门却被"顺手"改动 | Phase 0.5 补门之前**不碰 NEMO 语义**(只允许 §4 Q4/P9 的非语义部分) |
+| NEMO 无门却被附带改动 | Phase 0.5 补门之前**不碰 NEMO 语义**(只允许 §4 Q4/P9 的非语义部分) |
 | 语料目录可变(`download/` 由采集器写入) | STRIP_BUDGET/PROCEDURE_LIBRARIES 按**文件名**索引,因此新语料落"表内最大值"兜底;方案要求新样本同时补表 |
 
 ---
@@ -284,15 +284,15 @@ nemo_mapping ≈ 2580 NEMO 解析 + 映射 + 表
 | `assembly.rs` 有生产代码排在测试之后 | `assembly_tests` 之后仍有生产代码,`remint_tests` 位于文件末尾 | 成立(因此并修正了"搬到 ≤2500"的算术) |
 | `kitten4_editor_knows` 不在热点(≈1.3×10⁵ 次比较) | 调用点量级估算 | 推断,无 profile,因此方案里已按"无数据不做"处理 |
 | P5 的收益(1~3% core) | 无 profile | 推断,因此必须靠同轮 A/B 的数 |
-| P9 的收益(NEMO 省 1/2~2/3 解析) | 无 profile(NEMO 连 `elapsed_ms` 都没有) | 推断,因此Phase 0.5 补仪器后再量 |
+| P9 的收益(NEMO 省 1/2~2/3 解析) | 无 profile(NEMO 连 `elapsed_ms` 都没有) | 推断,故 Phase 0.5 补仪器后再量 |
 | `KITTEN_MUTATION_TEXT_SELECT` 表长 | 粗计 ≈41,而侦察报 17,**不一致** | 未定,因此动手前精算(不影响方向) |
-| `BlockJson::walk` 零生产调用 | grep 只命中**同名局部函数**,未精确区分方法 | 未定,因此Phase 4 用 dead_code 复核 |
+| `BlockJson::walk` 零生产调用 | grep 只命中**同名局部函数**,未精确区分方法 | 未定,故 Phase 4 用 dead_code 复核 |
 | "NEMO 方向没有离线门" | 读 `nemo_tests.rs` 的 `#[test]` 列表 | 方案原措辞过强,因此已更正:有 6 条默认跑的内存单测;缺的是 SHA 基线 + 真文件路径门 + `elapsed_ms` |
-| Q6 两套批处理执行器是否同构 | 逐行读 `assembly.rs` 的 `run_items` 与 `shared.rs` 的 `batch_map` | **不同构**(装箱/panic/所有权/返回四点都不同)因此结论"不合并" |
+| Q6 两套批处理执行器是否同构 | 逐行读 `assembly.rs` 的 `run_items` 与 `shared.rs` 的 `batch_map` | **不同构**(装箱/panic/所有权/返回四点都不同),因此结论"不合并" |
 
 **复核改正的三处**:
 
-1. **`assembly.rs` 的算术错了**:只搬并行机(≈97 行)因此2547,仍超 2500 软上限;要回到上限内必须**连 remint 段(≈256 行)一起搬**,因此已改正,并把"重开 rounds/31 remint 合并决策"单列为 **Q2**;
+1. **`assembly.rs` 的算术错了**:只搬并行机(≈97 行)时为 2547 行,仍超 2500 行软上限;要回到上限内必须**连 remint 段(≈256 行)一起搬**,因此已改正,并把"重开 rounds/31 remint 合并决策"单列为 **Q2**;
 2. **文件数错了**:现 `convert/` 共 **14** 个 `.rs`(含 2 个测试文件),改后 **18**(原写"13 增至 14");
 3. 锚点与口径:注释锚点由旧行号更正为 `mapping.rs` 中 `KN_TYPES` 所在注释;`_SELECT` 表长待精算;`extra` 的消费者(`assembly.rs` 的 remint `remap_object`)补进 P6 风险。
 
@@ -359,7 +359,7 @@ nemo_mapping ≈ 2580 NEMO 解析 + 映射 + 表
 
 | 项 | 数 |
 | --- | --- |
-| **P1**(关 `save_raw`) | **20 ms / 次**(3.8 MB 源,本地探针 `raw_write_cost_probe`;NEMO 两份,因此≈两倍)因此真实但**纯浪费的 I/O**,在 6.9 s 的网络受限端到端里占 **0.3%**,不可见 |
+| **P1**(关 `save_raw`) | **20 ms / 次**(3.8 MB 源,本地探针 `raw_write_cost_probe`;NEMO 两份,故约两倍);收益真实但属于**纯浪费的 I/O**,在 6.9 s 的网络受限端到端里占 **0.3%**,不可见 |
 | **P10**(封面随产物带出) | 每次"上传到账号"**省一个 `GET /creation-tools/v1/works/{id}` RTT** + 消掉一处全局客户端依赖(未计时) |
 | **结构**:`assembly.rs` | 2644 降至 **2045**(−23%) |
 | **结构**:`translate/mod.rs` | 2192 降至 **746**(含它带着的 `diff_tests`;五件事已拆成 options/report/pipeline/入口) |
@@ -375,7 +375,7 @@ nemo_mapping ≈ 2580 NEMO 解析 + 映射 + 表
  而 P2/P3(整份深拷)、P5(逐块线性扫描)、P7.1(实体 clone)都不在这个量级上 —— 实测证实了这点;
 2. **真正拿到的是结构与安全**:文件回到上限内、职责归位、两处环断掉、死数据/死字段清除、生成器入库、
  反编译侧第一次有单测、`输出不变` 这条门从"红的"变成"严格模式可证";
-3. **剩余性能项(P6/P8–P11)处在同一量级**,因此预期仍是几个百分点以内,因此应当按"可维护性"而不是"提速"来权衡;
+3. **剩余性能项(P6/P8–P11)处在同一量级**,预期仍是几个百分点以内,因此应当按"可维护性"而不是"提速"来权衡;
  若确实要提速,只有两条路:(1) `#[serde(flatten)]` 的逐节点 serde(P6,字节敏感、风险最高);
  (2) 查清端到端里那 **≈30% 未归类**的耗时(需要 profiler,不是加探针)。
 
@@ -386,13 +386,13 @@ nemo_mapping ≈ 2580 NEMO 解析 + 映射 + 表
 | 失效模块名引用(`mapping.rs` 指向已并入的 `neko.rs`、`translate/mod.rs` 指向 `remint`、`nemo_mapping.rs` 指向 `tables_gen_nemo`/`nemo_xml`) | 由 M6/M8/M9 那一批顺路改成现路径(纯注释) |
 | `docs/goals/convert-backlog.md` 的 `k4raw` 漂移 | 已改正为 `download/compile/*.bcm4` |
 | 生成物死数据(`TOP_BLOCKS`/`KN_TYPES`) | 已删(`b7d4e07`) |
-| `BlockJson::count_types` / `BlockTree::count_types` 的"零调用" | 复核后**保留并注明**:仅测试/仪器用;`walk` 是递归核心且有生产调用(`assembly::duplicate_ids`)因此不删 |
+| `BlockJson::count_types` / `BlockTree::count_types` 的"零调用" | 复核后**保留并注明**:仅测试/仪器用;`walk` 是递归核心且有生产调用(`assembly::duplicate_ids`),因此不删 |
 | `unique_test_dir` 夹在 `#[cfg(test)]` 与生产代码之间 | 低价值(仅排版),**不做** |
 | staging 懒创建 | 收益微秒级且 `output_dir` 需要目录先存在,**不做** |
 
 ### 10.4 M6/M8/M9(2026-09-26,Phase 2/4 收尾)
 
-- **M8**:删单字段 newtype `ParsedEntity`,因此`parse_block_data_json`/`parse_parts` 直接返回 `BlockTree`,
+- **M8**:删单字段 newtype `ParsedEntity`,故 `parse_block_data_json`/`parse_parts` 直接返回 `BlockTree`,
  4 个生产/测试调用点与 10 处 model 内断言去掉 `.tree` 拆包(纯拆包消除,derive 能力全仓无第二处使用);
 - **M6**:新增 `model::flat_index` / `model::nested_index` 两个泛型自由函数(不用宏、不引环),
  `mapping.rs` 8 份 + `nemo_mapping.rs` 5 份 `LazyLock` 索引各压成一行;逐张核对表参数类型与
@@ -429,12 +429,12 @@ nemo_mapping ≈ 2580 NEMO 解析 + 映射 + 表
 
 **结论(与前面的 A/B 互相印证)**
 
-1. **本库自身的函数没有热点**:`backend::core::convert::*` 单条自身耗时都 **< 0.4%**,因此
+1. **本库自身的函数没有热点**:`backend::core::convert::*` 单条自身耗时都 **< 0.4%**:
  P2/P3(少几次深拷)、P5(少几次线性扫描)之所以测不出收益,是因为**它们都不是这里的瓶颈**;
 2. **瓶颈是"分配与 Value 树本身"**:libc 40.7%(malloc/free/memcpy)+ Value 析构 5.5% +
  BTreeMap 插入/消耗 ≈ 10%,因此合起来**过半时间花在"反复构造并丢弃 serde_json 中间树"**上
  —— 这正是之前端到端里那"≈30% 未归类"的去向;
-3.,因此**P6(`#[serde(flatten)]` 逐节点 serde)确实是下一个正确的方向**:它同时减少
+3. **P6(`#[serde(flatten)]` 逐节点 serde)确实是下一个正确的方向**:它同时减少
  `deserialize_any` 的逐节点缓冲、BTreeMap 插入与随后的 Value 析构;
 4. 但要记住前车之鉴:**先量后改** —— P6 落地后必须用同一套同轮 A/B 证明它真的动了 `core`/`e2e`,
  而不是又一次"落在噪声里"。
@@ -454,11 +454,11 @@ nemo_mapping ≈ 2580 NEMO 解析 + 映射 + 表
 | 3 | **NEMO 方向单独采一次 perf**(换 `.bcm` 源) | NEMO 无 profiler 覆盖;而它有已知的**重复解析**(同一段 XML 包 `<root>` 解析 3 次、`has_return_blocks` 再解析一次) | 方向清楚(§4 P9),但要先有**基线**(NEMO 至今无 SHA 门) |
 | 4 | **SHA256 占 7.7%** | `.bcmkn` 解密链(`shared::CryptoService::sha256`) | 固有成本;可考:(1) 核实同一次转换里是否**重复解密/重复派生**;(2) `sha2` 的 asm feature(依赖变更,需单独评估) |
 
-### 11.2 便宜、防复发的工程项(低风险,建议顺手做)
+### 11.2 低成本、防复发的工程项(低风险,建议一并执行)
 
 | # | 方向 | 说明 |
 | --- | --- | --- |
-| 5 | **`repo_hygiene` 加一条规则:`src/**` 不得被 `.gitignore` 误伤** | 该轮已出现此类问题(`bin/` 通配吞掉 `src/bin/`,生成器**几个月没入库**)因此用 `git check-ignore` 扫一遍 `src/` 即可,便宜且一劳永逸 |
+| 5 | **`repo_hygiene` 加一条规则:`src/**` 不得被 `.gitignore` 误伤** | 该轮已出现此类问题(`bin/` 通配把 `src/bin/` 一并忽略,生成器**几个月未入库**),因此用 `git check-ignore` 扫一遍 `src/` 即可,成本低且可长期防复发 |
 | 6 | **恢复 `[lints.rust] unused` 告警**(现行 `allow`) | 死代码不会被报;先跑一次看数量再决定清理批次(目标库 B5) |
 | 7 | **convert 域加一条粗粒度性能门** | 现在 `convert_bench` 只打印不判:可加"`core`/`e2e` 超过基线 1.5× 才失败",把"悄悄变慢"变成红灯(方案 §6.3 的 gap) |
 | 8 | **NEMO 进 `convert_bench` 基线** | 让 NEMO 方向的重构可证(现在只有 6 条内存单测,没有字节门) |
@@ -467,7 +467,7 @@ nemo_mapping ≈ 2580 NEMO 解析 + 映射 + 表
 
 | # | 方向 | 卡点 |
 | --- | --- | --- |
-| 9 | **正向扫描器缺"编辑格式"语料** | 平台只给编译态(`player/load`)、`edit/load/*` 404,因此需要**浏览器会话抓包**(rounds/33 §2 已把三条路探死) |
+| 9 | **正向扫描器缺"编辑格式"语料** | 平台只给编译态(`player/load`)、`edit/load/*` 404,因此需要**浏览器会话抓包**(rounds/33 §2 已把三条路径探查穷尽) |
 | 10 | **实机门进 CI**(离线替身:官方 `validateBcm` 可 headless 跑) | 当年判"手动"(D3);若 CI 想守"编辑器能打开",这是唯一可行路径 |
 | 11 | **词汇表重导自动化** | 现在只有流程注释(`kitten4_vocab.rs` 文件头)+ 日期;可加一条"导出日期过旧就提醒"的检查 |
 
@@ -476,13 +476,13 @@ nemo_mapping ≈ 2580 NEMO 解析 + 映射 + 表
 | # | 方向 | 出处 |
 | --- | --- | --- |
 | 12 | **A4:NEMO 上传真机验证** | 会在账号留一份**删不掉的** NEMO 草稿,因此需人明确批准 |
-| 13 | **分片上传**(>20 MB 作品) | 当前只加了"提前报错闸";真实 KN 产物 3~9 MB,因此不急 |
+| 13 | **分片上传**(>20 MB 作品) | 当前只加了"提前报错闸";真实 KN 产物 3~9 MB,因此优先级不高 |
 | 14 | **NEMO"完整搬家"的资源重传** | 现在造型/音频仍指源 CDN(rounds/30 §4) |
 | 15 | **api 层 DTO 类型化**(351 处 `MewResult<Value>`)、`converse` 退避重连、`WorkId` newtype 推广、C 组小改 | `docs/goals/pending-decisions.md` B/C 组 |
 
 ### 11.5 建议顺序
 
-**P6(带 A/B)** 至 **#5 `gitignore` 卫生规则 + #7 性能门**(各半小时级,防复发)至 **#6 `unused` 告警** 至
+先做 **P6(带 A/B)**,再做 **#5 `gitignore` 卫生规则 + #7 性能门**(各半小时级,防复发),然后做 **#6 `unused` 告警**,之后
 再议 #3(NEMO perf)与 #9(抓包),其余按既定优先级安排。
 
 ### 10.6 **P6 实测:逐字节等价,但没有可测收益 —— 已回退**(2026-09-26)
@@ -501,8 +501,8 @@ nemo_mapping ≈ 2580 NEMO 解析 + 映射 + 表
 
 (*第 1 轮"前"侧整体偏快,与本库历史多次测得的 334–343 ms 差一倍,属异常点;看稳定轮次 2、3:**前 ≈ 后**。)
 
-**结论:回退 P6。** 它证明了等价性,却**换不来速度**,代价是把一个成熟的 `derive` 换成约 150 行手写代码
-因此违反仓库"无数据不做 + 不过度抽象"的纪律。
+**结论:回退 P6。** 它证明了等价性,却**换不来速度**,代价是把一个成熟的 `derive` 换成约 150 行手写代码,
+故违反仓库"无数据不做 + 不过度抽象"的纪律。
 
 **为什么 profiler 会让人误以为是它**:§10.5 里那 40.7% 的 libc 大头是**整份 `Value` 树本身的构造与析构**
 (assembly 建树 + 序列化后整棵丢弃),而不只是 serde 的 flatten 缓冲;手写解析仍然要 clone 同样多的
@@ -514,23 +514,23 @@ String/Value,因此省下的只是"未匹配键的缓冲机制"这一小块。
 
 ---
 
-## 12. 编辑格式语料:抓到了(rounds/33 §2 卡住的那一块)
+## 12. 编辑格式语料:已取得(rounds/33 §2 未解决的那一块)
 
-**怎么破的**:不猜端点,直接**逆向编辑器自己的 bundle**(`creation.codemao.cn/kitten/build/kitten.*.js`,仓库既有手法)。
+**取得方式**:不猜测端点,直接**逆向编辑器自身的 bundle**(`creation.codemao.cn/kitten/build/kitten.*.js`,仓库既有手法)。
 里面写着编辑器的读写路径:
 
 | 用途 | 端点(bundle 原文) |
 | --- | --- |
-| **读编辑格式** | `GET {creation_api}/kitten/work/ide/load/{work_id}`,因此`{ name, ide_type, preview, source_urls: [ …/*.bcm4 ], … }` |
+| **读编辑格式** | `GET {creation_api}/kitten/work/ide/load/{work_id}`,返回 `{ name, ide_type, preview, source_urls: [ …/*.bcm4 ], … }` |
 | 写/保存 | 先把 JSON 传到 CDN,再 `POST {creation_api}/kitten/r2/work`(`work_id`/`name`/**`work_url`**/`preview`/`orientation`/`sample_id`/`version:"4.11.20"`/`work_source_label`/`parent_id`/`save_type`) |
-| 服务端翻译 | `POST /kitten/work/translate`(官方那条 Kitten 到 KN 的转换) |
+| 服务端翻译 | `POST /kitten/work/translate`(官方那条 Kitten 改为 KN 的转换) |
 | 存档(历史) | `GET /kitten/work/archive/{id}` |
 | `.bcm` 解码 | `POST /kitten/work/bcm/decode`(`{code}`) |
 
 `creation_api` 是运行时注入的,因此用本库的 `BaseKey::Creation`(`https://api-creation.codemao.cn`)。
 
 **关键结论**:`source_urls` 里就是**编辑器亲手写出去的编辑格式文件**(每件作品通常 10 个历史版本)。
-拿它喂正向扫描器,就打破了"自产自测"—— 输入不再是"本库反编译器的产物"。
+以它作为正向扫描器的输入,即可打破"自产自测"—— 输入不再是"本库反编译器的产物"。
 
 **已完成**:
 - 工具 `tests/convert_edit_harvest.rs`(`#[ignore]`,需账号):登录、逐作品拉 `ide/load`、把 `source_urls`
@@ -540,9 +540,9 @@ String/Value,因此省下的只是"未匹配键的缓冲机制"这一小块。
 - 实测:抓 `174408420` / `215246857` 两件各 10 版,因此**20 份平台原件**;正向扫描**全部转换得动**、
  往返确定性 + 实体 id 覆盖门全绿(整个 forward sweep 1 passed,209 s)。
 
-**顺手验证了反编译保真**:同一件作品(215246857)对比**平台原件与本库反编译的产物** ——
+**一并验证了反编译保真**:同一件作品(215246857)对比**平台原件与本库反编译的产物** ——
 顶层键只差 `painter`(已知项 `docs/rounds/34` §4octies),`theatre` 键、actor 键、`block_data_json` 键**完全一致**。
-因此反编译侧的结构保真是真的。
+由此确认反编译侧的结构保真成立。
 
 **尚未完成的**:正向扫描器当前只**打印**类型差(按既定口径),拿这批真原件看到的新差异(如
 `cloud_lists_delete: 9 -> 12`、`WIDGET_LVMI_lightSensorGet: 4 -> 0`)值得逐条分诊 —— 这是下一轮的事。
@@ -567,25 +567,25 @@ String/Value,因此省下的只是"未匹配键的缓冲机制"这一小块。
 
 | 现象 | 例 | 为什么可疑 |
 | --- | --- | --- |
-| `lists_get` **单向大减** | 原气骑士 768 降至 490、Plactions 201 降至 101、烂 144 降至 90、跑酷_70 1 降至 0 | 此前(rounds/34 §4quinquies)的结论是"槽的默认影子不回写 + 计算型列表槽,因此表示差异、引用零丢失",但那基于**代理指标**;这里幅度更大、且出现 `1` 降至 `0`(单例直接归零) |
-| `WIDGET_LVMI_lightSensorGet` **单向归零** | `4` 降至 `0`(P1拓展任务1音乐顺序) | 该类型在 `KITTEN_TO_KN` 里是**恒等映射**,因此正向应原样保留;归零说明它根本没进产物 |
+| `lists_get` **单向大减** | 原气骑士 768 降至 490、Plactions 201 降至 101、烂 144 降至 90、跑酷_70 1 降至 0 | 此前(rounds/34 §4quinquies)的结论是"槽的默认影子不回写 + 计算型列表槽,即表示差异、引用零丢失",但那基于**代理指标**;这里幅度更大、且出现 `1` 降至 `0`(单例直接归零) |
+| `WIDGET_LVMI_lightSensorGet` **单向归零** | `4` 降至 `0`(P1拓展任务1音乐顺序) | 该类型在 `KITTEN_TO_KN` 里是**恒等映射**,因此正向应原样保留;归零说明它没有进入产物 |
 
 **已核清的口径(`reverse_tests.rs` 的 `census_kitten4_blocks` 与 `census_diff`)**:
 
 - 只走 `theatre.{actors,scenes}[*].block_data_json`;只数**带字符串 `id`** 的 `type`(挡掉 `connections` 连接描述符与影子串噪声);
-- 会**递归进字符串里的 JSON**(`is_string` 到 `from_str`,深度 < 4)—— 所以"编辑格式里把 `block_data_json` 存成字符串"的形态也数得到;
+- 会**递归进字符串里的 JSON**(`is_string` 改为 `from_str`,深度 < 4)—— 所以"编辑格式里把 `block_data_json` 存成字符串"的形态也数得到;
 - 键走 `canonical_kind`(等价类代表:传递闭包 + 取类内字典序最小,抵消改名);
 - **方向**:`census_diff(before, after)` 打印 `before -> after`,而调用点是 `before = 源 Kitten4`、`after = 往返后的 Kitten4`。
 
 **注意:此前版本在此处记错两条,现撤回**:
 
-1. 原文认为"`P1拓展任务1音乐顺序…bcm4` 其实是 KN 文档,因此方向判错" —— **不成立**:扫描器**本来就有**方向守卫
+1. 原文认为"`P1拓展任务1音乐顺序…bcm4` 实为 KN 文档,因此方向判错" —— **不成立**:扫描器**本来就有**方向守卫
  (`reverse_tests.rs` 的 `is_editor_format_kitten4(&source)`),那件作品通过守卫,因此它确实是 Kitten4 编辑格式;
  腿日志里的"KN 顶层键"是**KN 腿**的键(标签写的就是 KN),不是源文件的键。;
 2. 以 Python 逐字复刻同一口径,对**源文件**统计 `WIDGET_LVMI_lightSensorGet` 得 **0 个**(文件确认明文 JSON),
- 而 census 报"源侧 4",因此**两者仍对不上**。因此这条**没有查清**,不能当成"丢块"、也不能当成"测量假象"。
+ 而 census 报"源侧 4",因此**两者仍对不上**。故这条**没有查清**,不能当成"丢块"、也不能当成"测量假象"。
 
-**因此已查清(同日,用临时仪器直接打印真代码的 census)**:两条"未定性"都是**`canonical_kind` 的类代表假象**,不是丢块。
+**已查清(同日,用临时仪器直接打印真代码的 census)**:两条"未定性"都是**`canonical_kind` 的类代表假象**,不是丢块。
 
 以 `P1拓展任务1音乐顺序_300981590.bcm4` 为例,同一份源文档、同一批 37 块:
 
@@ -596,10 +596,10 @@ String/Value,因此省下的只是"未匹配键的缓冲机制"这一小块。
 | `math_number: 6` | `default_value: 6` |
 | `start_on_click: 3` | `on_running_group_activated: 3` |
 
-**根因**:`canonical_kind` 取**类内字典序最小**当代表;ASCII 里大写(`W`=87)小于小写(`g`=103)因此代表名取决于"这一轮里哪些名字出现过"。
+**根因**:`canonical_kind` 取**类内字典序最小**当代表;ASCII 里大写(`W`=87)小于小写(`g`=103),因此代表名取决于"这一轮里哪些名字出现过"。
 往返一旦改变名字集合,同一批块就换到**另一个类代表**名下,因此报告里出现 `X: 4 -> 0` 这种**幻影差异**(实际上 4 块都在,只是换了代表)。
 
-**因此下一轮的真做法(取代原来的"分诊"计划)**:把差异口径从"类内字典序最小"改成**固定代表**
+**下一轮的做法(取代原来的"分诊"计划)**:把差异口径从"类内字典序最小"改成**固定代表**
 (例如统一用 KN 侧的规范名,或类内**优先级最高**的名字:优先 KN 原生名,其次表内键,再次字典序),
 让类代表**与往返无关**;之后 `lists_get: 768 -> 490` 这类也应在同一口径下重新判读(它大概率同样是代表漂移 + 已文档化的"槽默认影子不回写"叠加)。
 
@@ -633,9 +633,9 @@ String/Value,因此省下的只是"未匹配键的缓冲机制"这一小块。
 > `bcm_translator_text_return_value_block: 4 -> 0`(`P1拓展任务1音乐顺序_300981590.bcm4`)
 
 **假设已检验并推翻**(同日):查 `tables_gen.rs` 的 `KITTEN_TO_KN` 条目 —— `("calculate", "bcm_translator_text_return_value_block")`
-**就在 `KITTEN_TO_KN` 里**,因此闭包**是连通的**,因此"手写特例不在表里"这个解释**不成立**。
+**就在 `KITTEN_TO_KN` 里**,因此闭包**是连通的**,"手写特例不在表里"这个解释**不成立**。
 
-因此那么 `4 -> 0` 只剩两种可能,都需要**仪器化**(和 §13.4 那次一样,直接打印真代码的 census 成员):
+那么 `4 -> 0` 只剩两种可能,都需要**仪器化**(和 §13.4 那次一样,直接打印真代码的 census 成员):
 1. 这 4 块在往返后落到了**另一个等价类**(即表把某些名字连成了两个不相交的类),或
 2. 它们**真的没进产物**(那才是需要修的缺陷)。
 
@@ -647,13 +647,13 @@ String/Value,因此省下的只是"未匹配键的缓冲机制"这一小块。
 | `start_on_click` | 3 | `on_running_group_activated` **3**(改名) |
 | 其余 7 类 | 一致 | 逐类相同 |
 
-因此唯一实质差异:**`get_midis × 4` 在往返里没了**(其余都是改名/等价类问题,已被 §13.4 的口径修掉)。
+唯一实质差异是:**`get_midis × 4` 在往返里消失**(其余都是改名/等价类问题,已被 §13.4 的口径修掉)。
 
 **读法与下一步**:`get_midis` 是 Kitten4 侧名字,`KITTEN_TO_KN` 把它映射到**占位文本块**
 `bcm_translator_text_return_value_block`(rounds/20 的 `LC` 降级一族,"原文进 mutation"),这一类是**已文档化的不可逆项**
 (见 `real_bcmkn_…` 测试的 allow-list)。但按契约,反向**至少应把占位块保留**在 Kitten4 侧;
-现在它**整块消失**,因此要么反向的 `reverse_placeholder`(靠 mutation 里的标题反查)没认出它,
-要么它在写出阶段被当"编辑器不认识的类型"剔掉了(rounds/34 §4nonies 的 `strip_unknown_blocks`)。
+现在它**整块消失**,因此要么反向的 `reverse_placeholder`(靠 mutation 里的标题反查)未能识别它,
+要么它在写出阶段被当作"编辑器不认识的类型"剔除(rounds/34 §4nonies 的 `strip_unknown_blocks`)。
 
 **下一轮第一条(2 小时量级)**:
 1. 看那 4 个占位块在**中间态(KN)**里长什么样(mutation 是否带标题、`type` 是否就是 `bcm_translator_text_return_value_block`);
@@ -670,14 +670,14 @@ String/Value,因此省下的只是"未匹配键的缓冲机制"这一小块。
 | **中间态(KN)** | 5 / **17** | `bcm_translator_text_execution_block 2`、`math_number 2`、`on_running_group_activated 3`、`procedures_2_callnoreturn 8`、`repeat_forever 2` |
 | 往返后(Kitten4) | 8 / **34** | (见 §13.4) |
 
-因此那 4 块 `get_midis` **在正向腿就没进 KN**;顺带还少了 `play_midimusic_till_end`/`set_midimusic_speed`/`self_shake`/`procedures_2_defnoreturn`/部分 `math_number`
+那 4 块 `get_midis` **在正向腿未进入 KN**;另外还少了 `play_midimusic_till_end`/`set_midimusic_speed`/`self_shake`/`procedures_2_defnoreturn`/部分 `math_number`
 (合计 ≈20 块)。同一份"源 37 / 中间 17"的落差,**与 rounds/32 §3bis、rounds/33 §3bis 记录过的"残块"**(根块 `parent_id` 为空、
 任何可达块都不引用它们)高度吻合 —— 那些块**不在任何根的可达树里**,正向只搬可达树,因此**少它们是既定正确行为**,
-不是丢块(反向重建树时这些残块也自然消失,当年就是这么定性的)。
+不是丢块(反向重建树时这些残块也自然消失,此前的定性即如此)。
 
 **因此下一轮第一条(定案只差一步)**:对这件语料数一次**可达性** —— 从根(无 `parent_id` 的块)沿 `connections`
-BFS,比较"可达集合"与"全量直方图";若那 4 个 `get_midis` **不可达**,因此本条差异**结案为既定行为**,
-把口径写进扫描器注释(或把扫描器改成只数可达块,彻底消掉这类噪声);若它们**可达**,因此那才是真缺陷,再查正向在哪一步吞了它。
+BFS,比较"可达集合"与"全量直方图";若那 4 个 `get_midis` **不可达**,则本条差异**结案为既定行为**,
+把口径写进扫描器注释(或把扫描器改成只数可达块,彻底消掉这类噪声);若它们**可达**,则那才是真缺陷,再查正向在哪一步丢弃了它。
 
  > 备注:至此,正向扫描的全部差异都已**追到根**(改名/等价类/降级/残块候选),没有留悬空结论。
 
@@ -693,23 +693,23 @@ scenes 实体 b5e60282…: 块 20 / 根 4 / 可达 20
 合计块 37;`get_midis` 4 个,其中**不可达 0 个**
 ```
 
-因此**37 块全部可达**,那 4 个 `get_midis` 一个都不在残块里,因此**"残块"解释不成立**,因此
-正向腿(Kitten4 到 KN)**真的丢了 4 个可达积木**,因此按本仓库的标准,这是一条**真缺陷**,不是归一化、不是既定行为。
+**37 块全部可达**,那 4 个 `get_midis` 一个都不在残块里,故**"残块"解释不成立**;
+正向腿(Kitten4 改为 KN)**确实丢失了 4 个可达积木**,按本仓库的标准,这是一条**真缺陷**,不是归一化、也不是既定行为。
 
 **已知线索**(供下一轮直接切入):
 - `get_midis` 在 `KITTEN_TO_KN` 里映射到占位文本块 `bcm_translator_text_return_value_block`(`tables_gen.rs` 的 `KITTEN_TO_KN` 条目),
  属 `LC` 降级一族("原文进 mutation");但**中间态(KN)里既没有该占位块、正向也没报 `DegradedToText`**(§13.5 实测),
- 而 KN 中间态只有一个 `bcm_translator_text_execution_block×2`,因此降级路径看起来**根本没走到**,或者走到了另一处;
+ 而 KN 中间态只有一个 `bcm_translator_text_execution_block×2`,因此降级路径看起来**完全没有走到**,或者走到了另一处;
 - 源侧这 4 块都在**实体**里(actor×3 + scene×1),而 KN 中间态 5 类 / 17 块,因此丢的不止这 4 块(合计 ≈20),
  其中 `procedures_2_defnoreturn×4` 也一并消失,因此怀疑不是"单个类型"的问题,而是**某类子树**没被搬。
 
-**下一轮第一步(单元级,分钟级)**:拿一个只含 `get_midis` 的最小 Kitten4 文档(照 `mapping.rs` 现有测试的夹具写法)
-过一遍 `convert_kitten4_document`,看它变成什么(占位块?消失?报什么告警)——
+**下一轮第一步(单元级,分钟级)**:构造一个只含 `get_midis` 的最小 Kitten4 文档(照 `mapping.rs` 现有测试的夹具写法),
+输入 `convert_kitten4_document`,观察其产出(是否成为占位块、是否消失、报告何种告警)——
 把"整份语料里的疑似丢块"缩小到"一个块的最小复现",再顺 `LC`/`KC` 查那一步。
 
 ### 13.7 **更正 §13.5/§13.6**:正向没有丢块 —— 最小复现给出反证
 
-用**真 API 的最小复现**(只含一个 `get_midis` 的 Kitten4 文档过一遍 `convert_kitten4_document`,仪器用完即撤):
+用**真 API 的最小复现**(只含一个 `get_midis` 的 Kitten4 文档输入 `convert_kitten4_document`,仪器用完即撤):
 
 ```
 KN 侧块数 = 1
@@ -718,19 +718,19 @@ KN 侧块数 = 1
 translate_type("get_midis") = bcm_translator_text_return_value_block
 ```
 
-因此`get_midis` **被正常转换**成文档化的占位块(`LC` 降级一族),**没有丢、也没有告警**,因此
-**正向腿没有"吞掉可达积木"这回事**,§13.6 据此下的"真缺陷"结论**不成立,撤回**。
+因此 `get_midis` **被正常转换**成文档化的占位块(`LC` 降级一族),**没有丢、也没有告警**,因此
+**正向腿没有"丢弃可达积木"这回事**,§13.6 据此下的"真缺陷"结论**不成立,撤回**。
 
 **那 §13.5 的"KN 中间态只有 17 块"从哪来?** —— 那是临时探针自身的缺陷:遍历 KN 侧时只看了
 顶层 `nekoBlockJsonList` 数组元素与它下面的 map 值,**漏掉了嵌在 `inputs`/`statements` 里、以及定义体里的块**
 (相邻的两次探针里,`bcm_translator_text_execution_block×2` 这种"块里的块"就是这么被漏算的),于是把 37 数成 17,
-又据此编出"丢 ≈20 块"的结论。**两条更正连在一起读**:探针写错一次,就会造出一个不存在的缺陷。
+又据此编出"丢 ≈20 块"的结论。**两条更正合起来说明一点**:探针写错一次,就会造出一个并不存在的缺陷。
 
 **最终结论(正向扫描)**:
 - 差异**全部**落在 (1) 改名(等价类,§13.4 已把口径修稳)(2) 已文档化的降级/包装(占位块、GC 包装、`procedures_2_*` 拆分、
  `stop` 与 `terminate`、`shadow_number`)(3) 槽默认影子不回写(rounds/34 §4quinquies),因此**没有确认的正向缺陷**;
-- **方法教训(第二次同类,这次更狠)**:探针/仪器必须**用真 API 走最小复现**来交叉验证,
- 不能只靠自己写的遍历 —— 遍历写错一次,就能凭空造出一个"缺陷"并一路写成结论。
+- **方法教训(第二次同类,本次后果更重)**:探针/仪器必须**用真 API 走最小复现**来交叉验证,
+ 不能只靠自己写的遍历 —— 遍历写错一次,就会造出一个并不存在的"缺陷",并一路写进结论。
 
 ### 13.8 收尾:块没丢 —— "17" 是**树可达计数**,不是"块是否存在"
 
@@ -745,7 +745,7 @@ translate_type("get_midis") = bcm_translator_text_return_value_block
 因此**正向没有丢任何块**:"17"是"**从根可达的树**"计数(场景那 20 块在 KN 里以另一种连接形态存在,不在这棵树的计数里),
 而"块是否还在"要用 **id 是否出现在文档里** 来判 —— **20/20 都在**。
 
-**因此所有"丢块"的说法全部收回,最终结论**:正向(Kitten4 到 KN)与往返扫描里的差异,全部属于
+**因此所有"丢块"的说法全部收回,最终结论**:正向(Kitten4 改为 KN)与往返扫描里的差异,全部属于
 (1) **改名/等价类**(§13.4 已把口径修稳)(2) **已文档化的降级与包装**(占位块、GC 包装、`procedures_2_*` 拆分、
 `stop` 与 `terminate`、`shadow_number` 拆包)(3) **槽默认影子不回写**(rounds/34 §4quinquies)
 因此**没有确认的正向缺陷**。
@@ -753,5 +753,5 @@ translate_type("get_midis") = bcm_translator_text_return_value_block
 > **方法教训(第三次,也是最重要的一次)**:"块数"至少有三个互不相等的口径 ——
 > (a) **原始 JSON 遍历**(census 用的,数与连接形态无关) (b) **从根可达的树计数**(`tree.count()`,转换器实际处理的那棵)
 > (c) **id 是否出现在文档里**(判"有没有搬过去")。
-> 拿 (b) 或 (c) 的差值去当 (a) 的结论、或反过来,就会凭空造出"丢块"。
+> 拿 (b) 或 (c) 的差值去当 (a) 的结论、或反过来,就会得出并不存在的"丢块"结论。
 > **跨口径比较之前先声明口径;定案优先用真 API 的最小复现。**

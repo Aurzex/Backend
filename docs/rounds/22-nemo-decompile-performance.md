@@ -1,7 +1,7 @@
 # NEMO 反编译性能:瓶颈分析与优化(2026-09-25)
 
 范围:`NemoDecompiler` / `NemoResourceManager`(现 `src/core/convert/decompile/editors/nemo.rs`)与同型的 WOOD。
-结论:瓶颈在**请求次数与往返延迟(RTT)的乘积**(1 390 次串行 GET),不在带宽;改并发后由 **402 s** 降至 **103 s**,启用 `skip_resources` 后为 **7.6 s**。
+结论:瓶颈是**请求次数与往返延迟(RTT)的乘积**(1 390 次串行 GET)而非带宽;改并发后由 **402 s** 降至 **103 s**,启用 `skip_resources` 后为 **7.6 s**。
 
 ---
 
@@ -18,7 +18,7 @@
 
 ## 2. 抓包侧证(`temp/PCAPdroid_25_9月_12_11_14.pcap`,官方 App 打开同一作品)
 
-自写解析器(`temp/pcap_conn3.py`,纯标准库;PCAPdroid 的 VPN 隧道里目的地址是网关,所以按归一化五元组 + TLS ClientHello 定客户端方向):
+自行编写的解析器(`temp/pcap_conn3.py`,纯标准库;PCAPdroid 的 VPN 隧道里目的地址是网关,故按归一化五元组与 TLS ClientHello 判定客户端方向):
 
 | 项 | 值 |
 | --- | --- |
@@ -74,7 +74,7 @@
 
 ## 5. 「上传编译好的 NEMO 文件,而不是下载资源」路线
 
-该思路可行,且**所需能力已具备一半**:
+该思路可行,且**所需能力已部分具备**:
 
 | 需要的东西 | 现状 |
 | --- | --- |
@@ -95,9 +95,9 @@
 
 ### 5.2 取端点的具体做法
 
-1. 抓 **NEKO/NEMO 前端 bundle**(与 `docs/rounds/20` 附录 C 同法:下载主 bundle + chunk,搜 `works`/`create`/`import`/`bcm_url`/`bcm_version`),
+1. 抓 **NEKO/NEMO 前端 bundle**(与 `docs/rounds/20` 附录 C 同法:下载主 bundle 与 chunk,搜 `works`/`create`/`import`/`bcm_url`/`bcm_version`),
    定位"新建/导入作品"的请求构造;
-2. 与现有三个 create(`/kitten/r2/work`、`/neko/works`、`/wood/project`)对照猜路径族(都在 `BaseKey::Creation` 下);
+2. 对照现有三个 create(`/kitten/r2/work`、`/neko/works`、`/wood/project`)推测路径族(均在 `BaseKey::Creation` 下);
 3. 真机验证:用配置里的 NEMO 作品(或先 fork 一个可再创作的)建一次,回读详情确认 `bcm_url`/`n_brick`/资源可加载;
 4. 成功后按现有风格加 `NemoWorkManager::create_nemo_work(CreateNemoWorkArgs { name, bcm_url, bcm_version, preview, save_type, … })`,
    并把它接到 `convert::translate_work`(与 Kitten/Neko 的 `create_draft_work` 并列)。
@@ -110,7 +110,7 @@
 反编译(skip_resources) → 上传 .bcm → create_nemo_work(work_url, bcm_version) → 得新作品 id
 ```
 
-净效果:**把"40 MB 下行 + 8 分钟"换成"4 MB 产出 + 1 次上传"**。
+净效果:**把"40 MB 下行、8 分钟"换成"4 MB 产出、1 次上传"**。
 
 ## 6. 抓包得到的 API 清单(可新增项与不可新增项)
 
@@ -124,7 +124,7 @@
 | `open-service.codemao.cn` | 不明(流量很小) | 待核验:需 bundle 侧确认 |
 | `shence-data` / `bugly` / `umeng` / `aliyun log` | 官方 App 的埋点与崩溃上报 | 判不做:不该接(与业务无关) |
 
-**结论**:抓包能给出"主机 + 流量构成 + 时序",但**无法给出 URL 与参数**(全 TLS),因此 2026-09-25 未直接新增 API。新增只能走 bundle 反编译路径(§5),这也是 `open-service.codemao.cn` 与 NEMO create 接口的下一步。
+**结论**:抓包能给出"主机、流量构成与时序",但**无法给出 URL 与参数**(全 TLS),因此 2026-09-25 未直接新增 API。新增只能走 bundle 反编译路径(§5),这也是 `open-service.codemao.cn` 与 NEMO create 接口的下一步。
 
 ## 7. 复现方式
 

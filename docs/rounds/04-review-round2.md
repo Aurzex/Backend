@@ -4,15 +4,15 @@
 
 请求:按 5 个维度(逻辑错误 / 性能 / 更优实现 / 性能优化 / 设计模式)评审当前库代码,指出问题并提供具体优化方案。约束:简洁可读优先、不过度抽象、不用宏、不主动删非确证死代码。
 
-现状:上一轮评审(temp/REVIEW.md,97 条)已由 commit ef55995 整改(严重缺陷修复 + api 层样板统一 + 效率优化)。本评审基线为 HEAD(ef55995),`cargo check --all-targets` 通过。方法与核实:7 个 reviewer 子代理按文件簇并行审查,主代理逐条对照源码复核——**本文件中全部高/中优先级发现均已亲自 `read`/`grep` 核实**;标注 `[INFERENCE]` 的条目为仓库内无法确证的服务端契约(需实测),其余为代码可证事实。锚点均按 HEAD(ef55995) 的符号定位。
+现状:上一轮评审(temp/REVIEW.md,97 条)已由 commit ef55995 整改(严重缺陷修复 + api 层样板统一 + 效率优化)。本评审基线为 HEAD(ef55995),`cargo check --all-targets` 通过。方法与核实:7 个 reviewer 子代理按文件簇并行审查,主代理逐条对照源码复核——**本文件中全部高/中优先级发现均已通过 `read`/`grep` 核实**;标注 `[INFERENCE]` 的条目为仓库内无法确证的服务端契约(需实测),其余为代码可证事实。锚点均按 HEAD(ef55995) 的符号定位。
 
 ## 评审总览
 
-### 上轮整改核实(全部正确落地)
+### 上轮整改核实(全部正确落实)
 
 - **多账号身份错配**(pipeline.rs 的 `ensure_account_login`):`ensure_account_login` 每次用选中账号本人凭据登录;`account_usage` 改为按用户名记账(`HashMap<String, usize>`);账号移除时 `account_usage.remove(&user)` 并修正 `current_idx`。已核实正确。
 - **flush_loop 命令丢弃**(cloudvar.rs 的 `flush_loop`):未就绪与发送失败两条路径均回退队列。已修复(残留风险见 F1)。
-- **connect 并发双建**(cloudvar.rs 的 `connect`):`connect_lock` 串行化建立。已修复(残留竞态见 F2)。
+- **connect 并发重复建立**(cloudvar.rs 的 `connect`):`connect_lock` 串行化建立。已修复(残留竞态见 F2)。
 - **captcha 防水墙票据**(captcha.rs 的 `verify_waterproof_wall_ticket`):已 `.with_payload(ticket)`,与 geetest 一致,已修复。
 - **手机号参数由 i32 改为 &str**(account.rs):`validate_phone_number`/`execute_request_phone_change_verification` 已改 &str(残留:`update_phone_number` 的 captcha 仍为 i32,见 P6-1)。
 - **AdminInfo 固定字段提取**(auth.rs 的 `AdminInfo` 与 main.rs)(残留:auth_details 形态不对称,见 L-11)。
@@ -39,12 +39,12 @@
 
 **[中] F1 flush_loop 部分失败重放已送达帧(残留)**
 - 位置:src/core/cloudvar.rs 的 `flush_loop`
-- 问题:私有帧成功、公有帧失败时整批 `push_front` 回退,已入 mpsc 的私有帧下次重发;列表帧(append/unshift/insert/delete 均非幂等)中途失败同样整批重放。`tx.send` 返回 Ok 仅表示 rx 存活,不保证帧已写出——读线程已消费前几帧并写 socket 后死亡时,Ok 帧照样丢失(窗口缩小但未消除)。另 `merge_commands(batch.clone())` 成功路径也整批深拷贝。
-- 决定:**不改回退结构**。彻底修复需「读线程逐帧确认」的协议级改造,收益/成本比差;当前窗口极小且失败路径有 warn 日志。评审记录在案,克隆问题同留(`batch.clone()` 仅为失败回退所需)。
+- 问题:私有帧成功、公有帧失败时整批 `push_front` 回退,已入 mpsc 的私有帧下次重发;列表帧(append/unshift/insert/delete 均非幂等)中途失败同样整批重放。`tx.send` 返回 Ok 仅表示 rx 存活,不保证帧已写出——读线程已消费前几帧并写 socket 后死亡时,Ok 帧依然丢失(窗口缩小但未消除)。另 `merge_commands(batch.clone())` 成功路径也整批深拷贝。
+- 决定:**不改回退结构**。彻底修复需「读线程逐帧确认」的协议级改造,收益与成本之比偏低;当前窗口持续时间极短且失败路径有 warn 日志。评审记录在案,克隆问题一并记录(`batch.clone()` 仅为失败回退所需)。
 
-**[中] F2 connect() 与自动重连仍可双建 socket(残留)**
+**[中] F2 connect() 与自动重连仍可能重复建立 socket(残留)**
 - 位置:src/core/cloudvar.rs 的 `establish_locked` 入口与 `on_connection_lost` 重试循环
-- 问题:重连线程睡醒后调 `establish()`,持有 `connect_lock` 后进 `establish_locked`,但 **establish_locked 无 connected 复查**。若用户在退避 sleep(最长 5 分钟)期间手动 `connect()`(此时已置 connected=true),重连线程随后仍会再建一条 socket 并覆盖 `inner.tx`/`read_join`,双读线程双 socket,旧 socket 的读线程收尾时经 `on_connection_lost` 踩掉新连接的 connected 标志。另外 `connect()` 的 `reset_state()` 会清空断线期间排队命令与本地状态。
+- 问题:重连线程在退避结束后调用 `establish()`,持有 `connect_lock` 后进入 `establish_locked`,但 **establish_locked 无 connected 复查**。若用户在退避 sleep(最长 5 分钟)期间手动 `connect()`(此时已置 connected=true),重连线程随后仍会再建一条 socket 并覆盖 `inner.tx`/`read_join`,形成两条读线程与两个 socket,旧 socket 的读线程退出时经 `on_connection_lost` 清除新连接的 connected 标志。另外 `connect()` 的 `reset_state()` 会清空断线期间排队命令与本地状态。
 - 修复:Phase 2-1(`establish_locked` 入口复查)与 Phase 2-2(`connect` 在重连在途时跳过 `reset_state` 的决策,见 Approach)。
 
 **[中] F3 close() 持 read_join 锁 join 自身,死锁窗口**
@@ -59,7 +59,7 @@
 
 **[中] F5 update_private_vars_done 处理器与发送格式不匹配**
 - 位置:cloudvar.rs 的 `UpdatePrivateVarHandler` 与 `flush_loop` 发送
-- 问题:客户端发 `("update_private_vars", [ {cvid,value}, … ])` 数组,`UpdatePrivateVarHandler` 却按对象 `payload.get("cvid")` 解析——数组上恒为 None,处理器空操作;同文件 `UpdatePublicVarHandler` 按数组解析,两通道形态矛盾。断线重连补发的私有变量回显将永不落地本地。`[INFERENCE]` 服务端回显格式,但代码内形态矛盾可证。
+- 问题:客户端发 `("update_private_vars", [ {cvid,value}, … ])` 数组,`UpdatePrivateVarHandler` 却按对象 `payload.get("cvid")` 解析——数组上恒为 None,处理器空操作;同文件 `UpdatePublicVarHandler` 按数组解析,两通道形态矛盾。断线重连补发的私有变量回显将永不写入本地。`[INFERENCE]` 服务端回显格式,但代码内形态矛盾可证。
 - 修复:Phase 2-5(handler 兼容数组与单对象两种形态)。
 
 **[中] F6 分页参数重名:base_params 与 amount/offset 键冲突**
@@ -67,42 +67,42 @@
 - 问题:`build_params` 先 clone base_params 再无条件 append amount_key/offset_key。调用方在 base_params 预置同名键:work.rs `with_iter_param("page_size","100")` + `with_amount_key("page_size")`(计算值 15)、`with_iter_param("current_page","1")` + `with_offset_key("current_page")`;education/forum 同款 `page=1` + offset_key("page")。每请求携带 `page_size=100&page_size=15` / `page=1&page=2` 重复键:服务端取首值则永远第 1 页(重复数据),取末值则预设参数无效(work.rs 的 100/40 页大小从未生效,往返次数多 3-7 倍)。
 - 修复:Phase 1-1(过滤同名键)与 Phase 1-2(删除或替换调用点预设)。
 
-**[中] F7 分页 EOF 判定假设每页恰好 page_size 条,页被截断时静默丢数据**
+**[中] F7 分页 EOF 判定假设每页恰好 page_size 条,页被截断时静默丢失数据**
 - 位置:acquire.rs 的 `next_item`
 - 问题:`total.is_some_and(|t| (current_page + 1) * page_size >= t)` 以「每页满页」为前提;服务端页上限低于请求值(work.rs 24/30/100、education.rs 150/100 混用)或过滤条目时提前终止,剩余举报/作品本会话静默不处理。
 - 修复:Phase 1-3(改用累计 `yielded >= total`)。
 
 **[中] F8 每举报类型 100 条硬上限 + 「所有举报处理完成」误报**
 - 位置:src/core/registry.rs 的举报类型注册块(四处同型),配合 whale.rs 的 `with_limit(default_limit)` 与 terminal.rs 的完成文案
-- 问题:4 个 `gen_from(... Some(100))` 使 `PaginatedIter.with_limit(100)` 生效,`reached_limit` 在产出 100 条后终止。某类型待处理 >100 时:处理会话只处理前 100 条却打印「所有举报处理完成」;pass_all 一键通过同样只过 100 条/类型;done 浏览器每类型最多看 100 条。registry.rs 中的回归测试用无限生成器,测不出该截断。
+- 问题:4 个 `gen_from(... Some(100))` 使 `PaginatedIter.with_limit(100)` 生效,`reached_limit` 在产出 100 条后终止。某类型待处理 >100 时:处理会话只处理前 100 条却打印「所有举报处理完成」;pass_all 一键通过同样只过 100 条/类型;done 浏览器每类型最多可浏览 100 条。registry.rs 中的回归测试用无限生成器,测不出该截断。
 - 修复:Phase 3-3(4 处 `Some(100)` 改为 `None`,让 chunk_size 控制节奏;完成文案随之变准确)。
 
 **[中] F9 execute_action / apply_action_by_key 丢弃 check_status 的 Ok(false)**
-- 位置:src/core/pipeline.rs 的 `apply_action_by_method(...)?`(吞 bool)与 services.rs 的 `execute_action`(同型)
-- 问题:服务端返回非 204 的 2xx/3xx 时 `check_status` 返回 `Ok(false)`,被 `?` 静默吞掉,记录被 `mark_record_processed` 标记、UI 报「已处理」。同文件 `pass_all` 正确检查 `Ok(true)`——两条路径语义不一致。
+- 位置:src/core/pipeline.rs 的 `apply_action_by_method(...)?`(丢弃 bool 返回值)与 services.rs 的 `execute_action`(同型)
+- 问题:服务端返回非 204 的 2xx/3xx 时 `check_status` 返回 `Ok(false)`,被 `?` 静默丢弃,记录被 `mark_record_processed` 标记、UI 报「已处理」。同文件 `pass_all` 正确检查 `Ok(true)`——两条路径语义不一致。
 - 修复:Phase 3-1。
 
 **[中] F10 terminal.rs 单条动作失败即中止整个待处理会话**
 - 位置:src/core/terminal.rs 的 `process_item`
-- 问题:`processor.apply_action(item, &key, admin_id)?` 用 `?` 传播:任一条 PATCH 瞬时失败都会使 process_pending 整段退出,本会话剩余举报全部未处理;若该条持续失败,每次进入都卡在同一项。与批量路径(逐条 Err 仅 ui.error,不中断)及 pass_all 语义不一致。同段 `decided.insert(j)` 在失败时也照插。
+- 问题:`processor.apply_action(item, &key, admin_id)?` 用 `?` 传播:任一条 PATCH 瞬时失败都会使 process_pending 整段退出,本会话剩余举报全部未处理;若该条持续失败,每次进入都会阻塞在同一项。与批量路径(逐条 Err 仅 ui.error,不中断)及 pass_all 语义不一致。同段 `decided.insert(j)` 在失败时也会插入。
 - 修复:Phase 3-2。
 
-**[中] F11 send_and_wait 断连时静默返回半截回复**
-- 位置:src/core/converse.rs 的 `send_and_wait`、Begin 事件置 `completed_round` 与收尾逻辑
-- 问题:Begin 事件后连接中断,收尾只清 receiving(不清 completed_round):`wait_for_response` 谓词 `!receiving` 立即为真,`send_and_wait` 返回 Ok(部分文本),调用方无法区分成功与断连。
+**[中] F11 send_and_wait 断连时静默返回不完整的回复**
+- 位置:src/core/converse.rs 的 `send_and_wait`、Begin 事件置 `completed_round` 与结束处理逻辑
+- 问题:Begin 事件后连接中断,结束处理只清 receiving(不清 completed_round):`wait_for_response` 谓词 `!receiving` 立即为真,`send_and_wait` 返回 Ok(部分文本),调用方无法区分成功与断连。
 - 修复:Phase 4-1。
 
 **[中] F12 converse connect() 无并发防护**
 - 位置:src/core/converse.rs 的 `connect`
-- 问题:check-then-act(先读 connected 再 establish),并发调用双建连接,第二次覆盖 tx,第一条读线程收尾踩掉 connected 标志(与 cloudvar 上轮已修的缺陷同型)。ChatClient 文档宣称线程安全可克隆共享。
+- 问题:check-then-act(先读 connected 再 establish),并发调用会重复建立连接,第二次覆盖 tx,第一条读线程退出时清除 connected 标志(与 cloudvar 上轮已修的缺陷同型)。ChatClient 文档宣称线程安全可克隆共享。
 - 修复:Phase 4-2。
 
 **[中] F13 主动 close() 触发虚假「连接已断开」Error 事件**
-- 位置:src/core/converse.rs 的 `read_loop` 收尾
-- 问题:收尾无条件按 `was_connected=true` 发 `ChatEventType::Error("连接已断开")`;主动 `close()`(先置 stopping)也会触发,与真实异常断连不可区分。
+- 位置:src/core/converse.rs 的 `read_loop` 结束处理
+- 问题:结束处理无条件按 `was_connected=true` 发 `ChatEventType::Error("连接已断开")`;主动 `close()`(先置 stopping)也会触发,与真实异常断连不可区分。
 - 修复:Phase 4-3。
 
-**[中] F14 同端点页大小矛盾(KN 作品列表 24 vs 15;课程包 150 vs 100)**
+**[中] F14 同端点页大小矛盾(KN 作品列表 24 与 15;课程包 150 与 100)**
 - 位置:work.rs 的三个 KN 作品列表迭代器(page_size 24)与 user.rs 的作品列表迭代器(page_size 15);education.rs 的两处课程包迭代器(150 与 100)
 - 问题:同一上游端点两种页大小;若服务端封顶低于请求值,offset 步进按请求值推进,造成跳条,且 F7 的总数终止判定截断尾部。
 - 修复:Phase 1-4(统一页大小并优先 `with_response_amount_key`,education.rs 已有先例)。
@@ -111,7 +111,7 @@
 **[低] L2 list_pop / CloudList::pop / shift 空列表返回 Err 而非 Ok(None),且读-删间 TOCTOU** — 见 cloudvar.rs 的 `list_pop`、`CloudList::pop` 与 `shift`。修复:Phase 2-7(空列表短路返回 Ok(None);读-删原子化需锁内执行,属协议级改动,仅修空列表分支)。
 **[低] L3 自动重连不清除本地 state,服务端已删变量永久残留** — cloudvar.rs 的 `on_connection_lost` 不 reset_state,重连后 list_variables_done 只增不删。修复:Phase 2-8(收到新一轮 list_variables_done 时全量替换 store)。
 **[低] L4 reconnect_attempts 只写不读;ConnectionEvent::Error 从未构造** — 位于 cloudvar.rs。修复:Phase 2-9(删除该字段;Error 事件在 establish 失败路径构造发出)。
-**[低] L5 stream_works_from_both_sources 奇数 limit 少一条,limit=1 时发 limit=0** — retrieve.rs 的 `stream_works_from_both_sources` 合并流无 take 截断,已核实。修复:Phase 6-2。
+**[低] L5 stream_works_from_both_sources 奇数 limit 时少返回一条,limit=1 时发出 limit=0** — retrieve.rs 的 `stream_works_from_both_sources` 合并流无 take 截断,已核实。修复:Phase 6-2。
 **[低] L6 compiler write_blocks/block_xml:字符串 next 引用断链且从不输出 mutation** — compiler.rs 的 `write_blocks` 引用收集只认对象形式,`block_xml` 的 next 链要求 `is_object`,且 `block_xml` 全函数不序列化由 JSON 路径合成的 mutation,导致 Kitten2/3 输出丢失 text_join 槽数、if-else 与过程调用结构。**上轮用户决定放弃此项,此处仅记录不改**。
 **[低] L7 FunctionCallDecompiler 参数块绕过 create_block_decompiler 工厂** — compiler.rs 的 `FunctionCallDecompiler`:嵌套调用参数内的专用块失去 NAME/mutation 处理,与 `process_params` 路径不一致。**同上轮决策,仅记录不改**。
 
@@ -135,22 +135,22 @@
 
 **[中] I1 统一 ClientAccess 错误语义:4xx/5xx 错误体被丢弃**
 - 位置:acquire.rs 的 `ClientAccess` 默认方法(status_as_error 默认 true)
-- 问题:统一后的 `check_status`/`send_and_parse`/`send_maybe_parse` 经 `builder.send()?` 发送,任何 4xx/5xx 直接转 Err 且响应体(服务端错误消息)被丢;`send_maybe_parse` 的 `{success:false}` 分支对 4xx/5xx 不可达。全仓仅 auth.rs 一处用 `with_error_body()`。后果:几十个调用点拿不到服务端拒绝原因,无法区分「服务器拒绝」与「网络故障」。
+- 问题:统一后的 `check_status`/`send_and_parse`/`send_maybe_parse` 经 `builder.send()?` 发送,任何 4xx/5xx 直接转 Err 且响应体(服务端错误消息)被丢弃;`send_maybe_parse` 的 `{success:false}` 分支对 4xx/5xx 不可达。全仓仅 auth.rs 一处用 `with_error_body()`。后果:几十个调用点无法获取服务端拒绝原因,无法区分「服务器拒绝」与「网络故障」。
 - 修复:Phase 6-6(在 ClientAccess 三个默认方法内统一关闭 status_as_error 并按 expected 检查,把非预期状态与错误体并入错误信息)——不改任何调用点签名。
 
 **[低] I2 main.rs 以 `msg.contains("验证码")` 判定重试** — main.rs 中字符串匹配中文错误文案决定重试语义,任何含「验证码」的其他错误会静默改变重试行为。修复:Phase 6-7(LoginHandler 暴露结构化错误码或 error_code 匹配)。
-**[低] I3 handle_password_v0/v1/v2 把 Http/Json/Io 错误全部压成 MewError::Auth** — auth.rs 的 `handle_password_v0/v1/v2`:变体信息丢失,调用方无法区分凭据错误与网络错误。**用户上轮已决策不合并三函数;此处仅建议错误透传不改结构**:Phase 6-8。
+**[低] I3 handle_password_v0/v1/v2 把 Http/Json/Io 错误全部归并为 MewError::Auth** — auth.rs 的 `handle_password_v0/v1/v2`:变体信息丢失,调用方无法区分凭据错误与网络错误。**用户上轮已决策不合并三函数;此处仅建议错误透传不改结构**:Phase 6-8。
 **[低] I4 时间戳工具分散**(auth.rs 手写 SystemTime 与 expect panic 点、acquire.rs 的 current_timestamp_13):由 Phase 5 统一吸收,不做独立工具函数。
 
 ### 4. 性能优化
 
 - **[中] O1 分页页大小统一 + response_amount_key 兜底**(F14 修复的一部分,教育 fetch_all_works_gen 已有先例),由 Phase 1-4 处理。
 - **[低] O2 KITTY_HEADERS 每请求循环添加** — acquire.rs 的 `KITTY_HEADERS`:4 个静态头每次请求 `builder.header` 设置;ureq Agent::config_builder 支持 default_headers,可在 KittyCore::new 一次配置。**决定不改**(收益小,且 per-request 语义更显式)。
-- 其余(锁内聚合、双哈希查找、fire_list_outcome 锁 5 次等上轮条目)按用户回退指令保持现状。
+- 其余(锁内聚合、双哈希查找、fire_list_outcome 重复加锁 5 次等上轮条目)按用户回退指令保持现状。
 
 ### 5. 设计模式
 
-- 无新抽象需求。这些修复全部为「既有正确抽象未用对」的修正(bool 吞掉、形态不匹配、锁使用错误),不需要引入 trait/宏/Builder。
+- 无新抽象需求。这些修复全部为「既有正确抽象未用对」的修正(bool 返回值被丢弃、形态不匹配、锁使用错误),不需要引入 trait/宏/Builder。
 - 唯一涉及写法的模式点:close() 持锁 join(RAII 守卫生命周期陷阱),由 Phase 2-3 用显式作用域 drop 守卫,属写法修正而非新抽象。
 
 ## Approach(整改步骤,按行为分组;锚点按 HEAD 的符号定位,实施前重读)
@@ -209,7 +209,7 @@ if inner.connected.load(Ordering::Acquire) {
     return Ok(());
 }
 ```
-行为:重连线程睡醒后与手动 connect() 竞态时不再双建(connect() 的检查在锁内,此复查在锁内覆盖重连路径)。
+行为:重连线程在退避结束后与手动 connect() 竞态时不再重复建立(connect() 的检查在锁内,此复查在锁内覆盖重连路径)。
 
 2-2 **`connect()` 在重连在途时不 reset_state**:
 ```rust
@@ -289,7 +289,7 @@ ActionChoice::Apply(key) => {
     }
 }
 ```
-并把批量循环内 `decided.insert(j)` 移入 `Ok(())` 分支(失败项本 chunk 内仍可再问)。Abort 路径保持 Err(ProcessorError::Aborted) 不变。
+并把批量循环内 `decided.insert(j)` 移入 `Ok(())` 分支(失败项在本 chunk 内仍会被再次询问)。Abort 路径保持 Err(ProcessorError::Aborted) 不变。
 
 3-3 **registry.rs 4 处 `Some(100)` 改为 `None`**(四处同型,以 `grep -n 'Some(100)' src/core/registry.rs` 定位):`gen_from(|| fetch_*_reports_gen(..., None))`。行为:每类型全量迭代,chunk_size 控制节奏;「所有举报处理完成」(terminal.rs 的完成文案)与 pass_all 完成文案变为准确。无 limit 上限后 PaginatedIter 以 total/空页终止(Phase 1-3 已保证完整)。
 
@@ -301,7 +301,7 @@ if last_login.as_deref() == Some(user.as_str()) {
 }
 match Self::login_student(&user, &pass) { ... 成功后 *last_login = Some(user.clone()); }
 ```
-失败分支照旧移除账号并清 usage(同时 `*last_login = None`,避免与移除后新选中账号混淆);调用处传 `&mut last_login`(循环外初始化 `let mut last_login: Option<String> = None;`)。行为:多账号轮换时每账号仍每次登录(身份正确性不变);单账号批量举报从 25 次登录降为 1 次。
+失败分支仍按原逻辑移除账号并清 usage(同时 `*last_login = None`,避免与移除后新选中账号混淆);调用处传 `&mut last_login`(循环外初始化 `let mut last_login: Option<String> = None;`)。行为:多账号轮换时每账号仍每次登录(身份正确性不变);单账号批量举报从 25 次登录降为 1 次。
 
 ### Phase 4 — converse 断连语义(独立)
 
@@ -315,11 +315,11 @@ if !self.is_connected() {
 }
 Ok(self.current_response())
 ```
-行为:中途断连返回错误而非半截文本。
+行为:中途断连返回错误而非不完整文本。
 
 4-2 **`connect` 加连接锁**:`ChatInner` 增加 `connect_lock: Mutex<()>` 字段(build 处初始化),connect() 整体包 `let _guard = self.inner.connect_lock.lock().unwrap_or_else(PoisonError::into_inner);`(检查与 establish 都在临界区内)。行为:并发 connect 串行化,第二次直接命中 connected 复查返回。
 
-4-3 **`read_loop` 收尾主动关闭不发 Error**:
+4-3 **`read_loop` 结束处理:主动关闭不发 Error**:
 ```rust
 if was_connected && !inner.stopping.load(Ordering::Acquire) {
     info!("AI 对话连接已断开");
@@ -342,7 +342,7 @@ Ok(value_to_i64(&json["data"]).unwrap_or(0))
 
 5-4 **community.rs 的 `extract_time_string` 改用 `value_to_i64(...).map(|v| v.to_string()).unwrap_or_default()`**:与 auth.rs 解析一致,消除同端点双形态矛盾。
 
-行为:无论服务端返回数字还是数字字符串,两条路径都正确;秒/毫秒按用途分离(校准用秒、登录票据用本地毫秒)。`[INFERENCE]` 若实测服务端返回毫秒数字,则校准基准仍错——届时把 5-2 改为 `server_time / 1000`(该 fallback 见 Assumptions)。
+行为:无论服务端返回数字还是数字字符串,两条路径都正确;秒与毫秒按用途分离(校准用秒、登录票据用本地毫秒)。`[INFERENCE]` 若实测服务端返回毫秒数字,则校准基准仍错——届时把 5-2 改为 `server_time / 1000`(该 fallback 见 Assumptions)。
 
 ### Phase 6 — 小项(独立,可并行)
 
@@ -355,7 +355,7 @@ let per_source_limit = Some((limit + 1) / 2);
 Box::new(nemo_stream.chain(web_stream).take(limit as usize))
 ```
 行为:奇数 limit 恰好返回 limit 条;limit=1 不再发 limit=0。
-6-3 **retrieve.rs 的 `reply_items` 论坛回复 N+1 有界并行**:仿照本文件 `aggregate_user_comments_from_works` 的 `thread::scope` 与分块先例,reply_items 改为按评论分块(如 8 条/块)并行拉取回复,按原顺序合并;无回复源(Work/Shop)路径保持现状。行为:单流串行 1000 请求降为 125 批并发;顺序保持。
+6-3 **retrieve.rs 的 `reply_items` 论坛回复 N+1 有界并行**:仿照本文件 `aggregate_user_comments_from_works` 的 `thread::scope` 与分块先例,reply_items 改为按评论分块(如 8 条/块)并行拉取回复,按原顺序合并;无回复源(Work/Shop)路径保持现状。行为:单流的 1000 次串行请求降为 125 批并发;顺序保持。
 6-4 **retrieve.rs 的 `stream_user_ids` 去克隆**:`if let Some(comment_obj) = comment.as_object() { ... reply_items(source, comment_id, comment_obj) ... }`,与 stream_comment_ids 借用风格一致。
 6-5 **auth.rs 的 `generate_x_device_auth` hex 编码预分配**:
 ```rust
@@ -392,9 +392,9 @@ Err(e) => match e {
 
 ### 不改(记录在案,带理由)
 
-- F1 flush_loop 整批回退重放风险:协议级确认机制成本高,窗口极小,维持现状。
+- F1 flush_loop 整批回退重放风险:协议级确认机制成本高,窗口持续时间极短,维持现状。
 - L6 与 L7 的 compiler.rs write_blocks、mutation 与工厂绕过:上轮用户决策放弃,行为依赖外部数据形态,不改。
-- captcha.rs 的 `verify_aliyun`、`verify_netease` 与 `verify_tencent` 空负载:全仓零调用(已 grep 确证),属公共 API 缺口而非活路径缺陷;启用时按 `verify_geetest_captcha` 模式补参数。不删(公共 API,外部消费者未知)、不改。
+- captcha.rs 的 `verify_aliyun`、`verify_netease` 与 `verify_tencent` 空负载:全仓零调用(已 grep 确证),属公共 API 缺口而非活路径缺陷;启用时按 `verify_geetest_captcha` 模式补参数。不删除(公共 API,外部消费者未知)、不修改。
 - forum 的 201 与 200 状态码、community delete 的 204 与 200 状态码、logout 的 204 与 200 状态码、create_account 的 identity 与 phone 字段、rebind-captcha 字段名:与第三方整理 OpenAPI 文档冲突,服务端契约 `[INFERENCE]`,实测前不改。
 - O2 KITTY_HEADERS 默认头、P3 merge_commands 克隆、HTTPStatus 枚举迁移、god file 拆分、manager 宏:上轮用户回退指令,维持现状。
 

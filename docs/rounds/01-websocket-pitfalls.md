@@ -2,11 +2,11 @@
 
 > **项目背景**:将 Python 的「操作云变量」(`cloudcfg.py`)与「AI 助手对话」(`deepser.py`)移植到 Rust。硬约束:**仅使用 `tungstenite + rustls`、无 async runtime、以库形式提供、建造者模式 + 链式调用、用 `log` 替代 `print`**。真机联调贯穿全程,先后用两个账号验证(第一个账号 AI 对话配额为 0,第二个账号正常)。
 >
-> 全文按「业务协议 -> 并发线程 -> 编译类型 -> 调试方法论」四层组织。前两层是"为什么连不通/连上了不工作",第三层是"为什么编译不过",第四层是"怎么快速定位"。每条坑均含:现象、根因、修复代码、验证结果、通用教训。
+> 全文按「业务协议、并发线程、编译类型、调试方法论」四层组织。前两层是"为什么连不通/连上了不工作",第三层是"为什么编译不过",第四层是"怎么快速定位"。每条坑均含:现象、根因、修复代码、验证结果、通用教训。
 
 ---
 
-# 第一部分:业务/协议层(最容易翻车,且错误信息极具误导性)
+# 第一部分:业务/协议层(最容易出错,且错误信息极具误导性)
 
 ## 坑 1:401 的真凶是 URL 参数,不是 TLS 指纹
 
@@ -50,7 +50,7 @@ URL 里的两个 query 参数——**`authorization_type` 与 `stag` 必须与�
 | Nemo | 5 | 2 |
 | KittenN | 5 | 3 |
 
-用 `KittenN(5,3)` 去连一个 `ide_type: "KITTEN"` 的作品 -> 401;改成 `Kitten(1,1)` -> 立即 `101 Switching Protocols`。正确做法是连接前先查作品信息并自动推断:
+用 `KittenN(5,3)` 去连一个 `ide_type: "KITTEN"` 的作品 -> 401;改成 `Kitten(1,1)` 到 立即 `101 Switching Protocols`。正确做法是连接前先查作品信息并自动推断:
 
 ```rust
 // 通过 work API 获取作品类型
@@ -64,7 +64,7 @@ let info = WorkDataFetcher::new().fetch_work_details(work_id)?;
 - 如果服务器真的"在 TLS 层按 JA3 指纹拒绝",你**根本到不了 HTTP 层**——要么握手失败(`handshake failure`),要么 TCP 被断,绝不会收到带 HTTP 状态码的响应。
 - 服务器收下了你的 Client Hello(不管扩展列表是什么)、收下了你的 HTTP 请求,然后说"业务凭证不对" -> **这是业务层拒绝**(URL 参数 / device-auth / token),与指纹无关。
 
-> 为什么今天能成功而当年不能?今天遇到 401 后,第一件事是**用 work API 查作品类型** -> 发现是 KITTEN 作品 -> 修正 editor 参数 -> 成功。当年在"TLS 方向"深挖了四层,唯独没有打印并对比**完整请求 URL 的 query 部分**——那是唯一真正不同的变量。
+> 为什么今天能成功而当年不能?今天遇到 401 后,第一件事是**用 work API 查作品类型** -> 发现是 KITTEN 作品、修正 editor 参数、成功。当年在"TLS 方向"深挖了四层,唯独没有打印并对比**完整请求 URL 的 query 部分**——那是唯一真正不同的变量。
 
 ### 通用教训
 
@@ -185,7 +185,7 @@ return Frame::Event(name.clone(), payload);
 
 ### 根因
 
-服务器对客户端的 `40`(Socket.IO 连接确认)会**重复回 `40`**(可能回两次)。本项目的 `handle_frame` 每收到一次 `40` 就发一次 JOIN,第二次 JOIN 被服务器视为非法 -> 发 `41` 断开。Python 端有 `_join_sent` 标志防重,移植时漏了。
+服务器对客户端的 `40`(Socket.IO 连接确认)会**重复回 `40`**(可能回两次)。本项目的 `handle_frame` 每收到一次 `40` 就发一次 JOIN,第二次 JOIN 被服务器视为非法 到 发 `41` 断开。Python 端有 `_join_sent` 标志防重,移植时漏了。
 
 ### 修复
 
@@ -331,7 +331,7 @@ impl ChatEventHandler for ConnectAckHandler {
 {"code": 1, "data": {"user_id": "1742185446", "count": 1, "search_session": "..."}}
 ```
 
-`user_id` 是**字符串** `"1742185446"`,而代码用 `Value::as_i64()` 解析 -> 返回 `None`。
+`user_id` 是**字符串** `"1742185446"`,而代码用 `Value::as_i64()` 解析 到 返回 `None`。
 
 ### 修复
 
@@ -512,7 +512,7 @@ notify 线程:flag.store(true); cond.notify_all()   ← 此刻没有等待者,�
 wait 线程:进入 wait_timeout(释放锁,开始等待)       ← 永远等不到
 ```
 
-`flag` 是 `AtomicBool`,`notify_all` 不持锁 -> 存在"wait 已检查、尚未等待"的窗口,通知丢失。
+`flag` 是 `AtomicBool`,`notify_all` 不持锁 到 存在"wait 已检查、尚未等待"的窗口,通知丢失。
 
 ### 修复
 
@@ -589,10 +589,10 @@ wait_flag(..., || {
 
 若在持有 `Mutex<DataStore>` 时调用用户回调:
 
-1. 回调里再调用 `get()`/`set()` -> **重入同一把 std Mutex -> 直接死锁**(std Mutex 不可重入);
-2. 回调 panic -> 锁被污染(`PoisonError`),后续所有访问报错。
+1. 回调里再调用 `get()`/`set()` -> **重入同一把 std Mutex 到 直接死锁**(std Mutex 不可重入);
+2. 回调 panic 到 锁被污染(`PoisonError`),后续所有访问报错。
 
-### 修复:取走 -> 释放锁 -> 锁外执行 -> 放回
+### 修复:取走、释放锁、锁外执行、放回
 
 ```rust
 let callbacks = {
@@ -714,7 +714,7 @@ loop {
 
 ### 风险
 
-`connected`(WebSocket 建立)早于 Socket.IO 握手完成。批量上传线程只看 `connected`,可能在握手完成前把命令发出去 -> 服务器丢弃 -> 命令已 drain 不回填 -> **数据静默丢失**。
+`connected`(WebSocket 建立)早于 Socket.IO 握手完成。批量上传线程只看 `connected`,可能在握手完成前把命令发出去、服务器丢弃、命令已 drain 不回填 -> **数据静默丢失**。
 
 ### 修复
 
@@ -735,7 +735,7 @@ if !inner.connected.load(Ordering::Acquire)
 
 ### 教训
 
-**"连接建立"与"可以发业务数据"是两个时刻**。中间隔着 Socket.IO 握手(`0` -> `40`),用独立的 `io_ready` 标志表达,而不是复用 `connected`。
+**"连接建立"与"可以发业务数据"是两个时刻**。中间隔着 Socket.IO 握手(`0` 改为 `40`),用独立的 `io_ready` 标志表达,而不是复用 `connected`。
 
 ---
 
@@ -953,8 +953,8 @@ debug!("... 列表 {list_count}");
 
 ### 现象
 
-- `on_ranking_received(cb: impl Fn(RankingData))` 存入 `Box<dyn Fn(&RankingData)>` -> 类型不匹配;
-- 列表"整表变更回调"误用了"单值变更回调"别名 -> 参数类型不匹配。
+- `on_ranking_received(cb: impl Fn(RankingData))` 存入 `Box<dyn Fn(&RankingData)>` 到 类型不匹配;
+- 列表"整表变更回调"误用了"单值变更回调"别名 到 参数类型不匹配。
 
 ### 修复
 
@@ -975,7 +975,7 @@ type ListChangeCallback = Box<dyn Fn(&[CloudValue], &[CloudValue], &str) + Send 
 
 1. **把帧流打出来,与 Python 原版逐字对比**。这是定位坑 3/5/6 的决定性手段:每次收发帧都打日志,与 `cloudcfg.py`/`deepser.py` 的发送字符串逐字节 diff。`diff` 一个空格就能救回半天时间。
 2. **挂 `log::Log` 输出,用 `LevelFilter::Debug` 看全量日志**。测试进程没有 logger 时,`log` 宏默认静默,容易误以为"什么都没发生"。测试入口加一个最小 logger,是所有网络调试的第一步。
-3. **二分定位顺序**:完整请求 URL(含 query)-> headers -> 签名 -> token 时效 -> **最后才怀疑 TLS**。坑 1 就是跳过了第一步直接挖 TLS,多花了数倍时间。
+3. **二分定位顺序**:完整请求 URL(含 query)-> headers 到 签名 -> token 时效 -> **最后才怀疑 TLS**。坑 1 就是跳过了第一步直接挖 TLS,多花了数倍时间。
 4. **区分账号问题与代码问题**:服务器静默(坑 9)是超时的常见伪装。先看 `chat_count`、`remaining_times` 等配额字段,再查代码。
 5. **Python 对照探针的陷阱**:用标准库手写 WS 客户端做对照时,发现"同帧同时序下 Python 探针被断、Rust 成功",排除协议差异后疑为 **rustls 与 OpenSSL 的 TLS 指纹差异**导致服务器对探针有不同行为——**不要用探针的失败否定主实现**,以真实目标客户端的实测为准。
 6. **临时 smoke 测试 + 真实账号验证,验证后删除**:真机冒烟测试(只读云变量、实际对话)是协议正确性的最终裁判;但账号凭据不能进仓库,测完即删。
@@ -1014,7 +1014,7 @@ type ListChangeCallback = Box<dyn Fn(&[CloudValue], &[CloudValue], &str) + Send 
 [超时] AI 未开始回复
 ```
 
-诡异之处:握手阶段(`0` -> `40` -> `join_ack` -> 各种 ack)一切正常,唯独 `chat` 帧石沉大海。而**同样的帧、同样的时序**,在服务器消息密集的窗口内一切顺利——这提示问题与"时机"有关,而不是帧格式。
+诡异之处:握手阶段(`0`、`40`、`join_ack`、各种 ack)一切正常,唯独 `chat` 帧石沉大海。而**同样的帧、同样的时序**,在服务器消息密集的窗口内一切顺利——这提示问题与"时机"有关,而不是帧格式。
 
 ## 二、架构:为什么选了"单线程事件循环 + channel"
 

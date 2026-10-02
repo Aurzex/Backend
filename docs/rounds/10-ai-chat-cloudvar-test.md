@@ -1,8 +1,8 @@
 # 真机冒烟测试 — AI 对话与作品云变量(2026-08-12)
 
-> 目的:验证 `core/converse.rs`(AI 对话)与 `core/cloudvar.rs`(作品云变量)在真实环境下的可用性,顺带核验刚完成的「云变量编辑器类型自动识别」。
+> 目的:验证 `core/converse.rs`(AI 对话)与 `core/cloudvar.rs`(作品云变量)在真实环境下的可用性,并核验同期完成的「云变量编辑器类型自动识别」。
 > 基线:HEAD `70a6b44`。方法:当时的临时示例 `examples/smoke_test.rs`。
-> **该示例从未入库**(`examples/` 目录当前不存在,`git log` 里也没有它的痕迹),当时只在本机跑;
+> **该示例从未入库**(`examples/` 目录当前不存在,`git log` 里也没有它的痕迹),当时仅在本机运行;
 > 不要把它连同凭据提交进来。当前可复用的真机入口:`tests/live_features.rs`(登录/AI 对话/云变量)
 > 与 `tests/convert_live.rs`(作品转化),凭据统一从 `data/test-config.json` 读。
 
@@ -31,15 +31,15 @@
 
 5/5 全部连接成功、数据就绪、变量/列表完整读取。
 
-## 发现并修复的 Bug:`connect()` 不等 Socket.IO 就绪
+## 发现并修复的 Bug:`connect()` 未等待 Socket.IO 就绪
 
-**严重度:。AI 对话"超时未开始回复"的真凶。**
+**严重度:。AI 对话"超时未开始回复"的直接原因。**
 
 ### 现象
 
-首次测试,账号 A 的 `send_and_wait` 稳定报 `Timeout("AI 未开始回复")`,三个账号无一幸免。
+首次测试,账号 A 的 `send_and_wait` 稳定报 `Timeout("AI 未开始回复")`,三个账号均出现同一现象。
 
-### 根因(日志铁证)
+### 根因(日志证据)
 
 ```text
 [INFO] AI 对话 WebSocket 已建立
@@ -49,7 +49,7 @@
 [INFO] 连接确认 - 剩余对话次数: 0
 ```
 
-`connect()` 原实现只等 WebSocket 层连接(`connected` 标志,establish 后立即置位),`send_and_wait` 随即发送 chat 帧——此时 Socket.IO 握手(`0` 帧->`40`)与 JOIN 均未完成,服务器静默丢弃,`join_ack` 也收不到。Python 参考实现(`deepser.py`)靠 `connect()` 后 `sleep(2)` 规避;Rust 端缺这个等待。
+`connect()` 原实现只等 WebSocket 层连接(`connected` 标志,establish 后立即置位),`send_and_wait` 随即发送 chat 帧——此时 Socket.IO 握手(`0` 帧转为 `40`)与 JOIN 均未完成,服务器静默丢弃,`join_ack` 也收不到。Python 参考实现(`deepser.py`)以 `connect()` 后 `sleep(2)` 规避该问题;Rust 端缺少这一等待。
 
 ### 修复
 
@@ -64,7 +64,7 @@
 
 ## 新功能:云变量编辑器类型自动识别
 
-**背景**:云存储 WS 连接参数 `authorization_type`/`stag` 因编辑器而异(Kitten=`1/1`,Nemo=`5/2`,KittenN=`5/3`,Coco=`1/1`)。此前 `CloudBuilder` 默认 Kitten,遇到 NEMO/KN 作品直接 401(实测 194684070/103791894/325806995 均中招)。
+**背景**:云存储 WS 连接参数 `authorization_type`/`stag` 因编辑器而异(Kitten=`1/1`,Nemo=`5/2`,KittenN=`5/3`,Coco=`1/1`)。此前 `CloudBuilder` 默认 Kitten,遇到 NEMO/KN 作品直接返回 401(实测 194684070/103791894/325806995 均受影响)。
 
 **实现**(`src/core/cloudvar.rs`):
 
@@ -76,12 +76,12 @@
 
 ## 有价值的经验
 
-1. **`chat_count: 0` 是账号配额,不是代码 bug**。服务器对配额不足的 chat 请求**静默无视**(不回任何帧),超时是唯一信号——与 `docs/rounds/01-websocket-pitfalls.md` 坑 9 完全一致。测试中该字段在多次连接间从 0 涨到 6,疑为配额刷新滞后。
-2. **"服务器静默"≠"代码 bug"**:先看 `on_connect_ack` 的 `chat_count`/`remaining_times` 体检字段,再查协议。
-3. **时序问题优先看日志顺序**:chat 帧在握手前发出,靠日志里 `聊天消息已发送` 与 `握手成功` 的先后即可定位,无需抓包。
+1. **`chat_count: 0` 是账号配额,不是代码 bug**。服务器对配额不足的 chat 请求**静默无视**(不回任何帧),超时是唯一信号——与 `docs/rounds/01-websocket-pitfalls.md` 坑 9 完全一致。测试中该字段在多次连接间由 0 增至 6,疑为配额刷新滞后。
+2. **"服务器静默"不等于"代码 bug"**:先查看 `on_connect_ack` 的 `chat_count`/`remaining_times` 诊断字段,再查协议。
+3. **时序问题优先检查日志顺序**:chat 帧在握手前发出,依据日志中 `聊天消息已发送` 与 `握手成功` 的先后顺序即可定位,无需抓包。
 4. **NEMO/KN 作品的云变量必须用对应编辑器参数**,否则 401;现在库内自动识别,调用方无需感知。
-5. **登录接口偶发全局超时**:重试即可,非代码缺陷;批量测试账号时逐个跑比一次性并发更稳。
-6. **测试工具设计**:当时的 `examples/smoke_test.rs` 支持多账号 + 自动识别作品类型,一键复跑。
+5. **登录接口偶发全局超时**:重试即可,非代码缺陷;批量测试账号时逐个执行比一次性并发更稳定。
+6. **测试工具设计**:当时的 `examples/smoke_test.rs` 支持多账号与自动识别作品类型,可一键重新运行。
    **注意**:它把账号密码当命令行参数传,这类工具不要入库(本仓库里它从未入库);
    现在的回归入口是 `tests/live_features.rs` / `tests/convert_live.rs`,凭据只从
    `data/test-config.json`(gitignored)读。

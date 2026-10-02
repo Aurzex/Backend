@@ -238,7 +238,7 @@ pub struct LocalClientProvider {
 
 ## docs/rounds/18-architecture-api-review-plan.md
 
-- **错**:`Other` -> `InvalidArgument` 是公开 API 命名变更(SemVer breaking),crate 处 0.1.0 可接受;grep `MewError::Other` 全仓 9 处一次性改名。
+- **错**:`Other` -> `InvalidArgument` 是公开 API 命名变更(SemVer breaking),crate 处 0.1.0 可接受;grep `MewError::Other` 全仓 9 处一次性改名。(该句在 2026-10-02 的语体清洗中已改写为「`Other` 改名为 `InvalidArgument` 属公开 API 命名变更…」;此处引的是**改写前原文**。)
   - **为何错**:数字与实测不符:范围偏差段记载「实际 10 处而非 9 处」,漏了 auth.rs:498(验证码文件写入失败),且该处语义不同应改 MewError::Io 而非 InvalidArgument。
   - **正确**:全仓 10 处:9 处参数校验 -> InvalidArgument,auth.rs:498 -> MewError::Io;requests.rs:1619/1627 另走 Json 错误。
   - 出处:18-...md §Approach Phase 4 影响面 vs §范围偏差第 1 条

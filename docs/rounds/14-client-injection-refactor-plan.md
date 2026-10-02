@@ -6,20 +6,20 @@
 
 ## Context
 
-项目自述(`README.md`「可替换边界」「设计要点」)宣称 `CodeMaoClient` 支持全局单例 / 独立实例(`new_independent`)/ 自定义认证(`new_with_auth`)/ 自定义 `KittyAuth`,且 `ClientProvider` 用于依赖注入与测试。但实际业务层把这条边界封死,存在以下确定性缺陷与重复:
+项目自述(`README.md`「可替换边界」「设计要点」)宣称 `CodeMaoClient` 支持全局单例 / 独立实例(`new_independent`)/ 自定义认证(`new_with_auth`)/ 自定义 `KittyAuth`,且 `ClientProvider` 用于依赖注入与测试。但实际业务层使这条边界失效,存在以下确定性缺陷与重复:
 
 1. **业务层硬编码全局客户端**:13 个 api 域的全部 Manager 字段都是 `client: &'static CodeMaoClient`,构造函数 `new()` 一律 `Self { client: CodeMaoClient::global() }`(全仓 ≈37 处)。调用方**无法**用独立/自定义客户端构造任何 Manager——「可替换边界」在业务层不可达。
 2. **反编译器硬编码全局**:`core/compiler.rs` 的 `CodemaoDecompiler::global()`,内部 `KittyFactory::global_client().clone()`。
-3. **举报引擎硬编码全局**:`core/retrieve.rs` 的 `count_comments` 与 `stream_edu_accounts_with_reset_passwords` 直调 `CodeMaoClient::global()`。
+3. **举报引擎硬编码全局**:`core/retrieve.rs` 的 `count_comments` 与 `stream_edu_accounts_with_reset_passwords` 直接调用 `CodeMaoClient::global()`。
 4. **六套错误枚举**:`MewError`(utils)、`CloudError`(cloudvar)、`ChatError`(converse)、`DecompilerError`(compiler)、`ProcessorError`(registry)、`DataQueryError`(retrieve)。其中 `CloudError` 与 `ChatError` 有 7 个完全相同的变体(WebSocket/Handshake/Json/Send/NotConnected/Auth/Thread),重复维护。
 5. **跨模块类型重复**:`WorkType { Kitten=1, Nemo=3, CodeGame=5 }` 与 `KittenVersion { V3, V4 }` 在 `api/user.rs` 与 `api/work.rs` 各定义一份(变体、判别值、`as_str` 映射完全一致;`work.rs` 的 `WorkType` 实为死代码,全仓零调用点)。
 6. **冗余向后兼容分发**:`CodeMaoClient::new(config)` 依 `config.use_global_auth` 分发,`KittyConfig.use_global_auth`/`with_independent_auth()` 已无存在意义(构造函数已显式化为 `new_with_global_auth`/`new_independent`),两者全仓零调用点。
 
-目标:把「可替换边界」真正打通到业务层,顺带消除上述确定性的重复与死代码。原则沿用 `CONTRIBUTING.md`:简洁可读、不新增依赖、不引入宏/多余抽象、`lock().unwrap()`、thiserror 保留底层变体。
+目标:将「可替换边界」真正贯通到业务层,同时消除上述确定性的重复与死代码。原则沿用 `CONTRIBUTING.md`:简洁可读、不新增依赖、不引入宏/多余抽象、`lock().unwrap()`、thiserror 保留底层变体。
 
 ## Approach
 
-五个阶段彼此独立,可按任意顺序执行;建议按下述顺序,每个阶段结束 `cargo check --all-targets` 与 `cargo test` 均须绿。
+五个阶段彼此独立,可按任意顺序执行;建议按下述顺序,每个阶段结束 `cargo check --all-targets` 与 `cargo test` 均须通过。
 
 ### Phase 1 — 业务 Manager 客户端注入
 
@@ -29,7 +29,7 @@
 
 穷举清单:`grep -rn "client: &'static CodeMaoClient" src/api/`,命中即为待改结构体(≈37 个,分布在 `account/captcha/clouddb/codegame/community/education/forum/library/shop/user/whale/work` 12 个文件)。
 
-对每个命中结构体做三件事:
+对每个命中的结构体执行以下三项改动:
 
 1. 字段类型 `client: &'static CodeMaoClient` 改为 `client: CodeMaoClient`。
 2. `new()` 改为委托 `Self::new_with_client(CodeMaoClient::global().clone())`(保留全局默认,README 与测试的 `Xxx::new()` 调用不受影响)。
@@ -188,7 +188,7 @@ impl From<tungstenite::Error> for SocketError {
 
 ## 不落地(记录在案)
 
-- **`core/retrieve.rs` 的全局硬编码**(`DataQuery` 是单元结构体、`CommentQueryBuilder` 无 client 字段,却硬编码 `CodeMaoClient::global()`;`stream_edu_accounts_with_reset_passwords` 内 `EduDataFetcher::new()` 与 `switch_identity` 直调全局):其注入需给两个类型新增 `client: CodeMaoClient` 字段并贯穿全部请求构造,与 api 层机械替换不同,连同 `core/{registry,services}.rs` 举报引擎的同类硬编码,归入后续单独一轮。
+- **`core/retrieve.rs` 的全局硬编码**(`DataQuery` 是单元结构体、`CommentQueryBuilder` 无 client 字段,却硬编码 `CodeMaoClient::global()`;`stream_edu_accounts_with_reset_passwords` 内 `EduDataFetcher::new()` 与 `switch_identity` 直接调用全局客户端):其注入需给两个类型新增 `client: CodeMaoClient` 字段并贯穿全部请求构造,与 api 层机械替换不同,连同 `core/{registry,services}.rs` 举报引擎的同类硬编码,归入后续单独一轮。
 - **`decompile_work` 返回类型重载**(`None` 返回 JSON 字符串 / `Some` 返回文件路径):既有已文档化行为,拆分为独立 `decompile_to_json`/`decompile_to_file` 属另一处 API 语义重构,不列入 2026-08-29 的范围。
 - **Phase 4 去重 `WorkType`/`KittenVersion`**:用户决定不执行(2026-08-29),方案保留在 Approach 备查;`user.rs`/`work.rs` 的两处重复定义维持现状。
 
@@ -204,7 +204,7 @@ impl From<tungstenite::Error> for SocketError {
 
 ## Verification
 
-前置:每个阶段结束 `cargo check --all-targets` 0 error;最终 `cargo clippy --all-targets` 不新增警告;`cargo test` 全绿(库单测 + `compile_live` + `live_features` 无配置时自动跳过)。
+前置:每个阶段结束 `cargo check --all-targets` 0 error;最终 `cargo clippy --all-targets` 不新增警告;`cargo test` 全部通过(库单测、`compile_live` 与 `live_features` 无配置时自动跳过)。
 
 归零 grep 验证(最终态):
 
@@ -227,15 +227,15 @@ fn manager_new_with_client_uses_injected_client() {
 }
 ```
 
-该测试观察到的行为是「Manager 用的是注入的客户端身份状态,而非全局」,若 `new_with_client` 退回全局会失败。
+该测试观察到的行为是「Manager 使用的是注入的客户端身份状态,而非全局」,若 `new_with_client` 退回全局则失败。
 
-其余行为(网络请求语义)在无网络环境下以 code review + 编译为准:Phase 1/2/4/5 均为等价重写或纯可见性放宽,不改动任何 HTTP/WS 端点、参数或请求体。
+其余行为(网络请求语义)在无网络环境下以 code review 与编译为准:Phase 1/2/4/5 均为等价重写或纯可见性放宽,不改动任何 HTTP/WS 端点、参数或请求体。
 
 ## Verification(实际执行结果)
 
 - `cargo check --all-targets` 0 error。
 - `cargo clippy --all-targets` 0 warning。
-- `cargo test` 全绿:库单测 5 passed(含新增 `manager_new_with_client_uses_injected_client` + 既有 4)、`compile_live` 1 passed(NEMO 1 ignored)、`live_features` 3 passed(`login_and_ai_chat` / `cloud_variables` / `decompile_works`,真机命中 codemao 服务)、doc-tests 0。
+- `cargo test` 全部通过:库单测 5 passed(含新增 `manager_new_with_client_uses_injected_client` 与既有 4 项)、`compile_live` 1 passed(NEMO 1 ignored)、`live_features` 3 passed(`login_and_ai_chat` / `cloud_variables` / `decompile_works`,真机命中 codemao 服务)、doc-tests 0。
 - 归零验证:
     - `grep "client: &'static CodeMaoClient" src/` 命中 0 处(Phase 1)。
     - `grep "CodeMaoClient::new(\|use_global_auth\|with_independent_auth" src/` 命中 0 处(Phase 3)。

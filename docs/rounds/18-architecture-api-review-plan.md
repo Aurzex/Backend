@@ -2,19 +2,19 @@
 
 审阅日期:2026-08-30 · 基线:HEAD `4a62bb3` · 范围:`src/api/auth.rs` + `src/core/{compiler,unpacker,converse}.rs` + `src/utils/requests.rs` + `src/core/{retrieve,registry,pipeline}.rs`(改名调用点)+ `README.md` + `CONTRIBUTING.md`
 
-> 方案先行(本文档),随后落地代码。前九轮已打通客户端注入、错误模型收敛与反编译返回语义修正。本轮从「架构与 API 设计」六原则视角做全景评审,输出按优先级排序的整改路线图。评审结论全部锚定实际读到的文件/符号/行号。
+> 方案先行(本文档),随后落地代码。前九轮已完成客户端注入、错误模型收敛与反编译返回语义修正。本轮从「架构与 API 设计」六原则视角做全景评审,输出按优先级排序的整改路线图。评审结论全部锚定实际读到的文件/符号/行号。
 
 ## Context
 
-评审范围 25,510 行。本轮不推翻已定稿设计(客户端注入、错误分层骨架、反编译返回 `PathBuf`),聚焦确定性改进,分五类:
+评审范围覆盖 25,510 行代码。本轮不推翻已定稿设计(客户端注入、错误分层骨架、反编译返回 `PathBuf`),聚焦确定性改进,分五类:
 
-1. **登录流过度分层**:`LoginBuilder`+`LoginSession` 两类型一 DSL;`AuthManager` 三个委托字段两个冗余(创建两个 `AuthProcessor` + 三个 provider box)。
+1. **登录流过度分层**:`LoginBuilder`+`LoginSession` 两个类型承载一条 DSL;`AuthManager` 三个委托字段中有两个冗余(创建两个 `AuthProcessor` + 三个 provider box)。
 2. **大文件**:`compiler.rs` 4117 行,切两个文件(遵循 core 层 8 字母文件名约定)。
 3. **并发锁模型**:审计 ~134 处 `lock().unwrap()` 后结论「保持 std,不引入第三方锁库」;唯一真实缺陷是 converse `connect()` 活性缺陷。
 4. **错误模型**:`MewError` 实际 6 变体,`Other(String)` 语义不达意,文档与实际不符。
 5. **命名与可见性**:`GlobalKittyAuth`/`LocalKittyAuth`/`KittyIdentityManager` 本可 `pub(crate)`;57 个 `fetch_*_gen` 方法后缀非惯用。
 
-**演示层结论(评估后不落地)**:`core::terminal`(922 行)的 `ProcessorUi`(trait)/`ConsoleUi`/`ReportConsole` 定位为**可外部调用的举报控制台 UI 组件**——下游通过实现 `ProcessorUi` 或直接调 `ReportConsole::run(&mut ui, &processor, admin_id)` 嵌入自己的工具,无需独立运行(无 `main`)。因此 `terminal.rs` 保留在库内(`pub mod terminal`),**不迁入 `main.rs`、不迁入 `examples/`、不删除**;`main.rs` 仍作为默认 binary 的薄演示驱动。原「演示泄漏」判断撤回。
+**演示层结论(评估后不落地)**:`core::terminal`(922 行)的 `ProcessorUi`(trait)/`ConsoleUi`/`ReportConsole` 定位为**可外部调用的举报控制台 UI 组件**——下游通过实现 `ProcessorUi` 或直接调 `ReportConsole::run(&mut ui, &processor, admin_id)` 嵌入自己的工具,无需独立运行(无 `main`)。因此 `terminal.rs` 保留在库内(`pub mod terminal`),**不迁入 `main.rs`、不迁入 `examples/`、不删除**;`main.rs` 仍作为默认 binary 的轻量演示驱动。原「演示泄漏」判断撤回。
 
 原则沿用 `CONTRIBUTING.md`(不引入额外锁依赖、不过度抽象、thiserror 保留底层变体、简洁可读)。**延续允许破坏性 pub API 变更**(0.1.0 窗口)。
 
@@ -35,15 +35,15 @@
 
 ## Approach
 
-各阶段相互独立,按优先级顺序执行(每阶段结束 `cargo check --all-targets` 绿)。
+各阶段相互独立,按优先级顺序执行(每阶段结束 `cargo check --all-targets` 通过)。
 
 ### Phase 1 — 登录流精简:合并 LoginBuilder+LoginSession、AuthManager 去重(P1)
 
 **问题定位**
 
-- `src/api/auth.rs` 六类型全 pub(`AuthProcessor` L365、`LoginHandler` L583、`AuthManager` L823、`LoginBuilder` L1243、`LoginSession` L1351、`CloudAuthenticator` L1160)。
-- **LoginBuilder+LoginSession 无缝两段式**:`build()`(L1324)仅把 9 字段打包成 `LoginCredentials` 并搬进 `LoginSession`,`execute()`(L1359)一行透传 `AuthManager::login`。两类型只为「构造无副作用 -> execute 才发网络」一条,而这条已由「builder 只有 setter」天然保证。
-- **AuthManager 三个委托字段两个冗余**(L824-826):`client_provider` 仅用于 logout 端点与 `configure_authentication_token`;`processor` 仅用于 `admin_login` 的 `fetch_admin_details`(L1044)。`new_with_provider`(L832-834)创建**两个** `AuthProcessor` + **三个** `Box<dyn ClientProvider>`。
+- `src/api/auth.rs` 六个类型全部标记为 pub(`AuthProcessor` L365、`LoginHandler` L583、`AuthManager` L823、`LoginBuilder` L1243、`LoginSession` L1351、`CloudAuthenticator` L1160)。
+- **LoginBuilder+LoginSession 两段式**:`build()`(L1324)仅把 9 字段打包成 `LoginCredentials` 并移入 `LoginSession`,`execute()`(L1359)一行透传 `AuthManager::login`。两个类型仅承载「构造阶段无副作用、执行 execute 才发起网络请求」一条性质,而这条性质已由「builder 只有 setter」天然保证。
+- **AuthManager 三个委托字段中有两个冗余**(L824-826):`client_provider` 仅用于 logout 端点与 `configure_authentication_token`;`processor` 仅用于 `admin_login` 的 `fetch_admin_details`(L1044)。`new_with_provider`(L832-834)创建**两个** `AuthProcessor` + **三个** `Box<dyn ClientProvider>`。
 
 **改动 — A:合并 LoginBuilder ∪ LoginSession**
 
@@ -100,17 +100,17 @@ impl AuthManager {
 
 **保留不动**
 
-- `AuthProcessor`(纯传输,返回裸 `Value`,无 token 副作用)<-> `LoginHandler`(token 提取 + 持久化 + `LoginResult` 塑形):真实 seam,保留。
-- `AuthManager` 去重后是「一个协作者 + 两个状态字段」的真门面,保留。
+- `AuthProcessor`(纯传输,返回裸 `Value`,无 token 副作用)与 `LoginHandler`(token 提取 + 持久化 + `LoginResult` 塑形)之间构成真实 seam,保留。
+- `AuthManager` 去重后是一个「一个协作者 + 两个状态字段」的真实门面,保留。
 
 **影响面与风险**
 
-- 6 类型 -> 5 类型;删 1 类型 + 2 字段 + 1 冗余 `AuthProcessor` + 1 provider box。破坏面:`LoginSession` 仅被 ``pipeline.rs`` 与 README 消费。
+- 6 类型减为 5 类型;删 1 类型 + 2 字段 + 1 冗余 `AuthProcessor` + 1 provider box。破坏面:`LoginSession` 仅被 ``pipeline.rs`` 与 README 消费。
 - 风险:`execute(&mut self)` 用 `.take()` 消费 String 字段(零克隆),`status`/`role` 为 Copy 枚举直接拷。
 
 **验证**
 
-- `grep -n "LoginSession" src/` -> 0;`grep -n "client_provider" src/api/auth.rs` -> 仅 `ClientProvider` trait/impl 相关,`AuthManager` 无字段。
+- `grep -n "LoginSession" src/` 命中 0 处;`grep -n "client_provider" src/api/auth.rs` 仅命中 `ClientProvider` trait/impl 相关,`AuthManager` 无字段。
 
 ---
 
@@ -146,7 +146,7 @@ use crate::core::unpacker::{
 
 **影响面与风险**
 
-- 依赖方向单向:门面(`compiler.rs`)-> 引擎(`unpacker.rs`),引擎不反向引用门面。公开路径不变(仅 `DecompilerError` 经 `pub use` 保留原路径)。纯移动无逻辑变更,回归风险低。
+- 依赖方向单向:门面(`compiler.rs`)依赖引擎(`unpacker.rs`),引擎不反向引用门面。公开路径不变(仅 `DecompilerError` 经 `pub use` 保留原路径)。纯移动无逻辑变更,回归风险低。
 - 已知局限:引擎 `unpacker.rs` 仍约 3740 行(门面约 350 行),这是「只切两个文件」的固有结果;若后续需进一步拆分,再按段切子模块(本轮不做,见「不落地」)。
 - 风险:分文件后 `use` 语句未下沉会报未使用 import;`#[cfg(test)]` 单测若跨文件引用需一并迁。
 
@@ -158,7 +158,7 @@ use crate::core::unpacker::{
 
 ### Phase 3 — 并发/锁:保持 std 同步模型,不引入第三方锁库;修 converse connect() 活性缺陷(P1)
 
-**结论先行**:审计(`cloudvar.rs` ~90 处、`converse.rs` ~30 处、`services.rs` 11 处、`pipeline.rs` 1 处、`socketio.rs` 2 处 `lock().unwrap()`;`retrieve.rs` 零锁)显示现有 std 模型**无死锁环、中毒面极小、锁粒度合理**。第三方锁库只能带来边际抛光,不带来正确性收益,不值得为此破坏「零第三方锁依赖」卖点。**保持 `CONTRIBUTING.md`「不引入额外锁依赖」约定,不修订为引入锁库**;仅修一个活性缺陷。
+**结论先行**:审计(`cloudvar.rs` ~90 处、`converse.rs` ~30 处、`services.rs` 11 处、`pipeline.rs` 1 处、`socketio.rs` 2 处 `lock().unwrap()`;`retrieve.rs` 零锁)显示现有 std 模型**无死锁环、中毒面极小、锁粒度合理**。第三方锁库只能带来边际改善,不带来正确性收益,不值得为此破坏「零第三方锁依赖」这一约定。**保持 `CONTRIBUTING.md`「不引入额外锁依赖」约定,不修订为引入锁库**;仅修一个活性缺陷。
 
 **替换点清单 + 量化(说明为何不迁移)**
 
@@ -176,7 +176,7 @@ use crate::core::unpacker::{
 - **锁竞争**:所有锁语句/块级作用域,guard 在每次 `send`/`join`/回调前显式释放(`cloudvar.rs::CloudBuilder::build` 注释明确防死锁窗口;`converse.rs::ChatClient::send_message` 注释避免嵌套取锁)。唯一跨阻塞持有的是 `connect_lock`(建连串行化),属持有时长取舍非竞争热点。
 - **死锁**:无嵌套双锁持有;`connect_lock` 是唯一外层锁,内层锁在其下逐个获取、从不并发持有两个。无死锁环。
 
-**唯一真实缺陷(需修)**:converse.rs `connect()`(L255-274)持 `connect_lock` 跨一次阻塞 `wait_flag` 等待(L269-273),谓词只判 `joined`。若另一线程在等待期间调 `close()`(L419-436),`close()` 已置 `stopping=true`(L421)并 `notify_with` 通知(L429-434,内部 `notify_all`),但 `connect()` 的谓词不含 `stopping`,唤醒后重查 `joined`(仍 false)继续睡 -> `connect()` 挂满 `connect_timeout`。**缺口在 `connect()` 谓词,不在 `close()`(close 已通知)。**
+**唯一真实缺陷(需修)**:converse.rs `connect()`(L255-274)持 `connect_lock` 跨一次阻塞 `wait_flag` 等待(L269-273),谓词只判 `joined`。若另一线程在等待期间调 `close()`(L419-436),`close()` 已置 `stopping=true`(L421)并 `notify_with` 通知(L429-434,内部 `notify_all`),但 `connect()` 的谓词不含 `stopping`,唤醒后重查 `joined`(仍 false)继续等待,导致 `connect()` 阻塞直至 `connect_timeout` 超时。**缺口在 `connect()` 谓词,不在 `close()`(close 已通知)。**
 
 改动(`converse.rs` L269-273):
 
@@ -193,7 +193,7 @@ let joined = wait_flag(
 Ok(joined && !self.inner.stopping.load(Ordering::Acquire))
 ```
 
-说明:`stopping` 在 `connect()` 开头(L264)已 `store(false)` 复位,故谓词中的 `stopping` 只反映本次 connect 期间发生的 `close()`;`joined && !stopping` 正确处理「连接成功但随即被 close」的边角。
+说明:`stopping` 在 `connect()` 开头(L264)已 `store(false)` 复位,故谓词中的 `stopping` 只反映本次 connect 期间发生的 `close()`;`joined && !stopping` 正确处理「连接成功但随即被 close」的边界情形。
 
 **保持 std 的场景(明确)**
 
@@ -210,19 +210,19 @@ Ok(joined && !self.inner.stopping.load(Ordering::Acquire))
 
 **验证**
 
-- 新增行为测试:线程 A `connect()`(设短 `connect_timeout`)、线程 B 立即 `close()`,断言 `connect()` 在超时前返回 `Ok(false)`(而非挂满 timeout)。
+- 新增行为测试:线程 A `connect()`(设短 `connect_timeout`)、线程 B 立即 `close()`,断言 `connect()` 在超时前返回 `Ok(false)`(而非等待至超时)。
 
 ---
 
-### Phase 4 — 错误模型:消除 `Other(String)` 字符串魔法 + 文档对齐(P1)
+### Phase 4 — 错误模型:消除 `Other(String)` 笼统字符串变体 + 文档对齐(P1)
 
 **问题定位**
 
-- 定稿错误模型宣称 `MewError` = `Http/Io/Json/HttpStatus{status,body}`,但实际 ``src/utils/requests.rs`` 有 6 变体,多出 `Auth(String)`(L32)与 `Other(String)`(L34)。
+- 定稿错误模型记为 `MewError` = `Http/Io/Json/HttpStatus{status,body}`,但实际 ``src/utils/requests.rs`` 有 6 变体,多出 `Auth(String)`(L32)与 `Other(String)`(L34)。
 - `Other(String)` 实为**客户端侧参数校验/前置条件错误**:`forum.rs::ForumDataFetcher::fetch_post_replies_iter`「数据长度需小于 20」、`forum.rs::ForumActionHandler::create_post`/532「必须提供 board_id/workshop_id」、`whale.rs::ReportHandler::process_work_report`「不支持此决议类型」、`requests.rs::KittyCore::apply_to_request_builder`/783「该 HTTP 方法不支持/需要请求体」、`requests.rs::BaseKey::from_str`「无效 base URL 键」。
 - 另有两处 `Other` 是**服务端契约违背**(非参数错误):`requests.rs::PaginatedIter::size_hint`/1627「上传响应缺少必填字段」。
 - `Auth(String)` 是认证域错误,字符串承载消息,调用方只能 `matches!(MewError::Auth(_))`。
-- 二者是合法的新错误类别(非把传输错误压成 String,不违「保留底层变体」),但 `Other` 命名不达意,README L215/CONTRIBUTING L38 与实际 6 变体不符。
+- 二者是合法的新错误类别(非把传输错误折叠为 String,不违「保留底层变体」),但 `Other` 命名不达意,README L215/CONTRIBUTING L38 与实际 6 变体不符。
 
 **改动**
 
@@ -247,31 +247,31 @@ pub enum MewError {
 }
 ```
 
-2. 7 处校验类构造点 `MewError::Other(…)` -> `MewError::InvalidArgument(…)`:`forum.rs::ForumDataFetcher::fetch_post_replies_iter`/526/532、`whale.rs::ReportHandler::process_work_report`、`requests.rs::BaseKey::from_str`/773/783。
+2. 7 处校验类构造点 `MewError::Other(…)` 改为 `MewError::InvalidArgument(…)`:`forum.rs::ForumDataFetcher::fetch_post_replies_iter`/526/532、`whale.rs::ReportHandler::process_work_report`、`requests.rs::BaseKey::from_str`/773/783。
 
 3. `requests.rs::PaginatedIter::size_hint`/1627 是服务端契约违背,改走 `Json` 错误(`serde_json::Error::io(std::io::Error::new(std::io::ErrorKind::InvalidData, msg))` 包装,`serde_json::Error` 已 `#[from]` 进 `Json`),不再走 `InvalidArgument`。
 
-4. `Auth(String)` 保留为认证域类别,更新 doc 注释「凭据/身份域错误,区别于传输错误」;不细分成员(克制:消息已够信息量,细分破坏 `matches!` 惯用)。
+4. `Auth(String)` 保留为认证域类别,更新 doc 注释「凭据/身份域错误,区别于传输错误」;不细分成员(理由:消息已足够信息量,细分破坏 `matches!` 惯用)。
 
 5. 更新 README L215「错误模型分层」与 CONTRIBUTING L38,补 `Auth`/`InvalidArgument` 两类域错误。
 
 **影响面与风险**
 
-- `Other` -> `InvalidArgument` 是公开 API 命名变更(SemVer breaking),crate 处 0.1.0 可接受;grep `MewError::Other` 全仓 9 处一次性改名。
+- `Other` 改名为 `InvalidArgument` 属公开 API 命名变更(SemVer breaking),crate 处 0.1.0 可接受;grep `MewError::Other` 全仓 9 处一次性改名。
 
 **验证**
 
-- `grep -n "MewError::Other" src/` -> 0;`cargo check --all-targets` + `cargo test` 通过。
+- `grep -n "MewError::Other" src/` 命中 0 处;`cargo check --all-targets` + `cargo test` 通过。
 
 ---
 
 ### Phase 5 — pub(crate) 收紧:3 个 auth 类型(P1)
 
-**问题定位**:`GlobalKittyAuth`(`requests.rs::IdentityManager::switch_identity`)、`LocalKittyAuth`(L433)、`KittyIdentityManager`(L234)三个 `pub` 类型是「本可私有却公开」的泄漏。用户经 `CodeMaoClient::global()`/`new_with_global_auth()`/`new_independent()` 使用默认实现,或经 `new_with_auth(config, Arc<dyn KittyAuth>)` 注入自定义 `impl KittyAuth`,均无需具名这三者。
+**问题定位**:`GlobalKittyAuth`(`requests.rs::IdentityManager::switch_identity`)、`LocalKittyAuth`(L433)、`KittyIdentityManager`(L234)三个类型本可私有却标记为 `pub`,属可见性过宽。用户经 `CodeMaoClient::global()`/`new_with_global_auth()`/`new_independent()` 使用默认实现,或经 `new_with_auth(config, Arc<dyn KittyAuth>)` 注入自定义 `impl KittyAuth`,均无需具名这三者。
 
 **改动**
 
-- 三者 `pub` -> `pub(crate)`。`KittyAuth` trait 保持 pub(下游自定义认证提供者的扩展 seam);`KittyConfig` 保持 pub(`new_with_auth` 构造参数);`MewError`/`MewResult`/`Catsona`/`CodeMaoClient`/`PaginatedIter`/`HTTPStatus`/`BaseKey` 保持 pub(公开契约)。
+- 三者由 `pub` 收紧为 `pub(crate)`。`KittyAuth` trait 保持 pub(下游自定义认证提供者的扩展 seam);`KittyConfig` 保持 pub(`new_with_auth` 构造参数);`MewError`/`MewResult`/`Catsona`/`CodeMaoClient`/`PaginatedIter`/`HTTPStatus`/`BaseKey` 保持 pub(公开契约)。
 
 **保持 pub 的常量**:`DEFAULT_PAGE_SIZE`/`DEFAULT_LIMIT`/`DEFAULT_OFFSET`/`DEFAULT_PID`(L149-155)与 `FETCH_ALL`(L158)均为内部使用且文档承诺的公开常量,不动(`FETCH_ALL` 内部无消费点但 README L157 承诺为 `.with_limit(FETCH_ALL)` 的全量标记,保留)。
 
@@ -285,15 +285,15 @@ pub enum MewError {
 
 ---
 
-### Phase 6 — `fetch_*_gen` -> `fetch_*_iter`(P1)
+### Phase 6 — `fetch_*_gen` 改为 `fetch_*_iter`(P1)
 
 **问题定位**:57 个分页方法用 `_gen`(generator)后缀,非 Rust 惯用(惯用为无后缀或 `_iter`)。分布:user.rs 12、work.rs 11、community.rs 10、education.rs 10、forum.rs 6、shop.rs 4、whale.rs 4。另有 17 处内部调用点(retrieve.rs 8、registry.rs 8、pipeline.rs 1)与 README L83 示例。
 
 **改动**
 
-1. 57 个 `pub fn fetch_*_gen(` -> `pub fn fetch_*_iter(`(机械改名,`_gen` 后缀 -> `_iter`,方法体不动)。
-2. 17 处内部调用点 `.fetch_*_gen(` -> `.fetch_*_iter(`:`retrieve.rs::CommentQueryBuilder::build_raw_stream`/303/309/326/905/927/1003/1108、`registry.rs::ReportFetcher::new_with_client`/442/488/502/543/552/590/599、`pipeline.rs`。
-3. README L83 `fetch_all_works_gen` -> `fetch_all_works_iter`。
+1. 57 个 `pub fn fetch_*_gen(` 改为 `pub fn fetch_*_iter(`(机械改名,`_gen` 后缀改为 `_iter`,方法体不动)。
+2. 17 处内部调用点 `.fetch_*_gen(` 改为 `.fetch_*_iter(`:`retrieve.rs::CommentQueryBuilder::build_raw_stream`/303/309/326/905/927/1003/1108、`registry.rs::ReportFetcher::new_with_client`/442/488/502/543/552/590/599、`pipeline.rs`。
+3. README L83 `fetch_all_works_gen` 改为 `fetch_all_works_iter`。
 
 **影响面与风险**
 
@@ -301,7 +301,7 @@ pub enum MewError {
 
 **验证**
 
-- `grep -n "fn .*_gen(" src/` -> 0;`grep -n "_iter(" src/` 覆盖 57 定义 + 17 调用。
+- `grep -n "fn .*_gen(" src/` 命中 0 处;`grep -n "_iter(" src/` 覆盖 57 定义 + 17 调用。
 
 ---
 
@@ -316,8 +316,8 @@ pub enum MewError {
 
 **改动**
 
-- ``auth.rs::CloudAuthenticator::new_with_provider``/``registry.rs::ReportFetcher::FETCH_RETRY``/``compiler.rs`` -> `ok_or_else`/`expect("…")` 或重组为 `if let Some`,消除裸 unwrap。
-- 10 处 `write!(String).unwrap()` -> `let _ = write!(String, …);`。
+- ``auth.rs::CloudAuthenticator::new_with_provider``/``registry.rs::ReportFetcher::FETCH_RETRY``/``compiler.rs`` 改用 `ok_or_else`/`expect("…")`,或重组为 `if let Some`,以消除裸 unwrap。
+- 10 处 `write!(String).unwrap()` 改为 `let _ = write!(String, …);`。
 
 **影响面与风险**:低,纯风格;不改行为。与 doc 05 目标风格一致。
 
@@ -355,27 +355,27 @@ pub enum MewError {
 
 ## Verification
 
-前置:每阶段结束 `cargo check --all-targets` 0 error;最终 `cargo clippy --all-targets` 不新增警告;`cargo test` 全绿(库单测 + `compile_live` + `live_features` 无配置时自动跳过)。
+前置:每阶段结束 `cargo check --all-targets` 0 error;最终 `cargo clippy --all-targets` 不新增警告;`cargo test` 全部通过(库单测 + `compile_live` + `live_features` 无配置时自动跳过)。
 
 归零 grep 验证(最终态):
 
-1. **Phase 1**:`grep -n "LoginSession" src/` -> 0。
+1. **Phase 1**:`grep -n "LoginSession" src/` 命中 0 处。
 2. **Phase 2**:`use backend::core::compiler::{DecompileOptions, decompile_work, decompile_works}` 在 tests 仍编译;`pub use crate::core::unpacker::DecompilerError` 保留原路径。
 3. **Phase 3**:converse `connect()` 谓词含 `stopping`;行为测试断言并发 `close()` 时提前返回 `Ok(false)`。
-4. **Phase 4**:`grep -n "MewError::Other" src/` -> 0。
+4. **Phase 4**:`grep -n "MewError::Other" src/` 命中 0 处。
 5. **Phase 5**:`grep -rn "GlobalKittyAuth\|LocalKittyAuth\|KittyIdentityManager" src/ --include=*.rs` 仅命中 requests.rs 定义。
-6. **Phase 6**:`grep -n "fn .*_gen(" src/` -> 0;`grep -n "_iter(" src/` 覆盖 57 定义 + 17 调用。
+6. **Phase 6**:`grep -n "fn .*_gen(" src/` 命中 0 处;`grep -n "_iter(" src/` 覆盖 57 定义 + 17 调用。
 
 新行为检查:
 
 - Phase 1:真机 `cargo run` 走完登录(`builder.execute()` 路径)。
-- Phase 3:并发 `close()` 时 `connect()` 不再挂满 `connect_timeout`。
+- Phase 3:并发 `close()` 时 `connect()` 不再等待至 `connect_timeout` 超时。
 
 其余行为以 code review + 编译为准:Phase 1/2 为等价搬迁/精简,Phase 3 为活性修复,Phase 4/5/6 为改名 + 语义/可见性澄清,不改任何端点/请求体/落盘行为。
 
 ## Assumptions & contingencies
 
-- **0.1.0 破坏窗口**:Phase 1(删 `LoginSession`)、Phase 4(改 `Other`)、Phase 6(`_gen`->`_iter`)、#8(公开 API 改名)属 SemVer breaking。假设团队 1.0 前可接受一次性破坏;**若不可接受**,仅执行非破坏项(Phase 2/3/5、#7/#9/#10 试点),Phase 4/6/#8 降级为「文档标注 deprecated 别名,1.0 移除」。
+- **0.1.0 破坏窗口**:Phase 1(删 `LoginSession`)、Phase 4(改 `Other`)、Phase 6(`_gen` 改为 `_iter`)、#8(公开 API 改名)属 SemVer breaking。假设团队 1.0 前可接受一次性破坏;**若不可接受**,仅执行非破坏项(Phase 2/3/5、#7/#9/#10 试点),Phase 4/6/#8 降级为「文档标注 deprecated 别名,1.0 移除」。
 - **引擎文件名**:默认 `unpacker`(8 字母);若团队更倾向「解密」语义,等价改用 `decipher`(8 字母),不影响切分方案与 `pub use` 路径(仅换 `mod` 名)。
 - **converse `stopping` 复位语义**:`connect()` 开头 L264 已 `stopping.store(false)`,故谓词加 `stopping` 不误判历史 close;若实现时发现 `stopping` 在其它路径被提前置位,以 `cargo check` 定位复位点。
 - **`serde_json::Error::io` 构造**:Phase 4 的 `requests.rs::PaginatedIter::size_hint`/1627 用 `serde_json::Error::io(io::Error::new(ErrorKind::InvalidData, msg))`;若该构造器不可用,回退为新增专用变体 `InvalidResponse(String)`。实现时以 `cargo check` 为准。
@@ -386,15 +386,15 @@ pub enum MewError {
 ## Verification(实际执行结果)
 
 - `cargo check --all-targets` 0 error;`cargo clippy --all-targets` 0 warning。
-- `cargo test` 全绿:库单测 5+5 passed、`compile_live` 1 passed(NEMO 1 ignored)、`live_features` 3 passed(真机命中 codemao 服务)、doc-tests 0。
-- 归零验证:`LoginSession` -> 0;`MewError::Other` -> 0;`GlobalKittyAuth\|LocalKittyAuth\|KittyIdentityManager` 跨文件引用 -> 0;`fn .*_gen(` -> 0;`_gen(` 全仓(含 tests/README)-> 0。
+- `cargo test` 全部通过:库单测 5+5 passed、`compile_live` 1 passed(NEMO 1 ignored)、`live_features` 3 passed(真机命中 codemao 服务)、doc-tests 0。
+- 归零验证:`LoginSession` 命中 0 处;`MewError::Other` 命中 0 处;`GlobalKittyAuth\|LocalKittyAuth\|KittyIdentityManager` 跨文件引用命中 0 处;`fn .*_gen(` 命中 0 处;`_gen(` 全仓(含 tests/README)命中 0 处。
 - core 层 9 个文件全部 8 字母:`compiler`=8、`unpacker`=8(其余 8 个不变)。
-- `compiler.rs` 4117 -> 367 行,`unpacker.rs` 3759 行(引擎仍偏大,「只切两个文件」固有结果)。
+- `compiler.rs` 由 4117 行减为 367 行,`unpacker.rs` 3759 行(引擎仍偏大,「只切两个文件」固有结果)。
 - 剩余非锁 `.unwrap()` 49 处经逐类核查:cloudvar 31/converse 7/services 6 为多行 `.lock()\n.unwrap()`(审计安全集),converse `history.last()` 与 services `pending.remove()` 由紧邻检查保证,terminal 2/main 1 为 demo io、account 1 为 `#[cfg(test)]` 断言、socketio 1 为 `wait_timeout`——无新 panic 面。
 
 ## 范围偏差(实际执行中确定,记录在案)
 
-- **`MewError::Other` 实际 10 处而非 9 处**:计划列了 9 处,漏了 ``auth.rs::AuthProcessor::handle_password_v1``「验证码文件写入失败」。该处是文件写入 I/O 失败(非参数校验),改为 `MewError::Io(std::io::Error::other(...))` 而非 `InvalidArgument`,语义更准。
+- **`MewError::Other` 实际 10 处而非 9 处**:计划列了 9 处,遗漏了 ``auth.rs::AuthProcessor::handle_password_v1``「验证码文件写入失败」。该处是文件写入 I/O 失败(非参数校验),改为 `MewError::Io(std::io::Error::other(...))` 而非 `InvalidArgument`,语义更准。
 - **`response_missing_field` 落点**:计划放在模块级,实际 `first_token_entry`/`required_str_field` 位于 `impl FileUploader` 内,helper 改为该 impl 的关联函数并以 `Self::response_missing_field` 调用(纯函数,不依赖 self)。
 - **`search_*_gen` 一并改名**:Phase 6 计划只列 `fetch_*_gen`,实际 3 个 `search_posts_gen`/`search_kn_works_gen`/`search_published_kn_works_gen` 也是分页方法(返回 `PaginatedIter`),按同一约定改 `search_*_iter`(共 60 定义 + 18 调用)。
 - **Phase 3 未补 CONTRIBUTING 锁条款**:计划「记录性澄清」,本轮仅改代码,`CONTRIBUTING.md` 锁条款原文未动(维持「不引入额外锁依赖」,与结论一致,无必要改)。
