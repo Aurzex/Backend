@@ -234,8 +234,14 @@ const SAMPLES: &[Sample] = &[
         source_version: None,
     },
     Sample {
+        // ⚠️ 夹具目录纪律:样本所在目录**必须只读**(任何测试/工具都不得写入)。
+        // 本样本原先在 `download/convert/`,而那是 `PathConfig::convert_file_path()`
+        // = 转化域门面的**默认输出目录** —— 真机门
+        // `convert_live::translate_work_creates_draft_when_ignored` 会往那里写同名产物,
+        // 跑一次真机门就把本夹具覆盖(旧字节不可恢复)。现挪到 `download/fixtures/`
+        // (gitignored;两个 bench 只读,仓库里没有任何写点)。
         label: "kn-9.4MB",
-        path: "download/convert/Phigros 自制谱模拟器_195038626.kn.bcmkn",
+        path: "download/fixtures/Phigros 自制谱模拟器_195038626.kn.bcmkn",
         source_editor: EditorType::Neko,
         target: TargetEditor::Kitten4,
         slug: "kitten4",

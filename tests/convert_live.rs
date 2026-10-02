@@ -322,10 +322,13 @@ fn translate_work_creates_draft_when_ignored() {
     let Some(work_id) = first_work(&cfg, "KITTEN4") else {
         return;
     };
+    // 产物写本测试自己的临时目录(本文件头部约定「输出写系统临时目录,不污染仓库」):
+    // 不给 `output_dir` 时门面用默认输出目录 `download/convert/`,那里曾与 bench 夹具撞车。
+    let dir = work_dir("draft");
     let out = translate_work(
         WorkId::new(work_id),
         TargetEditor::KittenN,
-        TranslateOptions::new().upload(true),
+        TranslateOptions::new().output_dir(&dir).upload(true),
     )
     .expect("作品转化 + 建草稿");
     let created = out.work_id.expect("应返回新建的草稿作品 id");

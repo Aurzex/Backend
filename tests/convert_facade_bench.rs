@@ -38,8 +38,10 @@ const SAMPLES: &[Sample] = &[
         target: TargetEditor::KittenN,
     },
     Sample {
+        // 只读夹具目录(理由见 `tests/convert_bench.rs` 同名样本的注释):
+        // 原先在 `download/convert/`,会被真机门写入的同名产物覆盖。
         label: "kn-9.4MB",
-        path: "download/convert/Phigros 自制谱模拟器_195038626.kn.bcmkn",
+        path: "download/fixtures/Phigros 自制谱模拟器_195038626.kn.bcmkn",
         target: TargetEditor::Kitten4,
     },
     Sample {
