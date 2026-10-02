@@ -25,10 +25,7 @@
   - **删 13**(零调用点):`auth.rs:91`/`:116` 的 `as_str`+`from_str`、`forum.rs:72 TargetType::as_str`、`shared.rs:370 ValueExt::get_string_or`(声明+实现)、`pipeline.rs:187 clear_processed_records`、`registry.rs:78 description`、`:204 reason_id_field`、`:274 prompt`(连带其 `format!` 与孤立的 `parts` 绑定)、`retrieve.rs:52`/`:82` 的 `as_str`、`decompile/mod.rs:905 BlockContext::new`。**踩坑记录**:原清单把 `forum.rs:55` 记为死项,但那一行是 `DeleteItemType::as_str`,而**相邻**的 `ItemType::as_str` 有调用点(`forum.rs:418/436`)⇒ 误删被编译器当场拦下,已还原原文、改删 `DeleteItemType`/`TargetType` 两处。
   - **`#[cfg(test)]` 10**(从生产构建移出,比"留着再闭嘴"合仓库口径):`mapping::{SHADOW_XML_INDEX, shadow_xml, kitten_names_for, reverse_candidates}`、`xml::{remove_attr, parse, Parser::run}`、`model::count_types` ×2(依 `convert-backlog.md` §2 第 10 条)、`tables_gen::SHADOW_XML`(**生成物 + 生成器 `src/bin/gen_translate_tables.rs` 两处同步**;本机 `temp/tables` 不在库内 ⇒ 无法重跑生成器核对,属刻意手改,提交信息已写明);`mapping.rs` 的 import 也拆出 cfg(test) 一条。
   - **`#[allow(dead_code)]` + 理由 8**:`cloudvar.rs:190 RankingData.cvid`、`:211 CloudCommand::Variable.private`(代码里本就写明"刻意不读")、`converse.rs:101 UserInfo` 三字段、`retrieve.rs:1192 AdminReportStatistics.total_admins`、`:1202 FanByLikesStatistics` 五字段、`pipeline.rs:197 ActionRegistry.client`、`registry.rs:398 ReportFetcher.client`、`registry.rs:283 ReportTypeRegistry.default_actions`(注释明写"保留")。
-- **登记待决 3 项**(本轮按 `allow`/未改处理,各自成文):
-  1. `BlockContext.variable_map` 只写不读(每角色一份 UUID→变量名,由 `with_capacity` 注入);删它要连带 **9 处**(字段 + 两个签名参数 + 2 个调用点 + 每角色的 map 构造)⇒ 建议并入 **R4**(decompile 补离线测试)一并做;
-  2. `ActionRegistry.client` / `ReportFetcher.client` 是"**存而不用**"的客户端注入缝 —— 请求实际走**方法参数**上的 client,`new_with_client` 收下的那个被丢弃(不是错客户端 bug,但注入形状名不副实);
-  3. `pub struct AdminReportStatistics` / `FanByLikesStatistics` / `RankingData` / `UserInfo` 的字段**全是 `pub(crate)`** ⇒ 外部拿到这些类型也读不到任何字段(要么本意是内部类型、要么字段该放宽到 `pub`)—— 属对外形状,需拍板。
+- **三处对外形状待决已移入 `pending-decisions.md` D6**(2026-10-02;按分库纪律:决策不进待办库):`BlockContext.variable_map` 只写不读(已分派并入 **R4**)/ `ActionRegistry.client`·`ReportFetcher.client` 存而不用且 `new_with_client` 收下即丢(**待拍板**)/ 四个 `pub` 类型字段全是 `pub(crate)`(待定)。
 
 ## 2. 小改(机械、低风险,可批量做)
 

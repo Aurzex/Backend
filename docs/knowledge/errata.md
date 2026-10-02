@@ -362,3 +362,9 @@ W10 落地(`66c0b6b`)后,**"内联对象形态影子 ⇒ 拒收该作品"这条�
   - **为何错**:两边不是同一约定,是**同名不同物** —— `decompile` 侧 `XmlBlockWriter` 写 **Kitten2/3 blocksXML**(根块 `x=0, y=0.0 + 220·i`);`translate/model.rs` 的 `ROOT_LAYOUT_Y`/`ROOT_LAYOUT_STEP` 写 **Kitten4 `block_data_json` 的 `location`**(`[0, 80 + 220·i]`,且只在 KN 侧根块缺 `location` 时兜底)。格式、编辑器、方向三者皆不同 ⇒ 不存在可提的"共享常量"。且平台侧实测:编辑器亲手写出的编辑格式里(711 个含根块的实体)根块坐标是用户拖出来的任意值,编辑器自己排的网格是 **0 + 80·k**(起点 0 出现 257/711,起点 80 零次)⇒ 那对 220 与"平台约定"也不沾边。
   - **正确**:① 根块坐标属**非语义**(`location` 就在 `nemo_mapping` 语义 diff 的 allow-list 里),两处唯一的硬要求是"根块互不重叠";② 因此**不做共享常量、也不改数值** —— 改数值(`80 → 0`)零行为收益(实测该样本产物 SHA256 `0d3cf2e3…` → `15d7d050…`)却要重刷 `kn-3.7MB-kitten4` 基线键;③ 只把 `model.rs` 那句自称"一致"的注释改准(`4072846`),并把 0/80 的平台读数写在那里。
   - 出处:docs/rounds/31-convert-layout-consolidation-plan.md §3.6 N4(⚠️ 它点名的 `model.rs:706-708`、`editors.rs:625-626` 已随文件增长**行号漂移**,请按符号定位:`ROOT_LAYOUT_Y`/`ROOT_LAYOUT_STEP` 及其文档注释、`XmlBlockWriter::write_blocks`)、src/core/convert/translate/model.rs、src/core/convert/decompile/editors.rs;语料 `download/compile/k4edit/*.bcm4`、`download/compile/raw/*.bcm4`(取证脚本为只读的一次性解析,未入库)。
+
+## 第 40 轮 R2 的两组 `unused` 读数(2026-10-02)
+
+- **易误**:"`--bins` **946**(其中 `main.rs` **896**)/ `--tests` **551**"看起来像**现在能跑出来**的数。
+  - **正确**:这是 **`47a8c5e`(bin 改走库 crate、去掉第二个 crate root)之前**的旧读数(`src/main.rs` 当时还把 `mod api/core/utils` 再编一遍)—— 它被那次**重写**清掉,**不是**"清 `unused`"清的;现行 `--bins` = **0**,当前树**不可复现**该数字。R2 开工时(`47a8c5e` 之后)的同口径读数是 `--lib` 50 / `--bins` 50(bin 自身 0)/ `--tests` 98,终态三选择 **0/0/0**。
+  - **权威口径**:`docs/goals/infra-backlog.md` §1.1 的"两棵树"分层与 `docs/goals/README.md` 第 40 轮 R2 行;另 `docs/rounds/39` §0.3 W5 行 / §W5 落地段 / 回填段也在**就地标注**(标注日期 **2026-10-02** —— 该文按纪律本不改写,只因它仍是**在用中的计划文档**才接受这种临时处理,故在此登记)。
