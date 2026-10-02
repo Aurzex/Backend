@@ -26,7 +26,7 @@
 | 举报"每类型 100 条"上限 | 现默认移除上限;是否保留取决于产品语义 | `docs/rounds/04` Assumptions |
 | ~~大作品上传超时~~ | ✅ 已修(2026-09-26):上传请求用**请求级超时覆盖**(常量值与实测读数见 `../knowledge/nemo-runtime-and-upload.md` §6) | `docs/rounds/21` §8.4 N1 |
 | ~~单包上传大小上限(413)~~ | ✅ **已收尾(2026-09-26)**:上限 **20~24 MB**,已加 `shared::ensure_single_package_fits` 提前报错(逐档读数/速率/渠道见 `../knowledge/platform-and-protocol.md` §5bis)。要传更大作品需分片上传(暂无需求) | `pending-decisions.md` A5/D5 |
-| ~~下载侧大文件风险~~ | ✅ **已修(2026-10-02,`afca96c`)**:两层 —— 请求级超时 + 显式有界的大体通路(普通 API 响应仍守 10 MB 护栏);**未做**:body 流式读取的"无读超时"。常量值/逐路径枚举/一次性证明见 `docs/rounds/40-…` | `docs/rounds/40-download-timeout-and-body-cap.md` |
+| ~~下载侧大文件风险~~ | ✅ **已修(2026-10-02,`afca96c`)**:两层 —— 请求级超时 + 显式有界的大体通路(普通 API 响应仍守 10 MB 护栏);**未做**:body 流式读取的"无读超时"。常量值/逐路径枚举/一次性证明见 `docs/rounds/40-gates-cleanup-and-real-defects.md` §7 | `docs/rounds/40-gates-cleanup-and-real-defects.md` §7 |
 
 ## 4. P2 性能小项(择机清)
 

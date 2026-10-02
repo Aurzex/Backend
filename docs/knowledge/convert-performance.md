@@ -61,13 +61,13 @@
   两者都不通过时还要能**同时看到**:**`tests/convert_bench.rs` 的断言顺序曾把产物 SHA 的红遮住**
   (`#meta` 先 panic)—— 已修(`636127f`):比较抽成纯函数一次返回**全部**不一致项、两类**分开标注**、
   尾部单次 panic 报两类计数与逐项(样本名 → 键 → 基线 → 现在);2026-10-02 的一次误判就是这么来的。
-  见 `../rounds/40-bench-fixture-discipline.md` §3.1/§6。
+  见 `../rounds/40-gates-cleanup-and-real-defects.md` §8.3.1/§8.6。
 - **两种门要分清(一遍知就够)**:
   - **可复现门**:样本来自可控采集(`download/compile/**` 等)⇒ 产物 SHA 原则上可复现,变了就是行为变了;
   - **快照冻结门**:`kn-9.4MB` 的产物 SHA **是输入快照的函数** —— 夹具里的实体/积木 id 是**随机 UUID**
     (未开 `deterministic_ids`),而反向会把源实体 id 带进产物 ⇒ **重新采集(或再跑一次产它的真机门)
     就必变 SHA**,必须再走一次**有据刷新**(`BACKEND_BENCH_REFRESH=1` + 逐键解释)。
-    详见 `../rounds/40-bench-fixture-discipline.md` §3。
+    详见 `../rounds/40-gates-cleanup-and-real-defects.md` §8.3。
 - **无数据不做**:任何"看起来更快"的改动,要么有基准点,要么承认在噪声内(例:某次优化 `core` 259 vs 261 ms 属噪声,保留它的理由只是"构造上更少分配")。
 - 官方差分门只做**语义比较**(官方从不逐字节对齐)。
 

@@ -61,7 +61,7 @@
 - ⚠ 实测细节:`ureq` 的 `timeout_global` 只覆盖到**响应头**,不覆盖 body 流式读取 ⇒ 上述改动解决的是
   "**首字节/响应头 > 30 s**"与"**单个响应体 > 10 MB**"两类失败;真正慢的 body 传输属**另一类"无 body 读超时"问题**(未修)。
   ⇒ **常量值(`DOWNLOAD_TIMEOUT` / `MAX_DOWNLOAD_BODY_BYTES`)、逐路径枚举与一次性证明只在
-  `docs/rounds/40-…` 展开**(见 `docs/rounds/40-download-timeout-and-body-cap.md`)。
+  `docs/rounds/40-gates-cleanup-and-real-defects.md` §7 展开**。
 
 ## 依据
 
