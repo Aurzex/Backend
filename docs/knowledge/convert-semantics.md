@@ -90,6 +90,9 @@ NEMO → KN 是另一条前端(`hI.parseBlocksXML`),官方管线共 12 步(`main
    **整份工作区加载失败**。注册表 = 线上编辑器 `Object.keys(window.Blockly.Blocks)`(349 条,导出快照在
    `src/core/convert/translate/kitten4_vocab.rs`)⇒ 写出阶段必须落成编辑器认识的形态(不认识的就地改成「未收录积木」标记、
    影子清空)+ 逐类报告(rounds/34 §4nonies、36、38 §7bis)。
+   - **反编译侧的同一条契约(已被测试钉住,`c076918`)**:反编译遇到**未知影子类型**时一律**告警 + 回退成
+     `logic_empty` 占位**(JSON 与 XML 两种形态各钉一条测试,见 `src/core/convert/decompile/shadow.rs`),
+     **绝不把未知类型名原样写出去** —— 那不是"少一块",而是让 Kitten4 **整份工作区加载失败**(本条第 3 款)。
 4. **表(`REVERSE_TYPES`/`KITTEN_TO_KN`)是 Kitten3 口径** ⇒ 凡是要往 Kitten4 写名字的地方(块、影子,
    以及将来任何新写出点)**都要过词汇判据**:候选认识取候选;否则 KN 名认识就保留 KN 名;否则交给写出阶段落成标记并报告。
    反例(已修):KN `text` 的候选只有 `get_split_options`,而平台 40 件 Kitten4 语料里 `get_split_options`

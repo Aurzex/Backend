@@ -22,7 +22,6 @@
 | B2 | **KN → NEMO 方向**是否需要 | ① 做(要自建 NEMO 编码器并过 NEMO App 校验) ② 不做 | **②不做**:平台无对照实现,唯一用途是把产物塞回 NEMO(见 `pending-decisions` 之外的 route B),成本/风险远高于收益 |
 | B3 | **把建作品接进 convert 域**?(`translate_work` 自动 `create_kn_work`/`create_nemo_work`) | ① 保持"转换只出文件,建作品由调用方显式调" ② 加**显式开关**自动建作品 | **①**:**建作品等同发布行为**,必须由调用方显式授权;已有独立 API 够用 |
 | B4 | **`converse` 断线重连**:AI 对话断线后只能等 `Timeout`,需手动 `connect()`;云变量有指数退避 | ① 加指数退避重连(要先定会话/历史重建语义) ② 至少把可见行为写进文档 | **①**:与云变量行为对齐,但**必须先定 session 语义** |
-| B5 | **恢复 `[lints.rust] unused` 告警**(现在 `unused = "allow"`,死代码不会被报) | ① 恢复为 `warn` + 清理暴露项 ② 维持 `allow` | **①**:先跑一次看告警数量再决定是否在本轮清 |
 | B6 | **举报"每类型 100 条"上限**是否保留 | ① 移除上限(现默认) ② 保留 + 报告剩余 | 需**产品语义**拍板;技术侧无阻塞 |
 | B7 | **api 层 newtype ID 推广**(`UserId` 等,13 个 Manager 数百签名) | ① 先看 `WorkId` 试点收益再定 ② 直接推广 ③ 不做 | **①**:`WorkId` 已在反编译链试点 |
 | B8 | **`work.rs`(2533 行)再切 `WorkDataFetcher`** | ① 切(纯搬迁,re-export 保路径) ② 不做 | **①按需**:纯搬迁无风险,但目前没有痛点 |
@@ -32,7 +31,6 @@
 | # | 项 | 建议 | 说明 |
 | - | -- | ---- | ---- |
 | C1 | 49 处**非锁 `unwrap`** 硬化(`time_difference` / `active.as_mut` / 模板 `unwrap` / 10 处 `write!().unwrap()`) | 做 | 机械改动,零行为变化 |
-| C2 ✅ **已不成立(2026-10-01 核实)** | `DecompilerError` **包装 `MewError`**(原记"消除自带 `Io/Json/Http` 重复") | — | **该重复已不存在**:`DecompilerError` 已无 `Io`/`Json`/`Http` 变体,改成 `From<io::Error>`/`From<serde_json::Error>` 折进 `Mew`(见 `docs/rounds/39` §1.3 与 §W12d);剩的那一件事已办:**死变体 `UnsupportedType` 已删(2026-10-02,`fef30e7`)** —— 破坏性公共面变更,已授权(`rounds/39` §W5②) |
 | C3 | P2 死代码/收尾:`simple.rs` 的 `Arc::clone`、`nemo.rs::get_sha` 的 64 字节 clone、`cloudvar` flush 的 100 ms 轮询改 `Condvar` | 做 | 都是局部小改,**删除前需零调用点证据** |
 | C4 | `auth.rs::AccountStatus` 与 `requests.rs::Identity` 平行枚举合并 | 做(不紧急) | 易漂移,合并前先确认无外部依赖 |
 | C5 | `MessageHandler` / `ChatEventHandler` 两个 trait 改自由函数 | 做 | 可读性收尾,非必须 |
@@ -57,6 +55,10 @@
 | **D6** **对外形状三项**(第 40 轮 R2 报出,2026-10-02 登记) | ① `BlockContext.variable_map` **只写不读**(每角色一份 UUID→变量名,由 `with_capacity` 注入;**已于 `c076918` 删除**);② `ActionRegistry.client` / `ReportFetcher.client` **存而不用** —— 请求实际走**方法参数**上的 client,`new_with_client` 收下的那个被丢弃(不是错客户端 bug,但注入形状**名不副实**);③ 四个 `pub` 类型(`AdminReportStatistics` / `FanByLikesStatistics` / `RankingData` / `UserInfo`)的字段**曾是 `pub(crate)`** ⇒ 外部拿到类型也读不到字段(**已放宽**,`104964f`) | ① 并入 R4 一并做 / 留 / 删;② **删字段 + 删 `new_with_client`**(注入改由方法参数承担,干净切齐)/ 保留现状;③ 先查这些类型是否出现在 `backend::` 的**公开签名**里再定(对外数据 ⇒ 放宽字段;内部类型 ⇒ 把类型收 `pub(crate)`) | ① ✅ **已完成**(`c076918`,随 R4 落地:字段 + `with_capacity` 参数 + 调用点已删,产物字节不变)⇒ 不必在此再决策;② **待你拍板**(删字段/方法属**公共面**改动);③ ✅ **已完成**(`104964f`:**7 个类型 / 27 个字段**放宽到 `pub`,含 4 张嵌套表;同步撤掉 4 处 `#[allow(dead_code)]`,全仓现剩 **7 处**) | ②不定:使用者以为 `new_with_client` 生效,实际被丢;③不定:外部拿到类型但零可读字段(名不副实) |
 
 ## 已决(不用再问)
+
+> **2026-10-02 从 B/C 组移入**(已完成,保留结论与提交号以便回溯):
+> - ~~B5 **恢复 `[lints.rust] unused` 告警**~~ → **已完成**:旧为 `allow`;第 40 轮 R2 三阶段放开为 `warn`(`6414b97` 机械族 19 条 / `30216c5` `dead_code` 31 条 / `8da596d` 收口),**终态三选择(`--lib`/`--bins`/`--tests`)诊断 0/0/0**;口径与逐条处置见 `../goals/infra-backlog.md` §1.1,耐久约定见 `repo-conventions.md` §6。
+> - ~~C2 **`DecompilerError` 包装 `MewError`**(原记"消除自带 `Io/Json/Http` 重复")~~ → **已不成立并已办净**:该重复 **2026-10-01 核实已不存在**(`io::Error`/`serde_json::Error` 经 `From` 折进 `Mew`);剩下的零调用死变体 `UnsupportedType` **已于 `fef30e7` 删除**(破坏性公共面变更、已授权)。见 `docs/rounds/39` §1.3/§W5②/§W12d。
 
 - `MewError`/`MewResult` **品牌名保留**;`terminal.rs` 留在库内;`HttpClient` trait 不公开;类型级 WS 状态机(`CloudConnection<Connected>`)不做;god file 不拆、不加宏(`impl_api_manager!` 类)。
 - 转换域:**不对齐官方字节**(只语义 diff + 官方 `validateBcm` 硬门);`RawValue` 透传与单遍遍历**判不做**;反向(KN→Kitten4)实体级并行**判不做**。
