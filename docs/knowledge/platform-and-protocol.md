@@ -9,7 +9,7 @@
 - 云存储 WebSocket 的 `401` **几乎总是连接参数不匹配**,不是鉴权失败:
 
   | 作品编辑器 | `authorization_type` | `stag` |
-  | ---------- | -------------------- | ------ |
+  | ---- | ---- | ---- |
   | Kitten / Coco | 1 | 1 |
   | Nemo | 5 | 2 |
   | KittenN | 5 | 3 |
@@ -47,7 +47,7 @@
 ## 5. 作品/资源端点族(已核实)
 
 | 族 | 端点 | 备注 |
-| -- | ---- | ---- |
+| ---- | ---- | ---- |
 | 作品详情(编辑器类型判定) | work API 的 `ide_type` / `work_type`(KN=15) | 决定 WS 连接参数与云变量参数 |
 | NEMO 建作品 | `POST /nemo/v3/works/upload/<orientation>`(JSON;**作品 id 由它返回**) | **不需要资源字节**;但要有一个**合法 NEMO `.bcm` 的 `work_url`**。接口已实现(`create_nemo_work`)+ 上传渠道已就绪(`UploadChannel::Nemo` → 凭证项目名 `nemo_android_ios`),**尚未真机验证**(NEMO 侧删除端点未知,避免留草稿) |
 | KN 建作品 | `POST /neko/works` | 本库 `create_kn_work` 已真机验证(建出草稿并过官方校验器);**反编译可选上传**也在此端点验证通过(`DecompileOptions::upload_to_account`,自建自删) |
@@ -60,7 +60,7 @@
 ## 5bis. 上传:单包大小上限与速率(实测 2026-09-26)
 
 | 项 | 实测值 |
-| -- | ------ |
+| ---- | ---- |
 | 单包上限 | **20 MB 可传、24 MB 被 qiniu 拒 `413`** ⇒ 落在 **20~24 MB** 之间(5/9/10/12/14/16/20 MB 全部成功) |
 | 上传速率 | 约 **200 KB/s**(5 MB ≈ 24 s;20 MB ≈ 105 s) |
 | 渠道 | 社区前端 `UploadChannel::Codemao`(`save_path = "convert-source"`);NEMO 走 `nemo_android_ios` |
@@ -69,13 +69,13 @@
   记录每档的成功/失败与耗时。结论对 `translate_work(upload=true)` 与反编译"上传到账号"都成立。
 - ⇒ 产物超过上限时**提前报错**(`shared::ensure_single_package_fits`,别让用户白等几分钟再吃 413);
   上传请求必须单独放宽超时 —— **常量值与实测读数见 `nemo-runtime-and-upload.md` §6**(A1)。
-- 要传更大的作品只能做**分片上传**(见 `docs/goals/convert-backlog.md`);真实 KN 产物多在 3~9 MB。
+- 要传更大的作品只能做**分片上传**(见 `../goals/convert-backlog.md`);真实 KN 产物多在 3~9 MB。
 
 ## 依据
 
-- `docs/rounds/01-websocket-pitfalls.md`(25 条坑与调试方法论;其中路径/版本号已过时,勘误见 `errata.md`)。
-- `docs/rounds/10-ai-chat-cloudvar-test.md`(真机 AI 对话 + 云变量观察)。
-- 上传上限/速率:2026-09-26 逐档实测(同渠道),记录见 `docs/goals/pending-decisions.md` A5。
-- `docs/rounds/08/09-protocol-compliance*.md`(六协议;`LoginSession` 等表述已失效)。
-- `docs/rounds/24-nemo-upload-route-and-apis.md` §1/§2/§12(抓包与建作品证据)、`docs/rounds/13`(端点面)。
+- `../rounds/01-websocket-pitfalls.md`(25 条坑与调试方法论;其中路径/版本号已过时,勘误见 `errata.md`)。
+- `../rounds/10-ai-chat-cloudvar-test.md`(真机 AI 对话 + 云变量观察)。
+- 上传上限/速率:2026-09-26 逐档实测(同渠道),记录见 `../goals/pending-decisions.md` A5。
+- `../rounds/08/09-protocol-compliance*.md`(六协议;`LoginSession` 等表述已失效)。
+- `../rounds/24-nemo-upload-route-and-apis.md` §1/§2/§12(抓包与建作品证据)、`../rounds/13`(端点面)。
 - 代码锚点:`src/utils/socketio.rs`(parse_frame / set_stream_read_timeout / Notify / wait_flag)、`src/core/cloudvar.rs`、`src/core/converse.rs`、`src/api/work.rs`。

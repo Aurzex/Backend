@@ -1,12 +1,12 @@
 # 作品文件格式(权威事实)
 
 > 知识库条目:三种作品文件**实际长什么样**。全部来自真实样例与官方前端 bundle,出处见文末「依据」。
-> 方案与实施过程见 `docs/rounds/20-kitten-kn-work-conversion-plan.md`。
+> 方案与实施过程见 `../rounds/20-kitten-kn-work-conversion-plan.md`。
 
 ## 1. 三种扩展名与顶层结构
 
 | 扩展名   | 编辑器     | 积木存放位置                                                                                                        | 顶层关键字段                                                                                                                                                    |
-| -------- | ---------- | ------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ---- | ---- | ---- | ---- |
 | `.bcm`   | Kitten 2/3 | `theatre.{actors,scenes}.<uuid>.blocksXML`(**Blockly XML 字符串**)                                                  | `width`/`height`、`theatre.{scenes,actors,styles,scenes_order,current_scene,current_entity}`、`variables`、`variable_order`、`audio`、`toolbox`、`work_type:"KITTEN"`、`version:16` |
 | `.bcm4`  | Kitten 4   | `theatre.{actors,scenes}.<uuid>.block_data_json`(**JSON 积木图**)                                                    | `size:{width,height}`、`theatre.{scenes,actors,styles,groups,timer,videos,scenes_order}`、`variables`、`variable_order`、`cloud_variables`、`broadcasts`、`audio`、`midimusic`、`matrix`、`models`、`toolbox`、`version:25` |
 | `.bcmkn` | KN(Neko)   | `actors.actorsDict.<uuid>.nekoBlockJsonList`、`scenes.scenesDict.<uuid>.nekoBlockJsonList`、`procedures.proceduresDict.<uuid>.nekoBlockJsonList` | `stageSize:{width,height}`、`styles.stylesDict`、`variables.variablesDict`、`broadcasts.broadcastsDict`、`audios.audiosDict`、`scenes{scenesDict,currentSceneId,sortList}`、`actors.actorsDict`、`procedures.proceduresDict`、`projectName`、`version`(**字符串**,真机 0.13.0 / 0.27.1)、`toolType:"KN"`、`textToBlock`、`hidden_toolbox`、`previewUrl`、`resourceZip`、`guideUrl`、`aiImageUrls` |
@@ -67,7 +67,7 @@
 ## 5. 加密与传输
 
 | 形态 | 是否加密 | 依据 |
-| ---- | -------- | ---- |
+| ---- | ---- | ---- |
 | `.bcmkn` 经 **NEKO 播放器详情接口**取回(`source_urls[0]`) | **是**:`reversed(base64-STANDARD)` → `IV(12) ‖ AES-256-GCM(明文 JSON)`;key = `SHA256(salt)`,`salt = 0x00..0x1E` | 本库 `unpacker.rs` 已实现并真机验证 |
 | `.bcmkn` 落盘产物 / CDN 模板 / 编辑器本地导入 | **否**,明文 JSON | `kn-default-v-0.13.1.bcmkn`(3.7 KB)实测明文 |
 | `.bcm/.bcm4`(播放器 `player/load`、编辑版文件) | **否**,明文 JSON | 本库无 Kitten 侧加密代码 |
@@ -86,6 +86,6 @@
 
 ## 依据
 
-- `docs/rounds/20-kitten-kn-work-conversion-plan.md` §2(结构表、`block_data_json`、节点模型、加密矩阵)、§8(陷阱)、§11(实测)。
+- `../rounds/20-kitten-kn-work-conversion-plan.md` §2(结构表、`block_data_json`、节点模型、加密矩阵)、§8(陷阱)、§11(实测)。
 - 样例:`download/compile/raw/春风得意-编辑版.bcm`(Kitten3)、`几何对战-联机.bcm4`(Kitten4)、`download/compile/HEX Editor_317683843.bcmkn`、`https://creation.codemao.cn/neko/bcm/kn-default-v-0.13.1.bcmkn`。
 - 代码锚点:`src/core/convert/decompile/mod.rs`(编译版引用校验)、`src/core/convert/shared.rs`(bcmkn 解密)、`src/core/convert/translate/model.rs`(节点模型)。

@@ -17,7 +17,7 @@
 **提交清单**(按时间顺序):
 
 | 提交 | 一句话 |
-| ---- | ------ |
+| ---- | ---- |
 | `f68c2e6` | R1:删 artifact 上传步 + 新增 `offline-gate` job |
 | `6414b97` / `30216c5` / `8da596d` | R2:`unused` 分三阶段放开(机械族 → `dead_code` → 收口) |
 | `47a8c5e` | `src/main.rs` 改走库 crate(去掉第二个 crate root;R2「两棵树」的分界点) |
@@ -146,7 +146,7 @@
 ### 7.5 下载路径枚举(改造前后)
 
 | # | 路径(文件:函数) | 下载内容 | 改前 | 改后 |
-| - | ---------------- | -------- | ---- | ---- |
+| ---- | ---- | ---- | ---- | ---- |
 | — | `core/convert/shared.rs` `CodeMaoHttpClient::{get_json,get_binary,get_text}` | **全部下载的单一咽喉** | 全局 30 s + 10 MB | `DOWNLOAD_TIMEOUT` 900 s + 256 MiB |
 | 1 | `decompile/editors.rs` `KittenFetcher::fetch` | Kitten `player/load` 元信息 | 30 s | 900 s |
 | 2 | 同上(作品文档) | **Kitten 编译版作品文档(MB 级)** | 30 s + 10 MB | 900 s + 256 MiB |
@@ -222,7 +222,7 @@
 **确实是红的**:
 
 | 基线键 | 旧(刷新前) | 新(刷新后) |
-| --- | --- | --- |
+| ---- | ---- | ---- |
 | `kn-9.4MB-kitten4`(产物 SHA256) | `dac08917…` | `0e873b2b…` |
 | `#meta.source_bytes` | 9357732 | 9357804 |
 | `#meta.source_sha256` | `b4af1e83…` | `c5881f55…` |
@@ -291,7 +291,7 @@
 6 样本产物 SHA256(与基线逐项相同;其中 5 个自始未变):
 
 | 样本 | SHA256 |
-| --- | --- |
+| ---- | ---- |
 | `kitten4-10.8MB-kn` | `bafeb50c…` |
 | `kitten4-0.3MB-kn` | `d653a8a5…` |
 | `kn-9.4MB-kitten4` | `0e873b2b…` |

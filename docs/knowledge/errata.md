@@ -1,9 +1,11 @@
 # 历史文档勘误(errata)
 
-> **知识库条目。** 这里列出历史轮次(`docs/rounds/`)里**已经过时或写错**的表述及其正确值。
+> **知识库条目。** 这里列出**文档与现实不符**的表述及其正确值:历史轮次(`../rounds/`)里已过时/写错的部分,
+> 外加**非轮次条目**(仓库配置、文档读数与体例 —— 见篇末「非轮次条目」节)。
+> 每节的标题是**被勘误的源文件**(路径相对仓库的 `docs/`),按文件排;篇末几节按"多轮结论变更 / 非轮次"分组。
 >
-> 为什么不在原文档上直接改:`docs/rounds/20` §6.1 定为**历史保真** —— 轮次记录不改写,只在本篇集中勘误。
-> 每条的「正确」列都已在**写下时的**当前源码上核过(总表初版 2026-09-25;**此后各节按各自标注日期增补**,最新 2026-10-02)。
+> 为什么不在原文档上直接改:`../rounds/20` §6.1 定为**历史保真** —— 轮次记录不改写,只在本篇集中勘误。
+> 每条的「正确」列都已在**写下时的**当前源码上核过(总表初版 2026-09-25;**此后各节按各自标注日期增补,最晚一节为 2026-10-02**;续修时请连同日期一起更新)。
 >
 > 常见失效类型:① 文件被重命名/搬迁(`utils/acquire.rs` → `utils/requests.rs`、`core/compiler.rs` → `core/convert/**`、
 > `utils/data.rs` → `utils/filedata.rs`);② 类型改名(`HTTPStatus` → `StatusCode`、`CloudError`/`ChatError` → `SocketError`);③ 行号漂移;
@@ -191,7 +193,7 @@
   - **正确**:应为「6 个 core 类型」。
   - 出处:15-core-engine-client-injection-plan.md §Context 末段
 - **错**:`ViolationChecker`(541 行)…5. 自动举报流程(842 行)`KittyFactory::global_client().switch_identity(Catsona::Judge)` → `self.client.switch_identity(Catsona::Judge)`
-  - **为何错**:该改动在本轮实际被撤销:范围偏差明确记载 pipeline 的 switch_identity(Judge)(新行号 849)保持全局「不能部分注入」;计划写的行号 842 与文档后半段的 849 也不一致。
+  - **为何错**:该改动在该轮(`../rounds/16`)实际被撤销:范围偏差明确记载 pipeline 的 switch_identity(Judge)(新行号 849)保持全局「不能部分注入」;计划写的行号 842 与文档后半段的 849 也不一致。
   - **正确**:该处第七轮保持全局;`self.client.switch_identity(Catsona::Judge)` 实际由第八轮(16-...md Phase 1 step 4,行 849)完成。
   - 出处:15 §Approach Phase 3.5 / §范围偏差 / 16-...md §Approach Phase 1
 - **错**:`retrieve.rs:627` `let client = CodeMaoClient::global();`(`DataQuery::count_comments`)
@@ -288,11 +290,11 @@ pub struct LocalClientProvider {
 
 ## 第三十一轮的文件合并(2026-09-26)
 
-`src/core/convert/` 由 **27 个文件并为 13 个**(纯搬迁 + 少量仪式层删除,见 `docs/rounds/31`)。
+`src/core/convert/` 由 **27 个文件并为 13 个**(纯搬迁 + 少量仪式层删除,见 `../rounds/31`)。
 **读历史轮次时按此对照旧路径**:
 
 | 旧路径 | 现在 |
-| ------ | ---- |
+| ---- | ---- |
 | `shared/{mod,error,model,config,infra,upload}.rs` | `shared.rs` |
 | `decompile/blocks.rs` | `decompile/mod.rs` |
 | `decompile/editors/{mod,kitten,nemo,simple}.rs` | `decompile/editors.rs` |
@@ -302,7 +304,7 @@ pub struct LocalClientProvider {
 | `translate/tables_gen_nemo.rs` | `translate/nemo_mapping.rs` |
 | `core/compiler.rs`、`utils/acquire.rs`、`utils/data.rs`(更早的迁移) | `core/convert/**`、`utils/requests.rs`、`utils/filedata.rs` |
 
-同一轮还删掉/收敛了这些**名字**,早期文档若提到,以 `docs/rounds/31` §3 为准:
+同一轮还删掉/收敛了这些**名字**,早期文档若提到,以 `../rounds/31` §3 为准:
 
 - `WorkProcessorRegistry` + `FetcherFactory`/`DecompilerFactory`(换成 `match EditorType` 静态分派);
 - `DecompilerContextBuilder`(改为直接构造 `DecompilerContext`);
@@ -316,60 +318,64 @@ pub struct LocalClientProvider {
 正确值与证据都在新轮次里(读老轮次时以本节为准):
 
 | 出处 | 已过时的表述 | 正确值 / 证据 |
-| ---- | ------------ | ------------- |
-| rounds/20–32(多处)、`knowledge/convert-semantics.md` §5 旧版 | "编辑器不认识的类型**保留 KN 原名** + 告警,**不丢积木**" | **不成立**:保留不认识的名字会让编辑器**整份工作区加载失败** ⇒ 现行是**块就地改成「未收录积木」标记(`incompatible_block`/`incompatible_output_block`)+ 清空影子** + 逐类报告(`rounds/38` §7bis 起;**`rounds/34–36` 当时是"整块剔除块",那会让积木真的消失**)。见 rounds/34 §4nonies、rounds/36、rounds/38 |
-| rounds/28 §4、rounds/33 §3bis | "定义体侧差异归零,预算收紧到 **0/0**" | **0/0 只在那套口径下成立**;剔块会连带整棵子树 ⇒ 现行是**预算门(只许变小)+ 常显读数**,门的定义与数值只在 `knowledge/convert-semantics.md` §6 展开。见 rounds/36 |
+| ---- | ---- | ---- |
+| rounds/20–32(多处)、`convert-semantics.md` §5 旧版 | "编辑器不认识的类型**保留 KN 原名** + 告警,**不丢积木**" | **不成立**:保留不认识的名字会让编辑器**整份工作区加载失败** ⇒ 现行是**块就地改成「未收录积木」标记(`incompatible_block`/`incompatible_output_block`)+ 清空影子** + 逐类报告(`../rounds/38` §7bis 起;**`../rounds/34–36` 当时是"整块剔除块",那会让积木真的消失**)。见 rounds/34 §4nonies、rounds/36、rounds/38 |
+| rounds/28 §4、rounds/33 §3bis | "定义体侧差异归零,预算收紧到 **0/0**" | **0/0 只在那套口径下成立**;剔块会连带整棵子树 ⇒ 现行是**预算门(只许变小)+ 常显读数**,门的定义与数值只在 `convert-semantics.md` §6 展开。见 rounds/36 |
 | rounds/34 §4nonies 末段 | "**仍未解决**:产品在编辑器里作品名与变量能进,但 3 个角色一个都不出现(⇒ 画布 0 块)" | **已解决**(rounds/35):根因是缺 `theatre.groups` + 场景 `group_order`;KN 侧没有分组概念 ⇒ 反向必须合成"一角色一组" |
 | rounds/34 §4nonies 的挑名描述 | "歧义挑选:候选里编辑器认识的优先 → KN 名本身认识就保留 → 再退非云优先" | 这段只描述**多候选(歧义)**分支;**单候选分支当时完全没做判据** ⇒ KN `text` 被写成 Kitten3 口径的 `get_split_options` 而被剔掉。现块与影子**共用**同一判据。见 rounds/36 |
 | `src/core/convert/translate/assembly.rs` 旧注释 / rounds/31 审计 | "反向没有 groups 概念,写回 `scene.actors` 即可" | **不完整**:`scene.actors` 之外还必须有 `theatre.groups` 与 `group_order`(编辑器靠它们列角色)。见 rounds/35 |
-| 一般印象:"积木数对得上就能打开" | — | **错**:见 `knowledge/convert-semantics.md` §5bis 的**五条**隐性契约(骨架键 / groups / 词汇表 / 表是 Kitten3 口径 / 不认识的块改「未收录积木」标记;第 5 条为 rounds/38 增补) |
+| 一般印象:"积木数对得上就能打开" | — | **错**:见 `convert-semantics.md` §5bis 的**五条**隐性契约(骨架键 / groups / 词汇表 / 表是 Kitten3 口径 / 不认识的块改「未收录积木」标记;第 5 条为 rounds/38 增补) |
 
 ## 第三十八轮的结论变更(2026-10-01)
 
 | 出处 | 已过时的表述 | 正确值 / 证据 |
-| ---- | ------------ | ------------- |
-| `knowledge/convert-semantics.md` §5 旧版、rounds/20–37 | "占位积木(`LC` 降级)是**已文档化的不可逆项**,反向"至少应把占位块保留在 Kitten4 侧"" | **保留不住**:`bcm_translator_text_*` 不在编辑器注册表里,反向留下占位名会被写出阶段**整块剔除**(= 积木真丢)。**187 个占位映射里 43 个没有 `RC` 标题 ⇒ 必然走到这里**。现改为顶替成「未收录积木」`incompatible_block`/`incompatible_output_block`。见 `rounds/38` |
-| rounds/37 §13.4/§13.8 | "`bcm_translator_text_return_value_block: 4 -> 0` … 往返差异全部落在已文档化族里" | **那一条是真缺陷**,不是归一化:4 个 id 在 KN 中间态都在、产物里一个不剩(id 口径)。§13.8 的 id 证明**只覆盖正向腿**。见 `rounds/38` §3.2 |
-| rounds/34 §4quinquies | "槽默认影子不回写 ⇒ 表示差异、引用零丢失(基于代理指标)" | **结论不变**,但**证据换成 id 口径**重证:丢的 278 个 `lists_get` **逐个都是 KN 侧 `is_shadow` 的 `pure_list_get`**(折回父块 `fields`)。见 `rounds/38` §3.1 |
+| ---- | ---- | ---- |
+| `convert-semantics.md` §5 旧版、rounds/20–37 | "占位积木(`LC` 降级)是**已文档化的不可逆项**,反向"至少应把占位块保留在 Kitten4 侧"" | **保留不住**:`bcm_translator_text_*` 不在编辑器注册表里,反向留下占位名会被写出阶段**整块剔除**(= 积木真丢)。**187 个占位映射里 43 个没有 `RC` 标题 ⇒ 必然走到这里**。现改为顶替成「未收录积木」`incompatible_block`/`incompatible_output_block`。见 `../rounds/38` |
+| rounds/37 §13.4/§13.8 | "`bcm_translator_text_return_value_block: 4 -> 0` … 往返差异全部落在已文档化族里" | **那一条是真缺陷**,不是归一化:4 个 id 在 KN 中间态都在、产物里一个不剩(id 口径)。§13.8 的 id 证明**只覆盖正向腿**。见 `../rounds/38` §3.2 |
+| rounds/34 §4quinquies | "槽默认影子不回写 ⇒ 表示差异、引用零丢失(基于代理指标)" | **结论不变**,但**证据换成 id 口径**重证:丢的 278 个 `lists_get` **逐个都是 KN 侧 `is_shadow` 的 `pure_list_get`**(折回父块 `fields`)。见 `../rounds/38` §3.1 |
 | 一般印象:"积木数对了就没丢" | — | **判"丢没丢"只用 id 口径**(id 是否出现在产物里);且要分清**节点 id / XML 里的 id / 只是 `connections` 键上出现** —— 混了会同时造出"幻影丢失"和"漏报" |
-| `knowledge/convert-semantics.md` §5/§5bis、rounds/34–37 多处 | "编辑器不认识的类型**被剔除/清空**(宁可少几块)" | **只对了一半**:块现在**不再剔除**,而是**就地改成「未收录积木」标记**(`incompatible_block` / `incompatible_output_block`)—— 剔除会让积木真的消失(id 口径)。**影子**仍是清空 |
+| `convert-semantics.md` §5/§5bis、rounds/34–37 多处 | "编辑器不认识的类型**被剔除/清空**(宁可少几块)" | **只对了一半**:块现在**不再剔除**,而是**就地改成「未收录积木」标记**(`incompatible_block` / `incompatible_output_block`)—— 剔除会让积木真的消失(id 口径)。**影子**仍是清空 |
 | `assembly.rs` 旧实现的 `if dropped.is_empty() { return }`(rounds/37 P3 的"省一次遍历") | 被当成纯性能优化 | **不是**:它是**按实体**提前返回,顺带**跳过影子扫描** ⇒ "没有任何未知块的实体"里的未知影子**从来没被清过**(直接留在产物里,正是会让编辑器整份加载失败的东西)。rounds/38 去掉早退后,某作品影子清空量 52 → **62**(这 10 条是补上的漏清,不是回归) |
-| rounds/38 §8 | "**反向侧没有 id 台账**(正向那条已建);反向"认不出"的量由 `MARKER_BUDGET` 守" | **已不成立**(2026-10-01):反向台账 **`LOST_ID_BUDGET_REVERSE`** 已建(`d10d0cb` 首版、`ef37978` 把口径收窄到真正的积木节点;逐件打印 `[id台账·反向]`,只许变小),与正向 `LOST_ID_BUDGET` 同口径。原因与基线读数见 `rounds/39` §W3d/§0.3 与 `goals/convert-backlog.md` §6.3 G3 |
+| rounds/38 §8 | "**反向侧没有 id 台账**(正向那条已建);反向"认不出"的量由 `MARKER_BUDGET` 守" | **已不成立**(2026-10-01):反向台账 **`LOST_ID_BUDGET_REVERSE`** 已建(`d10d0cb` 首版、`ef37978` 把口径收窄到真正的积木节点;逐件打印 `[id台账·反向]`,只许变小),与正向 `LOST_ID_BUDGET` 同口径。原因与基线读数见 `../rounds/39` §W3d/§0.3 与 `../goals/convert-backlog.md` §6.3 G3 |
 
 ## 第三十九轮实施期间的结论变更(2026-10-01 ~ 10-02)
 
 W10 落地(`66c0b6b`)后,**"内联对象形态影子 ⇒ 拒收该作品"这条老结论全部失效**;读 33/34 轮时以本节为准:
 
 | 出处 | 已过时的表述 | 正确值 / 证据 |
-| ---- | ------------ | ------------- |
-| rounds/34 §1、§2 | `A28社区-开幕_174408420.bcm4` 报 `invalid type: map, expected a string` ⇒「**前置拦截**,报"内联影子是对象形态…暂不支持该作品"」,并把"支持对象形态影子"**列入待办**;§2 记"实测 **21/22** 件正向吃得下(Kitten3 一件、对象影子一件按形态跳过)" | **待办已做**(W10,`66c0b6b`):正向入口把对象影子就地改写成平台同款影子 XML,**不再拒收**。该件转换成功(源积木 6029 / 告警 19 / `validateBcm` = VALID),该语料 **`[跳过]` 归零**;Kitten2/3(`.bcm` + `blocksXML`)仍按形态守卫跳过。见 `rounds/39` §W10 落地段、`knowledge/convert-semantics.md` §3 |
+| ---- | ---- | ---- |
+| rounds/34 §1、§2 | `A28社区-开幕_174408420.bcm4` 报 `invalid type: map, expected a string` ⇒「**前置拦截**,报"内联影子是对象形态…暂不支持该作品"」,并把"支持对象形态影子"**列入待做**;§2 记"实测 **21/22** 件正向吃得下(Kitten3 一件、对象影子一件按形态跳过)" | **待做已做**(W10,`66c0b6b`):正向入口把对象影子就地改写成平台同款影子 XML,**不再拒收**。该件转换成功(源积木 6029 / 告警 19 / `validateBcm` = VALID),该语料 **`[跳过]` 归零**;Kitten2/3(`.bcm` + `blocksXML`)仍按形态守卫跳过。见 `../rounds/39` §W10 落地段、`convert-semantics.md` §3 |
 | rounds/33 §1 表 ① | 上传格式(`download/compile/*.bcm4`)⇒ 正向「**报错** `invalid type: map, expected a string`」 | **不再成立**:那条报错的根因正是对象形态影子,已由 `66c0b6b` 容错 |
-| rounds/17(错误收敛一节第 2 条) | 「保留 `Crypto`/`Decompile`/**`UnsupportedType`**/`InvalidResponse`/…(反编译专属变体)」 | **`UnsupportedType` 已不存在**:它是全仓零调用点的死变体,已于 `fef30e7`(2026-10-02,W5②)删除(破坏性公共面变更、已授权);其它变体未动。见 `rounds/39` §W5②、`knowledge/repo-conventions.md` §4 |
-
-## CI 产物口径与 `Cargo.toml` 不符(2026-10-02 实测)
-
-> 这条不是某篇轮次正文写错,而是**仓库里两处配置互相矛盾**,根因出处恰在 `docs/rounds/01`,故记在此。
-
-- **错**:`.github/workflows/CI.yml:28/33/39/44/49` 的 `libname` 列(`libbackend.so` ×2 / `backend.dll` / `libbackend.dylib` ×2)+ 上传步 `:63-67`(`path: target/<target>/release/<libname>`)—— 蕴含"release 会产出动态库"。
-  - **为何错**:`Cargo.toml:8` 是 `crate-type = ["rlib"]`,**只产 rlib,不产 `.so`/`.dll`/`.dylib`** ⇒ 上传步按该路径**找不到文件**;`actions/upload-artifact` 的 `if-no-files-found` **默认 `warn`** ⇒ **job 静默绿,产物其实从未上传**。
-  - **根因线索**:`docs/rounds/01-websocket-pitfalls.md:791`(为让库可被测试引用,把 `"rlib"` **加进** `crate-type`)与 `:809`(「`crate-type = ["cdylib"]` 的库不参与测试…加了 `"rlib"` 后测试才运行」)。此后 `cdylib` 从 `crate-type` 里消失,而 CI 的 `libname` 列表没跟上。
-  - **正确(已决并落地,2026-10-02,`f68c2e6`)**:取方案 ② 的删法 —— **删掉 artifact 上传步**及矩阵里的 `artifact:`/`libname:` 键。理由:本仓 `[lib] crate-type=["rlib"]` **只产 rlib**、`src/main.rs` 又是需账号的**交互式管理控制台**、仓内无消费方 ⇒ **没有可分发产物**,不恢复 `cdylib`。五目标 `cargo build --release` 矩阵保留;另新增 `offline-gate` job(fmt --check + clippy -D warnings + 逐目标点名的离线测试)。CI 口径(含**刻意不跑**真机门与吃 `download/` 的语料扫描器)见 `knowledge/repo-conventions.md` §6。
-  - 出处:`.github/workflows/CI.yml`、`Cargo.toml:8`、`docs/rounds/01` 附录「空的 lib」两节;登记在 `docs/goals/infra-backlog.md` §1。
+| rounds/17(错误收敛一节第 2 条) | 「保留 `Crypto`/`Decompile`/**`UnsupportedType`**/`InvalidResponse`/…(反编译专属变体)」 | **`UnsupportedType` 已不存在**:它是全仓零调用点的死变体,已于 `fef30e7`(2026-10-02,W5②)删除(破坏性公共面变更、已授权);其它变体未动。见 `../rounds/39` §W5②、`repo-conventions.md` §4 |
 
 ## 第三十一轮 §3.6 N4 的"同一约定"结论(2026-10-02 核实)
 
-- **错**:`docs/rounds/31-convert-layout-consolidation-plan.md` §3.6 N4 引 `translate/model.rs` 的注释「`XmlBlockWriter` 的约定:首根 80、每根 +220」,据此把两边当作**同一约定**,只把起点差异记作"疑似漂移",并提出"若确认是同一约定,则把 220/80 提到一处"。
+- **错**:`../rounds/31-convert-layout-consolidation-plan.md` §3.6 N4 引 `translate/model.rs` 的注释「`XmlBlockWriter` 的约定:首根 80、每根 +220」,据此把两边当作**同一约定**,只把起点差异记作"疑似漂移",并提出"若确认是同一约定,则把 220/80 提到一处"。
   - **为何错**:两边是**同名不同物**(`decompile` 侧写 Kitten2/3 blocksXML 的 `y=0.0 + 220·i`;`translate/model.rs` 写 Kitten4 `block_data_json` 的 `location`,且只在缺 `location` 时兜底)⇒ 不存在可提的"共享常量";平台侧读数也不支持"起点 80 是平台约定"。
   - **正确**:根块坐标**非语义**(`location` 就在语义 diff 的 allow-list 里),两处唯一的硬要求是"根块互不重叠"⇒ **不做共享常量、也不改数值**;只把 `model.rs` 那句自称"一致"的注释改准(`4072846`)。**平台取数与 A/B 实测的具体数字只在 `../goals/convert-backlog.md` §2 第 8 条展开。**
   - 出处:docs/rounds/31-convert-layout-consolidation-plan.md §3.6 N4(⚠️ 它点名的 `model.rs:706-708`、`editors.rs:625-626` 已随文件增长**行号漂移**,请按符号定位:`ROOT_LAYOUT_Y`/`ROOT_LAYOUT_STEP` 及其文档注释、`XmlBlockWriter::write_blocks`)。
 
-## 第 40 轮 R2 的 `unused` 读数(2026-10-02)
+## 非轮次条目(仓库配置 · 文档读数与体例)
+
+> 本节收的是**不是某篇轮次正文写错**、而是**仓库配置 / 文档读数 / 文档体例与现实不符**的条目。
+
+### CI 产物口径与 `Cargo.toml` 不符(2026-10-02 实测)
+
+> 这条不是某篇轮次正文写错,而是**仓库里两处配置互相矛盾**,根因出处恰在 `../rounds/01`,故记在此。
+
+- **错**:`.github/workflows/CI.yml:28/33/39/44/49` 的 `libname` 列(`libbackend.so` ×2 / `backend.dll` / `libbackend.dylib` ×2)+ 上传步 `:63-67`(`path: target/<target>/release/<libname>`)—— 蕴含"release 会产出动态库"。
+  - **为何错**:`Cargo.toml:8` 是 `crate-type = ["rlib"]`,**只产 rlib,不产 `.so`/`.dll`/`.dylib`** ⇒ 上传步按该路径**找不到文件**;`actions/upload-artifact` 的 `if-no-files-found` **默认 `warn`** ⇒ **job 静默绿,产物其实从未上传**。
+  - **根因线索**:`../rounds/01-websocket-pitfalls.md:791`(为让库可被测试引用,把 `"rlib"` **加进** `crate-type`)与 `:809`(「`crate-type = ["cdylib"]` 的库不参与测试…加了 `"rlib"` 后测试才运行」)。此后 `cdylib` 从 `crate-type` 里消失,而 CI 的 `libname` 列表没跟上。
+  - **正确(已决并落地,2026-10-02,`f68c2e6`)**:取方案 ② 的删法 —— **删掉 artifact 上传步**及矩阵里的 `artifact:`/`libname:` 键。理由:本仓 `[lib] crate-type=["rlib"]` **只产 rlib**、`src/main.rs` 又是需账号的**交互式管理控制台**、仓内无消费方 ⇒ **没有可分发产物**,不恢复 `cdylib`。五目标 `cargo build --release` 矩阵保留;另新增 `offline-gate` job(fmt --check + clippy -D warnings + 逐目标点名的离线测试)。CI 口径(含**刻意不跑**真机门与吃 `download/` 的语料扫描器)见 `repo-conventions.md` §6。
+  - 出处:`.github/workflows/CI.yml`、`Cargo.toml:8`、`../rounds/01` 附录「空的 lib」两节;登记在 `../goals/infra-backlog.md` §1。
+
+### 第 40 轮 R2 的 `unused` 读数(2026-10-02)
 
 - **易误**:表格/历史文里出现的 `--bins` 946(其中 `main.rs` 896)/ `--tests` 551,被当成**现在能跑出来**的数。
-  - **正确**:那是 **`47a8c5e`(bin 改走库 crate)之前**的旧读数,已被那次**重写**清掉(不是"清 `unused`"清的)⇒ 当前树**不可复现**。**全部读数(两棵树 / 三阶段 / 终态)与口径只在 `../goals/infra-backlog.md` §1.1 展开**;`docs/rounds/39` §0.3/§W5 段按纪律就地标注(2026-10-02),不改。
+  - **正确**:那是 **`47a8c5e`(bin 改走库 crate)之前**的旧读数,已被那次**重写**清掉(不是"清 `unused`"清的)⇒ 当前树**不可复现**。**全部读数(两棵树 / 三阶段 / 终态)与口径只在 `../goals/infra-backlog.md` §1.1 展开**;`../rounds/39` §0.3/§W5 段按纪律就地标注(2026-10-02),不改。
 
-## 2026-10-02 文档巡检(阶段 1:准确性)发现的两处
+### 2026-10-02 文档巡检(阶段 1:准确性)发现的两处
 
-- **渲染硬错误(已修,在此登记)**:`docs/rounds/37-convert-architecture-refactor-plan.md` §3.2 的表格在 Q5 与 Q6 两行之间夹了一个空行 ⇒ Markdown 把它断成两张表(Q6 那一行掉到表外、渲染异常)。已**只删该空行**(不改任何正文文字)。同批的同类空行断表另有两处:`docs/goals/pending-decisions.md` A 组表(A4/A5 之间)与 `docs/rounds/README.md` 第 40 轮两行之前,均已并回。
-- **失效目录(只登记,按"历史保真"不改正文)**:`docs/rounds/33-corpus-sweeps-and-format-split.md` §1、§3 与 §4 的命令示例把正向语料目录写成 `download/compile/k4raw/`(§3 还写"落盘到该目录")—— **该目录不存在**;平台原件编辑格式现在落在 `download/compile/k4edit/`(由 rounds/37 §12 的采集器写入),正向扫描器实际吃 `download/compile/*.bcm4`。`docs/goals/convert-backlog.md` §2 第 1 条与 `docs/rounds/37` §10.3 已改正,轮次正文按纪律不动。
-- **尺寸写法(只登记,不改历史正文)**:`docs/rounds/20-kitten-kn-work-conversion-plan.md` 附录里的「3.7 MB / 63 MB」指同一份 `原气骑士 且听风吟-编辑版.bcm4` —— **63 MB 是十进制量级(≈63.6 MB),数字本身不错**;现行统一口径写**字节数** `63 598 143 B(≈60.6 MiB)`(见 `work-file-formats.md` §6 第 5 条)。
+- **渲染硬错误(已修,在此登记)**:`../rounds/37-convert-architecture-refactor-plan.md` §3.2 的表格在 Q5 与 Q6 两行之间夹了一个空行 ⇒ Markdown 把它断成两张表(Q6 那一行掉到表外、渲染异常)。已**只删该空行**(不改任何正文文字)。同批的同类空行断表另有两处:`../goals/pending-decisions.md` A 组表(A4/A5 之间)与 `../rounds/README.md` 第 40 轮两行之前,均已并回。
+- **失效目录(只登记,按"历史保真"不改正文)**:`../rounds/33-corpus-sweeps-and-format-split.md` §1、§3 与 §4 的命令示例把正向语料目录写成 `download/compile/k4raw/`(§3 还写"落盘到该目录")—— **该目录不存在**;平台原件编辑格式现在落在 `download/compile/k4edit/`(由 rounds/37 §12 的采集器写入),正向扫描器实际吃 `download/compile/*.bcm4`。`../goals/convert-backlog.md` §2 第 1 条与 `../rounds/37` §10.3 已改正,轮次正文按纪律不动。
+- **尺寸写法(只登记,不改历史正文)**:`../rounds/20-kitten-kn-work-conversion-plan.md` 附录里的「3.7 MB / 63 MB」指同一份 `原气骑士 且听风吟-编辑版.bcm4` —— **63 MB 是十进制量级(≈63.6 MB),数字本身不错**;现行统一口径写**字节数** `63 598 143 B(≈60.6 MiB)`(见 `work-file-formats.md` §6 第 5 条)。

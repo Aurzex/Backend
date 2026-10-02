@@ -1,12 +1,12 @@
 # 转换与反编译性能(实测基线)
 
 > 知识库条目:**已经量到的数字、瓶颈归因、已落地优化及其收益、判定不做的项**。
-> 方案与执行记录见 `docs/rounds/22-*`(NEMO 反编译)、`docs/rounds/23-*`(转换总体)、`docs/rounds/25-*`(实体级并行)、`docs/rounds/29-*`(扫描台账)。
+> 方案与执行记录见 `../rounds/22-*`(NEMO 反编译)、`../rounds/23-*`(转换总体)、`../rounds/25-*`(实体级并行)、`../rounds/29-*`(扫描台账)。
 
 ## 1. 基线(实测)
 
 | 场景 | 优化前 | 现在 |
-| ---- | ------ | ---- |
+| ---- | ---- | ---- |
 | NEMO 作品反编译(含资源下载) | **2m42s** | **13s**(并发 + `skip_resources`) |
 | KN 作品反编译(模式分派) | 46s | **1.5s** |
 | Kitten4 作品反编译 | 单块 `from_value` | **1.5s**(逐块克隆改掉) |
@@ -21,7 +21,7 @@
 1. **请求数 × RTT**,不是 CPU:资源下载耗时几乎全部在这里。实测曲线(同一 NEMO 作品):
 
    | 并发 | 1 | 8 | 16 | 32 |
-   | ---- | - | - | -- | -- |
+   | ---- | ---- | ---- | ---- | ---- |
    | 耗时 | 402 s | 103 s | **92 s** | 127 s + **CDN 限流丢 2 个文件** |
 
    ⇒ 最优区间 8–16。下载是 I/O 密集,**不能用 `available_parallelism` 折算**(低核机器会折到近串行、高核机器会放宽到限流区)。本库把"作品级 × 单作品资源级"总线程**封顶 16**(常量 `RESOURCE_DOWNLOAD_BUDGET`)。
@@ -44,7 +44,7 @@
 ## 4. 判定**不做**(有证据)
 
 | 项 | 结论 | 理由 |
-| -- | ---- | ---- |
+| ---- | ---- | ---- |
 | 反向(KN→Kitten4)实体级并行 | **不做** | 63 个工作项、最大一项占 **36.7%**,且两段必须串行(`unrewrite_calls` 依赖全局 `call_targets`、`def_root_from_entry` 把定义根挂进宿主实体)⇒ Amdahl 上限 1.9×,**实际远低于 1.5×**,而反向 `core` 只有 ~200 ms |
 | `RawValue` 顶层只透传 | **不做** | 透传占比 ≈0%(见 `convert-semantics.md` §7) |
 | 单遍遍历合并 | **不做** | 只省遍历,不省逐块匹配/字段改写 |
@@ -73,8 +73,8 @@
 
 ## 依据
 
-- `docs/rounds/22-nemo-decompile-performance.md` §1–§4(现象/根因/实测 A-B)、§7(复现)。
-- `docs/rounds/23-convert-performance-plan.md` §1–§3、§5、§7(落地记录)。
-- `docs/rounds/25-convert-entity-parallelism-plan.md` §1(分布)、§9(正向落地)、§10(反向判不做)。
-- `docs/rounds/29-optimization-scan-ledger.md`(P0/P1 台账)。
+- `../rounds/22-nemo-decompile-performance.md` §1–§4(现象/根因/实测 A-B)、§7(复现)。
+- `../rounds/23-convert-performance-plan.md` §1–§3、§5、§7(落地记录)。
+- `../rounds/25-convert-entity-parallelism-plan.md` §1(分布)、§9(正向落地)、§10(反向判不做)。
+- `../rounds/29-optimization-scan-ledger.md`(P0/P1 台账)。
 - 代码锚点:`src/core/convert/decompile/mod.rs`(`RESOURCE_DOWNLOAD_BUDGET`)、`src/core/convert/mod.rs`(两级预算折算)、`tests/convert_bench.rs`(自有 SHA256 基线:6 样本,4 Kitten + 2 NEMO)。

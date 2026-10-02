@@ -1,7 +1,7 @@
 # 转换语义与不变量
 
 > 知识库条目:**编辑器间转换到底做了什么、哪些是硬约束、哪些坑官方自己也有**。
-> 方案与实施过程见 `docs/rounds/20-*`(Kitten↔KN)、`docs/rounds/27-*`(NEMO→KN)、`docs/rounds/28-*`(反向保真)。
+> 方案与实施过程见 `../rounds/20-*`(Kitten↔KN)、`../rounds/27-*`(NEMO→KN)、`../rounds/28-*`(反向保真)。
 
 ## 1. 平台/官方支持矩阵(实测)
 
@@ -53,16 +53,16 @@ NEMO → KN 是另一条前端(`hI.parseBlocksXML`),官方管线共 12 步(`main
 
 - 逐条与正面对称反查(改名逆表、字段反查、槽位还原),但不变量只能靠**往返 + 预算断言**守。
 - **保真缺口(当前口径,2026-10-01 起)**:见 §5bis —— 反向的可见损失来自"**写出的名字必须是编辑器注册表里的**"
-  这条硬约束:不认识的**块**就地改成「未收录积木」标记(`rounds/38` §7bis 起;此前是"整块剔除"),
+  这条硬约束:不认识的**块**就地改成「未收录积木」标记(`../rounds/38` §7bis 起;此前是"整块剔除"),
   **影子**清空;`def_census` 口径修正(只数定义根子树)后,定义体侧的"残块假缺口"已归零(rounds/33 §3bis),
-  现行门是**定义体缺口预算**(只许变小;数值与口径见 §6 **硬门表**)。历史研究路线见 `docs/rounds/28`、`docs/rounds/32`。
+  现行门是**定义体缺口预算**(只许变小;数值与口径见 §6 **硬门表**)。历史研究路线见 `../rounds/28`、`../rounds/32`。
 - **整作品实测(2026-09-26,真作品 `325806995` = `now但是1080P`,KN → Kitten4)**:
   告警 3 973 条按类别 = `未映射积木 643 · 丢弃实体属性 3 301 · 丢弃字段 12 · 重铸 id 17`
   (由 `tests/convert_live::kn_work_to_kitten4_file` 按类别打印)。
     - ⚠️ **口径已在 rounds/34 变更**:早期结论是"未映射/不认识的类型**保留 KN 原名 + 告警、不丢积木**" ——
     **这会让编辑器整份加载失败**(实测:80 种类型里 20 种 Kitten4 不认识 ⇒ 画布一块都不显示,rounds/34 §4nonies)。
     现行行为:写出阶段把编辑器不认识的**块**就地改成「未收录积木」标记(§5bis 第 5 条)、
-    **清空**这类**影子**,逐类型计入报告(`rounds/38` 起;此前是"整块剔除",那时积木会真的消失)。
+    **清空**这类**影子**,逐类型计入报告(`../rounds/38` 起;此前是"整块剔除",那时积木会真的消失)。
   - 因此"未映射积木"这个类别现在的含义是**内容恢复不出来**(但块本身还在画布上、看得见):
     两个真作品实测(rounds/36,A/B 对照)——`Node VM v3`(328981781)曾剔块 527 → **429**、
     清影子 174 → **4**;`now`(273988379)曾剔块 415 → **286**、清影子 224 → **46**
@@ -72,7 +72,7 @@ NEMO → KN 是另一条前端(`hI.parseBlocksXML`),官方管线共 12 步(`main
     `script_variables*`、`traverse_number*`、`self_listen*`/`self_broadcast_with_param`、
     `procedure_boolean`、`self_text_effect_color`、`color_size_slider`,以及反向反查不到原类型的
     **文本占位积木**(证据:平台 40 件 Kitten4 语料里这些名字**0 次出现**,编辑器注册表 349 条里也没有)。
-    要继续减损只能做"语义降级"(改语义,见 `goals/pending-decisions.md` D1)。
+    要继续减损只能做"语义降级"(改语义,见 `../goals/pending-decisions.md` D1)。
 - 运行时实测:KN→Kitten4 产物有 `theatre`/`size`/`block_data_json`,可被平台接受。
 
 ## 5bis. Kitten4 **编辑器的隐性契约**(实机验证得出,改写出器前必读)
@@ -107,30 +107,30 @@ NEMO → KN 是另一条前端(`hI.parseBlocksXML`),官方管线共 12 步(`main
      实机(线上 Kitten4 + 「打开本地作品」):语句型**原地**渲染成「未收录积木」并留在语句链里;
      值型因平台自己的块定义**没有 `output` 连接**而落成**孤立块**(槽位空,但块还在画布上)。
    - **影子是例外**:不换标记块,仍是**清空** —— 影子是槽位的默认值,换成标记块没有意义(没有字段
-     可表达默认值)。见 `rounds/34` §4quinquies 的 D2。
+     可表达默认值)。见 `../rounds/34` §4quinquies 的 D2。
 
 **判据与证据来源**(都可复用):
 
 | 判据 | 怎么做 |
-| ---- | ------ |
+| ---- | ---- |
 | 名字/字段是否合法 | 对着**平台真实文件**(`download/compile/*.bcm4`)做**归一化 schema 差集**(id 段折掉、块字段聚合),看"平台有、我们没有"的字段路径 |
 | 名字该叫什么 | **平台语料计数**(某名字在 40 件真作品里出现几次)比"表里怎么写的"更权威 |
-| 产物能不能用 | **无头 Chromium + 线上编辑器的「打开本地作品」**(隐藏 `input[accept=".bcm, .bcm4"]`)⇒ 数画布积木 + 看角色列表;**必须带一个已知能读的对照组**(见 `docs/rounds/35` 的方法留档) |
+| 产物能不能用 | **无头 Chromium + 线上编辑器的「打开本地作品」**(隐藏 `input[accept=".bcm, .bcm4"]`)⇒ 数画布积木 + 看角色列表;**必须带一个已知能读的对照组**(见 `../rounds/35` 的方法留档) |
 
 ## 5ter. 已知的**文档化偏差**(改代码前先看,别重复怀疑)
 
 | 偏差 | 说明 | 处置 |
 | ---- | ---- | ---- |
-| `keep_source` 上传的是**重建版**而非原始字节 | 原始 `.bcm*` 字节在反编译阶段就被解开,本库手上只有重建的编辑版 ⇒ 平台侧"保留原件"打开的是重建版(可读、可再转换,语义不受影响)。见 `docs/rounds/21` §8.4 N2 | **文档化**(rustdoc 已写明),不改反编译侧 |
+| `keep_source` 上传的是**重建版**而非原始字节 | 原始 `.bcm*` 字节在反编译阶段就被解开,本库手上只有重建的编辑版 ⇒ 平台侧"保留原件"打开的是重建版(可读、可再转换,语义不受影响)。见 `../rounds/21` §8.4 N2 | **文档化**(rustdoc 已写明),不改反编译侧 |
 | KN 侧"不认识"的类型在 Kitten4 产物里**被改成「未收录积木」标记** | 不是偷懒:Kitten4 编辑器不认识的名字会让**整份工作区加载失败**(§5bis 第 3 条);而**删掉**会让积木真的消失(rounds/38 的 id 口径定案) | 已按预算记账(`MARKER_BUDGET`,只许变小)+ 逐类打印报告 |
 | Kitten4 没有 **list 类型的程序集参数** | `param(type=List)` 必丢;属格式能力差 | 已定性(rounds/32) |
 
 ## 6. 硬门与不变量(实现任何新方向都必须满足)
 
 | 门 | 内容 |
-| -- | ---- |
+| ---- | ---- |
 | 官方校验器 | `BcmHelpers.validateBcm`(bundle module 87123)**可 headless 运行** —— "产物能否被编辑器加载"的硬门 |
-| 语义 diff | 与官方产物比较**忽略 id/location/uuid**(`docs/rounds/20` §9);官方产物按键插入序,**从不逐字节对齐官方** |
+| 语义 diff | 与官方产物比较**忽略 id/location/uuid**(`../rounds/20` §9);官方产物按键插入序,**从不逐字节对齐官方** |
 | 确定性 | `IdSource` + `TranslateOptions::deterministic_ids`;并发 1 与并发 N 产物 **SHA256 相同** |
 | **字节基线** | `convert_bench` 的产物 SHA256 + `#meta`(源 SHA / 字节 / 块数 / 告警数 / `source_version`);**样本清单与"两种门(可复现 / 快照冻结)"的说明只在 `convert-performance.md` §5 展开**。不变量:产物字节或报告退化(块变少、告警变多)都必须先解释再接受 |
 | 往返守恒 | KN→Kitten4→KN 的积木类型**多重集**一致(差异仅白名单降级项 + 预算断言) |
@@ -142,7 +142,7 @@ NEMO → KN 是另一条前端(`hI.parseBlocksXML`),官方管线共 12 步(`main
 ## 7. 判定"不做"的两项(有证据,别再重开)
 
 | 项 | 判定 | 证据 |
-| -- | ---- | ---- |
+| ---- | ---- | ---- |
 | `RawValue` 顶层只透传 | **不做** | 装配期"只透传不改"的顶层字段占比 **≈0%**:`theatre`(含 `block_data_json`)占文档 99.2–99.5% 且全部重写;`styles`/`audios`/`variables`/`broadcasts` 都要变换 ⇒ 收益上限 ≈0%,远低于 30% 门槛 |
 | 正/反向遍历合并成单遍 | **不做** | 正向实为 2 趟(`parse_node` 内含 `route_children` 再 `gc_deep`),反向本已单遍;合并只省遍历,不省逐块 `kind` 匹配/`transform_shadow_xml`/`map_field_name` 这些主要成本,且 `gc_node` 依赖子树已 parse |
 
@@ -155,7 +155,7 @@ NEMO → KN 是另一条前端(`hI.parseBlocksXML`),官方管线共 12 步(`main
 ## 9. **编辑格式**在平台上的读写端点(逆向编辑器 bundle 得到,2026-09-26)
 
 平台对外只给**编译态**(`/kitten/r2/work/player/load/{id}`),**编辑格式只存在于"编辑器读写的那份文件"里**。
-端点写在编辑器的 bundle(`creation.codemao.cn/kitten/build/kitten.*.js`,逐字见 `docs/rounds/37` §12):
+端点写在编辑器的 bundle(`creation.codemao.cn/kitten/build/kitten.*.js`,逐字见 `../rounds/37` §12):
 
 | 用途 | 端点 | 备注 |
 | ---- | ---- | ---- |
@@ -176,7 +176,7 @@ NEMO → KN 是另一条前端(`hI.parseBlocksXML`),官方管线共 12 步(`main
 同一份文档,"有多少块"至少有三种口径,答案**不相等**,混用就会造出**幻影缺陷**:
 
 | 口径 | 含义 | 什么时候用 |
-| ---- | ---- | ---------- |
+| ---- | ---- | ---- |
 | **(a) 原始 JSON 遍历** | 数与连接形态无关(census/扫描器用的就是这个) | 判"形态差异",但**不能**当"有没有丢" |
 | **(b) 从根可达的树计数** | `parse_*_entity` + `tree.count()`:转换器实际处理的那棵树 | 判"转换器搬了多少" |
 | **(c) id 是否出现在文档里** | 判"这块有没有被搬过去" | 判"丢没丢"的**唯一**直接证据 |
@@ -188,10 +188,10 @@ NEMO → KN 是另一条前端(`hI.parseBlocksXML`),官方管线共 12 步(`main
 
 ## 依据
 
-- `docs/rounds/20-kitten-kn-work-conversion-plan.md` §3(官方实现逆向)、§4(反向可行性)、§6.2(设计取舍)、§8(坑)、§9(验证)、§11(实测)、§11.2(真机端到端)。
-- `docs/rounds/27-nemo-to-kn-conversion-plan.md` §9(前端/映射研究)、§11/§12(落地与方向表)。
-- `docs/rounds/28-convert-reverse-fidelity-gaps.md`(缺口)、`docs/rounds/26-convert-rawvalue-single-pass-plan.md` §6(两项判不做)。
-- `docs/rounds/33-corpus-sweeps-and-format-split.md`(两台扫描器 + 编辑格式缺口)、
-  `docs/rounds/34-forward-corpus-and-guard-fixes.md`(§4octies 骨架键、§4nonies 词汇表与实机方法、§4sexies 云/本地收口)、
-  `docs/rounds/35-kitten4-groups-fix.md`(角色不显示)、`docs/rounds/36-editor-vocabulary-single-candidate.md`(块与影子统一判据)。
+- `../rounds/20-kitten-kn-work-conversion-plan.md` §3(官方实现逆向)、§4(反向可行性)、§6.2(设计取舍)、§8(坑)、§9(验证)、§11(实测)、§11.2(真机端到端)。
+- `../rounds/27-nemo-to-kn-conversion-plan.md` §9(前端/映射研究)、§11/§12(落地与方向表)。
+- `../rounds/28-convert-reverse-fidelity-gaps.md`(缺口)、`../rounds/26-convert-rawvalue-single-pass-plan.md` §6(两项判不做)。
+- `../rounds/33-corpus-sweeps-and-format-split.md`(两台扫描器 + 编辑格式缺口)、
+  `../rounds/34-forward-corpus-and-guard-fixes.md`(§4octies 骨架键、§4nonies 词汇表与实机方法、§4sexies 云/本地收口)、
+  `../rounds/35-kitten4-groups-fix.md`(角色不显示)、`../rounds/36-editor-vocabulary-single-candidate.md`(块与影子统一判据)。
 - 代码锚点:`src/core/convert/translate/{mapping,nemo_mapping,assembly,neko}.rs`、`tests/convert_*`。

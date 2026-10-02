@@ -40,7 +40,7 @@
 ## 3bis. `.gitignore` 的一个坑(已修,读到这里先知道)
 
 仓库的 `.gitignore` 从 Python 模板继承了通配规则 `bin/`,它会**连带忽略 Rust 的 `src/bin/`**
-⇒ `src/bin/gen_translate_tables.rs`(translate 表的生成器)**长期没进版本库**,而文件头与 `docs/rounds/20` 都以为它已提交。
+⇒ `src/bin/gen_translate_tables.rs`(translate 表的生成器)**长期没进版本库**,而文件头与 `../rounds/20` 都以为它已提交。
 已在 `.gitignore` 里显式放行(`!/src/bin/`、`!/src/bin/**`),该文件现已入库。
 **教训**:往仓库里加"生成器/工具"时,确认 `git check-ignore -v <path>` 是空的 —— 否则"改生成器"这件事本身会悄悄丢失。
 
@@ -62,7 +62,7 @@
 ## 4. 错误类型
 
 - 统一 `MewError` / `MewResult<T>`(`src/utils/requests.rs`);HTTP 状态码枚举已改名为 `StatusCode`(`HTTPStatus` 已不存在)。
-- `ProcessorError`/`DataQueryError` 已包装 `MewError`。`DecompilerError` 现只有 `Mew(#[from] MewError)` 加域内变体(`Crypto`/`Decompile`/`InvalidResponse`/`MissingField`/`TypeMismatch`/`Other`),`io::Error`/`serde_json::Error` 经 `From` 折进 `Mew`。原先记的两条**都不再成立**:"仍自带 `Io/Json/Http`、与 `MewError` 重复**待改**"已于 2026-10-01 核实消除(见 `docs/rounds/39` §1.3/§W12d);零调用的死变体 `UnsupportedType` **已于 `fef30e7`(2026-10-02)删除**(破坏性公共面变更,已授权,见 `rounds/39` §W5②)。
+- `ProcessorError`/`DataQueryError` 已包装 `MewError`。`DecompilerError` 现只有 `Mew(#[from] MewError)` 加域内变体(`Crypto`/`Decompile`/`InvalidResponse`/`MissingField`/`TypeMismatch`/`Other`),`io::Error`/`serde_json::Error` 经 `From` 折进 `Mew`。原先记的两条**都不再成立**:"仍自带 `Io/Json/Http`、与 `MewError` 重复**待改**"已于 2026-10-01 核实消除(见 `../rounds/39` §1.3/§W12d);零调用的死变体 `UnsupportedType` **已于 `fef30e7`(2026-10-02)删除**(破坏性公共面变更,已授权,见 `../rounds/39` §W5②)。
 - 破坏性 API 变更**不留兼容别名**(已授权的前提下直接删)。
 
 ## 5. 命名与文件组织
@@ -70,18 +70,18 @@
 - 删除/合并**必须有零调用点证据**(全仓 grep 命中 0 才删);测试模块一律放**文件末尾**。
 - `src/prelude.rs` 只 re-export `utils::requests`;`utils.rs` 现导出 `requests`/`filedata`/`socketio`(`acquire.rs`/`data.rs` 已成历史名)。
 - **`core/convert/` 是"作品文件转换域"的唯一边界**:读(反编译)与写(互转)共用同一地基;域外不再有平铺的 `compiler.rs`/`unpacker.rs`/`decoders.rs`。
-- **域内文件组织(以 `docs/rounds/31-convert-layout-consolidation-plan.md` §2「目标结构」的模块图 + §2.3「组织规则」为准;该文没有 §2.1)**:一个文件一个职责;
+- **域内文件组织(以 `../rounds/31-convert-layout-consolidation-plan.md` §2「目标结构」的模块图 + §2.3「组织规则」为准;该文没有 §2.1)**:一个文件一个职责;
   生成物单独一处(`translate/tables_gen.rs`,**不可与手写表混放**);测试默认内联在被测文件末尾,
   「本体 + 测试 > 3 000 行」时才独立成 `*_tests.rs`;**单文件上限 ≈ 2 500 行**。
-  当前布局:`mod.rs` + `shared.rs` + `upload.rs` + `decompile/{mod,editors,config,shadow,work}.rs` + `translate/{mod,model,mapping,assembly,pipeline,options,report,xml,nemo,nemo_mapping,tables_gen,kitten4_vocab,reverse_tests,nemo_tests}.rs`(**22 文件**;W2 后新增 4 个:`upload.rs` 是**域级工具层**(与门面同级,`shared.rs` 零反向依赖),`decompile/{config,shadow,work}.rs` 是反编译**私有件**。权威清单见 `docs/rounds/39` §W2 落地段;其 §1.1 的表是 W2 之前的快照)。
+  当前布局:`mod.rs` + `shared.rs` + `upload.rs` + `decompile/{mod,editors,config,shadow,work}.rs` + `translate/{mod,model,mapping,assembly,pipeline,options,report,xml,nemo,nemo_mapping,tables_gen,kitten4_vocab,reverse_tests,nemo_tests}.rs`(**22 文件**;W2 后新增 4 个:`upload.rs` 是**域级工具层**(与门面同级,`shared.rs` 零反向依赖),`decompile/{config,shadow,work}.rs` 是反编译**私有件**。权威清单见 `../rounds/39` §W2 落地段;其 §1.1 的表是 W2 之前的快照)。
 - 分层纪律:`translate` 子域**不碰网络**;需要网络(上传/建作品)的编排放 `core/convert/mod.rs` 门面
-  (反编译侧的可选「上传到账号」同理,见 `docs/rounds/30`)。
+  (反编译侧的可选「上传到账号」同理,见 `../rounds/30`)。
 - 文档:记录放 `docs/`;**历史轮次不改写**(保真),勘误集中到本库 `errata.md`。
 
 ## 6. 测试与验证门
 
 | 门 | 内容 |
-| -- | ---- |
+| ---- | ---- |
 | 单测 | `cargo test`(库单测:注入契约、请求头大小写、分块终止性等) |
 | `tests/repo_hygiene.rs` | 挡住明文账密/敏感串入库(曾经真的漏过) |
 | 真机门 | `tests/live_features.rs`(登录 + AI + 云变量)、`tests/compile_live.rs`(7 种反编译)、`tests/convert_live.rs`(转换 + 写平台) |
@@ -89,7 +89,7 @@
 | 转换专项 | 官方校验器(`validateBcm`)硬门 + 语义 diff + `deterministic_ids` 字节一致 + 往返多重集守恒 |
 | 词表新鲜度 | `kitten4_vocab::tests::editor_type_list_freshness_is_reported_not_enforced` —— **只打印读数**(条目数 / 导出日期 / 距今天数;超过 180 天、或条目数与单一事实源 `KITTEN4_VOCAB_EXPORTED` 不一致时醒目提醒)。**刻意不做按挂钟时间失败**:那会让门在某个日期之后**自动变红**、沦为噪音;允许随日期改变**打印内容**,不允许让测试失败 |
 | **CI 跑什么** | `.github/workflows/CI.yml` 三个 job:`build`(**五目标** `cargo build --release` 矩阵,含 aarch64 交叉链接)、`hygiene`(`cargo test --test repo_hygiene`,与本地 pre-commit 同一份)、**`offline-gate`**(`cargo fmt --check` + `cargo clippy --all-targets -- -D warnings` + **逐目标点名**的离线测试:`--lib` / `--test repo_hygiene` / `--test convert_bench`) |
-| **CI 刻意不管什么**(是遗漏的反面,别当缺口补) | ① **真机门**(`compile_live`/`convert_live`/`live_features`):无 `data/test-config.json` 时它们 `load_config()` → None 后**直接 return(静默 pass)**,当门等于没验;CI 也**不设** `BACKEND_REQUIRE_LIVE`(设了就依赖凭据/网络)⇒ 真机验证只在本机做。② **语料扫描器与 `convert_bench` 的性能样本**:吃 gitignored 的 `download/`,干净检出上走 `missing_fixture` **打印一行并跳过**(**预期跳过**,不是没跑)。③ **artifact 上传**:本仓 `[lib] crate-type=["rlib"]`(只产 rlib)、`src/main.rs` 是需账号的交互式控制台、仓内无消费方 ⇒ **没有可分发产物**,旧上传步已删(`f68c2e6`,详见 `errata.md` 末节与 `goals/infra-backlog.md` §1) |
+| **CI 刻意不管什么**(是遗漏的反面,别当缺口补) | ① **真机门**(`compile_live`/`convert_live`/`live_features`):无 `data/test-config.json` 时它们 `load_config()` → None 后**直接 return(静默 pass)**,当门等于没验;CI 也**不设** `BACKEND_REQUIRE_LIVE`(设了就依赖凭据/网络)⇒ 真机验证只在本机做。② **语料扫描器与 `convert_bench` 的性能样本**:吃 gitignored 的 `download/`,干净检出上走 `missing_fixture` **打印一行并跳过**(**预期跳过**,不是没跑)。③ **artifact 上传**:本仓 `[lib] crate-type=["rlib"]`(只产 rlib)、`src/main.rs` 是需账号的交互式控制台、仓内无消费方 ⇒ **没有可分发产物**,旧上传步已删(`f68c2e6`,详见 `errata.md` 末节与 `../goals/infra-backlog.md` §1) |
 | **死代码 / 未用项** | `[lints.rust] unused = "warn"` **活着**(`8da596d`,rounds/40 R2 三阶段放开):`clippy --all-targets -- -D warnings` 下**任何**未用项(未用 import / 变量 / `mut` / 赋值 / `must_use`、`dead_code`)都会把门**打红**。新增死代码只有三条出路:**① 接线**(真用起来)/ **② 标 `#[cfg(test)]`**(仅测试用)/ **③ `#[allow(dead_code)]` + 一句理由**(如"由生成器消费"),**不留无理由的 `allow`**。口径与 `Cargo.toml` 里 `[lints.rust]` 的注释一致;**放开过程的读数、两条实测坑与逐条处置见 `../goals/infra-backlog.md` §1.1** |
 | 必备前置 | 大改先出方案文档 → 子代理评审 → 再动 Rust 代码 |
 
@@ -102,6 +102,6 @@
 
 ## 依据
 
-- `CONTRIBUTING.md`;`docs/rounds/05/06/07-style|call|typing*.md`;`docs/rounds/08/09-protocol-compliance*.md`;
-  `docs/rounds/14/15/16-*injection*.md`;`docs/rounds/17-error-convergence*.md`;`docs/rounds/18/19-*`;`docs/rounds/21-*`(域化)。
+- `CONTRIBUTING.md`;`../rounds/05/06/07-style|call|typing*.md`;`../rounds/08/09-protocol-compliance*.md`;
+  `../rounds/14/15/16-*injection*.md`;`../rounds/17-error-convergence*.md`;`../rounds/18/19-*`;`../rounds/21-*`(域化)。
 - 代码锚点:`src/utils/requests.rs`、`src/prelude.rs`、`src/utils.rs`、`src/core/convert/mod.rs`、`tests/repo_hygiene.rs`。

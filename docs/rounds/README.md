@@ -6,10 +6,10 @@
 ## 转换域轮次(28–40,2026-09-25 ~ 10-02)
 
 | 轮次 | 一句话 | 状态 |
-| ---- | ------ | ---- |
+| ---- | ---- | ---- |
 | [28](28-convert-reverse-fidelity-gaps.md) | KN→Kitten4 往返的**已知保真缺口**首份记录(留置) | 已被 32/33/36 收口(口径三次修正) |
 | [29](29-optimization-scan-ledger.md) | 全仓优化扫描(子代理)与处置台账 | 大部分已落地,剩余在 `../goals/*-backlog.md` |
-| [30](30-decompile-upload-option.md) | 反编译可选「上传到当前账号」(备份/搬家) | 已落地;NEMO 侧真机验证待决策 |
+| [30](30-decompile-upload-option.md) | 反编译可选「上传到当前账号」(备份/搬家) | 已落地;NEMO 侧真机验证待决 |
 | [31](31-convert-layout-consolidation-plan.md) | convert 域**文件编排合并**与架构收敛(27 → 13 文件) | 已落地(读老轮次注意路径对照) |
 | [32](32-reverse-definition-body-investigation.md) | 反向定义体缺口(6/21)调查:① 口径假象 ② 实体侧真丢 −24 已修 | 已收口 |
 | [33](33-corpus-sweeps-and-format-split.md) | 语料扩容 + 双向往返扫描 + 两个**形态陷阱**;残块归一化定性 | 已收口;编辑格式仍缺(需浏览器抓包) |

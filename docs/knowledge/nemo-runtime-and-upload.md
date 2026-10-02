@@ -1,7 +1,7 @@
 # NEMO 作品的运行与上传(知识)
 
 > 知识库条目:**NEMO 作品在平台上是怎么被打开/创建/存储的**,以及我们能不能绕过"下载 40 MB"。
-> 方案与取证过程见 `docs/rounds/22-*` §5/§6、`docs/rounds/24-*`、`docs/rounds/27-*` §9–§12。
+> 方案与取证过程见 `../rounds/22-*` §5/§6、`../rounds/24-*`、`../rounds/27-*` §9–§12。
 
 ## 1. NEMO 是什么
 
@@ -20,7 +20,7 @@
 
 ⇒ **作品 id 由第 3 步返回**(第 4 步只是绑封面)。本库已实现第 3 步(`NemoWorkManager::create_nemo_work`)与第 4 步;
 第 1/2 步现由 `UploadChannel::Nemo` 提供(`projectName=nemo_android_ios`),**但没有真机验证过**
-(NEMO 侧删除端点未知 ⇒ 建了草稿擦不掉;见 `docs/rounds/30` §4)。
+(NEMO 侧删除端点未知 ⇒ 建了草稿擦不掉;见 `../rounds/30` §4)。
 
 ## 2. 决定性证据:**建作品不需要资源字节**
 
@@ -38,7 +38,7 @@
 
 | 路线 | 形态 | 状态 |
 | ---- | ---- | ---- |
-| **A. 下载 + 本地重编译** | 反编译 NEMO(含资源)→ 转 KN → 上传产物建 KN 作品 | ✅ 已落地(`convert_live` 真机通过) |
+| **A. 下载 + 本地重编译** | 反编译 NEMO(含资源)→ 转 KN → 上传产物建 KN 作品 | ✅ 已完成(已落地:`convert_live` 真机通过) |
 | **B. 不下载,直接建作品** | 上传**已有的** `.bcm`/资源引用 + `create_nemo_work(work_url, bcm_version)` | ⚠️ 建作品端点已备好;但**要产出合法 NEMO 文件**才能把我们的产物塞回去 ⇒ 依赖 KN→NEMO(**平台无对照实现,不做**) |
 
 ⇒ 路线 B 的现实用法是**把 NEMO 作品转出来**(NEMO→KN→Kitten4),而不是把产物塞回 NEMO。
@@ -61,11 +61,11 @@
 - ⚠ 实测细节:`ureq` 的 `timeout_global` 只覆盖到**响应头**,不覆盖 body 流式读取 ⇒ 上述改动解决的是
   "**首字节/响应头 > 30 s**"与"**单个响应体 > 10 MB**"两类失败;真正慢的 body 传输属**另一类"无 body 读超时"问题**(未修)。
   ⇒ **常量值(`DOWNLOAD_TIMEOUT` / `MAX_DOWNLOAD_BODY_BYTES`)、逐路径枚举与一次性证明只在
-  `docs/rounds/40-gates-cleanup-and-real-defects.md` §7 展开**。
+  `../rounds/40-gates-cleanup-and-real-defects.md` §7 展开**。
 
 ## 依据
 
-- `docs/rounds/22-nemo-decompile-performance.md` §5(这条路)、§6(抓包里的 API 清单)。
-- `docs/rounds/24-nemo-upload-route-and-apis.md` §1(抓包量级)、§2(决定性证据)、§8–§13(前端 bundle 反编译 + 端点落地清点)。
-- `docs/rounds/27-nemo-to-kn-conversion-plan.md` §9(官方 12 步管线)、§11/§12(落地与方向表)。
+- `../rounds/22-nemo-decompile-performance.md` §5(这条路)、§6(抓包里的 API 清单)。
+- `../rounds/24-nemo-upload-route-and-apis.md` §1(抓包量级)、§2(决定性证据)、§8–§13(前端 bundle 反编译 + 端点落地清点)。
+- `../rounds/27-nemo-to-kn-conversion-plan.md` §9(官方 12 步管线)、§11/§12(落地与方向表)。
 - 代码锚点:`src/api/work.rs`(`create_nemo_work` / `create_kn_work` / `delete_work`)、`src/core/convert/mod.rs`(translate + 上传编排)。
