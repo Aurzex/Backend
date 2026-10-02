@@ -21,7 +21,8 @@
 
 ## 要立轮的大方向 / 已决但暂缓
 
-- **要立轮的**:`pending-decisions.md` B 组里的 DTO 类型化、kn 转 nemo、断线退避重连。
+- **要立轮的**:`pending-decisions.md` **B4**(`converse` 断线指数退避重连;前置条件=先定会话与历史重建语义);**B7/B8** 按需(`WorkId` 试点收益 / `work.rs` 再切 `WorkDataFetcher`)。
+  **B1(API DTO 类型化)与 B2(KN 到 NEMO)已列入"明确不做"**,见本节末,不再作为立轮候选。
 - **已决但暂缓(登记,待重新立项)**:`wrap_arithmetic` 移动不重铸(**W13**)——
   为何暂缓、代价与重开条件见 `convert-backlog.md` §5 第 5 行;证据见 `../rounds/38` §8、`../rounds/39` §W13。
 
