@@ -41,13 +41,13 @@ serde = {
 }
 serde_json = { version = "1.0.151", features = ["float_roundtrip"] }
 sha2 = "0.11.0"
-thiserror = "2.0.20"
+thiserror = "2.0.21"
 tungstenite = {
     version = "0.30.0",
     features = ["rustls-tls-webpki-roots"]
 }
 url = "2.5.8"
 ureq = {
-    version = "3.4.0",
+    version = "3.4.2",
     features = ["json", "multipart", "gzip"]
 }
