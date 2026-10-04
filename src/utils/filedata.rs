@@ -1,14 +1,7 @@
+use crate::utils::requests::MewResult;
 use log::debug;
 use std::fs;
 use std::path::{Path, PathBuf};
-use thiserror::Error;
-
-// 错误定义
-#[derive(Error, Debug)]
-pub enum FileError {
-    #[error("I/O 错误: {0}")]
-    Io(#[from] std::io::Error),
-}
 
 // 路径配置(可自定义根目录)
 /// 文件路径管理器,可基于自定义根目录构建所有子目录
@@ -77,8 +70,8 @@ impl PathConfig {
 pub struct CodeMaoFile;
 
 impl CodeMaoFile {
-    /// 写入字节数组
-    pub fn write_bytes(path: &Path, data: &[u8]) -> Result<(), FileError> {
+    /// 写入字节数组(失败经 `MewError::Io` 上报,与其他层同一口径)
+    pub fn write_bytes(path: &Path, data: &[u8]) -> MewResult<()> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }

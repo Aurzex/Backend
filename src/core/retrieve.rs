@@ -32,10 +32,15 @@ pub enum DataQueryError {
     InvalidSource(String),
     #[error("数据解析失败: {0}")]
     ParseError(String),
-    #[error("JSON 解析失败: {0}")]
-    Json(#[from] serde_json::Error),
     #[error("外部错误: {0}")]
-    External(#[from] MewError),
+    Mew(#[from] MewError),
+}
+
+/// 口径同 [`ProcessorError`]:`serde_json` 失败折进 [`MewError`],不另设 `Json` 变体
+impl From<serde_json::Error> for DataQueryError {
+    fn from(err: serde_json::Error) -> Self {
+        Self::Mew(err.into())
+    }
 }
 
 // 枚举定义

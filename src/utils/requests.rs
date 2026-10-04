@@ -21,7 +21,7 @@ use log::{debug, warn};
 #[derive(ThisError, Debug)]
 pub enum MewError {
     #[error("HTTP error: {0}")]
-    Http(#[from] ureq::Error),
+    Http(#[from] TransportError),
     /// 服务端返回 4xx/5xx 时的结构化错误(状态码 + 响应体)
     #[error("HTTP {status}: {body}")]
     HttpStatus { status: u16, body: String },
@@ -45,6 +45,73 @@ pub enum MewError {
         limit: u64,
         received: u64,
     },
+}
+
+/// 传输层失败(连接失败 / 超时 / TLS / 协议错误)。
+///
+/// 自有类型:`MewError::Http` 不再直接装 `ureq::Error` —— 那会迫使下游为了命名该字段而依赖
+/// 同版本 `ureq`,并把 ureq 的大版本升级变成本库的破坏性变更。只保留文本与最常用的
+/// "是否超时"判据;调用方需要更细分类时再按实际需求增。
+#[derive(Debug, Clone)]
+pub struct TransportError {
+    message: String,
+    timeout: bool,
+}
+
+impl TransportError {
+    /// 是否为超时(连接 / 发送 / 读响应体任一阶段)
+    pub fn is_timeout(&self) -> bool {
+        self.timeout
+    }
+
+    /// 底层错误的文本描述
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    /// 把 ureq 的传输错误折进来(仅 crate 内使用;ureq 类型不进公共契约)
+    pub(crate) fn from_ureq(err: ureq::Error) -> Self {
+        Self {
+            message: err.to_string(),
+            timeout: matches!(err, ureq::Error::Timeout(_)),
+        }
+    }
+}
+
+impl std::fmt::Display for TransportError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for TransportError {}
+
+impl MewError {
+    /// 把 ureq 的传输错误转成 [`MewError::Http`](唯一提到 ureq 的转换点,且不进公共签名)
+    pub(crate) fn transport(err: ureq::Error) -> Self {
+        Self::Http(TransportError::from_ureq(err))
+    }
+}
+
+/// 公共请求原语(`MewRequestBuilder::send*`)的响应。
+///
+/// 自有类型、内部持有 ureq 的响应:对外只暴露状态码与响应头查询,响应体一律经
+/// [`CodeMaoClient::response_to_json`] 等助手读取,因此下游不必依赖 `ureq` 也能用完整链路。
+#[derive(Debug)]
+pub struct MewResponse {
+    inner: Response<Body>,
+}
+
+impl MewResponse {
+    /// HTTP 状态码
+    pub fn status(&self) -> u16 {
+        self.inner.status().as_u16()
+    }
+
+    /// 查询单个响应头(名称大小写不敏感)
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.inner.headers().get(name).and_then(|v| v.to_str().ok())
+    }
 }
 
 pub type MewResult<T> = std::result::Result<T, MewError>;
@@ -596,7 +663,9 @@ impl MewRequestBuilder {
     }
 
     /// 发送普通请求(JSON 负载或空请求体),返回响应
-    pub fn send(self) -> MewResult<Response<Body>> {
+    ///
+    /// 返回 [`MewResponse`](自有响应类型,不暴露 ureq 类型)。
+    pub fn send(self) -> MewResult<MewResponse> {
         let body = match &self.payload {
             Some(payload) => RequestBody::Json(payload),
             None => RequestBody::Empty,
@@ -605,13 +674,13 @@ impl MewRequestBuilder {
     }
 
     /// 发送请求但复用外部持有的请求体(借用,避免克隆),适用于分页等重复发送场景
-    pub fn send_with_payload_ref(&self, payload: &Value) -> MewResult<Response<Body>> {
+    pub fn send_with_payload_ref(&self, payload: &Value) -> MewResult<MewResponse> {
         let spec: RequestSpec<'_> = self.into();
         self.client.inner.send(spec, RequestBody::Json(payload))
     }
 
-    /// 发送 multipart/form-data 请求
-    pub fn send_multipart(self, form: Form) -> MewResult<Response<Body>> {
+    /// 发送 multipart/form-data 请求(仅 crate 内使用:`ureq` 的表单类型不进公共契约)
+    pub(crate) fn send_multipart(self, form: Form) -> MewResult<MewResponse> {
         self.client
             .inner
             .send((&self).into(), RequestBody::Form(form))
@@ -680,6 +749,7 @@ impl KittyCore {
         }
     }
 
+    #[cfg(test)]
     fn agent(&self) -> &Agent {
         &self.agent
     }
@@ -830,7 +900,7 @@ impl KittyCore {
     }
 
     /// 统一发送请求:按方法选择无体/有体构建器,按 `RequestBody` 决定负载形态
-    fn send(&self, spec: RequestSpec<'_>, body: RequestBody<'_>) -> MewResult<Response<Body>> {
+    fn send(&self, spec: RequestSpec<'_>, body: RequestBody<'_>) -> MewResult<MewResponse> {
         let url = self.build_url(spec.endpoint, spec.base_key);
         let payload = match &body {
             RequestBody::Json(v) => Some(*v),
@@ -850,7 +920,7 @@ impl KittyCore {
                 );
                 let builder =
                     Self::apply_request_config(builder, spec.status_as_error, spec.timeout);
-                builder.call()?
+                builder.call().map_err(MewError::transport)?
             }
             // 带请求体方法: 按负载形态发送 JSON/表单/空请求体
             HttpMethod::Post | HttpMethod::Patch | HttpMethod::Put => {
@@ -864,15 +934,17 @@ impl KittyCore {
                 let builder =
                     Self::apply_request_config(builder, spec.status_as_error, spec.timeout);
                 match body {
-                    RequestBody::Json(payload) => builder.send_json(payload)?,
-                    RequestBody::Form(form) => builder.send(form)?,
-                    RequestBody::Empty => builder.send_empty()?,
+                    RequestBody::Json(payload) => {
+                        builder.send_json(payload).map_err(MewError::transport)?
+                    }
+                    RequestBody::Form(form) => builder.send(form).map_err(MewError::transport)?,
+                    RequestBody::Empty => builder.send_empty().map_err(MewError::transport)?,
                 }
             }
         };
 
         self.log_response(&url, &response)?;
-        Ok(response)
+        Ok(MewResponse { inner: response })
     }
 
     /// 请求级配置:错误响应体保留(4xx/5xx 不直接报错)+ 超时覆盖(大请求体用)
@@ -901,9 +973,9 @@ impl KittyCore {
     }
 
     /// 将响应体解析为 JSON
-    fn response_to_json(&self, response: Response<Body>) -> MewResult<Value> {
-        let mut body = response.into_body();
-        let bytes = body.read_to_vec()?;
+    fn response_to_json(&self, response: MewResponse) -> MewResult<Value> {
+        let mut body = response.inner.into_body();
+        let bytes = body.read_to_vec().map_err(MewError::transport)?;
         if bytes.is_empty() {
             if self.config.log_requests && log::log_enabled!(log::Level::Debug) {
                 debug!("响应体: (空)");
@@ -925,9 +997,9 @@ impl KittyCore {
     }
 
     /// 将响应体读取为字符串
-    fn response_to_string(&self, response: Response<Body>) -> MewResult<String> {
-        let mut body = response.into_body();
-        let text = body.read_to_string()?;
+    fn response_to_string(&self, response: MewResponse) -> MewResult<String> {
+        let mut body = response.inner.into_body();
+        let text = body.read_to_string().map_err(MewError::transport)?;
         if self.config.log_requests && log::log_enabled!(log::Level::Debug) {
             debug!("---------- 响应体 (文本) ----------");
             if text.len() > 1000 {
@@ -943,9 +1015,9 @@ impl KittyCore {
     }
 
     /// 将响应体读取为二进制数据
-    fn response_to_binary(&self, response: Response<Body>) -> MewResult<Vec<u8>> {
-        let mut body = response.into_body();
-        let data = body.read_to_vec()?;
+    fn response_to_binary(&self, response: MewResponse) -> MewResult<Vec<u8>> {
+        let mut body = response.inner.into_body();
+        let data = body.read_to_vec().map_err(MewError::transport)?;
         if self.config.log_requests && log::log_enabled!(log::Level::Debug) {
             debug!("---------- 响应体 (二进制) ----------");
             debug!("  大小: {} 字节", data.len());
@@ -978,8 +1050,8 @@ impl KittyCore {
     /// `Body::read_to_vec`/`read_to_string`,自带 **10 MB** 上限;作品/资源动辄几十 MB
     /// 会先撞它。这里用**显式自管**的上限读取:不依赖 ureq 的内部护栏,并把定位信息
     /// (URL / 上限 / 已读字节)带进错误,超限时报 [`MewError::ResponseTooLarge`]。
-    fn read_body_capped(response: Response<Body>, url: &str, max: u64) -> MewResult<Vec<u8>> {
-        let mut reader = response.into_body().into_reader();
+    fn read_body_capped(response: MewResponse, url: &str, max: u64) -> MewResult<Vec<u8>> {
+        let mut reader = response.inner.into_body().into_reader();
         let mut data: Vec<u8> = Vec::new();
         let mut buf = [0u8; 64 * 1024];
         loop {
@@ -1000,7 +1072,7 @@ impl KittyCore {
     }
 
     /// 读取**大体量**二进制响应体(作品/资源字节),上限 [`MAX_DOWNLOAD_BODY_BYTES`]
-    fn response_to_binary_large(&self, response: Response<Body>, url: &str) -> MewResult<Vec<u8>> {
+    fn response_to_binary_large(&self, response: MewResponse, url: &str) -> MewResult<Vec<u8>> {
         let data = Self::read_body_capped(response, url, MAX_DOWNLOAD_BODY_BYTES)?;
         if self.config.log_requests && log::log_enabled!(log::Level::Debug) {
             debug!("---------- 响应体 (二进制, 大体) ----------");
@@ -1011,13 +1083,13 @@ impl KittyCore {
     }
 
     /// 读取**大体量**文本响应体(如 NEKO 密文体),上限 [`MAX_DOWNLOAD_BODY_BYTES`]
-    fn response_to_string_large(&self, response: Response<Body>, url: &str) -> MewResult<String> {
+    fn response_to_string_large(&self, response: MewResponse, url: &str) -> MewResult<String> {
         let data = Self::read_body_capped(response, url, MAX_DOWNLOAD_BODY_BYTES)?;
         Ok(String::from_utf8_lossy(&data).into_owned())
     }
 
     /// 读取**大体量** JSON 响应体(作品文档),上限 [`MAX_DOWNLOAD_BODY_BYTES`]
-    fn response_to_json_large(&self, response: Response<Body>, url: &str) -> MewResult<Value> {
+    fn response_to_json_large(&self, response: MewResponse, url: &str) -> MewResult<Value> {
         let data = Self::read_body_capped(response, url, MAX_DOWNLOAD_BODY_BYTES)?;
         if data.is_empty() {
             return Ok(Value::Null);
@@ -1060,8 +1132,9 @@ impl CodeMaoClient {
         }
     }
 
-    /// 获取底层 Agent
-    pub fn agent(&self) -> &Agent {
+    /// 获取底层 Agent(**仅测试使用**:ureq 的类型不进公共契约)
+    #[cfg(test)]
+    pub(crate) fn agent(&self) -> &Agent {
         self.inner.agent()
     }
 
@@ -1099,41 +1172,33 @@ impl CodeMaoClient {
     }
 
     /// 将响应体解析为 JSON
-    pub fn response_to_json(&self, response: Response<Body>) -> MewResult<Value> {
+    pub fn response_to_json(&self, response: MewResponse) -> MewResult<Value> {
         self.inner.response_to_json(response)
     }
 
     /// 将响应体读取为字符串
-    pub fn response_to_string(&self, response: Response<Body>) -> MewResult<String> {
+    pub fn response_to_string(&self, response: MewResponse) -> MewResult<String> {
         self.inner.response_to_string(response)
     }
 
     /// 将响应体读取为二进制数据
-    pub fn response_to_binary(&self, response: Response<Body>) -> MewResult<Vec<u8>> {
+    pub fn response_to_binary(&self, response: MewResponse) -> MewResult<Vec<u8>> {
         self.inner.response_to_binary(response)
     }
 
     /// 读取**大体量**二进制响应体(作品/资源下载),上限 [`MAX_DOWNLOAD_BODY_BYTES`]
     /// 超限时报 [`MewError::ResponseTooLarge`](带 URL / 上限 / 已读字节)
-    pub fn response_to_binary_large(
-        &self,
-        response: Response<Body>,
-        url: &str,
-    ) -> MewResult<Vec<u8>> {
+    pub fn response_to_binary_large(&self, response: MewResponse, url: &str) -> MewResult<Vec<u8>> {
         self.inner.response_to_binary_large(response, url)
     }
 
     /// 读取**大体量**文本响应体,上限 [`MAX_DOWNLOAD_BODY_BYTES`]
-    pub fn response_to_string_large(
-        &self,
-        response: Response<Body>,
-        url: &str,
-    ) -> MewResult<String> {
+    pub fn response_to_string_large(&self, response: MewResponse, url: &str) -> MewResult<String> {
         self.inner.response_to_string_large(response, url)
     }
 
     /// 读取**大体量** JSON 响应体,上限 [`MAX_DOWNLOAD_BODY_BYTES`]
-    pub fn response_to_json_large(&self, response: Response<Body>, url: &str) -> MewResult<Value> {
+    pub fn response_to_json_large(&self, response: MewResponse, url: &str) -> MewResult<Value> {
         self.inner.response_to_json_large(response, url)
     }
 
@@ -2109,11 +2174,15 @@ pub trait ClientAccess {
 /// 发送请求并统一处理 4xx/5xx:错误时读取服务端错误体并包装为 `MewError`。
 /// builder 已持有客户端,无需额外 client 参数;供 `ClientAccess` 默认方法复用。
 /// 发送请求并把 4xx/5xx 变成 `MewError::HttpStatus`(带上响应体,便于排错)
-pub(crate) fn send_checked(builder: MewRequestBuilder) -> MewResult<Response<Body>> {
+pub(crate) fn send_checked(builder: MewRequestBuilder) -> MewResult<MewResponse> {
     let response = builder.with_error_body().send()?;
-    let status = response.status();
+    let status = response.inner.status();
     if status.is_client_error() || status.is_server_error() {
-        let body = response.into_body().read_to_string().unwrap_or_default();
+        let body = response
+            .inner
+            .into_body()
+            .read_to_string()
+            .unwrap_or_default();
         return Err(MewError::HttpStatus {
             status: status.as_u16(),
             body,

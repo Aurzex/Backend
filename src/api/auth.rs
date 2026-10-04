@@ -414,13 +414,15 @@ impl AuthProcessor {
             .send()?;
         let status = response.status();
         if status != 200 {
-            let body = response.into_body().read_to_string().unwrap_or_default();
+            let body = client
+                .response_to_string(response)
+                .unwrap_or_else(|e| format!("(读取响应体失败: {e})"));
             return Err(MewError::Auth(format!(
                 "API返回错误状态码: {}, Body: {}",
                 status, body
             )));
         }
-        let body = response.into_body().read_to_string()?;
+        let body = client.response_to_string(response)?;
         Ok(serde_json::from_str(&body)?)
     }
 
@@ -460,7 +462,7 @@ impl AuthProcessor {
             .send()?;
 
         if response.status() == 200 {
-            let bytes = response.into_body().read_to_vec()?;
+            let bytes = client.response_to_binary(response)?;
             CodeMaoFile::write_bytes(&PathConfig::global().captcha_file_path(), &bytes).map_err(
                 |e| MewError::Io(std::io::Error::other(format!("验证码文件写入失败: {}", e))),
             )?;

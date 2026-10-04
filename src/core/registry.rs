@@ -14,20 +14,32 @@ use log::error;
 
 use serde_json::{Value, json};
 
-// 自定义错误类型
+/// 举报引擎的错误。
+///
+/// 口径与 `core::convert` 的 `TranslateError` 一致:**底层 `io` / `serde_json` 失败一律折进
+/// [`MewError`]**(经 [`ProcessorError::Mew`] 承载),不再另设 `Io` / `Json` 变体 —— 否则同一
+/// 个底层失败在不同层得到不同的错误类型,调用方要维护两套 match。
 #[derive(Debug, thiserror::Error)]
 pub enum ProcessorError {
     #[error("Processing error: {0}")]
     Processing(String),
-    #[error("I/O error: {0}")]
-    Io(#[from] io::Error),
-    #[error("JSON error: {0}")]
-    Json(#[from] serde_json::Error),
     #[error("External error: {0}")]
     Mew(#[from] requests::MewError),
     /// 用户在交互中主动中止(如按 Q 退出处理会话)
     #[error("Aborted by user")]
     Aborted,
+}
+
+impl From<io::Error> for ProcessorError {
+    fn from(err: io::Error) -> Self {
+        Self::Mew(err.into())
+    }
+}
+
+impl From<serde_json::Error> for ProcessorError {
+    fn from(err: serde_json::Error) -> Self {
+        Self::Mew(err.into())
+    }
 }
 
 // 辅助函数
