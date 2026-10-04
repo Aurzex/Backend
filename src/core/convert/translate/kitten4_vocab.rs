@@ -10,11 +10,12 @@
 //! **编辑器真的认识**的名字。挑错的后果实测很重:产物里只要有编辑器不认识的类型,
 //! 编辑器加载整份工作区就会失败 —— 画布**一块都不显示**(见 `docs/rounds/34` §4nonies)。
 
-/// **重导流程(编辑器升级后必做)**
+/// **重导流程(编辑器升级后必做,可复跑)**
 ///
 /// ① 无头浏览器打开 `https://kitten4.codemao.cn/` 并等编辑器就绪(页面有 `window.Blockly`);
-/// ② 在页面里取 `Object.keys(window.Blockly.Blocks).sort()`;
-/// ③ 用结果**整体替换**下面的数组,并更新 [`KITTEN4_VOCAB_EXPORTED`]。
+/// ② 在页面控制台执行下面的命令,得到**已排序**、可直接粘进 Rust 数组的行文本:
+///    `Object.keys(window.Blockly.Blocks).sort().forEach(k => console.log(\`    "${k}",\`))`
+/// ③ 用输出**整体替换**下面的数组,并把 [`KITTEN4_VOCAB_EXPORTED`] 更新为 `(导出日期, 条目数)`。
 ///
 /// 判据:产物里出现的类型名(含影子 XML 的 `type`)必须都在这个数组里 ——
 /// 少一个,编辑器加载**整份工作区**就会失败(见 `docs/knowledge/convert-semantics.md` §5bis)。

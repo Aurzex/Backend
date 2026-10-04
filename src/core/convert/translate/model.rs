@@ -1579,6 +1579,44 @@ pub(super) fn nested_index<V: Copy>(
     index
 }
 
+/// 反查用的**分组索引**:外层键 → 该组的**原始条目切片**(**不去重**)。
+///
+/// 与 [`nested_index`] 的区别是不做去重:反向映射靠"命中数唯一才认"判歧义
+/// (见 `mapping::reverse_slot_name`),去重会丢掉多命中、把歧义误判成唯一。
+/// 同名组重复时保留**首个**,与原来的 `iter().find(|(k, _)| *k == name)` 同口径。
+pub(super) fn group_index<V: Copy>(
+    pairs: &'static [(&'static str, &'static [(&'static str, V)])],
+) -> HashMap<&'static str, &'static [(&'static str, V)]> {
+    let mut index = HashMap::with_capacity(pairs.len());
+    for (key, entries) in pairs {
+        index.entry(*key).or_insert(*entries);
+    }
+    index
+}
+
+/// 值 → 键的反查索引:**保留全部命中与表内顺序**,与逐条 `filter(|(_, v)| *v == x)` 等价
+/// (调用方常按"命中数唯一才认"判歧义,所以不能像 [`flat_index`] 那样只留第一个)。
+pub(super) fn flat_reverse_index(
+    pairs: &'static [(&'static str, &'static str)],
+) -> HashMap<&'static str, Vec<&'static str>> {
+    let mut index: HashMap<&'static str, Vec<&'static str>> = HashMap::new();
+    for (key, value) in pairs {
+        index.entry(*value).or_default().push(*key);
+    }
+    index
+}
+
+/// `(键, (名, 值))` 表按 `(名, 值)` 反查键的索引(**首个命中优先**,与 `iter().find(...)` 等价)
+pub(super) fn pair_reverse_index(
+    pairs: &'static [(&'static str, (&'static str, &'static str))],
+) -> HashMap<(&'static str, &'static str), &'static str> {
+    let mut index = HashMap::with_capacity(pairs.len());
+    for (key, pair) in pairs {
+        index.entry(*pair).or_insert(*key);
+    }
+    index
+}
+
 #[cfg(test)]
 mod neko_tests {
     use super::*;

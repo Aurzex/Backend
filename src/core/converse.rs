@@ -353,6 +353,9 @@ impl ChatClient {
     }
 
     /// 注册流式回复回调(内容,事件类型)
+    ///
+    /// **回调不应 panic**:`release` 构建是 `panic = "abort"`,回调内的 panic 会**直接终止进程**
+    /// (`catch_unwind` 在此配置下无效);回调需自行吞掉内部错误。
     pub fn on_stream(
         &self,
         cb: impl Fn(&str, ChatEventType) + Send + Sync + 'static,
@@ -509,175 +512,150 @@ pub(crate) fn parse_chat_ack(payload: &Value) -> Option<StreamEvent> {
     }
 }
 
-// 事件处理策略
-
-/// 事件处理策略接口:每种事件一个处理器
-trait ChatEventHandler: Send + Sync {
-    fn handle(&self, inner: &Arc<ChatInner>, payload: &Value);
-}
+// 事件分派:按事件名调用下列自由函数(每种事件一个处理函数,不再用 trait/结构体)
 
 /// `on_connect_ack`:记录连接确认信息(剩余对话次数),并发送 JOIN
 /// JOIN 在收到连接确认后发送(服务器就绪),与 Python 的时序一致
-struct ConnectAckHandler;
-
-impl ChatEventHandler for ConnectAckHandler {
-    fn handle(&self, inner: &Arc<ChatInner>, payload: &Value) {
-        if payload.get("code").and_then(Value::as_i64) != Some(1) {
-            return;
-        }
-        if let Some(data) = payload.get("data").and_then(Value::as_object) {
-            inner.user_info.lock().unwrap().extend(data.clone());
-            let chat_count = data
-                .get("chat_count")
-                .map_or_else(|| "未知".into(), ToString::to_string);
-            info!("连接确认 - 剩余对话次数: {chat_count}");
-        }
-        // 服务器可能重复确认,只发送一次 JOIN(帧格式与 Python 的 `42 ["join"]` 一致)
-        if !inner.join_sent.swap(true, Ordering::AcqRel)
-            && let Err(e) = send_raw(inner, "42 [\"join\"]")
-        {
-            warn!("发送 JOIN 失败: {e}");
-        }
+fn handle_connect_ack(inner: &Arc<ChatInner>, payload: &Value) {
+    if payload.get("code").and_then(Value::as_i64) != Some(1) {
+        return;
+    }
+    if let Some(data) = payload.get("data").and_then(Value::as_object) {
+        inner.user_info.lock().unwrap().extend(data.clone());
+        let chat_count = data
+            .get("chat_count")
+            .map_or_else(|| "未知".into(), ToString::to_string);
+        info!("连接确认 - 剩余对话次数: {chat_count}");
+    }
+    // 服务器可能重复确认,只发送一次 JOIN(帧格式与 Python 的 `42 ["join"]` 一致)
+    if !inner.join_sent.swap(true, Ordering::AcqRel)
+        && let Err(e) = send_raw(inner, "42 [\"join\"]")
+    {
+        warn!("发送 JOIN 失败: {e}");
     }
 }
 
 /// `join_ack`:记录用户信息并发送预设消息
-struct JoinAckHandler;
-
-impl ChatEventHandler for JoinAckHandler {
-    fn handle(&self, inner: &Arc<ChatInner>, payload: &Value) {
-        if payload.get("code").and_then(Value::as_i64) != Some(1) {
-            return;
-        }
-        let data = payload.get("data");
-        if let Some(data) = data {
-            // 服务器将 user_id 以字符串形式返回(如 "1742185446")
-            let user_id = data.get("user_id").and_then(|v| {
-                v.as_i64()
-                    .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
-            });
-            if let Some(user_id) = user_id {
-                *inner.user_id.lock().unwrap() = Some(user_id);
-            }
-            if let Some(session) = data.get("search_session").and_then(Value::as_str) {
-                *inner.search_session.lock().unwrap() = Some(session.to_string());
-            }
-        }
-        inner.notify.notify_with(|| {
-            inner.joined.store(true, Ordering::Release);
-        });
-        info!(
-            "加入成功 - 用户 ID: {:?}, 会话: {:?}",
-            *inner.user_id.lock().unwrap(),
-            *inner.search_session.lock().unwrap()
-        );
-        let _ = send_event_on(
-            inner,
-            "preset_chat_message",
-            &json!({
-                "turn_count": 5,
-                "system_content_enum": "default",
-            }),
-        )
-        .inspect_err(|e| warn!("发送预设消息失败: {e}"));
-        let _ = send_event_on(inner, "get_text2Img_remaining_times", &Value::Null)
-            .inspect_err(|e| warn!("查询剩余生成次数失败: {e}"));
+fn handle_join_ack(inner: &Arc<ChatInner>, payload: &Value) {
+    if payload.get("code").and_then(Value::as_i64) != Some(1) {
+        return;
     }
+    let data = payload.get("data");
+    if let Some(data) = data {
+        // 服务器将 user_id 以字符串形式返回(如 "1742185446")
+        let user_id = data.get("user_id").and_then(|v| {
+            v.as_i64()
+                .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+        });
+        if let Some(user_id) = user_id {
+            *inner.user_id.lock().unwrap() = Some(user_id);
+        }
+        if let Some(session) = data.get("search_session").and_then(Value::as_str) {
+            *inner.search_session.lock().unwrap() = Some(session.to_string());
+        }
+    }
+    inner.notify.notify_with(|| {
+        inner.joined.store(true, Ordering::Release);
+    });
+    info!(
+        "加入成功 - 用户 ID: {:?}, 会话: {:?}",
+        *inner.user_id.lock().unwrap(),
+        *inner.search_session.lock().unwrap()
+    );
+    let _ = send_event_on(
+        inner,
+        "preset_chat_message",
+        &json!({
+            "turn_count": 5,
+            "system_content_enum": "default",
+        }),
+    )
+    .inspect_err(|e| warn!("发送预设消息失败: {e}"));
+    let _ = send_event_on(inner, "get_text2Img_remaining_times", &Value::Null)
+        .inspect_err(|e| warn!("查询剩余生成次数失败: {e}"));
 }
 
 /// `preset_chat_message_ack`:预设消息确认
-struct PresetAckHandler;
-
-impl ChatEventHandler for PresetAckHandler {
-    fn handle(&self, _inner: &Arc<ChatInner>, _payload: &Value) {
-        debug!("预设消息确认");
-    }
+fn handle_preset_ack(_inner: &Arc<ChatInner>, _payload: &Value) {
+    debug!("预设消息确认");
 }
 
 /// `get_text2Img_remaining_times_ack`:剩余图片生成次数
-struct RemainingTimesHandler;
-
-impl ChatEventHandler for RemainingTimesHandler {
-    fn handle(&self, inner: &Arc<ChatInner>, payload: &Value) {
-        if payload.get("code").and_then(Value::as_i64) != Some(1) {
-            return;
-        }
-        if let Some(remaining) = payload.get("data").and_then(|d| d.get("remaining_times")) {
-            inner
-                .user_info
-                .lock()
-                .unwrap()
-                .insert("remaining_image_times".into(), remaining.clone());
-            info!("剩余图片生成次数: {}", remaining);
-        }
+fn handle_remaining_times(inner: &Arc<ChatInner>, payload: &Value) {
+    if payload.get("code").and_then(Value::as_i64) != Some(1) {
+        return;
+    }
+    if let Some(remaining) = payload.get("data").and_then(|d| d.get("remaining_times")) {
+        inner
+            .user_info
+            .lock()
+            .unwrap()
+            .insert("remaining_image_times".into(), remaining.clone());
+        info!("剩余图片生成次数: {}", remaining);
     }
 }
 
 /// `chat_ack`:处理流式回复
-struct ChatAckHandler;
-
-impl ChatEventHandler for ChatAckHandler {
-    fn handle(&self, inner: &Arc<ChatInner>, payload: &Value) {
-        let Some(event) = parse_chat_ack(payload) else {
-            return;
-        };
-        match event {
-            StreamEvent::Begin => {
-                if let Some(session_id) = payload
-                    .get("data")
-                    .and_then(|d| d.get("session_id"))
-                    .and_then(Value::as_str)
-                {
-                    *inner.session_id.lock().unwrap() = Some(session_id.to_string());
-                }
-                *inner.current_response.lock().unwrap() = String::new();
-                inner.notify.notify_with(|| {
-                    inner.receiving.store(true, Ordering::Release);
-                    inner.completed_round.store(
-                        inner.pending_round.load(Ordering::Acquire),
-                        Ordering::Release,
-                    );
-                });
-                emit_stream(inner, "", ChatEventType::Start);
+fn handle_chat_ack(inner: &Arc<ChatInner>, payload: &Value) {
+    let Some(event) = parse_chat_ack(payload) else {
+        return;
+    };
+    match event {
+        StreamEvent::Begin => {
+            if let Some(session_id) = payload
+                .get("data")
+                .and_then(|d| d.get("session_id"))
+                .and_then(Value::as_str)
+            {
+                *inner.session_id.lock().unwrap() = Some(session_id.to_string());
             }
-            StreamEvent::Chunk(content) => {
-                if inner.receiving.load(Ordering::Acquire) {
-                    inner.current_response.lock().unwrap().push_str(&content);
-                    emit_stream(inner, &content, ChatEventType::Text);
-                }
+            *inner.current_response.lock().unwrap() = String::new();
+            inner.notify.notify_with(|| {
+                inner.receiving.store(true, Ordering::Release);
+                inner.completed_round.store(
+                    inner.pending_round.load(Ordering::Acquire),
+                    Ordering::Release,
+                );
+            });
+            emit_stream(inner, "", ChatEventType::Start);
+        }
+        StreamEvent::Chunk(content) => {
+            if inner.receiving.load(Ordering::Acquire) {
+                inner.current_response.lock().unwrap().push_str(&content);
+                emit_stream(inner, &content, ChatEventType::Text);
             }
-            StreamEvent::End(_) => {
-                inner.notify.notify_with(|| {
-                    inner.receiving.store(false, Ordering::Release);
-                });
-                // 先落历史,再发 End 事件:End 回调中可读到完整对话
-                // 保留克隆而非 take:current_response 需在 End 后仍可被 send_and_wait 读取
-                let full = inner.current_response.lock().unwrap().clone();
-                if !full.is_empty() {
-                    inner
-                        .history
-                        .lock()
-                        .unwrap()
-                        .push(HistoryMessage::assistant(full.clone()));
-                }
-                emit_stream(inner, &full, ChatEventType::End);
+        }
+        StreamEvent::End(_) => {
+            inner.notify.notify_with(|| {
+                inner.receiving.store(false, Ordering::Release);
+            });
+            // 先落历史,再发 End 事件:End 回调中可读到完整对话
+            // 保留克隆而非 take:current_response 需在 End 后仍可被 send_and_wait 读取
+            let full = inner.current_response.lock().unwrap().clone();
+            if !full.is_empty() {
+                inner
+                    .history
+                    .lock()
+                    .unwrap()
+                    .push(HistoryMessage::assistant(full.clone()));
             }
+            emit_stream(inner, &full, ChatEventType::End);
         }
     }
 }
 
-/// 事件分派(策略注册表)
+/// 事件分派表(事件名 → 处理函数)
 fn dispatch_event(inner: &Arc<ChatInner>, name: &str, payload: &Value) {
     debug!(
         "收到 AI 事件: {name}, 载荷: {}",
         truncate(&payload.to_string(), 200)
     );
     match name {
-        "on_connect_ack" => ConnectAckHandler.handle(inner, payload),
-        "join_ack" => JoinAckHandler.handle(inner, payload),
-        "preset_chat_message_ack" => PresetAckHandler.handle(inner, payload),
-        "get_text2Img_remaining_times_ack" => RemainingTimesHandler.handle(inner, payload),
-        "chat_ack" => ChatAckHandler.handle(inner, payload),
+        "on_connect_ack" => handle_connect_ack(inner, payload),
+        "join_ack" => handle_join_ack(inner, payload),
+        "preset_chat_message_ack" => handle_preset_ack(inner, payload),
+        "get_text2Img_remaining_times_ack" => handle_remaining_times(inner, payload),
+        "chat_ack" => handle_chat_ack(inner, payload),
         other => {
             debug!("未知事件: {other}");
         }

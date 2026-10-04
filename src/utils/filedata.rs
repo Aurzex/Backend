@@ -89,3 +89,47 @@ pub fn value_to_i64(v: &serde_json::Value) -> Option<i64> {
         _ => None,
     }
 }
+
+// 通用值/文本工具(自 `core::registry` 归位:与举报类型无关,举报引擎只是消费方)
+
+/// 将 JSON 值转为字符串(字符串直取,数字转文本,其余空串)
+pub(crate) fn value_to_string(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Number(n) => n.to_string(),
+        _ => String::new(),
+    }
+}
+
+/// 将时间戳转换为字符串表示
+pub(crate) fn timestamp_to_string(ts: &serde_json::Value) -> String {
+    if let Some(secs) = ts.as_i64()
+        && secs > 0
+    {
+        // 原实现先做 UNIX_EPOCH+Duration 再换算回秒数,结果恒等于 secs,属无意义换算
+        return format!("{}", secs);
+    }
+    ts.to_string()
+}
+
+/// 去除 JSON 内嵌 HTML 的常见标记,转成可读纯文本
+pub(crate) fn html_to_text(html: &str) -> String {
+    html.replace("<br>", "\n")
+        .replace("<br/>", "\n")
+        .replace("<br />", "\n")
+        .replace("<p>", "")
+        .replace("</p>", "\n")
+        .replace("&nbsp;", " ")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+}
+
+/// 字节数转人类可读大小(KB/MB 两位小数)
+pub(crate) fn bytes_to_human(size_bytes: u64) -> String {
+    if size_bytes >= 1024 * 1024 {
+        format!("{:.2} MB", size_bytes as f64 / 1024.0 / 1024.0)
+    } else {
+        format!("{:.2} KB", size_bytes as f64 / 1024.0)
+    }
+}

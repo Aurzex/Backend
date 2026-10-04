@@ -87,26 +87,7 @@ pub enum UserRole {
     Admin,
 }
 
-/// 账号状态/类型(普通,评审,教育)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AccountStatus {
-    Judgement,
-    Average,
-    Edu,
-}
-
-impl AccountStatus {
-    /// 映射为身份枚举 `Identity`
-    pub fn to_identity(self) -> Identity {
-        match self {
-            AccountStatus::Judgement => Identity::Judge,
-            AccountStatus::Average => Identity::Fluffy,
-            AccountStatus::Edu => Identity::Scholar,
-        }
-    }
-}
-
-// 数据结构
+// 数据结构(账号身份直接用 `utils::requests::Identity`,不再维护平行枚举)
 
 /// 登录凭据,聚合身份,密码,令牌,状态等信息
 #[derive(Debug, Clone)]
@@ -115,7 +96,7 @@ pub struct LoginCredentials {
     pub password: String,
     pub token: String,
     pub pid: String,
-    pub status: AccountStatus,
+    pub status: Identity,
     pub role: UserRole,
     pub timestamp: Option<i64>,
     pub captcha: Option<String>,
@@ -128,7 +109,7 @@ impl Default for LoginCredentials {
             password: String::new(),
             token: String::new(),
             pid: DEFAULT_PID.to_string(),
-            status: AccountStatus::Average,
+            status: Identity::Fluffy,
             role: UserRole::User,
             timestamp: None,
             captcha: None,
@@ -582,7 +563,7 @@ impl LoginHandler {
         identity: &str,
         password: &str,
         pid: &str,
-        status: AccountStatus,
+        status: Identity,
     ) -> MewResult<LoginResult> {
         let client = self.client();
         client.switch_identity(Identity::Blanky)?;
@@ -590,7 +571,7 @@ impl LoginHandler {
         match self.processor.handle_password_v0(identity, password, pid) {
             Ok(data) => {
                 if let Some(token) = data.get("token").and_then(|t| t.as_str()) {
-                    self.set_token_and_identity(token, status.to_identity())?;
+                    self.set_token_and_identity(token, status)?;
                     Ok(
                         LoginResult::new(true, LoginMethod::PasswordV0, "v0 密码登录成功")
                             .with_token(token)
@@ -614,7 +595,7 @@ impl LoginHandler {
         identity: &str,
         password: &str,
         pid: &str,
-        status: AccountStatus,
+        status: Identity,
     ) -> MewResult<LoginResult> {
         let client = self.client();
         client.switch_identity(Identity::Blanky)?;
@@ -626,7 +607,7 @@ impl LoginHandler {
                     .and_then(|a| a.get("token"))
                     .and_then(|t| t.as_str())
                 {
-                    self.set_token_and_identity(token, status.to_identity())?;
+                    self.set_token_and_identity(token, status)?;
                     Ok(
                         LoginResult::new(true, LoginMethod::PasswordV1, "v1 密码登录成功")
                             .with_token(token)
@@ -650,7 +631,7 @@ impl LoginHandler {
         identity: &str,
         password: &str,
         pid: &str,
-        status: AccountStatus,
+        status: Identity,
     ) -> MewResult<LoginResult> {
         let client = self.client();
         client.switch_identity(Identity::Blanky)?;
@@ -662,7 +643,7 @@ impl LoginHandler {
                     .and_then(|a| a.get("token"))
                     .and_then(|t| t.as_str())
                 {
-                    self.set_token_and_identity(token, status.to_identity())?;
+                    self.set_token_and_identity(token, status)?;
                     Ok(
                         LoginResult::new(true, LoginMethod::PasswordV2, "v2 密码登录成功")
                             .with_token(token)
@@ -681,13 +662,13 @@ impl LoginHandler {
     }
 
     /// Token 登录处理(普通用户)
-    pub fn handle_token(&self, token: &str, status: AccountStatus) -> MewResult<LoginResult> {
+    pub fn handle_token(&self, token: &str, status: Identity) -> MewResult<LoginResult> {
         if token.trim().is_empty() {
             return Err(MewError::Auth("Token 不能为空".into()));
         }
 
         let auth_details = self.processor.fetch_auth_details(token)?;
-        self.set_token_and_identity(token, status.to_identity())?;
+        self.set_token_and_identity(token, status)?;
         Ok(LoginResult::new(true, LoginMethod::Token, "Token 登录成功")
             .with_token(token)
             .with_auth_details(auth_details))
@@ -1094,14 +1075,10 @@ impl AuthManager {
     }
 
     /// 手动配置认证令牌(不经过登录流程)
-    pub fn configure_authentication_token(
-        &self,
-        token: &str,
-        status: AccountStatus,
-    ) -> MewResult<()> {
+    pub fn configure_authentication_token(&self, token: &str, status: Identity) -> MewResult<()> {
         let client = self.client();
-        client.set_token(status.to_identity(), token)?;
-        client.switch_identity(status.to_identity())?;
+        client.set_token(status, token)?;
+        client.switch_identity(status)?;
         Ok(())
     }
 
@@ -1280,7 +1257,7 @@ pub struct LoginBuilder {
     password: Option<String>,
     token: Option<String>,
     pid: Option<String>,
-    status: AccountStatus,
+    status: Identity,
     role: UserRole,
     prefer_method: Option<LoginMethod>,
     timestamp: Option<i64>,
@@ -1301,7 +1278,7 @@ impl LoginBuilder {
             password: None,
             token: None,
             pid: None,
-            status: AccountStatus::Average,
+            status: Identity::Fluffy,
             role: UserRole::User,
             prefer_method: None,
             timestamp: None,
@@ -1329,7 +1306,7 @@ impl LoginBuilder {
         self
     }
 
-    pub fn status(mut self, val: AccountStatus) -> Self {
+    pub fn status(mut self, val: Identity) -> Self {
         self.status = val;
         self
     }

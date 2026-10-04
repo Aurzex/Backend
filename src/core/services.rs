@@ -17,11 +17,10 @@ use super::pipeline::{
     truncate_chars,
 };
 use super::registry::{
-    ProcessorError, ReportAction, ReportFetcher, SourceConfig, bytes_to_human, html_to_text,
-    resolution_display_name, value_to_string,
+    ProcessorError, ReportAction, ReportFetcher, SourceConfig, resolution_display_name,
 };
 use crate::api::whale::{ReportStatus, Resolution};
-use crate::utils::filedata::value_to_i64;
+use crate::utils::filedata::{bytes_to_human, html_to_text, value_to_i64, value_to_string};
 use crate::utils::requests::{CodeMaoClient, FileUploader, UploadChannel, current_timestamp_secs};
 
 /// 批量分组的键:(分组类型, 分组键)

@@ -315,8 +315,17 @@ impl AsRef<str> for Identity {
 /// `AtomicUsize` 使用 `Release/Acquire` 排序保证身份切换后令牌可见
 #[derive(Debug)]
 pub(crate) struct IdentityManager {
-    token_bowl: RwLock<[Option<Arc<str>>; 4]>,
+    token_bowl: RwLock<[IdentitySlot; 4]>,
     current_cat: AtomicUsize,
+}
+
+/// 单个身份槽:令牌 + 其预计算的 `"Bearer {token}"` 头值。
+///
+/// 两者在 `set_token` 时一并写入 ⇒ 请求路径只读、只克隆 `Arc`,不再逐请求 `format!`。
+#[derive(Debug, Clone, Default)]
+struct IdentitySlot {
+    token: Option<Arc<str>>,
+    header: Option<Arc<str>>,
 }
 
 impl IdentityManager {
@@ -416,9 +425,11 @@ impl From<HttpMethod> for &'static str {
 pub trait AuthProvider: Send + Sync + std::fmt::Debug {
     fn current_identity(&self) -> Identity;
     fn current_token(&self) -> Option<Arc<str>>;
-    fn auth_header(&self) -> Option<(&'static str, String)> {
+    /// 认证头(名, 值)。值以 `Arc<str>` 返回:内置实现**在令牌变更时预计算**,
+    /// 请求时只做一次廉价引用计数克隆,不再逐请求 `format!`。
+    fn auth_header(&self) -> Option<(&'static str, Arc<str>)> {
         self.current_token()
-            .map(|token| ("Authorization", format!("Bearer {}", token)))
+            .map(|token| ("Authorization", Arc::from(format!("Bearer {token}"))))
     }
     fn set_token(&self, identity: Identity, token: String) -> MewResult<()>;
     fn switch_identity(&self, identity: Identity) -> MewResult<()>;
@@ -438,7 +449,14 @@ impl AuthProvider for IdentityManager {
     fn current_token(&self) -> Option<Arc<str>> {
         let idx = self.current_cat.load(Ordering::Acquire);
         let bowl = self.token_bowl.read().unwrap();
-        bowl[idx].clone()
+        bowl[idx].token.clone()
+    }
+
+    /// 当前身份的认证头(令牌变更时已预计算,这里只克隆一次 `Arc`)
+    fn auth_header(&self) -> Option<(&'static str, Arc<str>)> {
+        let idx = self.current_cat.load(Ordering::Acquire);
+        let bowl = self.token_bowl.read().unwrap();
+        bowl[idx].header.clone().map(|h| ("Authorization", h))
     }
 
     /// 设置指定身份的令牌
@@ -450,11 +468,16 @@ impl AuthProvider for IdentityManager {
             return Err(MewError::Auth("Blanky identity cannot hold a token".into()));
         }
         let mut bowl = self.token_bowl.write().unwrap();
-        // 空字符串表示清空令牌,否则存入新令牌
+        // 空字符串表示清空令牌,否则存入新令牌并**预计算**其认证头值
         bowl[identity.index()] = if token.is_empty() {
-            None
+            IdentitySlot::default()
         } else {
-            Some(Arc::from(token))
+            let token: Arc<str> = Arc::from(token);
+            let header: Arc<str> = Arc::from(format!("Bearer {token}"));
+            IdentitySlot {
+                token: Some(token),
+                header: Some(header),
+            }
         };
         Ok(())
     }
@@ -464,7 +487,9 @@ impl AuthProvider for IdentityManager {
     /// Blanky 可以无条件切换(不需要令牌),其他身份必须已持有令牌
     fn switch_identity(&self, identity: Identity) -> MewResult<()> {
         if identity != Identity::Blanky
-            && self.token_bowl.read().unwrap()[identity.index()].is_none()
+            && self.token_bowl.read().unwrap()[identity.index()]
+                .token
+                .is_none()
         {
             return Err(MewError::Auth(format!(
                 "No token for identity {:?}",
@@ -499,6 +524,10 @@ impl AuthProvider for GlobalKittyAuth {
 
     fn current_token(&self) -> Option<Arc<str>> {
         get_global_identity_manager().current_token()
+    }
+
+    fn auth_header(&self) -> Option<(&'static str, Arc<str>)> {
+        get_global_identity_manager().auth_header()
     }
 
     fn set_token(&self, identity: Identity, token: String) -> MewResult<()> {
@@ -538,6 +567,10 @@ impl AuthProvider for LocalKittyAuth {
 
     fn current_token(&self) -> Option<Arc<str>> {
         self.inner.current_token()
+    }
+
+    fn auth_header(&self) -> Option<(&'static str, Arc<str>)> {
+        self.inner.auth_header()
     }
 
     fn set_token(&self, identity: Identity, token: String) -> MewResult<()> {
@@ -864,7 +897,7 @@ impl KittyCore {
         if let Some((k, v)) = auth.auth_header()
             && !is_header_overridden(k, extra_headers)
         {
-            builder = builder.header(k, &v);
+            builder = builder.header(k, v.as_ref());
         }
         for (k, v) in extra_headers {
             builder = builder.header(k.as_str(), v.as_str());

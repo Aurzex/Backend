@@ -46,6 +46,7 @@ use serde_json::{Value, json};
 
 use super::model::IdSource;
 use super::model::{BlockJson, BlockTree, flat_index, math_number_node, nested_index};
+use super::model::{flat_reverse_index, group_index, pair_reverse_index};
 use super::report::{TranslateReport, TranslateWarning};
 use super::tables_gen::{
     KITTEN_MUTATION_TEXT, KITTEN_MUTATION_TEXT_SELECT, KITTEN_TO_KN, TEXT_PLACEHOLDER_BLOCKS,
@@ -242,6 +243,30 @@ static INPUT_NAME_MAP_INDEX: std::sync::LazyLock<
 static APPEARANCE_ATTRIBUTE_INDEX: std::sync::LazyLock<
     HashMap<&'static str, (&'static str, &'static str)>,
 > = std::sync::LazyLock::new(|| flat_index(APPEARANCE_ATTRIBUTE));
+
+// ---------------------------------------------------------------- 反向查表索引
+//
+// 与正向索引同口径(首个命中优先),但有几处**必须**不同:
+// - 组索引用 `group_index`(不去重):反向靠"命中数唯一才认"判歧义;
+// - 值向索引用 `flat_reverse_index`(保留全部命中):`reverse_field_name` 要看候选个数。
+static SPECIAL_FIELD_VALUES_GROUPS: std::sync::LazyLock<
+    HashMap<&'static str, &'static [(&'static str, &'static str)]>,
+> = std::sync::LazyLock::new(|| group_index(SPECIAL_FIELD_VALUES));
+
+static INPUT_NAME_MAP_GROUPS: std::sync::LazyLock<
+    HashMap<&'static str, &'static [(&'static str, &'static str)]>,
+> = std::sync::LazyLock::new(|| group_index(INPUT_NAME_MAP));
+
+static FIELD_NAME_MAP_REVERSE: std::sync::LazyLock<HashMap<&'static str, Vec<&'static str>>> =
+    std::sync::LazyLock::new(|| flat_reverse_index(FIELD_NAME_MAP));
+
+static APPEARANCE_ATTRIBUTE_REVERSE: std::sync::LazyLock<
+    HashMap<(&'static str, &'static str), &'static str>,
+> = std::sync::LazyLock::new(|| pair_reverse_index(APPEARANCE_ATTRIBUTE));
+
+/// `ZH_NAME_BY_TYPE` 的兜底标题索引(每块都可能查,原先是 204 条线性扫)
+static ZH_NAME_BY_TYPE_INDEX: std::sync::LazyLock<HashMap<&'static str, &'static str>> =
+    std::sync::LazyLock::new(|| flat_index(ZH_NAME_BY_TYPE));
 
 // 降级占位积木的标题表索引(与上面的正向表同口径)
 static KITTEN_MUTATION_TEXT_INDEX: std::sync::LazyLock<HashMap<&'static str, &'static str>> =
@@ -441,11 +466,9 @@ fn mutation_text(orig: &str, fields: &BTreeMap<String, Value>) -> (String, bool)
 
 /// `ZH_NAME_BY_TYPE` 兜底标题
 fn zh_title(kind: &str) -> String {
-    ZH_NAME_BY_TYPE
-        .iter()
-        .find(|(k, _)| *k == kind)
-        .map(|(_, v)| (*v).to_string())
-        .unwrap_or_else(|| kind.to_string())
+    ZH_NAME_BY_TYPE_INDEX
+        .get(kind)
+        .map_or_else(|| kind.to_string(), |v| (*v).to_string())
 }
 
 fn mutation_xml(text: &str) -> String {
@@ -916,7 +939,7 @@ pub(super) fn reverse_candidates(kind: &str) -> &'static [&'static str] {
 
 /// `LC` 里键值不同的类型(正向会改名):保留它们的 KN 名**不能**保证往返回来
 fn is_renamed_lc_key(kind: &str) -> bool {
-    KITTEN_TO_KN.iter().any(|(k, v)| *k == kind && *v != kind)
+    KITTEN_TO_KN_INDEX.get(kind).is_some_and(|kn| *kn != kind)
 }
 
 /// 正向类型预览:校验反演候选确实能再正向映射回同一个 KN 类型(往返安全性的硬保证)
@@ -974,16 +997,11 @@ fn reverse_field_name(kitten: &str, kn_name: &str) -> String {
         _ => {}
     }
     // `FIELD_NAME_MAP` 的反转(值 → 键);歧义时优先"本来就是这个名字"
-    if map_field_name(kitten, kn_name) == kn_name
-        && !FIELD_NAME_MAP.iter().any(|(_, v)| *v == kn_name)
-    {
+    let reverse = FIELD_NAME_MAP_REVERSE.get(kn_name);
+    if map_field_name(kitten, kn_name) == kn_name && reverse.is_none() {
         return kn_name.to_string();
     }
-    let mut candidates: Vec<&str> = FIELD_NAME_MAP
-        .iter()
-        .filter(|(_, v)| *v == kn_name)
-        .map(|(k, _)| *k)
-        .collect();
+    let mut candidates: Vec<&str> = reverse.cloned().unwrap_or_default();
     if kn_name == "type" && !candidates.contains(&"OP") {
         candidates.push("OP");
     }
@@ -1013,7 +1031,7 @@ fn reverse_field_value(kitten_field: &str, value: &Value) -> Value {
 
 /// 取值表反查:`SPECIAL_FIELD_VALUES[name]` 里映射结果为 `text` 的源值
 fn unmapped_field_text(name: &str, text: &str) -> Option<String> {
-    let entries = SPECIAL_FIELD_VALUES.iter().find(|(k, _)| *k == name)?.1;
+    let entries = SPECIAL_FIELD_VALUES_GROUPS.get(name)?;
     entries
         .iter()
         .find(|(_, v)| *v == text)
@@ -1022,16 +1040,15 @@ fn unmapped_field_text(name: &str, text: &str) -> Option<String> {
 
 /// KN 输入/影子槽位名 → Kitten 槽位名(按 `INPUT_NAME_MAP` 反查;`key` 是正向 lookup 用的类型)
 fn reverse_slot_name(key: &str, kn_slot: &str) -> String {
-    let Some((_, entries)) = INPUT_NAME_MAP.iter().find(|(k, _)| *k == key) else {
+    let Some(entries) = INPUT_NAME_MAP_GROUPS.get(key) else {
         return kn_slot.to_string();
     };
-    let hits: Vec<&str> = entries
+    let mut hits = entries
         .iter()
         .filter(|(_, mapped)| *mapped == kn_slot)
-        .map(|(orig, _)| *orig)
-        .collect();
-    match hits.as_slice() {
-        [only] => (*only).to_string(),
+        .map(|(orig, _)| *orig);
+    match (hits.next(), hits.next()) {
+        (Some(only), None) => only.to_string(),
         _ => kn_slot.to_string(),
     }
 }
@@ -1386,10 +1403,9 @@ fn reverse_appearance_attribute(
         _ => return None,
     };
     let value = value.and_then(value_key)?;
-    APPEARANCE_ATTRIBUTE
-        .iter()
-        .find(|(_, (name, mapped))| *name == field && *mapped == value.as_ref())
-        .map(|(key, _)| *key)
+    APPEARANCE_ATTRIBUTE_REVERSE
+        .get(&(field, value.as_ref()))
+        .copied()
 }
 
 /// 类型级字段补齐(在字段反演之后跑;这些字段是正向从别的字段派生的,不属于源)

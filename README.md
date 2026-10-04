@@ -71,14 +71,15 @@ backend = { path = "../Backend" }
 **1. 登录 + 分页拉取**(`LoginBuilder` 写身份,`PaginatedIter` 直接 for 循环):
 
 ```rust
-use backend::api::auth::{AccountStatus, LoginBuilder};
+use backend::api::auth::LoginBuilder;
 use backend::api::education::EduDataFetcher;
+use backend::utils::requests::Identity;
 
 // 登录:小鱼干(令牌)写进全局身份槽,之后所有请求自动携带
 LoginBuilder::new()
     .identity("13800138000")
     .password("student-pass")
-    .status(AccountStatus::Edu)   // 教育身份,映射到 IdentityIdentity::Scholar
+    .status(Identity::Scholar)    // 教育身份
     .execute()?;                  // 构造阶段无副作用,execute() 才发网络请求
 //                                  -> MewResult<LoginResult>
 

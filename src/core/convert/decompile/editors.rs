@@ -1336,7 +1336,13 @@ impl CocoDecompiler {
 
 impl WorkDecompiler for CocoDecompiler {
     fn decompile(&self, raw: RawWorkData, context: &DecompilerContext) -> Result<DecompileResult> {
-        let mut work = (*raw.expect_coco()?).clone();
+        // 唯一 Arc(`RawWorkData::Coco` 由反编译端一次性构造)时用 `try_unwrap` 免一次整份 JSON
+        // 深拷贝;拿不到唯一所有权(仍有他人持有)时回退到克隆,语义不变。
+        let coco = raw.expect_coco()?;
+        let mut work = match Arc::try_unwrap(coco) {
+            Ok(value) => value,
+            Err(shared) => (*shared).clone(),
+        };
         Self::reorganize(&mut work, context)?;
         Ok(DecompileResult::Json(work))
     }

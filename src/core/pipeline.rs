@@ -6,9 +6,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 use log::{error, info, warn};
 use serde_json::Value;
 
-use super::registry::{
-    ProcessorError, SourceConfig, html_to_text, timestamp_to_string, value_to_string,
-};
+use super::registry::{ProcessorError, SourceConfig};
 use crate::api::forum::{
     ForumActionHandler, ForumDataFetcher, ForumReportReasonId, ItemType, PostReportReasonId,
 };
@@ -16,7 +14,7 @@ use crate::api::shop::{ReportCommentArgs, WorkShopReportReasonId, WorkshopAction
 use crate::api::whale::{ReportHandler, Resolution};
 use crate::api::work::{BaseWorkOperations, CommentOperations};
 use crate::core::retrieve::{CommentSource, DataQuery, JsonObject};
-use crate::utils::filedata::PathConfig;
+use crate::utils::filedata::{PathConfig, html_to_text, timestamp_to_string, value_to_string};
 use crate::utils::requests::{CodeMaoClient, Identity, ResponseMode};
 
 // 配置结构体(依赖注入)
@@ -980,7 +978,7 @@ impl ViolationChecker {
         crate::api::auth::LoginBuilder::new_with_client(self.client.clone())
             .identity(username)
             .password(password)
-            .status(crate::api::auth::AccountStatus::Edu)
+            .status(Identity::Scholar)
             .execute()?;
         Ok(())
     }

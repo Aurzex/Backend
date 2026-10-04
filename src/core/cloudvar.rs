@@ -626,6 +626,9 @@ struct CloudInner {
     /// 建立连接的互斥锁:防止 connect() 与自动重连并发执行 establish
     connect_lock: Mutex<()>,
     commands: Mutex<VecDeque<CloudCommand>>,
+    /// flush 线程的按需唤醒标记:入队命令时在 `notify` 锁内置位,flush 线程取批前清除。
+    /// 超时(`flush_interval`)兜底仍保留——未就绪批次必须定期重试,不能只靠唤醒。
+    flush_pending: AtomicBool,
     state: Mutex<DataStore>,
     pending_rankings: Mutex<VecDeque<String>>,
     events: Mutex<Events>,
@@ -800,6 +803,7 @@ impl CloudBuilder {
             flush_join: Mutex::new(None),
             connect_lock: Mutex::new(()),
             commands: Mutex::new(VecDeque::new()),
+            flush_pending: AtomicBool::new(false),
             state: Mutex::new(DataStore::default()),
             pending_rankings: Mutex::new(VecDeque::new()),
             events: Mutex::new(Events::default()),
@@ -877,7 +881,10 @@ impl CloudConnection {
     /// 调用 `close()` 会 join 自身线程导致死锁
     pub fn close(&self) {
         let inner = &self.inner;
-        inner.stopping.store(true, Ordering::Release);
+        // 在 notify 锁内置 stopping,唤醒正阻塞在 wait_flag 的 flush 线程(避免 join 白等一个 interval)
+        inner
+            .notify
+            .notify_with(|| inner.stopping.store(true, Ordering::Release));
         inner.auto_reconnect.store(false, Ordering::Release);
         // 发送关闭帧,通知读线程退出
         if let Some(tx) = inner.tx.lock().unwrap().clone() {
@@ -942,6 +949,9 @@ impl CloudConnection {
     // 事件监听(观察者模式)
 
     /// 注册数据就绪回调
+    ///
+    /// **回调不应 panic**:`release` 构建是 `panic = "abort"`,回调内的 panic 会**直接终止进程**
+    /// (`catch_unwind` 在此配置下拦不住);回调需自行吞掉内部错误。
     pub fn on_data_ready(&self, cb: impl Fn() + Send + Sync + 'static) -> CallbackHandle {
         self.inner
             .events
@@ -952,6 +962,8 @@ impl CloudConnection {
     }
 
     /// 注册在线用户数变更回调(旧值,新值)
+    ///
+    /// **回调不应 panic**:`release` 构建是 `panic = "abort"`,回调内的 panic 会**直接终止进程**。
     pub fn on_online_users_change(
         &self,
         cb: impl Fn(i64, i64) + Send + Sync + 'static,
@@ -965,6 +977,8 @@ impl CloudConnection {
     }
 
     /// 注册排行榜数据接收回调
+    ///
+    /// **回调不应 panic**:`release` 构建是 `panic = "abort"`,回调内的 panic 会**直接终止进程**。
     pub fn on_ranking_received(
         &self,
         cb: impl Fn(RankingData) + Send + Sync + 'static,
@@ -973,6 +987,9 @@ impl CloudConnection {
     }
 
     /// 注册连接生命周期事件回调
+    ///
+    /// **回调不应 panic**:`release` 构建是 `panic = "abort"`,回调内的 panic 会**直接终止进程**
+    /// (连接回调在读线程内执行,panic 无法被 `catch_unwind` 兜住);回调需自行吞掉内部错误。
     pub fn on_connection(
         &self,
         cb: impl Fn(ConnectionEvent) + Send + Sync + 'static,
@@ -1246,6 +1263,8 @@ impl CloudVariable {
     }
 
     /// 注册变更回调(旧值,新值,来源)
+    ///
+    /// **回调不应 panic**:`release` 构建是 `panic = "abort"`,回调内的 panic 会**直接终止进程**。
     pub fn on_change(
         &self,
         cb: impl Fn(&CloudValue, &CloudValue, &str) + Send + Sync + 'static,
@@ -1277,6 +1296,8 @@ impl CloudVariable {
     }
 
     /// 注册排行榜数据回调(仅私有变量有效)
+    ///
+    /// **回调不应 panic**:`release` 构建是 `panic = "abort"`,回调内的 panic 会**直接终止进程**。
     pub fn on_ranking(
         &self,
         cb: impl Fn(RankingData) + Send + Sync + 'static,
@@ -1450,6 +1471,8 @@ impl CloudList {
     }
 
     /// 注册整表变更回调(旧列表,新列表,来源)
+    ///
+    /// **回调不应 panic**:`release` 构建是 `panic = "abort"`,回调内的 panic 会**直接终止进程**。
     pub fn on_change(
         &self,
         cb: impl Fn(&[CloudValue], &[CloudValue], &str) + Send + Sync + 'static,
@@ -1468,6 +1491,8 @@ impl CloudList {
     }
 
     /// 注册列表操作回调(操作名,参数)
+    ///
+    /// **回调不应 panic**:`release` 构建是 `panic = "abort"`,回调内的 panic 会**直接终止进程**。
     pub fn on_operation(
         &self,
         operation: &str,
@@ -1798,8 +1823,13 @@ impl CloudInner {
         Ok(())
     }
 
+    /// 入队命令并唤醒 flush 线程。置位标记与入队同在 `notify` 锁内完成,
+    /// 与 flush 线程 `wait_flag` 的「持锁检查」配对,消除丢失唤醒窗口。
     fn queue(&self, command: CloudCommand) {
-        self.commands.lock().unwrap().push_back(command);
+        self.notify.notify_with(|| {
+            self.commands.lock().unwrap().push_back(command);
+            self.flush_pending.store(true, Ordering::Release);
+        });
     }
 }
 
@@ -1890,313 +1920,276 @@ fn handle_frame(inner: &Arc<CloudInner>, text: &str) -> Result<()> {
 
 // 消息处理策略
 
-/// 消息处理策略接口:每种消息类型一个处理器
-trait MessageHandler: Send + Sync {
-    fn handle(&self, inner: &Arc<CloudInner>, payload: &Value) -> Result<()>;
-}
+// 消息分派:按事件名调用下列自由函数(每条消息一个处理函数,不再用 trait/结构体)
 
 /// `connect_done`:加入成功,请求全量数据
-struct JoinHandler;
-
-impl MessageHandler for JoinHandler {
-    fn handle(&self, inner: &Arc<CloudInner>, _payload: &Value) -> Result<()> {
-        info!("加入成功,请求所有数据");
-        send_inner_event(inner, "list_variables", &json!({}))
-    }
+fn handle_join(inner: &Arc<CloudInner>, _payload: &Value) -> Result<()> {
+    info!("加入成功,请求所有数据");
+    send_inner_event(inner, "list_variables", &json!({}))
 }
 
 /// `list_variables_done`:创建数据项并标记就绪
-struct AllDataHandler;
-
-impl MessageHandler for AllDataHandler {
-    fn handle(&self, inner: &Arc<CloudInner>, payload: &Value) -> Result<()> {
-        if let Some(items) = payload.as_array() {
-            for item in items {
-                if let Err(e) = create_data_item(inner, item) {
-                    warn!("创建数据项失败: {e}");
-                }
-            }
-            // 快照剪枝:移除快照中已不存在的本地条目,避免断线期间被服务端删除的
-            // 变量/列表残留本地;保留条目经 create_* 按名 upsert,回调不受影响
-            let keep: HashSet<&str> = items
-                .iter()
-                .filter_map(|it| it.get("cvid").and_then(Value::as_str))
-                .collect();
-            let mut store = inner.state.lock().unwrap();
-            store
-                .private_vars
-                .retain(|_, v| keep.contains(v.cvid.as_str()));
-            store
-                .public_vars
-                .retain(|_, v| keep.contains(v.cvid.as_str()));
-            store.lists.retain(|_, v| keep.contains(v.cvid.as_str()));
-            store
-                .private_cvid
-                .retain(|cvid, _| keep.contains(cvid.as_str()));
-            store
-                .public_cvid
-                .retain(|cvid, _| keep.contains(cvid.as_str()));
-            store
-                .list_cvid
-                .retain(|cvid, _| keep.contains(cvid.as_str()));
-        } else {
-            warn!(
-                "list_variables_done 载荷不是数组: {}",
-                truncate(&payload.to_string(), 200)
-            );
-        }
-        inner
-            .notify
-            .notify_with(|| inner.data_ready.store(true, Ordering::Release));
-        let callbacks = {
-            let mut events = inner.events.lock().unwrap();
-            events.data_ready.take_all()
-        };
-        for (_, cb) in &callbacks {
-            if let Err(e) = catch_unwind(AssertUnwindSafe(cb)) {
-                warn!("数据就绪回调 panic: {e:?}");
+fn handle_all_data(inner: &Arc<CloudInner>, payload: &Value) -> Result<()> {
+    if let Some(items) = payload.as_array() {
+        for item in items {
+            if let Err(e) = create_data_item(inner, item) {
+                warn!("创建数据项失败: {e}");
             }
         }
-        inner
-            .events
-            .lock()
-            .unwrap()
-            .data_ready
-            .items
-            .extend(callbacks);
-        let store = inner.state.lock().unwrap();
-        info!(
-            "数据准备完成: 私有 {} 公有 {} 列表 {}",
-            store.private_vars.len(),
-            store.public_vars.len(),
-            store.lists.len()
+        // 快照剪枝:移除快照中已不存在的本地条目,避免断线期间被服务端删除的
+        // 变量/列表残留本地;保留条目经 create_* 按名 upsert,回调不受影响
+        let keep: HashSet<&str> = items
+            .iter()
+            .filter_map(|it| it.get("cvid").and_then(Value::as_str))
+            .collect();
+        let mut store = inner.state.lock().unwrap();
+        store
+            .private_vars
+            .retain(|_, v| keep.contains(v.cvid.as_str()));
+        store
+            .public_vars
+            .retain(|_, v| keep.contains(v.cvid.as_str()));
+        store.lists.retain(|_, v| keep.contains(v.cvid.as_str()));
+        store
+            .private_cvid
+            .retain(|cvid, _| keep.contains(cvid.as_str()));
+        store
+            .public_cvid
+            .retain(|cvid, _| keep.contains(cvid.as_str()));
+        store
+            .list_cvid
+            .retain(|cvid, _| keep.contains(cvid.as_str()));
+    } else {
+        warn!(
+            "list_variables_done 载荷不是数组: {}",
+            truncate(&payload.to_string(), 200)
         );
-        Ok(())
     }
+    inner
+        .notify
+        .notify_with(|| inner.data_ready.store(true, Ordering::Release));
+    let callbacks = {
+        let mut events = inner.events.lock().unwrap();
+        events.data_ready.take_all()
+    };
+    for (_, cb) in &callbacks {
+        if let Err(e) = catch_unwind(AssertUnwindSafe(cb)) {
+            warn!("数据就绪回调 panic: {e:?}");
+        }
+    }
+    inner
+        .events
+        .lock()
+        .unwrap()
+        .data_ready
+        .items
+        .extend(callbacks);
+    let store = inner.state.lock().unwrap();
+    info!(
+        "数据准备完成: 私有 {} 公有 {} 列表 {}",
+        store.private_vars.len(),
+        store.public_vars.len(),
+        store.lists.len()
+    );
+    Ok(())
 }
 
 /// `update_private_vars_done`:云端私有变量更新
-struct UpdatePrivateVarHandler;
-
-impl MessageHandler for UpdatePrivateVarHandler {
-    fn handle(&self, inner: &Arc<CloudInner>, payload: &Value) -> Result<()> {
-        // 兼容数组(与客户端发送格式及公有通道一致)与单对象两种回显形态
-        if let Some(items) = payload.as_array() {
-            for item in items {
-                Self::apply_one(inner, item);
-            }
-        } else {
-            Self::apply_one(inner, payload);
+fn handle_update_private_vars(inner: &Arc<CloudInner>, payload: &Value) -> Result<()> {
+    // 兼容数组(与客户端发送格式及公有通道一致)与单对象两种回显形态
+    if let Some(items) = payload.as_array() {
+        for item in items {
+            apply_private_var_update(inner, item);
         }
-        Ok(())
+    } else {
+        apply_private_var_update(inner, payload);
     }
+    Ok(())
 }
 
-impl UpdatePrivateVarHandler {
-    fn apply_one(inner: &Arc<CloudInner>, payload: &Value) {
-        if let (Some(cvid), Some(value)) = (
-            payload.get("cvid").and_then(Value::as_str),
-            payload.get("value"),
-        ) {
-            let new_value = CloudValue::from_json(value);
-            let old = {
-                let mut store = inner.state.lock().unwrap();
-                match store.variable_mut(VarKind::Private, cvid) {
-                    Some(v) => Some(std::mem::replace(&mut v.value, new_value.clone())),
-                    None => None,
-                }
-            };
-            if let Some(old) = old {
-                emit_variable_change(
-                    inner,
-                    VarKind::Private,
-                    cvid,
-                    &old,
-                    &new_value,
-                    ChangeSource::Cloud,
-                );
+fn apply_private_var_update(inner: &Arc<CloudInner>, payload: &Value) {
+    if let (Some(cvid), Some(value)) = (
+        payload.get("cvid").and_then(Value::as_str),
+        payload.get("value"),
+    ) {
+        let new_value = CloudValue::from_json(value);
+        let old = {
+            let mut store = inner.state.lock().unwrap();
+            match store.variable_mut(VarKind::Private, cvid) {
+                Some(v) => Some(std::mem::replace(&mut v.value, new_value.clone())),
+                None => None,
             }
+        };
+        if let Some(old) = old {
+            emit_variable_change(
+                inner,
+                VarKind::Private,
+                cvid,
+                &old,
+                &new_value,
+                ChangeSource::Cloud,
+            );
         }
     }
 }
 
 /// `update_vars_done`:云端公有变量更新(可能是列表或 "fail")
-struct UpdatePublicVarHandler;
-
-impl MessageHandler for UpdatePublicVarHandler {
-    fn handle(&self, inner: &Arc<CloudInner>, payload: &Value) -> Result<()> {
-        if payload.as_str() == Some("fail") {
-            return Ok(());
-        }
-        if let Some(items) = payload.as_array() {
-            for item in items {
-                if let (Some(cvid), Some(value)) =
-                    (item.get("cvid").and_then(Value::as_str), item.get("value"))
-                {
-                    let new_value = CloudValue::from_json(value);
-                    let old = {
-                        let mut store = inner.state.lock().unwrap();
-                        match store.variable_mut(VarKind::Public, cvid) {
-                            Some(v) => Some(std::mem::replace(&mut v.value, new_value.clone())),
-                            None => None,
-                        }
-                    };
-                    if let Some(old) = old {
-                        emit_variable_change(
-                            inner,
-                            VarKind::Public,
-                            cvid,
-                            &old,
-                            &new_value,
-                            ChangeSource::Cloud,
-                        );
+fn handle_update_public_vars(inner: &Arc<CloudInner>, payload: &Value) -> Result<()> {
+    if payload.as_str() == Some("fail") {
+        return Ok(());
+    }
+    if let Some(items) = payload.as_array() {
+        for item in items {
+            if let (Some(cvid), Some(value)) =
+                (item.get("cvid").and_then(Value::as_str), item.get("value"))
+            {
+                let new_value = CloudValue::from_json(value);
+                let old = {
+                    let mut store = inner.state.lock().unwrap();
+                    match store.variable_mut(VarKind::Public, cvid) {
+                        Some(v) => Some(std::mem::replace(&mut v.value, new_value.clone())),
+                        None => None,
                     }
+                };
+                if let Some(old) = old {
+                    emit_variable_change(
+                        inner,
+                        VarKind::Public,
+                        cvid,
+                        &old,
+                        &new_value,
+                        ChangeSource::Cloud,
+                    );
                 }
             }
         }
-        Ok(())
     }
+    Ok(())
 }
 
 /// `update_lists_done`:云端列表操作序列
-struct UpdateListHandler;
-
-impl MessageHandler for UpdateListHandler {
-    fn handle(&self, inner: &Arc<CloudInner>, payload: &Value) -> Result<()> {
-        if let Some(map) = payload.as_object() {
-            for (cvid, ops) in map {
-                if let Some(ops) = ops.as_array() {
-                    inner.list_apply_cloud(cvid, ops);
-                }
+fn handle_update_lists(inner: &Arc<CloudInner>, payload: &Value) -> Result<()> {
+    if let Some(map) = payload.as_object() {
+        for (cvid, ops) in map {
+            if let Some(ops) = ops.as_array() {
+                inner.list_apply_cloud(cvid, ops);
             }
         }
-        Ok(())
     }
+    Ok(())
 }
 
 /// `online_users_change`:在线用户数更新
-struct OnlineUsersHandler;
-
-impl MessageHandler for OnlineUsersHandler {
-    fn handle(&self, inner: &Arc<CloudInner>, payload: &Value) -> Result<()> {
-        if let Some(total) = payload.get("total").and_then(Value::as_i64) {
-            let old = inner.online_users.swap(total, Ordering::AcqRel);
-            emit_online_users_change(inner, old, total);
-        }
-        Ok(())
+fn handle_online_users(inner: &Arc<CloudInner>, payload: &Value) -> Result<()> {
+    if let Some(total) = payload.get("total").and_then(Value::as_i64) {
+        let old = inner.online_users.swap(total, Ordering::AcqRel);
+        emit_online_users_change(inner, old, total);
     }
+    Ok(())
 }
 
 /// `list_ranking_done`:排行榜数据接收
-struct RankingHandler;
-
-impl MessageHandler for RankingHandler {
-    fn handle(&self, inner: &Arc<CloudInner>, payload: &Value) -> Result<()> {
-        let cvid = if let Some(cvid) = inner.pending_rankings.lock().unwrap().pop_front() {
-            cvid
-        } else {
-            warn!("收到排行榜数据但没有待处理的请求");
-            return Ok(());
-        };
-        let mut ranking = RankingData {
-            cvid: cvid.clone(),
-            name: String::new(),
-            items: Vec::new(),
-        };
-        {
-            let store = inner.state.lock().unwrap();
-            if let Some(v) = store.variable(VarKind::Private, &cvid) {
-                ranking.name.clone_from(&v.name);
+fn handle_ranking(inner: &Arc<CloudInner>, payload: &Value) -> Result<()> {
+    let cvid = if let Some(cvid) = inner.pending_rankings.lock().unwrap().pop_front() {
+        cvid
+    } else {
+        warn!("收到排行榜数据但没有待处理的请求");
+        return Ok(());
+    };
+    let mut ranking = RankingData {
+        cvid: cvid.clone(),
+        name: String::new(),
+        items: Vec::new(),
+    };
+    {
+        let store = inner.state.lock().unwrap();
+        if let Some(v) = store.variable(VarKind::Private, &cvid) {
+            ranking.name.clone_from(&v.name);
+        }
+    }
+    if let Some(items) = payload.get("items").and_then(Value::as_array) {
+        for item in items {
+            if let (Some(value), Some(identifier), Some(nickname), Some(avatar_url)) = (
+                item.get("value"),
+                item.get("identifier"),
+                item.get("nickname"),
+                item.get("avatar_url"),
+            ) {
+                ranking.items.push(RankingItem {
+                    value: CloudValue::from_json(value),
+                    user: RankingUser {
+                        id: identifier
+                            .as_str()
+                            .and_then(|s| s.parse().ok())
+                            .unwrap_or(0),
+                        nickname: nickname.as_str().unwrap_or_default().to_string(),
+                        avatar_url: avatar_url.as_str().unwrap_or_default().to_string(),
+                    },
+                });
             }
         }
-        if let Some(items) = payload.get("items").and_then(Value::as_array) {
-            for item in items {
-                if let (Some(value), Some(identifier), Some(nickname), Some(avatar_url)) = (
-                    item.get("value"),
-                    item.get("identifier"),
-                    item.get("nickname"),
-                    item.get("avatar_url"),
-                ) {
-                    ranking.items.push(RankingItem {
-                        value: CloudValue::from_json(value),
-                        user: RankingUser {
-                            id: identifier
-                                .as_str()
-                                .and_then(|s| s.parse().ok())
-                                .unwrap_or(0),
-                            nickname: nickname.as_str().unwrap_or_default().to_string(),
-                            avatar_url: avatar_url.as_str().unwrap_or_default().to_string(),
-                        },
-                    });
-                }
-            }
-        } else {
-            warn!("排行榜 items 不是列表");
-        }
-        // 变量级回调
-        let callbacks = {
-            let mut store = inner.state.lock().unwrap();
-            store
-                .variable_mut(VarKind::Private, &cvid)
-                .map(|v| std::mem::take(&mut v.ranking_callbacks))
-        };
-        if let Some(callbacks) = callbacks {
-            for (_, cb) in &callbacks {
-                if let Err(e) = catch_unwind(AssertUnwindSafe(|| cb(ranking.clone()))) {
-                    warn!("排行榜回调 panic: {e:?}");
-                }
-            }
-            if let Some(v) = inner
-                .state
-                .lock()
-                .unwrap()
-                .variable_mut(VarKind::Private, &cvid)
-            {
-                v.ranking_callbacks.extend(callbacks);
-            }
-        }
-        // 连接级事件
-        let event_callbacks = {
-            let mut events = inner.events.lock().unwrap();
-            events.ranking.take_all()
-        };
-        for (_, cb) in &event_callbacks {
+    } else {
+        warn!("排行榜 items 不是列表");
+    }
+    // 变量级回调
+    let callbacks = {
+        let mut store = inner.state.lock().unwrap();
+        store
+            .variable_mut(VarKind::Private, &cvid)
+            .map(|v| std::mem::take(&mut v.ranking_callbacks))
+    };
+    if let Some(callbacks) = callbacks {
+        for (_, cb) in &callbacks {
             if let Err(e) = catch_unwind(AssertUnwindSafe(|| cb(ranking.clone()))) {
-                warn!("排行榜事件回调 panic: {e:?}");
+                warn!("排行榜回调 panic: {e:?}");
             }
         }
-        inner
-            .events
+        if let Some(v) = inner
+            .state
             .lock()
             .unwrap()
-            .ranking
-            .items
-            .extend(event_callbacks);
-        Ok(())
+            .variable_mut(VarKind::Private, &cvid)
+        {
+            v.ranking_callbacks.extend(callbacks);
+        }
     }
+    // 连接级事件
+    let event_callbacks = {
+        let mut events = inner.events.lock().unwrap();
+        events.ranking.take_all()
+    };
+    for (_, cb) in &event_callbacks {
+        if let Err(e) = catch_unwind(AssertUnwindSafe(|| cb(ranking.clone()))) {
+            warn!("排行榜事件回调 panic: {e:?}");
+        }
+    }
+    inner
+        .events
+        .lock()
+        .unwrap()
+        .ranking
+        .items
+        .extend(event_callbacks);
+    Ok(())
 }
 
 /// `illegal_event_done`:非法事件提示
-struct IllegalEventHandler;
-
-impl MessageHandler for IllegalEventHandler {
-    fn handle(&self, _inner: &Arc<CloudInner>, _payload: &Value) -> Result<()> {
-        warn!("检测到非法事件");
-        Ok(())
-    }
+fn handle_illegal_event(_inner: &Arc<CloudInner>, _payload: &Value) -> Result<()> {
+    warn!("检测到非法事件");
+    Ok(())
 }
 
-/// 策略注册表:事件名 → 处理器
+/// 事件名 → 处理函数 的分派表
 fn dispatch_message(inner: &Arc<CloudInner>, name: &str, payload: &Value) -> Result<()> {
     match name {
-        "connect_done" => JoinHandler.handle(inner, payload),
-        "list_variables_done" => AllDataHandler.handle(inner, payload),
-        "update_private_vars_done" => UpdatePrivateVarHandler.handle(inner, payload),
-        "update_vars_done" => UpdatePublicVarHandler.handle(inner, payload),
-        "update_lists_done" => UpdateListHandler.handle(inner, payload),
-        "online_users_change" => OnlineUsersHandler.handle(inner, payload),
-        "list_ranking_done" => RankingHandler.handle(inner, payload),
-        "illegal_event_done" => IllegalEventHandler.handle(inner, payload),
+        "connect_done" => handle_join(inner, payload),
+        "list_variables_done" => handle_all_data(inner, payload),
+        "update_private_vars_done" => handle_update_private_vars(inner, payload),
+        "update_vars_done" => handle_update_public_vars(inner, payload),
+        "update_lists_done" => handle_update_lists(inner, payload),
+        "online_users_change" => handle_online_users(inner, payload),
+        "list_ranking_done" => handle_ranking(inner, payload),
+        "illegal_event_done" => handle_illegal_event(inner, payload),
         other => {
             debug!(
                 "未知消息类型: {other}, 载荷: {}",
@@ -2519,12 +2512,24 @@ fn on_connection_lost(inner: Arc<CloudInner>) {
     }
 }
 
-/// 批量上传线程:周期性地合并队列命令并发送
+/// 批量上传线程:按需唤醒(`queue` 入队时通知)并合并队列命令发送。
+///
+/// 保留 `flush_interval` 超时兜底:未就绪(断线/重连)被回退的批次必须定期重试,
+/// 不能只靠唤醒——否则连接恢复后无人再通知,积压命令将永远滞留。
 fn flush_loop(inner: Arc<CloudInner>) {
     while !inner.stopping.load(Ordering::Acquire) {
-        thread::sleep(inner.flush_interval);
+        // 与 `queue`/`close` 的 `notify_with` 同锁纪律:wait_flag 持 notify 锁检查标记,
+        // 生产者持 notify 锁置位,消除「检查-置位」之间的丢失唤醒窗口
+        wait_flag(&inner.notify, inner.flush_interval, || {
+            inner.stopping.load(Ordering::Acquire) || inner.flush_pending.load(Ordering::Acquire)
+        });
+        if inner.stopping.load(Ordering::Acquire) {
+            break;
+        }
         let batch: Vec<CloudCommand> = {
             let mut queue = inner.commands.lock().unwrap();
+            // 持锁清除唤醒标记:清除期间生产者无法入队,不会丢掉它的下一次唤醒
+            inner.flush_pending.store(false, Ordering::Release);
             if queue.is_empty() {
                 continue;
             }
