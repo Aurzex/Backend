@@ -381,6 +381,13 @@ W10 落地(`66c0b6b`)后,**"内联对象形态影子 => 拒收该作品"这条�
   - **正确**:ureq 3 的超时是**三段预算** —— `timeout_global`(整通调用,含响应体)、`timeout_recv_response`(到响应头)、`timeout_recv_body`(响应体总预算);请求级覆盖只改被显式设置的旋钮,其余**继承 agent 配置**。真正的边界是 ureq 没有"逐次读的空闲超时"(响应体中途卡住只会吃掉总预算)。语义、读数与配置策略见 `platform-and-protocol.md` §5ter。
   - 出处:`../rounds/40-gates-cleanup-and-real-defects.md` §7.4/§7.6;复测见 `../rounds/43`;代码落点 `src/utils/requests.rs` 的 `KittyCore::new` 与 `apply_request_config`。
 
+### 公共面的 ureq 类型与 `FileError` 形态变更(2026-10-03)
+
+- **已过时(历史正文不改,此处登记)**:`../rounds/17` §2/§107 与 `../rounds/18` §235 里的 `MewError::Http(#[from] ureq::Error)`、`../rounds/29` §3-3 与 `../goals/platform-backlog.md` §5 提到的 `FileError`。
+  - **现状**:`MewError::Http` 自 2026-10-03 起装自有 `TransportError`(只给文本与 `is_timeout()`);公共请求原语返回自有 `MewResponse`;`FileError` **整型已删**,`CodeMaoFile::write_bytes` 返回 `MewResult<()>`。见 `../rounds/44`、`repo-conventions.md` §4。
+  - **为何改**:ureq 类型出现在 `pub` 签名里会迫使下游依赖同版本 ureq,并把 ureq 大版本升级变成本库的破坏性变更;`FileError` 只是 `MewError::Io` 的重复。
+  - 出处:`../rounds/17-error-convergence-decompile-fix-plan.md` §2/§107、`../rounds/18-architecture-api-review-plan.md` §235、`../rounds/29-optimization-scan-ledger.md` §3。
+
 ### 2026-10-02 文档巡检(阶段 1:准确性)发现的两处
 
 - **渲染硬错误(已修,在此登记)**:`../rounds/37-convert-architecture-refactor-plan.md` §3.2 的表格在 Q5 与 Q6 两行之间夹了一个空行 => Markdown 把它断成两张表(Q6 那一行掉到表外、渲染异常)。已**只删该空行**(不改任何正文文字)。同批的同类空行断表另有两处:`../goals/pending-decisions.md` A 组表(A4/A5 之间)与 `../rounds/README.md` 第 40 轮两行之前,均已并回。

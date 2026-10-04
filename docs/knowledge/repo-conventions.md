@@ -62,8 +62,10 @@
 ## 4. 错误类型
 
 - 统一 `MewError` / `MewResult<T>`(`src/utils/requests.rs`);HTTP 状态码枚举已改名为 `StatusCode`(`HTTPStatus` 已不存在)。
-- `ProcessorError`/`DataQueryError` 已包装 `MewError`。`DecompilerError` 现只有 `Mew(#[from] MewError)` 加域内变体(`Crypto`/`Decompile`/`InvalidResponse`/`MissingField`/`TypeMismatch`/`Other`),`io::Error`/`serde_json::Error` 经 `From` 折进 `Mew`。原先记的两条**都不再成立**:"仍自带 `Io/Json/Http`、与 `MewError` 重复**待改**"已于 2026-10-01 核实消除(见 `../rounds/39` §1.3/§W12d);零调用的死变体 `UnsupportedType` **已于 `fef30e7`(2026-10-02)删除**(破坏性公共面变更,已授权,见 `../rounds/39` §W52) )。
+- **底层失败一律折进 `MewError`**(`io::Error` / `serde_json::Error` 由 `From` 折进),域错误类型只留域内变体 + 一个 `Mew` 载体。2026-10-03 前 `ProcessorError`/`DataQueryError` 并列的 `Io`/`Json` 变体已删,两者的 `External` 也统一改名为 `Mew`;`FileError` 整型删除(`CodeMaoFile::write_bytes` 直接返回 `MewResult<()>`)。口径锚点:`translate/options.rs::TranslateError` 与 `convert/shared.rs::DecompilerError`。
+- `DecompilerError` 现只有 `Mew(#[from] MewError)` 加域内变体(`Crypto`/`Decompile`/`InvalidResponse`/`MissingField`/`TypeMismatch`/`Other`)。原先记的两条**都不再成立**:"仍自带 `Io/Json/Http`、与 `MewError` 重复**待改**"已于 2026-10-01 核实消除(见 `../rounds/39` §1.3/§W12d);零调用的死变体 `UnsupportedType` **已于 `fef30e7`(2026-10-02)删除**(破...
 - 破坏性 API 变更**不留兼容别名**(已授权的前提下直接删)。
+- **第三方 crate 的类型不进公共契约**(2026-10-03):公共请求原语返回自有 `MewResponse`(内部持有 ureq 的响应),传输失败装自有 `TransportError`(只给文本与 `is_timeout()`),不再出现 `ureq::Error` / `Response<Body>` / `Agent` / `Form`;域内专用的 `agent()` / `send_multipart()` 收 `pub(crate)`。判据:下游**不声明 ureq** 也能走完整链路(验收手法见 `../rounds/44`)。
 
 ## 5. 命名与文件组织
 

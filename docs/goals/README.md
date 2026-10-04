@@ -11,7 +11,7 @@
 - **C 组**:小项 C3–C8(C9/C10 真机实测已于 2026-10-03 完成,见 `../rounds/43`)。
 - **D 组**:D1–D6 已全部落定(D6 的 2)  与 4)  已于 2026-10-03 落地,见 `../rounds/43`)。
 - **`convert-backlog.md` §1**:另有待决项(B2 / A4 / `entity_concurrency` / 反向并行是否重开)。
-- **`infra-backlog.md` §6 架构盘点(第四条公共面项)**:`ureq` 实现类型泄漏进公共签名、`CheckConfig` 悬空公共面、`api` 层两处零调用全局入口、错误类型边界不一致。四项都是公共面变更,需拍板后才动。
+- **`infra-backlog.md` §6 架构盘点(剩两条)**:`CheckConfig` 悬空公共面、`api` 层两处零调用全局入口(原四条中"ureq 类型泄漏"与"错误类型边界"已于 2026-10-03 落地,见 `../rounds/44`)。两条都属公共面变更,需拍板后才动。
 
 ## 不用等决策就能做
 
@@ -77,3 +77,10 @@
 > **UI 输入错误传播** 已落地(`input`/`choose`/`menu` 返回 `MewResult`,EOF 也算错误);
 > **两处存而不用的注入字段** 已删除(保留构造器 —— 原建议的"删构造器"被实测否定);
 > **云变量重连放弃** 已写进 rustdoc。
+
+## 第 44 轮(2026-10-03,公共面收窄)
+
+> **逐项改动、验收读数与代码落点只在 `../rounds/44-third-party-type-containment.md` 展开**。一行状态:
+> **`ureq` 类型移出公共契约** 已完成(自有 `MewResponse` / `TransportError`;`agent()` / `send_multipart()` 收 `pub(crate)`;判据 = 外部消费 crate 不声明 ureq 也能编译并真机跑通);
+> **错误类型口径统一** 已完成(`ProcessorError` 删 `Io`/`Json`、`DataQueryError` 删 `Json` 并把 `External` 改名 `Mew`、`FileError` 整型删除);
+> **§6 盘点剩两条** 未动(`CheckConfig` 悬空面、`api` 层两处零调用全局入口)。

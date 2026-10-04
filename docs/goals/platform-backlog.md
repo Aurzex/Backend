@@ -39,6 +39,7 @@
 ## 5. 公开面清理(需版本策略)
 
 `../rounds/29` §3-3 的公开面死代码已被评审删除(`FileContent`、`CodeMaoFile::{file_write,write_json,write_lines,write_text}`、`PathConfig::{fiction_file_path,token_file_path,ensure_directories}`、孤立的 `FileError::Json`;**`write_bytes` 保留**)。
+**后续(2026-10-03,`../rounds/44`)**:`FileError` 类型本身也已删除,`CodeMaoFile::write_bytes` 返回 `MewResult<()>`。
 遗留问题:**破坏性 API 变更的版本策略** —— 本库尚未 1.0,当前约定是"不留兼容别名直接删";若将来要保兼容,这批就是需要 `#[deprecated]` 的先例。
 
 ## 6. 已核对并放弃的

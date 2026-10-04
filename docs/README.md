@@ -31,12 +31,12 @@
 
 ## 历史记录 [`rounds/`](rounds/)(过程)
 
-`rounds/01-websocket-pitfalls.md` … `rounds/43-a-group-real-machine-and-narrowing.md` —— 每轮一份的方案/评审/整改记录。
-**入口先看 [`rounds/README.md`](rounds/README.md)**(28–43 轮的索引 + "该看哪几篇"),再看本篇。
+`rounds/01-websocket-pitfalls.md` … `rounds/44-third-party-type-containment.md` —— 每轮一份的方案/评审/整改记录。
+**入口先看 [`rounds/README.md`](rounds/README.md)**(28–44 轮的索引 + "该看哪几篇"),再看本篇。
 价值在**证据链**(真机实测、抓包、官方 bundle 逆向、逐条评审),以及"为什么当初这么决定"。
 读它们时先看 [`knowledge/errata.md`](knowledge/errata.md):早期文档里的文件名/类型名/行号多数已经漂移。
 
-**文件分布**:知识库 [`knowledge/`](knowledge/)、目标库 [`goals/`](goals/)、轮次记录 `rounds/01`–`rounds/43`(每轮一篇,40 号已合并为单篇,另设本目录索引 `README.md`;第 38–40 轮为转换域的近期工作,第 41 轮为契约固化与文档重构,第 42 轮为依赖刷新,第 43 轮为 A 组实测与收窄)。
+**文件分布**:知识库 [`knowledge/`](knowledge/)、目标库 [`goals/`](goals/)、轮次记录 `rounds/01`–`rounds/44`(每轮一篇,40 号已合并为单篇,另设本目录索引 `README.md`;第 38–40 轮为转换域的近期工作,第 41–44 轮为工程与公共面收窄)。
 
 > **读老轮次前先做的两件事**:1)  查 [`knowledge/errata.md`](knowledge/errata.md)(它集中列出已过时/写错的表述及正确值,
 > 含"第三十三至三十六轮的结论变更"一节);2)  转换相关的问题先读 [`knowledge/convert-semantics.md`](knowledge/convert-semantics.md) 的
