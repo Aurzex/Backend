@@ -29,11 +29,11 @@
 
 | # | 项 | 建议 | 说明 |
 | --- | --- | --- | --- |
-| C3 | P2 死代码/收尾:`simple.rs` 的 `Arc::clone`、`nemo.rs::get_sha` 的 64 字节 clone、`cloudvar` flush 的 100 ms 轮询改 `Condvar` | 做 | 都是局部小改,**删除前需零调用点证据** |
-| C4 | `auth.rs::AccountStatus` 与 `requests.rs::Identity` 平行枚举合并 | 做(不紧急) | 易漂移,合并前先确认无外部依赖 |
-| C5 | `MessageHandler` / `ChatEventHandler` 两个 trait 改自由函数 | 做 | 可读性收尾,非必须 |
-| C6 | `registry.rs` 错位工具函数归位 | 做 | 模块组织问题 |
-| C7 | `decompile_work` 拆成 `decompile_to_json` / `decompile_to_file`(去掉返回类型重载) | 做 | API 语义清晰化 |
+| C3 **已完成(2026-10-03;逐项见 `../rounds/45`)** | P2 死代码/收尾:`simple.rs` 的 `Arc::clone`、`nemo.rs::get_sha` 的 64 字节 clone、`cloudvar` flush 的 100 ms 轮询改 `Condvar` | 逐项:`simple.rs` 已改 `Arc::try_unwrap`;**`get_sha` 不可行**(`RefCell` 借用无法带出函数边界;改 `Rc/Arc` 或 `&mut self` 的改动面远超收益);flush 已改按需唤醒(`flush_pending` + `Notify`,`flush_interval` 保留超时兜底) | 删除前需零调用点证据 |
+| C4 **已完成(2026-10-03)** | `auth.rs::AccountStatus` 与 `requests.rs::Identity` 平行枚举合并 | 已合并为单一 `Identity`(删 `AccountStatus` 与 `to_identity`;`Average→Fluffy`/`Edu→Scholar`/`Judgement→Judge` 一一对应,默认身份不变) | 已确认无外部依赖 |
+| C5 **已完成(2026-10-03)** | `MessageHandler` / `ChatEventHandler` 两个 trait 改自由函数 | 两个私有 trait 与其单元结构体已改为自由函数(分派结构保留) | 可读性收尾 |
+| C6 **已完成(2026-10-03)** | `registry.rs` 错位工具函数归位 | 四个与举报无关的工具(`value_to_string`/`timestamp_to_string`/`html_to_text`/`bytes_to_human`)已移到 `utils::filedata`(与既在那里的 `value_to_i64` 同处) | 模块组织问题 |
+| C7 **已核实应判不做(2026-10-03)** | `decompile_work` 拆成 `decompile_to_json` / `decompile_to_file`(去掉返回类型重载) | **前提不存在**:现签名 `decompile_work(work_id, output_dir: Option<&Path>) -> Result<PathBuf>` 里 `None` 只表示"写默认目录",没有"返回 JSON 串"的分支(`../rounds/17` §3 已确认该重载模式从未实现且当时就被删除);内存产物已由 `CodemaoDecompiler::decompile_artifact_with` 提供 ⇒ 强拆只会造出不存在的返回模式 | 无需动作 |
 | C8 | `core` 向 `api` 的依赖倒置(pipeline/registry/services/retrieve 反向依赖 api) | **暂缓(待重新立项)** | 架构级重构,收益不明确;记在案 |
 | C9 **已完成(2026-10-03)** | 真机实测两项:`/coconut/clouddb/currentTime` 单位、`update_phone_number` 字段名(`phone` vs `phone_number`) | 实测结论:`data` 为 **10 位秒级**时间戳(与本地秒同值);字段名是 **`phone_number`**,改发 `phone` 会被服务端忽略并报 `phone_number 不能为空` | **已完成**:两处假设均消掉,现有实现两处都正确;读数与探针见 `../rounds/43` §2、耐久事实见 `../knowledge/platform-and-protocol.md` §5 |
 | C10 **已完成(2026-10-03)** | 人工验证项:错误信息含服务端 body、并发 `connect` 串行化、断连不发虚假 `Error`、云存储事件帧是否容忍无空格 `42[…]` | 实测:统一路径(`send_checked`)**带完整服务端错误体**,裸 `send()` 不带;两线程并发 `connect` 均成功且数据就绪;`close` 后事件序列为 `[Opened, Closed { was_connected: true }]`,无虚假 `Error`;`parse_frame` 只剥 `42` 前缀交给 `serde_json`(跳前导空白)⇒ 有无空格都接受 | **已完成**:四项全部有实测或代码级证据;读数见 `../rounds/43` §2 |

@@ -30,9 +30,9 @@
 
 ## 4. P2 性能小项(择机清)
 
-1. `requests.rs` 的 **Bearer 头构造**(`format!("Bearer {token}")`)与 `Arc<str> -> String`:每次请求各克隆一次。
-2. `requests.rs::PaginatedIter::build_params`:每翻一页克隆全部 `base_params` + 两个键串。
-3. `cloudvar.rs` 的 flush 循环用固定 100 ms `sleep` 轮询(空闲也醒)=> 可换 `Condvar`/`Notify` 按需唤醒。
+1. **已完成(2026-10-03)**:`requests.rs` 的 Bearer 头不再逐请求构造 —— 身份槽在 `set_token` 时预计算 `"Bearer {token}"`(`IdentitySlot`),`AuthProvider::auth_header` 改为返回 `Option<(&'static str, Arc<str>)>`,请求路径只做一次引用计数克隆(内置实现全部覆写;trait 默认实现保留给外部实现者)。见 `../rounds/45`。
+2. **已核实应判不做(2026-10-03)**:`PaginatedIter::build_params` 的克隆要真正省掉,必须让 `MewRequestBuilder::with_params` 改收 `&[(String, String)]`(公共面破坏)或把整条链改成 `&mut self`——而 `with_params` 按值消费 `Vec` 的现状下,`&mut self` 也省不掉克隆;`base_params` 通常只有个位数条目 ⇒ **收益 < 改动面**,不立项。
+3. **已完成(2026-10-03)**:`cloudvar.rs` 的 flush 循环不再固定 `sleep(100 ms)` 轮询 —— 入队走新增的 `flush_pending` 标记 + `Notify::notify_with` 按需唤醒,`flush_loop` 用 `wait_flag(.., flush_interval, ..)` 等待;**保留超时兜底**(断线回退的批次仍会定期重试),标记在 `commands` 锁内清除以消除丢失唤醒窗口。见 `../rounds/45`。
 
 > 本节条目一律**按符号定位**(不写 `文件:行`);原始行号见 `../rounds/29` §3。
 

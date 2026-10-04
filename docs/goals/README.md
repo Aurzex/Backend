@@ -8,17 +8,16 @@
 
 - **`pending-decisions.md` A 组**:只剩 **A4**(NEMO 上传是否真机验证;A1/A2/A3/A5 已处理)。
 - **B 组**:大方向 B1–B8(B5 已完成并移入"已决")。
-- **C 组**:小项 C3–C8(C9/C10 真机实测已于 2026-10-03 完成,见 `../rounds/43`)。
+- **C 组**:只剩 **C8**(暂缓);C3–C7 已于 2026-10-03 结案(其中 C7 判不做,见 `../rounds/45`),C9/C10 见 `../rounds/43`。
 - **D 组**:D1–D6 已全部落定(D6 的 2)  与 4)  已于 2026-10-03 落地,见 `../rounds/43`)。
 - **`convert-backlog.md` §1**:另有待决项(B2 / A4 / `entity_concurrency` / 反向并行是否重开)。
 - **`infra-backlog.md` §6 架构盘点(剩两条)**:`CheckConfig` 悬空公共面、`api` 层两处零调用全局入口(原四条中"ureq 类型泄漏"与"错误类型边界"已于 2026-10-03 落地,见 `../rounds/44`)。两条都属公共面变更,需拍板后才动。
 
 ## 不用等决策就能做
 
-- `convert-backlog.md` §2 第 **5 / 6 / 7 / 13** 条(第 2、4 条已完成;0b 只剩"把词表重导 + 整体替换写成可复跑小流程"这一子项;0c 的标记量门已落地)。
+- `convert-backlog.md` §2 第 **7 / 13** 条(第 2、4、5 条已完成、第 6 条已核销、0b 子项已补齐;第 7 条是 NEMO 完整搬家的资源重传、第 13 条是夹具与输出目录分离,都属大件)。
 - `platform-backlog.md` §3 的待方案项(§1 的真机实测五项已于 2026-10-03 做完,见 `../rounds/43`)。
-- `convert-backlog.md` §7 的性能小改(五条,判据是产物 SHA 不变;收益须按仓库口径**先量**再宣称)。
-- `infra-backlog.md` §2:小改批量(剩第 3 条 P2 收尾;第 1、2 条已完成)。
+- `infra-backlog.md` §2 第 1–3 条**均已完成**(第 3 条 P2 收尾的逐项结论见 `../rounds/45`)。
 - `../rounds/40-gates-cleanup-and-real-defects.md` §9.3 的 **R5**(加载门离线化进 CI):要先拍板"入库最小夹具"的形态。
 
 ## 要立轮的大方向 / 已决但暂缓
@@ -84,3 +83,12 @@
 > **`ureq` 类型移出公共契约** 已完成(自有 `MewResponse` / `TransportError`;`agent()` / `send_multipart()` 收 `pub(crate)`;判据 = 外部消费 crate 不声明 ureq 也能编译并真机跑通);
 > **错误类型口径统一** 已完成(`ProcessorError` 删 `Io`/`Json`、`DataQueryError` 删 `Json` 并把 `External` 改名 `Mew`、`FileError` 整型删除);
 > **§6 盘点剩两条** 未动(`CheckConfig` 悬空面、`api` 层两处零调用全局入口)。
+
+## 第 45 轮(2026-10-03,机械批与核验收口)
+
+> **逐条改动、核销结论与性能读数只在 `../rounds/45-mechanical-batch-and-verification-closeout.md` 展开**。一行状态:
+> **小改批量** 已落地(认证头预计算、flush 按需唤醒、`AccountStatus` 并入 `Identity`、两个私有 trait 改自由函数、`registry` 工具归位、`simple.rs` 免拷、回调 panic 契约入 rustdoc、词表重导流程);
+> **两项判掉**:`PaginatedIter::build_params` 不立项(收益<改动面)、`decompile_work` 拆分不立项(前提不存在);**一项不可行**:`get_sha` 返回借用;
+> **核销三项陈旧挂账**(`infra-backlog.md` §3 三条)+ `rounds/21` §8.6 遗留逐条过完(仅 L1/L4 仍开放,已登记);
+> **性能 §7** 五条全部处置(反向查表索引已一致化,读数在噪声内、产物 SHA 零变化;其余三条判掉)。
+> **仍属大件、未动**:分片上传、NEMO 完整搬家的资源重传、夹具与输出目录分离。

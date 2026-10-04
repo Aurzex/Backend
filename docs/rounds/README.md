@@ -21,7 +21,7 @@
 | [39](39-convert-architecture-refinement-plan.md) | **convert 域架构精进方案**(只读调研 + 独立评审):职责错位收口(`model` 与 `xml` 之间的环、地基里的上传编排/影子大表)、门与仪器补洞(**基线缺失/部分样本缺失/REFRESH 丢键**/中文文案协议/反向 id 台账)、NEMO 进门(带 `source_version`)与**分配计数门**;含 W1–W13、不做清单、**C1/C2/C3 已拍板**、评审与修订记录 | 基本落地(2026-10-02,以该文 §0.3 为准) |
 | [40](40-gates-cleanup-and-real-defects.md) | **CI 防线 + `unused` 放开 + 根块定案 + 反编译补测 + 性能上界 + 可见性/公共面;下载侧请求级超时与 `ureq` 10 MB 隐性上限;夹具目录纪律 + 断言顺序**(R1–R6、R7、T1/T3 与同批清理的合并稿) | 已落地(`f68c2e6` / `6414b97` / `30216c5` / `8da596d` / `47a8c5e` / `4072846` / `c076918` / `104964f` / `cbb167a` / `60d5358` / `afca96c` / `9290ede` + `636127f`) |
 
-## 工程与文档轮次(41–44,2026-10-02 ~ 10-03)
+## 工程与文档轮次(41–45,2026-10-02 ~ 10-03)
 
 | 轮次 | 一句话 | 状态 |
 | --- | --- | --- |
@@ -29,6 +29,7 @@
 | [42](42-dependency-refresh.md) | 依赖按 crates.io 最高稳定版刷新(直接依赖与 `Cargo.lock` 全量重解),离线门与真机测试全过 | 已落地 |
 | [43](43-a-group-real-machine-and-narrowing.md) | A 组落地:**两处协议假设真机消掉**(`currentTime` 秒级 / 字段名 `phone_number`)、**分段超时**(原"body 无读超时"诊断被推翻)、UI 输入错误传播、两处存而不用字段删除 | 已落地 |
 | [44](44-third-party-type-containment.md) | **公共面收窄**:`ureq` 类型移出公共契约(自有 `MewResponse` / `TransportError`),三处错误类型收敛为"底层失败一律经 `MewError`"(删 `FileError`) | 已落地(`5e602dd`) |
+| [45](45-mechanical-batch-and-verification-closeout.md) | **机械批与核验收口**:认证头预计算、flush 按需唤醒、`AccountStatus` 并入 `Identity`、两个私有 trait 改自由函数、工具函数归位、反向查表索引一致化;infra §3 与 `rounds/21` 遗留核销 | 已落地 |
 
 ## 更早的轮次(01–27)
 

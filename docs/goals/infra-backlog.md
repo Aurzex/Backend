@@ -37,13 +37,19 @@
    - **保留 1 处**:`utils/socketio.rs` 的 `Condvar::wait_timeout(...).unwrap()` —— 错误来源是**同一 Mutex 毒化**,与紧邻的 `lock().unwrap()` 同失败类,按"锁解锁保留"的约定**判为保留**。
    - **待核验 1 处**:`core/terminal.rs` 的 stdin 读失败本应错误返回,但 `ProcessorUi::input(&mut self, &str) -> String` 是**公共 trait 形状**,现退为 `expect` fail-fast(避免空串让 `choose/menu` 死循环)。**已登记为 `./pending-decisions.md` D64) **(是否改 `MewResult<String>` 并逐调用点传播 —— 破坏性,需拍板)。
    - 另:测试夹具层的 5 处(`tests/**`)不在本口径内,未动。逐处说明见 `cbb167a` 的 diff。
-3. `P2` 收尾:`nemo.rs::get_sha` 每次 `clone()` 64 字节 hex(可返回 `&str`);`auth.rs::AccountStatus` 与 `requests.rs::Identity` 平行枚举合并(易漂移);`MessageHandler`/`ChatEventHandler` 两个 trait 改自由函数;`registry.rs` 错位工具函数归位(`../rounds/29` §3-5/§3-6、`../rounds/11` P2、`../rounds/05` 未执行项)。
+3. **P2 收尾四项已逐项结案(2026-10-03,见 `../rounds/45`)**:
+   - `simple.rs` 的 `Arc<Value>`:**已完成** —— `CocoDecompiler::decompile` 改为 `Arc::try_unwrap`,拿不到唯一所有权才回退克隆。
+   - `nemo.rs::get_sha` 的 64 字节 clone:**不可行** —— 缓存是 `RefCell<HashMap<String,String>>`,借用守卫无法把内部 `&str` 带出函数边界(改 `Rc/Arc` 或 `&mut self` 的改动面远超该 clone 的收益)。
+   - `AccountStatus` 与 `Identity` 平行枚举:**已完成**(合并为单一 `Identity`,删 `AccountStatus` 与 `to_identity`;映射 `Average→Fluffy`/`Edu→Scholar`/`Judgement→Judge` 一一对应,默认身份 `Fluffy` 不变)。
+   - `MessageHandler` / `ChatEventHandler` 两个 trait 与 `registry.rs` 错位工具函数:**已完成**(两个私有 trait 改为自由函数;`value_to_string`/`timestamp_to_string`/`html_to_text`/`bytes_to_human` 四个与举报无关的工具从 `core::registry` 移到 `utils::filedata`,与既在那里的 `value_to_i64` 同处)。
 
 ## 3. 待核验(证据不足)
 
-1. `services.rs` 是否落了 `report_processor_new_with_client_uses_injected_client` 契约测试(第六轮的"库单测 5 passed"里没看到它)(`../rounds/15` §Verification)。
-2. `../rounds/19` Phase 4 声称的 CONTRIBUTING 三处改动与 `parking_lot` 锁条款校验,在"实际执行结果"段未逐条确认。
-3. `../rounds/11` §P4-3、`../rounds/13` §P3-5/§P3-6 三条(同时列在 `./platform-backlog.md` §2)。
+> 三条已于 2026-10-03 核验并结案(见 `../rounds/45`)。
+
+1. **已核销(2026-10-03)**:`services.rs` 没有 `report_processor_new_with_client_uses_injected_client` 这个测试名,且该文件**没有测试模块**;全仓同名 0 命中(`src/`、`tests/`)。这不是遗漏而是 `../rounds/15` 方案自留的退化(同文"实际执行结果"只记了 `account.rs::manager_new_with_client_uses_injected_client` 与 `registry.rs::fetch_chunked_terminates_without_duplicates`)。要闭合就在 `services.rs` 末尾加同文件 `#[cfg(test)]` 断言注入客户端身份。
+2. **已确认(2026-10-03)**:`../rounds/19` Phase 4 要求的三处 CONTRIBUTING 改动**都在现行文件里**(命名段直白名、锁段含"默认 std + 仅经评审才引 `parking_lot`"、错误段含"保留底层变体,不要压成 `Auth(String)`")。
+3. ~~`../rounds/11` §P4-3、`../rounds/13` §P3-5/§P3-6 三条~~ **已核销(2026-10-03)**:三条均已落实(`converse.rs::handle_frame` 的"刻意不二次解析"注释、`education.rs::fetch_organization_ids` 传 `None`、`forum.rs::fetch_7day_hot_posts_iter` 端点固定),且 `./platform-backlog.md` §2 已同名标完成 ⇒ 本条是**重复挂账**,已删。
 
 ## 4. 已决(不做/暂缓)
 

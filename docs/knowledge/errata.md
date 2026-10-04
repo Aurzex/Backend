@@ -381,6 +381,12 @@ W10 落地(`66c0b6b`)后,**"内联对象形态影子 => 拒收该作品"这条�
   - **正确**:ureq 3 的超时是**三段预算** —— `timeout_global`(整通调用,含响应体)、`timeout_recv_response`(到响应头)、`timeout_recv_body`(响应体总预算);请求级覆盖只改被显式设置的旋钮,其余**继承 agent 配置**。真正的边界是 ureq 没有"逐次读的空闲超时"(响应体中途卡住只会吃掉总预算)。语义、读数与配置策略见 `platform-and-protocol.md` §5ter。
   - 出处:`../rounds/40-gates-cleanup-and-real-defects.md` §7.4/§7.6;复测见 `../rounds/43`;代码落点 `src/utils/requests.rs` 的 `KittyCore::new` 与 `apply_request_config`。
 
+### `AccountStatus` 已并入 `Identity`(2026-10-03)
+
+- **已过时(历史正文不改,此处登记)**:`../rounds/04`/`../rounds/17` 等早期轮次出现的 `AccountStatus`(及其 `to_identity()`)。
+  - **现状**:该平行枚举已于 2026-10-03 删除,统一用 `utils::requests::Identity`(`Average→Fluffy`/`Edu→Scholar`/`Judgement→Judge` 一一对应,默认身份仍是 `Fluffy`);`LoginBuilder::status(Identity)` 等签名随之改。见 `../rounds/45`、`repo-conventions.md` §4。
+  - **为何改**:两个枚举表达同一个"身份"概念、靠转换函数同步,属易漂移的重复定义。
+
 ### 公共面的 ureq 类型与 `FileError` 形态变更(2026-10-03)
 
 - **已过时(历史正文不改,此处登记)**:`../rounds/17` §2/§107 与 `../rounds/18` §235 里的 `MewError::Http(#[from] ureq::Error)`、`../rounds/29` §3-3 与 `../goals/platform-backlog.md` §5 提到的 `FileError`。
