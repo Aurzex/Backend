@@ -53,7 +53,11 @@
 | KN 建作品 | `POST /neko/works` | 本库 `create_kn_work` 已真机验证(建出草稿并过官方校验器);**反编译可选上传**也在此端点验证通过(`DecompileOptions::upload_to_account`,自建自删) |
 | 资源上传 | 七牛 `upload.qiniup.com` / `up.qiniup.com`,凭证走 `GET /cdn/qi-niu/tokens/uploading?projectName=…` | 凭证**按渠道区分**:社区前端 `community_frontend`、NEMO `nemo_android_ios`(见 `UploadChannel`)。抓包实测 288 KB 上行,全是小文件 |
 | 超时口径 | 客户端全局 30 s(`ClientConfig::timeout`);**上传**请求用请求级覆盖 | 9 MB 产物在慢网上要 31~35 s,故全局 30 s 下必失败(A1,已修);常量值/实测读数见 `nemo-runtime-and-upload.md` §6,下载侧大文件同类风险**已修**(见该文同节) |
-| 时间校准 | `/coconut/clouddb/currentTime` | **返回形态/单位未实测**(若为毫秒则会误当秒;见目标库) |
+| 时间校准 | `/coconut/clouddb/currentTime` | **实测(2026-10-03):`data` 是 10 位秒级时间戳**,与本地 `now_s` 同值(1791040701 vs 1791040701),**不是毫秒**;故不需要 `/1000`,现有"经 `value_to_i64` 直接当秒用"的处置正确 |
+| 换绑手机号 | `PATCH /tiger/v3/web/accounts/phone/change` | **请求字段名实测为 `phone_number`**(不是 OpenAPI 写的 `phone`):只发 `captcha` 或改发 `phone` 时服务端均答 `400 phone_number: 不能为空/不能为null`;发 `phone_number` 才进入验证码校验(`403 验证码错误或已被使用`)。现有实现正确 |
+
+- **统一错误语义(实测 2026-10-03)**:走本库统一路径(`send_checked`,即 `ClientAccess` 的 `send_and_parse` / `check_status` / `send_maybe_parse`)时,4xx/5xx 会读下服务端错误体并包进 `MewError::HttpStatus { status, body }` —— 实测 `AccountManager::update_phone_number` 的失败消息带完整 `403` 服务端 JSON。**直接 `MewRequestBuilder::send()` 则不会**(ureq 只给 `HTTP status: 404`);要带体必须显式 `.with_error_body()`。
+- **换绑手机号的副作用边界**:验证码无效时服务端在进入校验前即拒绝,因此用"无效验证码"探测字段名不会改动账号手机号(2026-10-03 实测,两次探测后手机号未变)。
 
 抓包量级参照(156.4 s / 386 连接 / 16 582 包):上下行 **1.99 MB / 22.40 MB**,`api.codemao.cn` 独占 **249 条连接** 1.46 MB,下行大头是 `creation.codemao.cn` 12.8 MB,故**控制面连接数**才是 NEMO 反编译慢的根源,不是字节量。
 
@@ -71,11 +75,43 @@
   上传请求必须单独放宽超时 —— **常量值与实测读数见 `nemo-runtime-and-upload.md` §6**(A1)。
 - 要传更大的作品只能做**分片上传**(见 `../goals/convert-backlog.md`);真实 KN 产物多在 3~9 MB。
 
+## 5ter. HTTP 超时是三段预算(实测 2026-10-03)
+
+ureq 3 的超时不是"一个数",而是三个互不覆盖的预算:
+
+| 旋钮 | 覆盖范围 | 本库配置 |
+| --- | --- | --- |
+| `timeout_global` | **整通调用**(DNS 解析到读完响应体) | `ClientConfig::timeout`,默认 30 s |
+| `timeout_recv_response` | 连接建立到**响应头**收到 | 同上 |
+| `timeout_recv_body` | **响应体**读取(总预算,不按次重置) | 同上 |
+
+实测(本机慢服务器 + 真实 `ureq` agent 与 `CodeMaoClient`,2026-10-03):
+
+| 场景 | 配置 | 结果 |
+| --- | --- | --- |
+| 响应头立刻发、响应体延迟 6 s | 只设 `timeout_global` 2 s | 2.0 s 失败 `timeout: global` |
+| 同上 | `timeout_global` 60 s + `timeout_recv_body` 2 s | 2.0 s 失败 `timeout: receive body` |
+| 响应体每 0.4 s 发 1 字节(共 20 字节) | `timeout_global` 2 s | 2.0 s 失败 `timeout: global` |
+| 请求级 `timeout_global` 覆盖到 60 s | agent 另设 `timeout_recv_response` 2 s | 2.1 s 失败 `timeout: receive response` |
+| 死服务端(accept 后不响应)+ 请求级覆盖 60 s | 客户端 `timeout` 2 s | 2.1 s 失败 `timeout: receive response`(未等满 60 s) |
+| 响应体延迟 6 s + 请求级覆盖 60 s | 客户端 `timeout` 2 s | 6.0 s 成功返回 8 字节 |
+
+三条结论:
+
+1. **`timeout_global` 覆盖响应体读取**,不只是响应头。故 `../rounds/40` §7.4 记录的"global 仅覆盖响应头、body 属无读超时"不成立,勘误见 `errata.md`(2026-10-03 条)。
+2. **请求级覆盖会继承 agent 的其余超时旋钮**:只改 `timeout_global` 不会把 `timeout_recv_response` 一起抬走。
+3. ureq 3 **没有逐次读的"空闲超时"**:响应体中途卡住只会吃掉总预算(不按次重置),这是旋钮自身的边界,不是漏配。
+
+=> 本库据此分段:普通接口三段一致(默认各 30 s);下载侧(`with_timeout(DOWNLOAD_TIMEOUT)`,900 s)
+只抬"总预算 + 响应体预算",**等响应头仍按客户端 `timeout` 失败** —— 死连接不会在下载路径上白等 15 min,
+大响应体的 900 s 预算不受影响。=> `src/utils/requests.rs` 的 `KittyCore::new` 与 `apply_request_config`。
+
 ## 依据
 
 - `../rounds/01-websocket-pitfalls.md`(25 条坑与调试方法论;其中路径/版本号已过时,勘误见 `errata.md`)。
 - `../rounds/10-ai-chat-cloudvar-test.md`(真机 AI 对话 + 云变量观察)。
 - 上传上限/速率:2026-09-26 逐档实测(同渠道),记录见 `../goals/pending-decisions.md` A5。
+- HTTP 三段超时:`§5ter`,2026-10-03 本机慢服务器 + 真实 `ureq` agent/`CodeMaoClient` 实测(探针为一次性集成测试,跑完已删;读数与场景表见该节)。
 - `../rounds/08/09-protocol-compliance*.md`(六协议;`LoginSession` 等表述已失效)。
 - `../rounds/24-nemo-upload-route-and-apis.md` §1/§2/§12(抓包与建作品证据)、`../rounds/13`(端点面)。
 - 代码锚点:`src/utils/socketio.rs`(parse_frame / set_stream_read_timeout / Notify / wait_flag)、`src/core/cloudvar.rs`、`src/core/converse.rs`、`src/api/work.rs`。

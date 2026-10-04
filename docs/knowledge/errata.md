@@ -374,6 +374,13 @@ W10 落地(`66c0b6b`)后,**"内联对象形态影子 => 拒收该作品"这条�
 - **易误**:表格/历史文里出现的 `--bins` 946(其中 `main.rs` 896)/ `--tests` 551,被当成**现在能跑出来**的数。
   - **正确**:那是 **`47a8c5e`(bin 改走库 crate)之前**的旧读数,已被那次**重写**清掉(不是"清 `unused`"清的)=> 当前树**不可复现**。**全部读数(两棵树 / 三阶段 / 终态)与口径只在 `../goals/infra-backlog.md` §1.1 展开**;`../rounds/39` §0.3/§W5 段按纪律就地标注(2026-10-02),不改。
 
+### 第 40 轮 §7.4 的"body 无读超时"诊断(2026-10-03 实测推翻)
+
+- **错**:`../rounds/40-gates-cleanup-and-real-defects.md` §7.4 的"附带发现"——"body 分片慢送(40 B / 40 s)在全局 30 s 下成功,故 `timeout_global` **仅覆盖响应头阶段**,不覆盖 body 流式读取"。
+  - **为何错**:2026-10-03 用本机慢服务器 + 真实 `ureq` 3.4.2 agent 直接复测,三种形态都被 `timeout_global` 掐断:响应体延迟 6 s 时 2.0 s 失败 `timeout: global`;响应体**分片慢送**(每 0.4 s 一字节)同样 2.0 s 失败。ureq 上游文档亦明示 `timeout_global` 是"end-to-end, from DNS lookup to finishing reading the response body"。
+  - **正确**:ureq 3 的超时是**三段预算** —— `timeout_global`(整通调用,含响应体)、`timeout_recv_response`(到响应头)、`timeout_recv_body`(响应体总预算);请求级覆盖只改被显式设置的旋钮,其余**继承 agent 配置**。真正的边界是 ureq 没有"逐次读的空闲超时"(响应体中途卡住只会吃掉总预算)。语义、读数与配置策略见 `platform-and-protocol.md` §5ter。
+  - 出处:`../rounds/40-gates-cleanup-and-real-defects.md` §7.4/§7.6;复测见 `../rounds/43`;代码落点 `src/utils/requests.rs` 的 `KittyCore::new` 与 `apply_request_config`。
+
 ### 2026-10-02 文档巡检(阶段 1:准确性)发现的两处
 
 - **渲染硬错误(已修,在此登记)**:`../rounds/37-convert-architecture-refactor-plan.md` §3.2 的表格在 Q5 与 Q6 两行之间夹了一个空行 => Markdown 把它断成两张表(Q6 那一行掉到表外、渲染异常)。已**只删该空行**(不改任何正文文字)。同批的同类空行断表另有两处:`../goals/pending-decisions.md` A 组表(A4/A5 之间)与 `../rounds/README.md` 第 40 轮两行之前,均已并回。

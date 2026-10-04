@@ -67,7 +67,7 @@
    取作品 `preview` —— 已改为:`DecompiledArtifact::Document` 随产物带出 `preview`(反编译阶段本就拿到),
    建草稿不再重拉详情,省一个 RTT,那处全局客户端依赖随之消失(`915c8ff`,rounds/37 P10)。
 3. **已完成(2026-10-01,`2d61959`)**:P3 结构化失败记录 —— 资源下载的失败清单已是 `(url, error)` 元组,重试直接用元组里的 url(原记录:`decompile/mod.rs` 用 `line.split(": ").next()` 从错误串反解 URL,因此 **URL 含 `": "` 会切错**、该文件不会被重试;错误文本本身不影响 —— `split` 取第一个 `": "` 之前的段。见 `../rounds/29`(P3 待做)、`../rounds/39` §W11)。
-4. **重连放弃的文档化**:云变量重连 5 次后仅 warn 并永久放弃,且**不再发事件**(仅初始 `Closed`),因此调用方可能无限等待,需在 rustdoc 写清(`../rounds/29` §4)。
+4. **已完成(2026-10-03)**:重连放弃的文档化 —— 云变量重连超过上限后仅 warn 并永久放弃、且**不再发事件**(仅初始 `Closed`),故调用方可能等到自己的超时;已写进 `CloudBuilder::max_reconnect_attempts` 与 `ConnectionEvent` 的 rustdoc(见 `../rounds/43` §6;原始记录 `../rounds/29` §4)。
 5. **转换域 P2**:`simple.rs` 的 `Arc<Value>` 可 `Arc::try_unwrap` 免拷(`../rounds/29` §3-4)。
 6. `../rounds/21` §6「明确遗留(不在本轮)」与原方案 §4/§5 的未勾选项 —— 以该文为准逐条过一遍(2026-10-01 盘点时未逐条核验)。
 7. **NEMO"完整搬家"还缺资源重传**:"上传到账号"只传 `.bcm`,造型/音频仍指向源 CDN URL;
@@ -204,3 +204,17 @@
 不冒充可用),而是"把丢失变成可看见的损失"。**该问句已关闭,不再挂起**。
 
 **拍板处与逐项状态见 `../rounds/39` §5 / §0.3**(2026-10-02 已按证据全部拍板并落地:C1 = 做、C2 = 不拆、C3 = 做;另 W52)  已完成、W13 暂缓)—— **本节不复制结论与提交号**。
+
+## 7. 性能盘点(2026-10-03,待做;全部需先量)
+
+> 只读盘点的结论:转换域的性能大方向早已关闭(见 §5 第 2 行与 `../rounds/40` §5:除"少建中间 `Value` 树"的整体重写外,其余都落在 ±2% 噪声内,重开需硬指标)。下面五条是**仍未登记**的小改,判据统一为"逐键/逐字节等价 + 产物 SHA 不变",收益按仓库口径**先量后宣称**。
+
+| # | 项 | 证据 | 计量方式 |
+| --- | --- | --- | --- |
+| 1 | **反向半边不走已有索引**:`KITTEN_TO_KN`(367 条)等静态表的反向查询仍是 `iter().find` 线性扫 | `translate/mapping.rs::{is_renamed_lc_key,unmapped_field_text,reverse_slot_name}`;对照正向索引 `mapping.rs::{KITTEN_TO_KN_INDEX,SPECIAL_FIELD_VALUES_INDEX,INPUT_NAME_MAP_INDEX}`;遗留记录 `../rounds/37` §10.1 | 语义:`cargo test --lib`(两腿语料扫描器);产物:`convert_bench` 的 `kn-3.7MB-kitten4`/`kn-9.4MB` SHA 与 `#meta` 不变;收益:同轮 A/B 的 `core` 与 `#meta.alloc_count_serial`(按 `../rounds/37` §6.2bis 口径) |
+| 2 | **反向值向反查缺索引**(索引只建了"键→值"一半,`reverse_field_name` 每字段扫两遍值) | `translate/mapping.rs::{reverse_field_name,reverse_appearance_attribute,unmapped_field_text,reverse_slot_name}` | 同第 1 条;注意必须保住现有歧义口径(命中数唯一才认) |
+| 3 | **`resolve_callee` 每个调用块线性扫 `procedures`(最多 3 趟)** | `translate/model.rs::{resolve_callee,rewrite_calls,unrewrite_calls,CALL_TYPES}` | 先按 `../rounds/37` §6.2ter 的一次性探针量"调用次数 × 定义数"确认 O(n·m);产物同上;行为看 procedure 类断言 |
+| 4 | **NEMO `parse_block` 的 `<field>` 分支每字段深拷整份 fields Map** | `translate/nemo_mapping.rs::parse_block`(`node_fields(fields.clone())`) | 产物取 NEMO 样本 SHA 不变;收益看该样本 `#meta.alloc_count_serial` 下降 |
+| 5 | **正向 `collect_forward_items` 每实体深拷 `source`**(与反向已做的 P2 同族) | `translate/pipeline.rs::collect_forward_items`、`assembly.rs::ConvertedEntity.source`;对照 `../rounds/37` §4 P2 | 产物取 `kitten4-*` 样本 SHA 不变;收益与风险按 P2 实测口径(约 2~3%)评估 |
+
+**已判不做(不要重开)**:`find_object_shadow` 惰性化(P4,`../rounds/37` §4;W10 起已由 `normalize_object_shadows` 的廉价探测替代)、P6 手写去 `#[serde(flatten)]`、W8 1)、W9、W13、单遍遍历合并、`RawValue` 透传、`BTreeMap` 改 `HashMap`、合并两份 `tree_to_json`、NEMO 每实体多趟全 DOM 遍历(属"单遍遍历合并"家族)。

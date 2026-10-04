@@ -61,3 +61,14 @@
 1. `../rounds/01` 的「附录:坑 10 全文」与正文重复,且残留写作指令句,宜去重或改成链接(该文属历史稿,**按"历史保真"约定不改**;需要时在勘误里注明)。
 2. "回调不应 panic"必须写进 rustdoc(`release` 是 `panic="abort"`,catch_unwind 无效)(`../rounds/01` 坑 13)。
 3. 本库(`../knowledge/`、`../goals/`)已替代 `../rounds/` 作为**入口**;新增改动优先更新本库 + 一个新轮次记录。
+
+## 6. 架构盘点(2026-10-03,待决)
+
+> 只读盘点认为整体分层健康:`utils` 为叶子、`api` 居中层、`core` 居上,全仓无模块环,`core → api` 为既定方向(C8 暂缓)。下面四条是其中**仍未登记**的开放项,证据为符号定位。
+
+| 项 | 证据 | 说明与代价 |
+| --- | --- | --- |
+| **公共请求原语把 `ureq` 实现类型泄漏进 `pub` 签名** | `requests.rs::MewRequestBuilder::{send,send_with_payload_ref,send_multipart}`、`CodeMaoClient::{agent,response_to_json,response_to_string,response_to_binary,response_to_*_large}`、`MewError::Http(#[from] ureq::Error)` | 签名里出现 `ureq::Response<Body>`/`Body`/`Form`/`Agent` ⇒ 下游要命名这些类型就必须依赖同版本 `ureq`,且 `ureq` 大版本升级会直接变成本库的破坏性变更。两种收法:仅域内用的收 `pub(crate)`,确需对外的包一层自有响应类型。属**公共面变更**(待决) |
+| **`CheckConfig` 是 `pub struct` 但字段全 `pub(crate)` 且无公开构造器** | `pipeline.rs::CheckConfig`、`services.rs::ReportProcessor::{new_with_config,new_with_config_and_client}` | 下游只能传 `Default`,公共签名承诺的"自定义配置"实际不可达。要么把两个构造器收 `pub(crate)`(先核调用点),要么公开字段或加 builder。属**公共面变更**(待决) |
+| **`api` 层两处零调用的全局入口** | `auth.rs::{global_auth_manager,GLOBAL_AUTH_MANAGER,fetch_current_timestamp}` | 与 `../knowledge/repo-conventions.md` §3 的注入纪律相悖(同 `KittyFactory` 已删的同类),且 `pub` 项 `unused` 抓不到 ⇒ 长期诱使新代码回落到全局身份槽。零调用可删(属公共面,需授权) |
+| **错误类型边界不一致** | `registry.rs::ProcessorError`(Io/Json/Mew 并列)、`retrieve.rs::DataQueryError`(Json/External 并列)、`filedata.rs::FileError`(仅 Io,唯一调用点立即 map 成 `MewError::Io`);口径锚点 `translate/options.rs::TranslateError` 与 `convert/shared.rs::DecompilerError`(io/json 均折进 `Mew`) | 同一个底层失败在不同层表示不同,下游要两套 match;`FileError` 还逼出样板 `map_err`。按 `TranslateError` 的既定口径收敛属**破坏性公共面变更**(待决) |
