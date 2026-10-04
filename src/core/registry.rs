@@ -387,10 +387,6 @@ struct ActiveSource {
 }
 
 pub(crate) struct ReportFetcher {
-    /// 注入缝:`new_with_client` 收下客户端,但各方法改为**按参数**注入(见 `new_with_client` 里的
-    /// `let c = client.clone()`),该字段因此无读者 —— 不删,否则 `new_with_client` 会变成忽略参数的假注入
-    #[allow(dead_code)]
-    client: CodeMaoClient,
     /// Arc 共享:ReportProcessor 的管道工厂与 fetcher 复用同一注册表,避免深拷贝
     pub(crate) registry: Arc<ReportTypeRegistry>,
 }
@@ -620,7 +616,6 @@ impl ReportFetcher {
         }
 
         ReportFetcher {
-            client,
             registry: Arc::new(registry),
         }
     }
@@ -801,7 +796,6 @@ mod tests {
         registry.register("test_type", cfg);
 
         let fetcher = ReportFetcher {
-            client: CodeMaoClient::global().clone(),
             registry: Arc::new(registry),
         };
         let items: Vec<Value> = fetcher

@@ -33,7 +33,7 @@ fn main() {
         Ok(r) => r,
         Err(msg) => {
             eprintln!("管理员登录失败: {}", msg);
-            return;
+            std::process::exit(1);
         }
     };
 
@@ -79,7 +79,10 @@ fn main() {
     };
     println!("\n=== 启动举报处理控制台 ===");
     let processor = ReportProcessor::new();
-    ReportConsole::run(&mut ui, &processor, admin_id);
+    if let Err(e) = ReportConsole::run(&mut ui, &processor, admin_id) {
+        eprintln!("控制台退出: {}", e);
+        std::process::exit(1);
+    }
 }
 
 /// 管理员账密登录,验证码错误时自动重新获取验证码并重试
@@ -106,10 +109,16 @@ fn admin_login_with_retry(ui: &mut dyn ProcessorUi) -> Result<LoginResult, Strin
 
         // 用户名/密码只在首次尝试时询问,重试仅重新输入验证码
         if attempts == 1 {
-            username = ui.input("管理员用户名: ");
-            password = ui.input("管理员密码: ");
+            username = ui
+                .input("管理员用户名: ")
+                .map_err(|e| format!("读取输入失败: {}", e))?;
+            password = ui
+                .input("管理员密码: ")
+                .map_err(|e| format!("读取输入失败: {}", e))?;
         }
-        let captcha = ui.input("请输入验证码: ");
+        let captcha = ui
+            .input("请输入验证码: ")
+            .map_err(|e| format!("读取输入失败: {}", e))?;
 
         match LoginHandler::new().handle_admin_password(&username, &password, timestamp, &captcha) {
             Ok(result) => return Ok(result),
@@ -122,7 +131,9 @@ fn admin_login_with_retry(ui: &mut dyn ProcessorUi) -> Result<LoginResult, Strin
                     return Err(msg);
                 }
                 if attempts >= MAX_ATTEMPTS {
-                    let again = ui.input("多次验证码错误, 是否继续重试? (Y/N): ");
+                    let again = ui
+                        .input("多次验证码错误, 是否继续重试? (Y/N): ")
+                        .map_err(|e| format!("读取输入失败: {}", e))?;
                     if !again.trim().eq_ignore_ascii_case("y") {
                         return Err(msg);
                     }

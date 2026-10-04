@@ -1,16 +1,23 @@
 use std::collections::HashSet;
 use std::io::{self, Write};
 
+use crate::utils::requests::MewResult;
+
 /// 交互界面:内部逻辑依赖该 trait 完成输入/选择/展示
+///
+/// 读入相关的三个方法返回 [`MewResult`]:stdin 出错或**读到 EOF**(管道关闭 / 输入被重定向到空文件)
+/// 都必须能向上传播。早期签名固定为 `String`,EOF 会让 `choose`/`menu` 拿着空串**无限重试**、
+/// 把提示符刷满终端(实测:管道立即关闭时两者都会死循环);`expect` 又会在 release
+/// (`panic = "abort"`)下直接终结进程。
 pub trait ProcessorUi {
     /// 输出一行普通信息(标题,列表行等)
     fn info(&mut self, msg: &str);
     /// 输出一行错误信息
     fn error(&mut self, msg: &str);
     /// 读取一行输入
-    fn input(&mut self, prompt: &str) -> String;
+    fn input(&mut self, prompt: &str) -> MewResult<String>;
     /// 在合法选项中循环选择(大小写不敏感),返回大写的合法键
-    fn choose(&mut self, prompt: &str, valid: &[&str]) -> String;
+    fn choose(&mut self, prompt: &str, valid: &[&str]) -> MewResult<String>;
     /// 编号菜单:列出 `options`(编号,键,名称),`default_idx` 为回车默认项
     /// 返回选中项索引,None 表示用户取消/退出
     fn menu(
@@ -18,7 +25,7 @@ pub trait ProcessorUi {
         title: &str,
         options: &[(&str, &str)],
         default_idx: Option<usize>,
-    ) -> Option<usize>;
+    ) -> MewResult<Option<usize>>;
 }
 
 /// 控制台实现:直接读写 stdin/stdout
@@ -34,17 +41,17 @@ impl ProcessorUi for ConsoleUi {
         eprintln!("{}", msg);
     }
 
-    fn input(&mut self, prompt: &str) -> String {
+    fn input(&mut self, prompt: &str) -> MewResult<String> {
         read_line(prompt)
     }
 
-    fn choose(&mut self, prompt: &str, valid: &[&str]) -> String {
+    fn choose(&mut self, prompt: &str, valid: &[&str]) -> MewResult<String> {
         let valid_set: HashSet<&str> = valid.iter().copied().collect();
         loop {
-            let input = read_line(prompt);
+            let input = read_line(prompt)?;
             let upper = input.trim().to_uppercase();
             if valid_set.contains(upper.as_str()) {
-                return upper;
+                return Ok(upper);
             }
             println!("无效输入,请重试");
         }
@@ -55,7 +62,7 @@ impl ProcessorUi for ConsoleUi {
         title: &str,
         options: &[(&str, &str)],
         default_idx: Option<usize>,
-    ) -> Option<usize> {
+    ) -> MewResult<Option<usize>> {
         println!("{}", title);
         for (i, (key, name)) in options.iter().enumerate() {
             let default_mark = if default_idx == Some(i) {
@@ -67,21 +74,21 @@ impl ProcessorUi for ConsoleUi {
         }
         println!("  0. 取消 (Q)");
         loop {
-            let input = read_line("> ");
+            let input = read_line("> ")?;
             let trimmed = input.trim();
             if trimmed.is_empty() {
                 if let Some(idx) = default_idx {
-                    return Some(idx);
+                    return Ok(Some(idx));
                 }
                 println!("无效输入,请重试");
                 continue;
             }
             if trimmed == "0" || trimmed.eq_ignore_ascii_case("q") {
-                return None;
+                return Ok(None);
             }
             if let Ok(n) = trimmed.parse::<usize>() {
                 if n >= 1 && n <= options.len() {
-                    return Some(n - 1);
+                    return Ok(Some(n - 1));
                 }
                 println!("无效输入,请重试");
                 continue;
@@ -90,7 +97,7 @@ impl ProcessorUi for ConsoleUi {
                 .iter()
                 .position(|(key, _)| key.eq_ignore_ascii_case(trimmed))
             {
-                return Some(idx);
+                return Ok(Some(idx));
             }
             println!("无效输入,请重试");
         }
@@ -98,17 +105,23 @@ impl ProcessorUi for ConsoleUi {
 }
 
 /// 从 stdin 读取一行并去除首尾空白
-fn read_line(prompt: &str) -> String {
+///
+/// **读到 EOF 也算错误**:管道关闭 / 输入重定向到空输入时 `read_line` 返回 `Ok(0)`,
+/// 若把它当空串返回,`choose`/`menu` 会立刻拿到空串再次读取 ⇒ 死循环刷屏。
+fn read_line(prompt: &str) -> MewResult<String> {
     print!("{}", prompt);
     // 提示符刷新失败(如 stdout 已关闭)不影响后续读输入,尽力而为即可
     let _ = io::stdout().flush();
     let mut input = String::new();
-    // ProcessorUi::input 的签名固定为返回 String,无法向上传播错误;
-    // stdin 已关闭/管道断开是致命环境错误,若静默返回空串会让 choose/menu 死循环重试 ⇒ 尽快 panic
-    io::stdin()
-        .read_line(&mut input)
-        .expect("stdin 读取失败(stdin 已关闭或管道断开)");
-    input.trim().to_string()
+    let n = io::stdin().read_line(&mut input)?;
+    if n == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "stdin 已到末尾(输入被关闭或重定向为空)",
+        )
+        .into());
+    }
+    Ok(input.trim().to_string())
 }
 
 // 举报处理控制台
@@ -202,7 +215,11 @@ pub struct ReportConsole;
 impl ReportConsole {
     /// 控制台主循环:未处理/已处理两个工作区 + 管理员统计,
     /// 支持快捷键直达,总数带缓存,退出时汇报会话统计
-    pub fn run(ui: &mut dyn ProcessorUi, processor: &ReportProcessor, admin_id: i32) {
+    pub fn run(
+        ui: &mut dyn ProcessorUi,
+        processor: &ReportProcessor,
+        admin_id: i32,
+    ) -> MewResult<()> {
         let mut session = RunStats::default();
         loop {
             let (todo, done) = processor.totals();
@@ -212,13 +229,13 @@ impl ReportConsole {
             ui.info("2(d). 查看已处理记录");
             ui.info("3(s). 管理员统计");
             ui.info("0(q). 退出");
-            let input = ui.input("> ");
+            let input = ui.input("> ")?;
             match input.trim().to_lowercase().as_str() {
-                "1" | "p" => Self::process_flow(ui, processor, admin_id, &mut session),
+                "1" | "p" => Self::process_flow(ui, processor, admin_id, &mut session)?,
                 "2" | "d" => {
-                    if Self::view_done(ui, processor, admin_id) {
+                    if Self::view_done(ui, processor, admin_id)? {
                         // 已处理记录中直接切到处理未处理
-                        Self::process_flow(ui, processor, admin_id, &mut session);
+                        Self::process_flow(ui, processor, admin_id, &mut session)?;
                     }
                 }
                 "3" | "s" => Self::show_stats(ui),
@@ -227,7 +244,7 @@ impl ReportConsole {
                         ui.info(&format!("本次会话处理统计: {}", session.summary()));
                     }
                     ui.info("退出举报处理控制台");
-                    return;
+                    return Ok(());
                 }
                 _ => ui.info("无效输入,请重试"),
             }
@@ -240,7 +257,7 @@ impl ReportConsole {
         processor: &ReportProcessor,
         admin_id: i32,
         session: &mut RunStats,
-    ) {
+    ) -> MewResult<()> {
         match Self::process_pending(ui, processor, admin_id) {
             Ok(stats) => {
                 ui.info(&format!("本次处理 {}", stats.summary()));
@@ -248,6 +265,7 @@ impl ReportConsole {
             }
             Err(e) => ui.error(&format!("处理失败: {}", e)),
         }
+        Ok(())
     }
 
     /// 只读视图:各管理员的举报处理量统计
@@ -291,7 +309,7 @@ impl ReportConsole {
             ui.info("没有待处理的举报");
             return Ok(RunStats::default());
         }
-        if ui.choose("是否一键全部通过? (Y/N)", &["Y", "N"]) == "Y" {
+        if ui.choose("是否一键全部通过? (Y/N)", &["Y", "N"])? == "Y" {
             let passed = processor.pass_all(admin_id);
             return Ok(RunStats {
                 passed,
@@ -416,7 +434,7 @@ impl ReportConsole {
         for line in &view.details {
             ui.info(line);
         }
-        match Self::ask_action(ui, processor, first, &view) {
+        match Self::ask_action(ui, processor, first, &view)? {
             ActionChoice::Apply(key) => {
                 let Some(action) = ReportAction::from_key(&key) else {
                     warn!("未知批量动作键: {}", key);
@@ -501,7 +519,7 @@ impl ReportConsole {
         for line in &view.details {
             ui.info(line);
         }
-        match Self::ask_action(ui, processor, item, &view) {
+        match Self::ask_action(ui, processor, item, &view)? {
             ActionChoice::Apply(key) => {
                 let Some(action) = ReportAction::from_key(&key) else {
                     warn!("未知动作键: {}", key);
@@ -525,7 +543,7 @@ impl ReportConsole {
                             && ui.choose(
                                 &format!("是否对同类型剩余 {} 条应用相同动作? (Y/N)", rest.len()),
                                 &["Y", "N"],
-                            ) == "Y"
+                            )? == "Y"
                         {
                             let mut ok = 0i64;
                             for &j in &rest {
@@ -569,7 +587,7 @@ impl ReportConsole {
         processor: &ReportProcessor,
         item: &serde_json::Value,
         view: &ReportItemView,
-    ) -> ActionChoice {
+    ) -> MewResult<ActionChoice> {
         let options: Vec<(&str, &str)> = view
             .actions
             .iter()
@@ -578,8 +596,8 @@ impl ReportConsole {
         let default_idx = view.actions.iter().position(|(k, _)| k == "P");
 
         loop {
-            let Some(idx) = ui.menu("请选择操作:", &options, default_idx) else {
-                return ActionChoice::Abort;
+            let Some(idx) = ui.menu("请选择操作:", &options, default_idx)? else {
+                return Ok(ActionChoice::Abort);
             };
             let key = &view.actions[idx].0;
             match key.as_str() {
@@ -589,7 +607,7 @@ impl ReportConsole {
                         continue;
                     }
                     let limit = ui
-                        .input("输入要获取的评论数: ")
+                        .input("输入要获取的评论数: ")?
                         .parse()
                         .unwrap_or_else(|_| processor.default_comment_limit());
                     match processor.check_violations(item, limit) {
@@ -598,7 +616,7 @@ impl ReportConsole {
                         }
                         Ok(violations) => {
                             ui.info(&format!("检测到 {} 条违规内容", violations.len()));
-                            if ui.choose("是否自动举报违规内容? (Y/N)", &["Y", "N"]) == "Y"
+                            if ui.choose("是否自动举报违规内容? (Y/N)", &["Y", "N"])? == "Y"
                             {
                                 match processor.auto_report(&violations) {
                                     Ok(n) => ui.info(&format!(
@@ -613,15 +631,19 @@ impl ReportConsole {
                         Err(e) => ui.error(&format!("违规检查失败: {}", e)),
                     }
                 }
-                "J" => return ActionChoice::Skip,
-                key => return ActionChoice::Apply(key.to_string()),
+                "J" => return Ok(ActionChoice::Skip),
+                key => return Ok(ActionChoice::Apply(key.to_string())),
             }
         }
     }
 
     /// 分页浏览已处理记录,支持类型/状态/仅我处理/关键字过滤;
     /// 返回 true 表示用户要求切换到"处理未处理"
-    fn view_done(ui: &mut dyn ProcessorUi, processor: &ReportProcessor, admin_id: i32) -> bool {
+    fn view_done(
+        ui: &mut dyn ProcessorUi,
+        processor: &ReportProcessor,
+        admin_id: i32,
+    ) -> MewResult<bool> {
         const PAGE_SIZE: usize = 15;
 
         ui.info("=== 已处理记录 ===");
@@ -653,7 +675,7 @@ impl ReportConsole {
 
             if raw_items.is_empty() {
                 ui.info("暂无已处理记录");
-                return false;
+                return Ok(false);
             }
 
             // 表头:当前过滤条件 + 页码
@@ -701,7 +723,7 @@ impl ReportConsole {
             }
 
             ui.info("[序号] 查看详情 | n 下一页 | b 上一页 | t 类型 | s 状态 | m 仅我处理 | k 搜索 | x 清除过滤 | u 处理未处理 | q 返回");
-            let input = ui.input("> ");
+            let input = ui.input("> ")?;
             let trimmed = input.trim();
             if let Ok(idx) = trimmed.parse::<usize>() {
                 if visible.is_empty() {
@@ -732,7 +754,7 @@ impl ReportConsole {
                     }
                     "t" => {
                         filter_changed = true;
-                        match Self::pick_type(ui, &type_options, filter.report_type.as_deref()) {
+                        match Self::pick_type(ui, &type_options, filter.report_type.as_deref())? {
                             TypeFilterChoice::Cancel => {}
                             TypeFilterChoice::All => filter.report_type = None,
                             TypeFilterChoice::Select(rt) => filter.report_type = Some(rt),
@@ -740,7 +762,7 @@ impl ReportConsole {
                     }
                     "s" => {
                         filter_changed = true;
-                        match Self::pick_status(ui, filter.status.as_deref()) {
+                        match Self::pick_status(ui, filter.status.as_deref())? {
                             StatusFilterChoice::Cancel => {}
                             StatusFilterChoice::All => filter.status = None,
                             StatusFilterChoice::Select(s) => filter.status = Some(s),
@@ -752,7 +774,7 @@ impl ReportConsole {
                     }
                     "k" => {
                         filter_changed = true;
-                        let k = ui.input("输入搜索关键字(回车清除): ");
+                        let k = ui.input("输入搜索关键字(回车清除): ")?;
                         let k = k.trim();
                         filter.keyword = if k.is_empty() {
                             None
@@ -764,8 +786,8 @@ impl ReportConsole {
                         filter_changed = true;
                         filter = DoneFilter::default();
                     }
-                    "u" => return true,
-                    "q" | "" => return false,
+                    "u" => return Ok(true),
+                    "q" | "" => return Ok(false),
                     _ => ui.info("无效输入,请重试"),
                 }
                 if filter_changed {
@@ -789,7 +811,7 @@ impl ReportConsole {
         ui: &mut dyn ProcessorUi,
         type_options: &[(String, String)],
         current: Option<&str>,
-    ) -> TypeFilterChoice {
+    ) -> MewResult<TypeFilterChoice> {
         ui.info("\n选择要查看的举报类型:");
         ui.info("  0. 全部");
         for (i, (rt, name)) in type_options.iter().enumerate() {
@@ -801,26 +823,29 @@ impl ReportConsole {
             ui.info(&format!("  {}. {}{}", i + 1, name, mark));
         }
         ui.info("  回车返回");
-        let input = ui.input("> ");
+        let input = ui.input("> ")?;
         let trimmed = input.trim();
         if trimmed.is_empty() {
-            return TypeFilterChoice::Cancel;
+            return Ok(TypeFilterChoice::Cancel);
         }
         if trimmed == "0" {
-            return TypeFilterChoice::All;
+            return Ok(TypeFilterChoice::All);
         }
         if let Ok(n) = trimmed.parse::<usize>()
             && n >= 1
             && n <= type_options.len()
         {
-            return TypeFilterChoice::Select(type_options[n - 1].0.clone());
+            return Ok(TypeFilterChoice::Select(type_options[n - 1].0.clone()));
         }
         ui.info("无效输入");
-        TypeFilterChoice::Cancel
+        Ok(TypeFilterChoice::Cancel)
     }
 
     /// 交互选择状态过滤
-    fn pick_status(ui: &mut dyn ProcessorUi, current: Option<&str>) -> StatusFilterChoice {
+    fn pick_status(
+        ui: &mut dyn ProcessorUi,
+        current: Option<&str>,
+    ) -> MewResult<StatusFilterChoice> {
         ui.info("\n选择状态过滤:");
         ui.info("  0. 全部");
         for (i, raw) in STATUS_FILTER_OPTIONS.iter().enumerate() {
@@ -837,22 +862,24 @@ impl ReportConsole {
             ));
         }
         ui.info("  回车返回");
-        let input = ui.input("> ");
+        let input = ui.input("> ")?;
         let trimmed = input.trim();
         if trimmed.is_empty() {
-            return StatusFilterChoice::Cancel;
+            return Ok(StatusFilterChoice::Cancel);
         }
         if trimmed == "0" {
-            return StatusFilterChoice::All;
+            return Ok(StatusFilterChoice::All);
         }
         if let Ok(n) = trimmed.parse::<usize>()
             && n >= 1
             && n <= STATUS_FILTER_OPTIONS.len()
         {
-            return StatusFilterChoice::Select(STATUS_FILTER_OPTIONS[n - 1].to_string());
+            return Ok(StatusFilterChoice::Select(
+                STATUS_FILTER_OPTIONS[n - 1].to_string(),
+            ));
         }
         ui.info("无效输入");
-        StatusFilterChoice::Cancel
+        Ok(StatusFilterChoice::Cancel)
     }
 }
 

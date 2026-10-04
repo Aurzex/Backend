@@ -161,10 +161,22 @@ impl ChangeSource {
 }
 
 /// 连接事件(供 `on_connection` 回调使用)
+///
+/// 注意**重连放弃不再补发事件**:自动重连在超过
+/// [`CloudBuilder::max_reconnect_attempts`] 次后只写一条 `warn!` 日志并永久停止
+/// (不会再尝试建立,直到调用方显式 [`CloudConnection::connect`])。因此调用方看到的
+/// 最后一个事件是断线那一刻的 [`ConnectionEvent::Closed`],**不能**把它当作"重连已放弃"
+/// 的信号 —— 依赖 `wait_for_data` 的等待会一直等到自己的超时(返回 `false`)。
 #[derive(Debug, Clone)]
 pub enum ConnectionEvent {
     Opened,
-    Closed { was_connected: bool },
+    /// 连接丢失。`was_connected` 为断线前是否处于已连接状态。
+    ///
+    /// 该事件只在**断线时**发一次:其后的自动重连成功会再发 [`ConnectionEvent::Opened`],
+    /// 而重连**放弃**不发任何事件(见上)。
+    Closed {
+        was_connected: bool,
+    },
     Error(String),
     ServerClosed(String),
 }
@@ -730,6 +742,11 @@ impl CloudBuilder {
     }
 
     /// 最大重连次数(默认 5)
+    ///
+    /// 退避序列为 `reconnect_interval * 2^(n-1)`(上限 5 分钟);超过本次数后**永久放弃**:
+    /// 只写一条 `warn!` 日志,**不**再发连接事件(见 [`ConnectionEvent`]),也不会自行重试,
+    /// 直到调用方显式 [`CloudConnection::connect`]。因此调用方若在等数据(`wait_for_data`),
+    /// 会一直等到自己的超时;需要"重连已放弃"这一信号时,应自行按超时判定。
     pub fn max_reconnect_attempts(mut self, attempts: usize) -> Self {
         self.max_reconnect_attempts = attempts;
         self

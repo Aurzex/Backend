@@ -527,6 +527,11 @@ impl MewRequestBuilder {
     /// (实测 31.2 s / 35.5 s 超时,见 `docs/rounds/21` §8.4 N1、`docs/goals/pending-decisions.md` A1)。
     ///
     /// 下载侧同理(**大响应体**):见 [`DOWNLOAD_TIMEOUT`]。
+    ///
+    /// 语义:只抬"整通调用的总预算 + body 预算";**等响应头**仍受客户端
+    /// `timeout_recv_response`(即 `ClientConfig::timeout`,默认 30 s)约束,
+    /// 因此死连接/无响应服务端不会在长超时路径上白等(实测见
+    /// `docs/knowledge/platform-and-protocol.md` §5ter)。
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
@@ -657,8 +662,15 @@ struct KittyCore {
 
 impl KittyCore {
     fn new(config: ClientConfig, auth: Arc<dyn AuthProvider>) -> Self {
+        // 三段预算各司其职(实测见 `docs/knowledge/platform-and-protocol.md` §5ter):
+        // `timeout_global` 是整通调用(含 body 读取)的总上限,`timeout_recv_response` 只管
+        // 连接建立到响应头,`timeout_recv_body` 只管 body。后两者在请求级覆盖 `timeout_global`
+        // 时会被**继承**(请求级 config 由 agent 配置派生),因此下载路径把总预算抬到
+        // `DOWNLOAD_TIMEOUT` 时,"等响应头"仍按这里的 30 s 失败,不会被一起抬走。
         let agent = Agent::config_builder()
             .timeout_global(Some(config.timeout))
+            .timeout_recv_response(Some(config.timeout))
+            .timeout_recv_body(Some(config.timeout))
             .build()
             .into();
         Self {
@@ -879,7 +891,11 @@ impl KittyCore {
             config = config.http_status_as_error(false);
         }
         if let Some(timeout) = timeout {
-            config = config.timeout_global(Some(timeout));
+            // 请求级覆盖只抬"总预算 + body 预算":响应头仍受 agent 的 `timeout_recv_response`
+            // 约束(请求级 config 从 agent 配置派生 ⇒ 未显式改的旋钮保持原值)。
+            config = config
+                .timeout_global(Some(timeout))
+                .timeout_recv_body(Some(timeout));
         }
         config.build()
     }
@@ -1648,6 +1664,13 @@ const UPLOAD_TIMEOUT: Duration = Duration::from_secs(600);
 ///
 /// 使用方:`core::convert::shared` 的 `CodeMaoHttpClient`(转换域取作品/资源的地基)
 /// 与采集工具。不动全局默认,也不动上传侧的 [`UPLOAD_TIMEOUT`]。
+///
+/// **超时是三段,不是一个数**(实测见 `docs/knowledge/platform-and-protocol.md` §5ter):
+/// `timeout_global` 是整通调用(含 body 读取)的总上限,`timeout_recv_response` 只管
+/// 等响应头,`timeout_recv_body` 只管读 body。本常量走请求级覆盖,只抬"总预算 + body 预算";
+/// "等响应头"仍按客户端配置的 `timeout`(默认 30 s)失败,因此死连接不会在下载路径上
+/// 白等 900 s。ureq 3 **没有逐次读的"空闲超时"**:body 中途卡住只会吃掉总预算,
+/// 这是该旋钮的边界,不是漏配。
 pub const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(900);
 
 /// 下载响应体的内存护栏上限(**不是**协议限制)
@@ -2127,5 +2150,56 @@ mod tests {
         assert!(is_header_overridden("User-Agent", &extra_headers));
         assert!(is_header_overridden("USER-AGENT", &extra_headers));
         assert!(!is_header_overridden("Accept", &extra_headers));
+    }
+
+    /// 三段超时预算都要落在 agent 上(缺任一段都会让另一类失败模式失去上界)
+    ///
+    /// 语义与实测见 `docs/knowledge/platform-and-protocol.md` §5ter。
+    #[test]
+    fn agent_carries_all_three_timeout_budgets() {
+        let budget = Duration::from_secs(7);
+        let client = CodeMaoClient::new_independent(ClientConfig::default().with_timeout(budget));
+        let timeouts = client.agent().config().timeouts();
+        assert_eq!(timeouts.global, Some(budget), "总预算");
+        assert_eq!(timeouts.recv_response, Some(budget), "等响应头");
+        assert_eq!(timeouts.recv_body, Some(budget), "读响应体");
+    }
+
+    /// 下载路径抬总预算时,**等响应头仍按客户端超时失败**(死连接不会白等 DOWNLOAD_TIMEOUT)。
+    ///
+    /// 用"accept 后永不响应"的本地服务端复现:客户端 2 s、请求级覆盖 60 s
+    /// ⇒ 必须在 2 s 量级失败,而不是等满 60 s。断言留大裕量(20 s)。
+    #[test]
+    fn request_level_override_keeps_header_budget() {
+        use std::net::TcpListener;
+        use std::time::Instant;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("绑定本地端口");
+        let port = listener.local_addr().expect("取端口").port();
+        std::thread::spawn(move || {
+            // 不读不写:让客户端一直等响应头;连接对象留在 vec 里保持打开
+            let mut held = Vec::new();
+            for s in listener.incoming().flatten() {
+                held.push(s);
+            }
+        });
+
+        let client = CodeMaoClient::new_independent(
+            ClientConfig::default().with_timeout(Duration::from_secs(2)),
+        );
+        let url = format!("http://127.0.0.1:{port}/dead");
+        let started = Instant::now();
+        let outcome = client
+            .build_request(HttpMethod::Get, &url, None)
+            .with_timeout(Duration::from_secs(60))
+            .send();
+        let elapsed = started.elapsed();
+
+        assert!(outcome.is_err(), "死连接必须失败");
+        assert!(
+            elapsed < Duration::from_secs(20),
+            "抬总预算后等响应头仍应按客户端超时(2 s)失败,实际 {elapsed:?} —— 若接近 60 s 说明请求级覆盖把 \
+             timeout_recv_response 也抬走了(见 knowledge §5ter)"
+        );
     }
 }
