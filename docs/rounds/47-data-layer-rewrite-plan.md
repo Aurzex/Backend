@@ -93,21 +93,22 @@
 
 **读数只一条:**正向的 `core` 只降 5%(它取 `report.elapsed_ms`,而深拷贝发生在 `assembly` **之外**),但同一样本的 `e2e` 降 22% —— 把 §2bis.5 第 5 条那条 [INFERENCE] 坐实了:**`e2e` 未归类那一段(原先 227 ms / 32%)正是产物物化与深拷贝**,现降至约 71 ms(−69%)。**§2.2 里反向两行与 NEMO 两行的目标已达成**(kn-9.4 125 ≤ 150、kn-3.7 35 ≤ 45、nemo-3.4 202 ≤ 230、nemo-old 59 ≤ 75);正向两行仍待 Step 2/3。
 
-### Step 2 — 流式写出(内部路径先行)
+### Step 2+3(已按评审建议合并)— 流式写出:从"造整棵树再序列化"改成"直接写"
 
-改动:新增 `assembly::write_document(writer, …)`(或等价的可序列化视图),把"源文档透传键 + 各段 + 程序集"**边装配边写进 `BufWriter`**,不再先合成整份产物 `Value::Object`;`translate_file` 与 `core::convert::translate_work_in` 改走它(`set_source_reference_in` 相应改成"写出时带 `source` 键")。
+> **2026-10-05 已试并回退**:把 `tree_to_json` 由"`BlockJson::to_value` 物化 + `fill_shield` 再 DFS 一趟"改成"引用式一趟写出"(`NodeRef`,按字典序写、就地补 `shield`),等价测试通过、产物 SHA 全绿,但**同轮 A/B(`git worktree` 检出 Step 1 状态、两棵树的 bench 交替跑)显示:时间中性(kitten4-10.8 `core` 332 vs 343、kn-9.4 141 vs 142)、分配次数 +1.5%**(1 538 778 → 1 562 371)。
+> 根因:新实现**每节点多一个 `Vec<(&str, 值)>`**(+1 次分配/节点),而 serde 那点被省掉的机械开销本就可忽略 —— 与 `rounds/37` P6(手写 `to_value`/`from_value`、逐字节等价但**零收益**)是**同一结论**:**瓶颈不在"怎么序列化",而在"有没有先把整棵树造成 `Value`"**。
+> 因此该写法**回退,不再重试**;Step 2/3 直接合并为下面这一步(评审 P1-2 也建议合并)。
 
-公开面:`translate_value` 返回的 `TranslateDocument.document: Value` 是 **pub 字段**,`tests/convert_facade_bench.rs` 等按现状使用 ⇒ **本轮不改这个字段**:内存型调用方仍可拿到 `Value`(其代价与今天相同,无回退),流式路径只服务"文件→文件"这条被测链路。是否把该字段换成流式产物类型**另立决策**,不在本轮。
+改动:新增可序列化的产物视图 + 文档级流式写出 —— `assembly` 边装配边写进 `BufWriter`,实体对象里的 `nekoBlockJsonList` 由 `BlockTree` **直接写出**(不经 `Vec<Value>`),`ConvertedEntity` 因此持 `BlockTree` 而非 `Vec<Value>`。
 
-当步期望:`e2e` −10% 以上(省掉整份产物树的构造与析构,直接命中 §2bis.5 第 5 条那 32% 的"未归类"),峰值内存同步下降。
+必须遵守(评审 P1-2/P1-3):
+- 公开面 `TranslateDocument.document: Value` **不动**:内存型调用方(含 `tests/convert_facade_bench.rs`)仍走 `.to_value()`,代价与今天相同;流式只服务"文件→文件"链路(`translate_file`、`translate_work_in`)。是否把该字段换成流式产物类型**另立决策**。
+- 键序按 **`serde_json::Map` 的字典序**(不是字段序、不是装配序);`extra` 的键要与已知键**合流后按字典序**输出,`shield` 落在它的字典序位置上;`NodeRef` 那种"每节点一个 `Vec`"的做法不再用(见上)。
+- 三端默认键策略不同(§3.3),写出必须按方向参数化 —— 本步只做正向,反向/NEMO 见 Step 4。
 
-### Step 3 — 块树不再回 `Value`(键序按**字典序**)
+交付物:①`BlockTree` 的 writer(无中间 `Value`);②`ProductDocument`(持各段 + 实体 `BlockTree`)的 `write_to` 与 `to_value`;③永久等价测试:同一批树"流式写出"与"`to_value` + `to_writer`"**逐字节相同**(覆盖 `extra`、`shield`、嵌套 `inputs`/`statements`/`next`、非 ASCII/转义)。
 
-改动:让 `BlockJson`/`BlockTree` 具备直接写到 writer 的能力,删掉 `tree_to_json` → `Vec<Value>` 这条路;`fill_shield` 的正向语义(只补 `shield`、只递归 `inputs`/`statements`/`next`)搬进写出逻辑。
-
-**关键约束(评审修订)**:产物键序**不是**结构体字段序,而是 **BTreeMap 字典序**(已产出 `.bcmkn` 里一个积木的键序是 `collapsed, comment, deletable, editable, field_constraints, field_extra_attr, fields, id, is_output, is_shadow, movable, shield, …`,而 `BlockJson` 的字段序以 `type` 开头)。因此手写 `Serialize` **必须**把已知键与 `extra` 合流后**按字典序**输出,`shield` 的补写要落在它的字典序位置上 —— 否则每个节点的键序都会变、直接击穿 SHA 门(`model.rs` 的模块注释已记录过这条差异)。
-
-当步期望:分配次数 −20%~−35%,`core` −15% 以上。
+当步期望:`e2e` −10% 以上、分配次数 −10%~−20%(省掉整棵产物积木 `Value` 的构造、序列化遍历与析构);`core` 同向下降(正向两行目标是 `core` ≤ 200 ms)。
 
 ### Step 4 — 反向与 NEMO 对齐同一套写出(必做,承载 §2.2 的三行目标)
 
@@ -184,6 +185,8 @@
 | 10 | P3 | §8 未与 R6 的重开条件及"已判不做"清单对账 | **已补**:§8 重写为对账段(声明满足两条重开条件 + 逐项列重开理由) |
 
 评审未采纳项:无。评审提出的"更省力替代路":无(其结论是本方案方向成立,问题在表述与分步)。
+
+**评审后新增的一条实测(2026-10-05)**:按"Step 3 = 引用式一趟写出"做过一版并**同轮 A/B 后回退** —— 时间中性、分配 +1.5%(根因:每节点多一个 `Vec`,而 serde 少走的那点机械开销可忽略)。这条与 `../rounds/37` P6 互证:**改动必须落在"少造 `Value` 树"上,不能落在"换一种序列化写法"上**;分步计划据此把 Step 2/3 合并(见 §4)。
 
 ## 依据
 
