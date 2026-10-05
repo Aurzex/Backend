@@ -262,12 +262,17 @@
 2. **id 铸造是纯函数**:正向 `model::IdSource` 的 counter 表示"第几次铸造"(阶段 1 用 `[0, n)`、阶段 2 用 `[n, 2n)`);`TEMP_ID_PREFIX` 哨兵与 `remap_*` 必须覆盖所有承载 id 的字段(fields/shadows 的键与 XML 串内),`debug_assert_eq!(unmatched, 0)` 是兜底。任何遍历顺序变化或增删一个铸造点都会整体偏移后续 id。
 3. **唯一接触源文档**:只有 `collect_forward_items`/`restore_forward_items` 改源文档,且必须在成功与失败两路都把 `block_data_json` 还原(已有 `source == pristine` 断言);`normalize_object_shadows` 只在副本上改。
 4. **`fill_shield` 的不对称语义**:正向只补 `shield: false`,不补 `is_shadow`/`is_output`/`disabled`;只递归 `inputs`/`statements`/`next`。NEMO **不补**;反向经 `KITTEN4_DEFAULTS` 补 12 个默认键。
-5. **`extra` flatten 保真**:未识别键原样往返,合流排序后输出。
-6. **反向的 id 语义**:节点/实体 id **沿用源 id**,但**形状 id 由 `IdSource::short` 现铸**,铸造点有三处 —— `model::encode_block`(缺 id / id 重复)、`model::unrewrite_call`(每个非 `Label` 形参的 `ARG<j>` 影子)、`model::def_root_from_entry`(每个形参的 `math_number` 影子);其顺序由实体遍历序、`unrewrite_calls`/`def_root_from_entry` 递归序与 `build_block_data_json` 的根序共同决定,同样落在 SHA 门上。
-7. **名字唯一化依赖遍历序**:`assembly::build_document` 的角色名 / 场景 `screenName` 用共享的 `actor_used`/`scene_used` + `uniquify`(命中加后缀),结果与遍历顺序绑定。
-8. **程序集与实体同表改写**:阶段 2 把程序集 id/形参 id 复制进实体树,`remap_entry` 与 `remap_tree` 必须成对覆盖。
-9. **反向独有**:全局 `call_targets` 的生命周期、`def_root_from_entry` 把定义根挂进宿主实体。
-10. **NEMO 的整数归一位置**:`normalize_integral_numbers` 必须在装配之后;单根失败按现有策略降级为告警(不整份失败)。
+5. **两条写出路径必须共用同一套实现与同一道变换**(Step 2/3 / Step 4 落地后的新增约束):
+   - 块写出的三条口径:**键序 = `serde_json::Map`(= `BTreeMap`)的字节序**;`shield` **KN 侧恒写 / Kitten4 侧只在真值时写**;缺省键只在 Kitten4 侧补,且**标记块不写 `fields`/`shadows`**(`EncodedBlocks.marked`,见 `../knowledge/convert-performance.md` §2bis.10);
+   - 内存路径(`into_value()` / `build_*_document`)与文件路径(`write_to()`)必须走**同一份**写出器与**同一道** `mark_unknown_blocks_encoded`;**任何"只为流式路径写一份"的改动都视为分叉**,不许合并;
+   - 常驻等价门是硬门(§6):块写出、空/最小树、正向三挂点、反向两挂点 —— 单改一处而不动门 = 未完成。
+
+6. **`extra` flatten 保真**:未识别键原样往返,合流排序后输出。
+7. **反向的 id 语义**:节点/实体 id **沿用源 id**,但**形状 id 由 `IdSource::short` 现铸**,铸造点有三处 —— `model::encode_block`(缺 id / id 重复)、`model::unrewrite_call`(每个非 `Label` 形参的 `ARG<j>` 影子)、`model::def_root_from_entry`(每个形参的 `math_number` 影子);其顺序由实体遍历序、`unrewrite_calls`/`def_root_from_entry` 递归序与 `encode_block_data_json` 的根序共同决定,同样落在 SHA 门上。
+8. **名字唯一化依赖遍历序**:`assembly::build_document` 的角色名 / 场景 `screenName` 用共享的 `actor_used`/`scene_used` + `uniquify`(命中加后缀),结果与遍历顺序绑定。
+9. **程序集与实体同表改写**:阶段 2 把程序集 id/形参 id 复制进实体树,`remap_entry` 与 `remap_tree` 必须成对覆盖。
+10. **反向独有**:全局 `call_targets` 的生命周期、`def_root_from_entry` 把定义根挂进宿主实体。
+11. **NEMO 的整数归一位置**:`normalize_integral_numbers` 必须在装配之后;单根失败按现有策略降级为告警(不整份失败)。
 
 ## 6. 验收矩阵(每步都必须过,且必须有量化入口)
 
@@ -278,6 +283,7 @@
 | 节点直写(Step 3) | 必须 | 必须 | 必须 | 必须 | 建议 |
 | 反向/NEMO 对齐(Step 4) | 必须 | 必须 | 必须 | 必须 | 建议 |
 | 源侧骨架解析(Step 5) | 必须 + **逐字段 spike 对照** | 必须 | 必须 | 必须 | 建议 |
+| 常驻等价门(Step 2/3 / Step 4 新增) | 必须(与 SHA 门并行) | 必须 | 必须 | 必须(含新门自身) | 不需要 |
 
 统一口径:`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、`cargo test`、`BACKEND_REQUIRE_BENCH=1 … --profile bench_perf --test convert_bench -- --ignored`(严格模式)全绿;每步单独提交并写明当步读数;**某步若 `core`/`e2e`/分配三项都没有可测变化,视为该步无效,记录原因并重排后续步**。
 
