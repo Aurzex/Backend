@@ -50,7 +50,22 @@ cargo build --release
 cargo test          # 跑库单测
 ```
 
-`[profile.release]` 已配置 `lto`、`opt-level = "z"`、`strip` 与 `panic = "abort"`,产物体积最小。
+`[profile.release]` 已配置 `lto`、`opt-level = 3`、`strip` 与 `panic = "abort"`。该档面向**速度**(2026-10-05 由 `opt-level = "z"` 改为 `3`:同树同输入实测 `core` 快 12.5%–28.5%、`e2e` 快 19%–31%,代价是本仓 bin 体积 2.20 → 2.90 MiB)。注意 `[profile.*]` 只作用于**本仓作为顶层**的构建;把本库当依赖引入时,用的是你自己工程里的 profile。
+
+**性能建议(不改本库即可拿到)**:转换/反编译的 CPU 有约 37% 花在全局分配/释放上(单次转换摊到 100+ 次分配/产物节点,实测读数见 `docs/knowledge/convert-performance.md` §2bis)。在**你自己的**工程里指定一个更快的全局分配器,即可在不改动本库、不改变产物的前提下省下这部分开销:
+
+```toml
+# Cargo.toml(你的工程)
+[dependencies]
+mimalloc = "0.1"          # 或 tikv-jemallocator / tcmalloc 绑定
+```
+
+```rust
+#[global_allocator]
+static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
+```
+
+本库**刻意不指定**全局分配器(那会强加给所有使用者);临时验证也可以用 `LD_PRELOAD=/usr/lib/libjemalloc.so.2 <你的程序>`。
 
 ## 模块一览
 

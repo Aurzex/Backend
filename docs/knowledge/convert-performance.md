@@ -97,7 +97,11 @@
 4. **并发不是这些样本的瓶颈**:正向实体级 `core` 1.44–1.56×、`e2e` 1.12–1.17×;反向与 NEMO 均 1.00×(与 `rounds/25` 的 Amdahl 结论一致)。
 5. **`e2e` 未归类占比**在 kitten4-10.8MB 高达 32%(227 ms),而 NEMO 只有 4–5% —— [INFERENCE] 前者对应"巨型 `Value` 文档的物化与析构 + 写盘",与 2bis.3 里 `drop_glue`/`BTreeMap` 析构的读数一致;要坐实需在 `translate_file` 内部再加一次快照(本轮未做)。
 
-### 2bis.6 构建档位:`opt-level` 的代价(2026-10-05 实测)
+### 2bis.6 构建档位:`opt-level` 的代价(2026-10-05 实测;**已采纳,发布档改为 3**)
+
+> **结论已落地(2026-10-05,用户拍板)**:`[profile.release]` 的 `opt-level` 由 `"z"` 改为 `3`(`Cargo.toml`);
+> 该档只作用于**本仓作为顶层**的构建,下游 rlib 消费者仍用自己的档,因此不构成本库的对外变更。
+> `bench_perf` 档保持自身设置不变(关 LTO、`unwind`),历史读数可比。
 
 同一棵树、同一输入,只改 `opt-level`(两者都 `lto = true`、`panic` 覆写为 `unwind` 以便跑测试),3 轮取最小:
 
@@ -116,6 +120,18 @@
 - `bench_perf` 档本来就是 `opt-level = 3` ⇒ 本文件其余读数都代表 **3 档**。
 
 依据:2026-10-05 的剖析会话(命令与读数见本节方法段;`#meta` 分配读数同时落 `tests/fixtures/translate/convert_bench_baseline.json`)。
+
+### 2bis.7 去掉 `json!` 深拷贝后的读数(2026-10-05,Step 1 落地)
+
+`json!(expr)` 展开成 `serde_json::to_value(&expr)`(见 serde_json `macros.rs`),因此把**已经构造好的 `Value`** 塞进 `json!({ "k": v })` 会把整份子树按 `Serialize` 重新物化一次。装配期有 6+ 处这种写法(正向 `assembly::build_document` 的 `actors`/`scenes`/`procedures`/`styles`/`variables`/`audios`、`model::procedures_to_json`、反向 `model::build_block_data_json`、NEMO `convert_nemo_document` 的各段),改成"直接搬所有权"(`shared::json_obj`)后:
+
+| 样本 | `core` 前 → 后 | `e2e` 前 → 后 | 分配次数 前 → 后 |
+| --- | --- | --- | --- |
+| kitten4-10.8MB | 292 → 277 | 697 → 545(−21.8%) | 2 125 796 → 1 538 778(−27.6%) |
+| kn-9.4MB | 189 → 125(−33.9%) | 330 → 265 | 995 789 → 798 341 |
+| nemo-3.4MB | 281 → 202(−28.1%) | 360 → 282 | 1 626 347 → 1 353 316 |
+
+**耐久的读数与结论**:正向的 `core`(取 `report.elapsed_ms`)只降约 5%,而 `e2e` 降 22% ⇒ §2bis.5 第 5 条那条推断成立:**`e2e` 里"未归类"的那一段(原 227 ms / 32%)就是产物物化与深拷贝**,现降到约 71 ms。也就是说**"性能优化只盯着 `core` 会看漏装配与写出这一整段"**,后续读数必须同时报 `e2e`。产物 SHA 与 `#meta` 全绿(逐字节不变)。
 
 ## 3. 已落地的优化(都有数字)
 
@@ -165,4 +181,5 @@
 - `../rounds/23-convert-performance-plan.md` §1–§3、§5、§7(落地记录)。
 - `../rounds/25-convert-entity-parallelism-plan.md` §1(分布)、§9(正向落地)、§10(反向判不做)。
 - `../rounds/29-optimization-scan-ledger.md`(P0/P1 台账)。
-- 代码锚点:`src/core/convert/decompile/mod.rs`(`RESOURCE_DOWNLOAD_BUDGET`)、`src/core/convert/mod.rs`(两级预算折算)、`tests/convert_bench.rs`(自有 SHA256 基线:6 样本,4 Kitten + 2 NEMO)。
+- `../rounds/47-data-layer-rewrite-plan.md`(2026-10-05 数据表示层重写方案与分步读数;§2bis/§2bis.6/§2bis.7 的剖析、`opt-level` 与 Step 1 读数都出自该轮的会话与提交)。
+- 代码锚点:`src/core/convert/decompile/mod.rs`(`RESOURCE_DOWNLOAD_BUDGET`)、`src/core/convert/mod.rs`(两级预算折算)、`src/core/convert/shared.rs::json_obj`(搬所有权、不重新物化)、`tests/convert_bench.rs`(自有 SHA256 基线:6 样本,4 Kitten + 2 NEMO)。
