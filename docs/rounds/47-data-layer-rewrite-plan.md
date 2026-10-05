@@ -115,7 +115,11 @@
 > | 产物解析(仅作参照) | 89.4 | |
 >
 > `e2e − core` = 171 ms;扣掉读源 6、源侧骨架 ~25、序列化 36 ⇒ **约 104 ms 落在"产物 `Value` 构造 + 落盘 + 析构"**。也就是说:**序列化本身只有 36 ms(预分配 sink 下仅 1 次分配),大头是那份产物 `Value` 本身的构造与析构** —— 与已回退的那版(只换写出方式、每节点多一个 `Vec`,量到零收益)正好互证:**收益只能来自"根本不做这份产物 `Value`",不能来自"换一种写法"**。
-> 因此本步的期望按此修订:`e2e` −10%~−18%(省掉产物 `Value` 的构造 + 序列化遍历 + 析构),`core` 侧只省其中"构造"的那部分(它在 `core` 窗口内)。
+> **实现路径(2026-10-05,按上表定)**:必须在写出路径上**根本不创建每块的 `Value`**,而不是"换一种构造/序列化方式"。已回退的那版之所以零收益,是因为 `tree_to_json` 的返回类型就是 `Value` —— 它只能在"造出这份 `Value`"的前提下做等价改写,块 `Value` 照造不误(还多了每节点一个 `Vec`)。因此本步的落地形态是:
+> 1. `model::BlockJson`/`BlockTree` 增**字节等价的文本写出**(键序 = `serde_json::Map` 字典序;`extra` 与已知键**合流后排序**;`shield` 落在其字典序位置;字符串转义交给 `serde_json::to_writer` 写键/值,不手写转义);
+> 2. 文档信封用一个 `write_document`:逐键 `serde_json::to_writer` 写键与值,并在 `theatre.{actors,scenes}.<id>.nekoBlockJsonList` 处挂钩子 —— 块的 `Value` 一个都不建,直接流写;
+> 3. 公开面 `TranslateDocument.document: Value` **不动**(内存路径继续走 `to_value()`);
+> 4. 永久等价测试:同一批树"流式写出"与"`to_value()` + `to_writer`"**逐字节相同**(覆盖 `extra`、`shield`、嵌套 `inputs`/`statements`/`next`、非 ASCII 与转义)。
 
 必须遵守(评审 P1-2/P1-3):
 - 公开面 `TranslateDocument.document: Value` **不动**:内存型调用方(含 `tests/convert_facade_bench.rs`)仍走 `.to_value()`,代价与今天相同;流式只服务"文件→文件"链路(`translate_file`、`translate_work_in`)。是否把该字段换成流式产物类型**另立决策**。
