@@ -568,6 +568,11 @@ fn ms(d: Duration) -> f64 {
 }
 
 /// 每个基准测试**独立**的临时目录(cargo 默认并行跑测试函数,共用一个目录会互相删)
+///
+/// 跑完由测试**自己删**(`remove_dir_all`,在末尾与 REFRESH 分支各一次):不删的话每跑一次
+/// 就在 `std::env::temp_dir()` 留一份约 33 MB 的产物 —— 2026-10-05 实测 `/tmp` 里积了 46 份
+/// 约 1.5 GB,把 tmpfs 打满后让**无关测试** (`translate_file_writes_bcm4_from_bcmkn`)
+/// 假红一次(`Disk quota exceeded`)。失败/panic 时保留现场,便于看产物。
 fn bench_dir(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
         "backend-convert-bench-{tag}-{}-{:08x}",
@@ -928,6 +933,7 @@ fn convert_bench() {
         std::fs::write(BASELINE, serde_json::to_string_pretty(&fresh).unwrap())
             .expect("写基线失败");
         println!("[convert_bench] 基线已写入 {BASELINE}(记得在提交信息里写清原因)");
+        let _ = std::fs::remove_dir_all(&dir);
         return;
     }
 
@@ -946,6 +952,8 @@ fn convert_bench() {
     println!(
         "\n[convert_bench] 产物 SHA256 与元信息都与基线一致 ✅;实体级并发 1 vs {PARALLEL_FACTOR} 同 SHA256 ✅"
     );
+    // 收工清掉本轮临时目录(见 `bench_dir` 的注释:不删会在 /tmp 里越积越多)
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// 读基线。**四条路径(W3a)**:

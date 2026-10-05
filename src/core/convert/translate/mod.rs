@@ -378,7 +378,11 @@ fn missing_fixture(what: &str) {
 
 /// 测试用临时目录:**每次调用唯一**(进程 + 随机后缀),避免并行测试/跨运行互相覆盖
 ///
-/// 只服务 `translate` 子树自己的测试(本文件 `diff_tests` 与 `reverse_tests`)⇒ 私有。
+/// 调用方**跑到末尾自行删除**(`remove_dir_all`):不删的话每跑一次就在 `std::env::temp_dir()`
+/// 留一份产物 —— 2026-10-05 实测 `/tmp` 里积了 46 份基准目录约 1.5 GB,把 tmpfs 打满后让
+/// **无关测试**假红一次(`Disk quota exceeded`)。失败/panic 时保留现场,便于看产物。
+///
+/// 只服务 `translate` 子树自己的测试(本文件 `diff_tests` 与 `reverse_tests`)=> 私有。
 #[cfg(test)]
 fn unique_test_dir(tag: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
@@ -815,6 +819,8 @@ mod diff_tests {
             ),
             Err(e) => eprintln!("跳过:无法执行 node({e})"),
         }
+        // 收工清掉临时目录(该目录只服务这次校验;不留会在 /tmp 里越积越多,见 `unique_test_dir`)
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// 手工排障:把产物落到系统临时目录(不参与断言)

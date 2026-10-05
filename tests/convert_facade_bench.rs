@@ -211,4 +211,6 @@ fn convert_facade_flow_bench() {
             &old_hash[..16],
         );
     }
+    // 收工清掉本轮临时目录(理由见 `convert_bench.rs::bench_dir` 的注释)
+    let _ = std::fs::remove_dir_all(&dir);
 }

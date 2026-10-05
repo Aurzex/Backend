@@ -2764,6 +2764,9 @@ mod reverse_tests_inner {
         let error =
             translate_file(&path, TargetEditor::Kitten4, strict).expect_err("strict 应失败");
         assert!(matches!(error, TranslateError::Lossy { .. }), "{error:?}");
+
+        // 收工清掉临时目录(理由见 `super::unique_test_dir` 的注释)
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// 实机现象(rounds/34 §4nonies):产物在 Kitten4 编辑器里**作品名/变量能进,但角色一个都不显示**。

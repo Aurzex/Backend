@@ -154,6 +154,8 @@ fn translate_work_end_to_end_bench() {
             );
         }
     }
+    // 收工清掉本轮临时目录(理由见 `convert_bench.rs::bench_dir` 的注释)
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// **P1 的量**:`save_raw` 消掉的是"把整份源作品 JSON 序列化一次 + 写盘一次(+ 收尾 unlink)"。
