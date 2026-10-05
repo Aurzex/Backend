@@ -197,6 +197,39 @@
 2. **流式化的真正障碍往往是"夹在中间的那道 `Value` 改造"**:本步卡住的不是写出器,而是装配期的 `mark_unknown_blocks`(把编辑器不认识的积木改成 `incompatible_*` 标记)——它在 `Value` 上做,而流式路径没有那份 `Value`。移植到 typed 形态后反而更直白(kind/fields/shadows/mutation 与 connections 都是现成字段),但**必须逐条对齐旧口径的时序**:旧流程是"先补缺省键 → 再由标记删掉 `fields`/`shadows`",移植版若照抄"标记块也补缺省",产物就多出两个空键 —— 这条由常驻等价门当场抓出(单测红),否则会一路走到 SHA 门才发现。
 3. **共用一个变换是硬要求**:移植后 `mark_unknown_blocks_encoded` 是内存路径与文件路径**唯一**的实现(旧 `Value` 版已删),不存在"两条路径对同一输入行为不同"的分叉。
 
+### 2bis.11 NEMO 侧符号级剖面(2026-10-05;`rounds/37` §4 P9「去重复解析」据此判不做)
+
+**方法**(与 §2bis 同,但**必须显式关掉 strip**):
+
+```bash
+CARGO_TARGET_DIR=target/prof CARGO_PROFILE_BENCH_PERF_DEBUG=1 CARGO_PROFILE_BENCH_PERF_STRIP=false \
+  RUSTFLAGS="-C force-frame-pointers=yes" cargo test --profile bench_perf --test convert_bench --no-run
+taskset -c 0-3 perf record -F 299 -g --call-graph fp -o /tmp/bench.perf -- \
+  target/prof/bench_perf/deps/convert_bench-<hash> --ignored --nocapture
+perf report --stdio -i /tmp/bench.perf --no-children --sort symbol -g none
+```
+
+> **坑**:`bench_perf` 档 `inherits = "release"`,而发布档是 `strip = true`,因此只设 `CARGO_PROFILE_BENCH_PERF_DEBUG=1` 拿到的仍是**被剥掉符号**的二进制(报告里表现为一堆 `[.] 0x…` 未解析地址);要符号必须同时 `CARGO_PROFILE_BENCH_PERF_STRIP=false`。
+
+**读数**(6 样本一轮,占该轮 self time;分母含测试框架自身的 `sha256_hex`):
+
+| 成本组 | 逐条 self(%) | 合计 |
+| --- | --- | --- |
+| 测试框架校验和与 `.bcmkn` 解密链 | `sha2::sha256::soft::unroll::compress` 11.17 | 11.2% |
+| 源 JSON 解析 | `skip_to_escape` 3.39、`parse_str` 1.51、`visit_map` 1.17 与 0.32、`from_utf8` 1.15、`deserialize_any` 1.04、`next_key_seed` 0.79、`ignore_value` 0.21 | 9.6% |
+| 分配器 | `cfree` 3.96、`malloc` 2.38、`__rust_alloc` 2.21 | 8.6% |
+| `Value` 表构建与析构 | `drop_glue::<Value>` 2.20 与 1.35、`IntoIter::dying_next` 1.76 与 1.10、`BTreeMap::insert` 1.73 与 1.10、`insert_entry` 1.14 | 10.4% |
+| 产物写出 | `format_escaped_str` 3.36、`Value::serialize` 0.92、`model::write_block` 0.92 | 5.2% |
+| **XML 全链** | `parse_fragment` 0.82、`Parser::parse_name` 0.45、`attr_span` 0.21、`XmlNode::serialize` 0.13、`drop_glue::<XmlNode>` 0.09、`count_source_elements` 0.06、`XmlNode::attr` 0.05、`text_content` 0.04,其余各 ≤0.03 | **1.9%** |
+| NEMO 业务函数 | `normalize_integral_numbers` 0.62、`Mapper::parse_block` 0.34、`Mapper::parse_fields` 0.18 | 1.1% |
+
+**结论**:
+
+1. **P9 判不做**:NEMO 两腿约占该轮 `e2e` 的 36%,据此折算 XML 全链约为 NEMO 腿耗时的 5%;而 P9 能动的只是其中"程序集条目的 `blocksXML` 被解析两到三次"那一部分,上界远低于噪声(仓库判胜口径是 `e2e` 出现两位数百分比差)。`text_content` 每次一个 String 的分配同样未进 0.05% 榜(0.04%)。
+2. NEMO 装配期的 `json!` 整段再物化**已不存在**:现存的 `json!` 都是 2–5 键的小字面量,大段一律走 `shared::json_obj` 搬所有权(Step 1 已覆盖 NEMO,见 §2bis.7)。
+3. **NEMO 唯一剩下的可测杠杆仍是产物侧流式写出**(上界 17–20%,须写第三套写出器;该决策见 `../goals/convert-backlog.md` §1),本次剖面不动摇该结论 —— 产物写出与 `Value` 构建两项合计约 15%。
+4. **库自身没有超过 1% 的单符号**(全基准最高是 `model::write_block` 0.92%)。剩余成本结构与 §2bis.5 一致,集中在源解析、表构建、产物写出与分配这四类数据表示层开销上。
+
 ## 3. 已落地的优化(都有数字)
 
 | 优化 | 做法 | 收益 |
@@ -219,6 +252,7 @@
 | 反向(KN->Kitten4)实体级并行 | **不做** | 63 个工作项、最大一项占 **36.7%**,且两段必须串行(`unrewrite_calls` 依赖全局 `call_targets`、`def_root_from_entry` 把定义根挂进宿主实体)=> Amdahl 上限 1.9×,**实际远低于 1.5×**,而反向 `core` 只有 ~200 ms |
 | `RawValue` 顶层只透传 | **不做** | 透传占比 ≈0%(见 `convert-semantics.md` §7) |
 | 单遍遍历合并 | **不做** | 只省遍历,不省逐块匹配/字段改写 |
+| NEMO 去重复解析(`rounds/37` §4 P9:程序集条目的 `blocksXML` 被解析两到三次、`text_content` 每次一个 String、三趟 `replace_*`) | **不做**(2026-10-05 判) | 符号级剖面:XML 全链只占基准 self 的 **1.9%**(折算约 NEMO 腿耗时的 5%),而 P9 能动的只是其中"程序集条目多解析一两次"那一小半;`text_content` 0.04%、三趟 `replace_*` 均未进 0.05% 榜 => 上界远低于噪声。读数与命令见 §2bis.11 |
 
 ## 5. 基准方法(避免自欺)
 
