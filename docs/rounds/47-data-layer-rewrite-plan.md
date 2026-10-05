@@ -36,7 +36,9 @@
 
 **Step 5 已落地后的实测(2026-10-05)**:`kitten4-10.8MB` 分配 1 538 778 → 1 329 054、`e2e` 595/580 → 546/545 ms;`kitten4-0.3MB` 分配 48 436 → 42 277。
 
-**Step 2/3 已落地后的实测(2026-10-05,`61e2c33`)**:`kitten4-10.8MB` 分配 → **909 987**、`e2e` → **421 ms**、`core` → 257 ms;`kitten4-0.3MB` 分配 → 28 864、`e2e` → 9 ms ⇒ **正向两行达标**。剩余未达标的是反向两行与 NEMO 两行的 `e2e`/分配(Step 4 的目标,但 Step 4 的"对齐同一套写出"机制本身要先按 Step 2/3 的结论重估:那四个方向的 `e2e` 未归类占比只有 4–16%,大头在 `core`,见 §2bis.1 与 §4 Step 4)。
+**Step 2/3 已落地后的实测(2026-10-05,`61e2c33`)**:`kitten4-10.8MB` 分配 → **909 987**、`e2e` → **421 ms**、`core` → 257 ms;`kitten4-0.3MB` 分配 → 28 864、`e2e` → 9 ms ⇒ **正向两行达标**。
+
+**Step 4(反向)已落地后的实测(2026-10-05,`bf33544`)**:`kn-9.4MB` 分配 → **602 799**、`e2e` → **237 ms**、`core` → 94 ms;`kn-3.7MB` 分配 → **141 085**、`e2e` → 67 ms ⇒ **反向两行达标**。**只剩 NEMO 两行**:`nemo-3.4MB` 分配 1 353 318(目标 1 300 000,差 4%)、`e2e` 291–315(目标 ≤300,贴线),其产物侧上界只有 17~20% ⇒ 若要做,先按 §4 Step 4 的表重新定机制(它的块表形态与解析器内就位的程序集都不同)。
 
 ## 3. 现状数据流(符号级)
 
@@ -158,7 +160,30 @@
 > **顺序修订(2026-10-05,按读数)**:§2.2 的约束项是**正向 `core`**(277 → ≤200),而 Step 2/3 主要打在 `assembly`/`ser` 一侧(对 `e2e` 大、对 `core` 小)。正向 `core` 里当前最大的单块是**源侧**:`parse`(整份文档 → `Value`)约 104 ms + `parse_block_data_json` 把 `Value` 再翻成强类型树 —— 即 `block_data_json` 这份**最大的 `Value` 子树**被完整物化了一次,随后又被翻译成 `BlockTree`、最后随文档一起析构。
 > 因此把 **Step 5(源侧)提前到 Step 2/3 之前**先做 spike:若 spike 成立(`RawValue` 直喂强类型 + 旧形态回落),先落 Step 5,再落 Step 2/3;若 spike 不成立(旧形态回落比例高、或字节/行为出现偏差),回到 Step 2/3 并按 §2.2 重新界定正向 `core` 目标(记录原因,不静默降级)。
 
-### Step 4 — 反向与 NEMO 对齐同一套写出(必做,承载 §2.2 的三行目标)
+### Step 4 — 反向与 NEMO 对齐同一套写出(反向 2026-10-05 已落地,`bf33544`;NEMO 未做)
+
+**反向落地内容**:
+
+1. `model::EncodedBlocks` + `encode_block_data_json`:编码不再物化节点 `Value`(节点按值搬进产出,`parent_id` 随行);`encoded_to_value` 与旧的 `build_block_data_json` 逐字节等价(后者降级为测试专用包装)。
+2. `model::write_encoded_blocks` / `write_kitten4_block`:邻接表 → JSON 文本的字节等价写出(顶层三键按字典序手写、节点/连接表按 id 序;Kitten4 侧补 `KITTEN4_DEFAULTS`、`parent_id` 强制、`shield` 只在真值时写)。
+3. **`mark_unknown_blocks` 从 `Value` 形态移植到 typed 形态**(流式路径没有那份 `Value`),两条路径共用;标记块**不写** `fields`/`shadows` 默认键(旧口径是"先补默认、再由标记删掉")⇒ `EncodedBlocks` 带 marked 集合。**这条正是常驻等价门抓出来的**(先写成"标记块也补默认",单测直接红)。
+4. `assembly::Kitten4ProductDocument`(每实体 `block_data_json` 留 `null` 占位 + 挂 `EncodedBlocks`;`into_value()` / `write_to()`);`pipeline::convert_kn_document_product` + `convert_kn_document` 包装;`translate_text` 为反向加快速通道。
+
+**验证**(装置同 §2.1;A = `8be59cf`):
+
+| 样本 / 指标 | A | B |
+| --- | --- | --- |
+| kn-9.4MB `e2e` / `core` | 280 / 133 ms | **237 / 94 ms(−15.4% / −29%)** |
+| kn-9.4MB 分配(次数 / 字节) | 798 343 / 156.9 MiB | **602 799 / 141.0 MiB(−24.5%)** |
+| kn-3.7MB `e2e` / `core` | 81 / 34 ms | **67 / 26 ms(−17% / −24%)** |
+| kn-3.7MB 分配 | 196 004 | **141 085(−28%)** |
+| 正向两样本 / NEMO 两样本 分配 | — | **逐位不变**(本步只改反向) |
+
+- 六个字节基线样本 × 两条腿:**产物 SHA256 与 `#meta` 全绿**(反向样本带 1828 / 508 条告警 ⇒ 标记行为逐字节保真);
+- `cargo test --lib` 140 项全绿(含 `kn_corpus_round_trip_sweep` 与标记预算门);fmt / clippy 全绿;
+- **§2.2 的反向两行由此达标**(kn-9.4:`core` 94 ≤ 150、`e2e` 237 ≤ 270、分配 602 799 ≤ 750 000;kn-3.7 同理)。
+- **NEMO 两行未做**:产物侧上界只有 17~20%(见下表),且它的块表是 NEMO 自己的 `nekoBlockJsonList` 形态、程序集在解析器内就位,复用不了本步的两套写出;要不要做按 §2.2 的剩余差距定(nemo-3.4MB 分配 1 353 318 vs 目标 1 300 000,差 4%)。
+
 
 改动:反向 `model::build_block_data_json`(相邻表 `Value`)与 `assembly::build_kitten4_document`、NEMO `nemo::tree_to_json` 与 `convert_nemo_document` 的逐段装配,改用与 Step 2/3 同族的流式写出。
 
@@ -178,7 +203,7 @@
 > **接线时发现的真正障碍(2026-10-05,已实测并回退,留给下一单元)**:
 > 1. **反向写出器本身可行,且已写出+gated 过**(本次会话实现并过了常驻等价门:把 `encode_block` 从"就地 `to_value` + 补 `KITTEN4_DEFAULTS` + 强制 `parent_id`"改成"节点按值搬进 `EncodedBlocks{blocks, connections}`",再按引用直写;门抓到一处真分歧 —— `is_shadow`/`is_output`/`disabled` 同时是 `KITTEN4_DEFAULTS`,键表里恒在,值必须取字段本身而不是"只在真值时入表")。因为接线没完成,该实现**已回退**(不留死代码)。
 > 2. **真正卡住的是装配期那道 `mark_unknown_blocks`**:它把"编辑器不认识的积木"就地改成 `incompatible_block`/`incompatible_output_block` 标记(rounds/34 §4nonies、rounds/38),而它**是在 `Value` 形态上做的**(读 `blocks.<id>.type`/`fields`/`shadows`、用 `connections` 判值位)。流式路径里没有那份 `Value` ⇒ **必须先把它移植到 `EncodedBlocks` 上**(typed 形态其实更好写:type/fields/shadows/mutation 与 connections 都是现成字段),再接线。
-> 3. 因此 Step 4 的**下一单元 = "移植 `mark_unknown_blocks` 到 `EncodedBlocks` + 反向 `ProductDocument` + 接线"**;验收仍是产物 SHA(反向两样本 + `MARKER_BUDGET` 语料门)与同轮 A/B。`KnEntity.tree: BlockTree` 已在装配签名里,`build_kitten4_document` 收 `blocks_by_entity: Vec<(usize, Value)>` —— 接线时这两处一起换成 `EncodedBlocks`。
+> 3. Step 4 的下一单元当时定为"移植 `mark_unknown_blocks` 到 `EncodedBlocks` + 反向 `ProductDocument` + 接线" —— **已按此完成**(`bf33544`,读数见本节开头)。
 
 
 
