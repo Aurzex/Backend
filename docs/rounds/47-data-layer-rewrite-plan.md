@@ -34,7 +34,9 @@
 
 现状取自已提交基线(正向两行与本轮同机读数一致;反向两行用基线值,与 §2bis.2 的同机读数差 0.3–0.5%,属构建差异)。
 
-**Step 5 已落地后的实测(2026-10-05)**:`kitten4-10.8MB` 分配 1 538 778 → 1 329 054、`e2e` 595/580 → 546/545 ms;`kitten4-0.3MB` 分配 48 436 → 42 277。表内目标值不变 —— 正向两行仍需 Step 2/3 与 Step 5b(`../rounds/47-data-layer-rewrite-plan.md` §4)共同达标。
+**Step 5 已落地后的实测(2026-10-05)**:`kitten4-10.8MB` 分配 1 538 778 → 1 329 054、`e2e` 595/580 → 546/545 ms;`kitten4-0.3MB` 分配 48 436 → 42 277。
+
+**Step 2/3 已落地后的实测(2026-10-05,`61e2c33`)**:`kitten4-10.8MB` 分配 → **909 987**、`e2e` → **421 ms**、`core` → 257 ms;`kitten4-0.3MB` 分配 → 28 864、`e2e` → 9 ms ⇒ **正向两行达标**。剩余未达标的是反向两行与 NEMO 两行的 `e2e`/分配(Step 4 的目标,但 Step 4 的"对齐同一套写出"机制本身要先按 Step 2/3 的结论重估:那四个方向的 `e2e` 未归类占比只有 4–16%,大头在 `core`,见 §2bis.1 与 §4 Step 4)。
 
 ## 3. 现状数据流(符号级)
 
@@ -95,7 +97,30 @@
 
 **读数只一条:**正向的 `core` 只降 5%(它取 `report.elapsed_ms`,而深拷贝发生在 `assembly` **之外**),但同一样本的 `e2e` 降 22% —— 把 §2bis.5 第 5 条那条 [INFERENCE] 坐实了:**`e2e` 未归类那一段(原先 227 ms / 32%)正是产物物化与深拷贝**,现降至约 71 ms(−69%)。**§2.2 里反向两行与 NEMO 两行的目标已达成**(kn-9.4 125 ≤ 150、kn-3.7 35 ≤ 45、nemo-3.4 202 ≤ 230、nemo-old 59 ≤ 75);正向两行仍待 Step 2/3。
 
-### Step 2+3(已按评审建议合并)— 流式写出:从"造整棵树再序列化"改成"直接写"
+### Step 2+3(2026-10-05 已落地,`61e2c33`)— 流式写出:从"造整棵树再序列化"改成"直接写"
+
+**落地内容**(按下方实测上界与实现路径定):
+
+1. `model::write_block_tree` / `write_block`:块树 → JSON 文本的**字节等价**写出。键序 = `serde_json::Map`(= `BTreeMap`)的字节序;`shield` **恒写**(旧路径靠 `fill_shield` 补,这里无条件写 `node.shield`);`extra` 与已知键撞名时 **`extra` 胜**(与 `to_value` 的"已知字段先写、flatten 后写覆盖"同口径);键名、字符串、`Value` 一律交给 `serde_json::to_writer` 转义。**不建任何中间 `Value`**。
+2. `assembly::ProductDocument`:文档里三处 `nekoBlockJsonList`(角色 / 场景 / 程序集定义体)只留 `null` **占位**(位置由 `Map` 的字典序决定),真正的树挂 `BlockHook`。`into_value()` 把树物化回 `Value` 填占位(公开面 `TranslateDocument.document: Value` 口径不变),`write_to()` 在占位处**直接流写**块树。
+3. `ConvertedEntity.blocks: BlockTree`(不再是 `Vec<Value>`);阶段 4 只改写树、不再编码;`model::procedure_entries` 把"程序集条目表"与"定义体树"拆开(树按值搬出,占位只作位置锚点)。
+4. `translate_file` 走 `ConvertedDocument::Product` → 新增的 `FileService::write_json_with`(同一套 `BufWriter` 口径,序列化交给调用方);内存路径(`translate_value`)与所有回落路径仍是整份 `Value`。
+5. 常驻等价门 3 条(块写出含 `extra` 撞名/`shield` 真假/三槽嵌套/转义与非 ASCII;空树与最小块;角色+场景+程序集**三处挂点**的整份文档),见 `model::streamed_writer_tests` 与 `assembly_tests::streamed_product_matches_value_product`。
+
+**验证**(装置同 §2.1;A = `d937cda`):
+
+| 样本 / 指标 | A(改动前) | B(本步) |
+| --- | --- | --- |
+| kitten4-10.8MB `e2e` | 541 ms | **421 ms(−22%)** |
+| kitten4-10.8MB `core` | 373 ms | **257 ms(−31%)** |
+| kitten4-10.8MB 分配(次数 / 字节) | 1 329 054 / 231.2 MiB | **909 987 / 184.6 MiB(−31.5% / −20%)** |
+| kitten4-0.3MB `e2e` / 分配 | 15 ms / 42 277 | **9 ms / 28 864(−31.7%)** |
+| kitten4-10.8MB 并发 8(`e2e` / `core`) | 417 / 260 ms | **316 / 156 ms** |
+| kn-9.4 / kn-3.7 / nemo / nemo-old 分配 | — | **逐位不变**(本步只改正向) |
+
+- 六个字节基线样本 × 串行/并发 8 两条腿:产物 **SHA256 与 `#meta` 全绿**;并发 1 与 8 同 SHA;
+- `cargo test --lib` 138 项全绿(含两条语料往返扫描器 —— 它们走 `translate_file`,即这条新路径);`cargo fmt --check` / `cargo clippy --all-targets -- -D warnings` 全绿。
+- **§2.2 正向两行由此达标**:10.8MB 分配 909 987 ≤ 1 200 000、`e2e` 421 ≤ 520;0.3MB 分配 28 864 ≤ 50 000(`core` 一列因 Step 5 的口径变化已不可比)。
 
 > **2026-10-05 已试并回退**:把 `tree_to_json` 由"`BlockJson::to_value` 物化 + `fill_shield` 再 DFS 一趟"改成"引用式一趟写出"(`NodeRef`,按字典序写、就地补 `shield`),等价测试通过、产物 SHA 全绿,但**同轮 A/B(`git worktree` 检出 Step 1 状态、两棵树的 bench 交替跑)显示:时间中性(kitten4-10.8 `core` 332 vs 343、kn-9.4 141 vs 142)、分配次数 +1.5%**(1 538 778 → 1 562 371)。
 > 根因:新实现**每节点多一个 `Vec<(&str, 值)>`**(+1 次分配/节点),而 serde 那点被省掉的机械开销本就可忽略 —— 与 `rounds/37` P6(手写 `to_value`/`from_value`、逐字节等价但**零收益**)是**同一结论**:**瓶颈不在"怎么序列化",而在"有没有先把整棵树造成 `Value`"**。
@@ -136,6 +161,8 @@
 ### Step 4 — 反向与 NEMO 对齐同一套写出(必做,承载 §2.2 的三行目标)
 
 改动:反向 `model::build_block_data_json`(相邻表 `Value`)与 `assembly::build_kitten4_document`、NEMO `nemo::tree_to_json` 与 `convert_nemo_document` 的逐段装配,改用与 Step 2/3 同族的流式写出。
+
+> **机制需先重估(2026-10-05,按 Step 2/3 的读数与归因)**:Step 4 的原机制是"反向 / NEMO 对齐同一套写出",但 §2bis.1 显示那四个方向的 `e2e` **未归类只占 4–16%**(NEMO 5%、反向 16%),而 Step 2/3 在正向拿到的 −22% `e2e` 正是**未归类那段(32%)**;反向 / NEMO 的大头在 `core`(kn-9.4 137 ms、nemo-3.4 217 ms,而它们的 `e2e` 分别是 289 / 313 ms)⇒ 对它们"只换写出方式"的预期收益小。**落地前先按方向量一次产物侧上界**(做法同 Step 2/3 的探针),再决定是"只对齐写出"还是"改查 `core` 的热点"——后者的候选见 `../rounds/37` §11.1 #3(NEMO 同一段 XML 包 `<root>` 解析 3 次 + `has_return_blocks` 再解析一次)。
 
 风险(评审补充):三端**默认键策略不同**(见 §3.3)⇒ 写出必须**按方向参数化**,不能强行统一;反向 `mark_unknown_blocks` 需要先有整份连接表;NEMO 的 `normalize_integral_numbers` 必须仍在装配之后。反向还有**形状 id 现铸**(见 §5 第 6 条)。
 
