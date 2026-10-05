@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
@@ -696,7 +697,7 @@ fn build_node(
 const ROOT_LAYOUT_Y: i64 = 80;
 const ROOT_LAYOUT_STEP: i64 = 220;
 
-/// 中核树 → Kitten4 编辑版 `block_data_json = {blocks, connections, comments}`
+/// 中核树 → Kitten4 编辑版 `block_data_json = {blocks, connections, comments}`(口径说明)
 ///
 /// - `blocks` 是 `id → 积木` 字典(子节点**不**内联,全部平铺);
 /// - `connections[parent][child] = {type:"next"}` 或 `{type:"input", input_type, input_name}`,
@@ -705,24 +706,127 @@ const ROOT_LAYOUT_STEP: i64 = 220;
 /// - `next` 子节点的 `parent_id` 指向链上前一个积木(Kitten4 实测如此);
 /// - 缺 id / id 重复(菱形展开的同一积木被两个槽位引用)时现铸新 id —— `blocks` 是 id 字典,
 ///   不重铸就会互相覆盖(正向产物里这类重复 id 有 49 个)。
+///
+/// **测试专用的一步到位包装**:生产路径两步分开 —— [`encode_block_data_json`](编码,装配期还要
+/// 在上面做标记改写)→ [`encoded_to_value`] / [`write_encoded_blocks`](物化或流式写出)。
+#[cfg(test)]
 pub(super) fn build_block_data_json(tree: &BlockTree, ids: &mut IdSource) -> Result<Value> {
-    let mut blocks: Map<String, Value> = Map::new();
-    let mut connections: Map<String, Value> = Map::new();
+    encoded_to_value(encode_block_data_json(tree, ids)?)
+}
+
+/// 反向编码的产出:节点按最终 id 排好(**不再物化成 `Value`**)+ 连接表
+///
+/// 拆出来是为了让两条路径共用同一套 id 铸造与连接表逻辑(`rounds/47` §4 Step 4):
+/// 内存路径走 [`encoded_to_value`](物化成 `Value`),文件路径走 [`write_encoded_blocks`]
+/// (按引用直写,不建节点 `Value` —— 与正向 Step 2/3 同一套做法)。
+pub(super) struct EncodedBlocks {
+    /// id → (节点, 该节点写出的 `parent_id`)
+    blocks: BTreeMap<String, (BlockJson, Option<String>)>,
+    /// 父 id → { 子 id: 连接信息 }
+    connections: BTreeMap<String, Map<String, Value>>,
+    /// 被改成「未收录积木」标记的 id(这些块**不写** `fields`/`shadows` 默认键:
+    /// 旧口径是"先补默认、再由标记把那两个键**删掉**",见 `mark_unknown_blocks_encoded`)
+    marked: BTreeSet<String>,
+}
+
+impl EncodedBlocks {
+    /// 测试用:从 `{blocks, connections}` 形态的 JSON 读出(只服务装配侧的两条标记测试;
+    /// 生产路径的编码由 [`encode_block_data_json`] 负责)
+    #[cfg(test)]
+    pub(super) fn from_json_for_test(value: &Value) -> Result<Self> {
+        let mut encoded = EncodedBlocks {
+            blocks: BTreeMap::new(),
+            connections: BTreeMap::new(),
+            marked: BTreeSet::new(),
+        };
+        if let Some(blocks) = value.get("blocks").and_then(Value::as_object) {
+            for (id, block) in blocks {
+                let node = BlockJson::from_value(block)?;
+                let parent = node.parent_id.clone();
+                encoded.blocks.insert(id.clone(), (node, parent));
+            }
+        }
+        if let Some(connections) = value.get("connections").and_then(Value::as_object) {
+            for (parent, children) in connections {
+                if let Some(map) = children.as_object() {
+                    encoded.connections.insert(parent.clone(), map.clone());
+                }
+            }
+        }
+        Ok(encoded)
+    }
+
+    /// 逐块可变遍历(装配期的标记改写用:类型/字段/影子/变异都在这层直接改)
+    pub(super) fn blocks_mut(&mut self) -> impl Iterator<Item = (&String, &mut BlockJson)> {
+        self.blocks.iter_mut().map(|(id, (node, _))| (id, node))
+    }
+
+    /// 登记一个"已改成标记"的 id(见 [`Self::marked`] 的说明)
+    pub(super) fn mark_as_marker(&mut self, id: &str) {
+        self.marked.insert(id.to_string());
+    }
+
+    /// 值位子块 id 集合(`connections` 里 `input_type == "value"` 的那些)
+    pub(super) fn value_children(&self) -> std::collections::BTreeSet<String> {
+        self.connections
+            .values()
+            .flat_map(|links| links.iter())
+            .filter(|(_, info)| info.get("input_type").and_then(Value::as_str) == Some("value"))
+            .map(|(child, _)| child.clone())
+            .collect()
+    }
+}
+
+/// 遍历一次树:铸 id、拆子节点、攒连接表(节点**按值搬进**产出,不再物化)
+pub(super) fn encode_block_data_json(
+    tree: &BlockTree,
+    ids: &mut IdSource,
+) -> Result<EncodedBlocks> {
+    let mut encoded = EncodedBlocks {
+        blocks: BTreeMap::new(),
+        connections: BTreeMap::new(),
+        marked: BTreeSet::new(),
+    };
     let mut seen: HashSet<String> = HashSet::new();
     for (index, root) in tree.roots.iter().enumerate() {
         let mut node = root.clone();
         if node.location.is_none() {
             node.location = Some(json!([0, ROOT_LAYOUT_Y + ROOT_LAYOUT_STEP * index as i64]));
         }
-        encode_block(
-            &mut node,
-            None,
-            &mut blocks,
-            &mut connections,
-            &mut seen,
-            ids,
-        )?;
+        encode_block(node, None, &mut encoded, &mut seen, ids)?;
     }
+    Ok(encoded)
+}
+
+/// [`EncodedBlocks`] → `Value`(内存路径;与旧口径逐字节相同,常驻门见本文件 `streamed_writer_tests`)
+pub(super) fn encoded_to_value(encoded: EncodedBlocks) -> Result<Value> {
+    let marked = encoded.marked.clone();
+    let mut blocks = Map::new();
+    for (id, (node, parent_id)) in encoded.blocks {
+        let mut value = node.to_value()?;
+        let skip_field_defaults = marked.contains(&id);
+        if let Some(object) = value.as_object_mut() {
+            for (key, default) in KITTEN4_DEFAULTS {
+                // 标记块不写 `fields`/`shadows`(旧口径:先补默认、再由标记把这两个键删掉)
+                if skip_field_defaults && matches!(*key, "fields" | "shadows") {
+                    continue;
+                }
+                object
+                    .entry((*key).to_string())
+                    .or_insert_with(|| (*default)());
+            }
+            object.insert(
+                String::from("parent_id"),
+                parent_id.map_or(Value::Null, Value::String),
+            );
+        }
+        blocks.insert(id, value);
+    }
+    let mut connections = Map::new();
+    for (parent, links) in encoded.connections {
+        connections.insert(parent, Value::Object(links));
+    }
+    // 顶层键序 = `Map` 字典序:blocks < comments < connections(写出端按同一顺序手写)
     Ok(json_obj([
         ("blocks", Value::Object(blocks)),
         ("connections", Value::Object(connections)),
@@ -730,12 +834,171 @@ pub(super) fn build_block_data_json(tree: &BlockTree, ids: &mut IdSource) -> Res
     ]))
 }
 
-/// 写一个积木(含其整棵子树),返回它最终落盘的 id
-fn encode_block(
-    node: &mut BlockJson,
+/// [`EncodedBlocks`] → JSON 文本(**不建节点 `Value`**)
+///
+/// 与 [`encoded_to_value`] + `serde_json::to_writer` 逐字节相同(常驻门:
+/// `encoded_blocks_writer_equals_value_path`):顶层三键按字典序手写,节点/连接表按 id 序,
+/// 每个节点见 [`write_kitten4_block`]。
+pub(super) fn write_encoded_blocks(
+    encoded: &EncodedBlocks,
+    w: &mut impl std::io::Write,
+) -> Result<()> {
+    w.write_all(b"{\"blocks\":{")?;
+    for (index, (id, (node, parent_id))) in encoded.blocks.iter().enumerate() {
+        if index > 0 {
+            w.write_all(b",")?;
+        }
+        serde_json::to_writer(&mut *w, id)?;
+        w.write_all(b":")?;
+        write_kitten4_block(
+            node,
+            parent_id.as_deref(),
+            encoded.marked.contains(id.as_str()),
+            w,
+        )?;
+    }
+    w.write_all(b"},\"comments\":{},\"connections\":{")?;
+    for (index, (parent_id, links)) in encoded.connections.iter().enumerate() {
+        if index > 0 {
+            w.write_all(b",")?;
+        }
+        serde_json::to_writer(&mut *w, parent_id)?;
+        w.write_all(b":")?;
+        write_map_entries(links.iter(), w)?;
+    }
+    w.write_all(b"}}")?;
+    Ok(())
+}
+
+/// Kitten4 侧单块 → JSON:`BlockJson::to_value` + [`KITTEN4_DEFAULTS`] 补缺省 + `parent_id` 强制
+///
+/// 与正向的 [`write_block`] 有三处差别(其余口径共用:键序 = `Map` 字节序、`extra` 撞名时
+/// `extra` 胜、键名/字符串/`Value` 交给 `serde_json` 转义):
+/// 1. **不恒写 `shield`** —— Kitten4 侧只有真值时才写(旧路径靠字段的 `skip_serializing_if`,
+///    没有 `fill_shield` 那一补);
+/// 2. 每块补 [`KITTEN4_DEFAULTS`] 的缺省键 ⇒ 这些键**恒在键表里**,值取字段本身
+///    (字段为假时旧路径由缺省补 `false`,净结果仍是 `false`);
+/// 3. `parent_id` **强制**为本次遍历给出的值(根写 `null`),优先级高于其它一切。
+fn write_kitten4_block(
+    node: &BlockJson,
     parent_id: Option<&str>,
-    blocks: &mut Map<String, Value>,
-    connections: &mut Map<String, Value>,
+    skip_field_defaults: bool,
+    w: &mut impl std::io::Write,
+) -> Result<()> {
+    let mut keys: Vec<&str> =
+        Vec::with_capacity(KNOWN_BLOCK_KEYS.len() + KITTEN4_DEFAULTS.len() + 1);
+    for (present, key) in [
+        (true, "type"),
+        (node.id.is_some(), "id"),
+        (node.location.is_some(), "location"),
+        (node.next.is_some(), "next"),
+        (!node.inputs.is_empty(), "inputs"),
+        (!node.statements.is_empty(), "statements"),
+        (!node.fields.is_empty(), "fields"),
+        (!node.shadows.is_empty(), "shadows"),
+        (node.mutation.is_some(), "mutation"),
+        (node.is_shadow, "is_shadow"),
+        (node.is_output, "is_output"),
+        (node.shield, "shield"),
+        (node.disabled, "disabled"),
+        (node.parent_id.is_some(), "parent_id"),
+        (node.field_constraints.is_some(), "field_constraints"),
+    ] {
+        if present {
+            keys.push(key);
+        }
+    }
+    keys.extend(node.extra.keys().map(String::as_str));
+    for (key, _) in KITTEN4_DEFAULTS {
+        // 标记块不写 `fields`/`shadows`(旧口径:先补默认、再由标记把这两个键删掉)
+        if skip_field_defaults && matches!(*key, "fields" | "shadows") {
+            continue;
+        }
+        keys.push(*key);
+    }
+    keys.push("parent_id");
+    keys.sort_unstable();
+    keys.dedup();
+
+    w.write_all(b"{")?;
+    for (index, key) in keys.iter().enumerate() {
+        if index > 0 {
+            w.write_all(b",")?;
+        }
+        serde_json::to_writer(&mut *w, key)?;
+        w.write_all(b":")?;
+        // 优先级:`parent_id` 强制 > `extra`(与已知键撞名时胜) > 已知键 > 缺省键
+        if *key == "parent_id" {
+            match parent_id {
+                Some(parent) => serde_json::to_writer(&mut *w, parent)?,
+                None => w.write_all(b"null")?,
+            }
+            continue;
+        }
+        if let Some(value) = node.extra.get(*key) {
+            serde_json::to_writer(&mut *w, value)?;
+            continue;
+        }
+        match *key {
+            "type" => serde_json::to_writer(&mut *w, &node.kind)?,
+            "id" => serde_json::to_writer(&mut *w, expect_some(&node.id, "id")?)?,
+            "location" => serde_json::to_writer(&mut *w, expect_some(&node.location, "location")?)?,
+            "next" => write_kitten4_block(expect_some(&node.next, "next")?, None, false, w)?,
+            "inputs" | "statements" => {
+                let map = if *key == "inputs" {
+                    &node.inputs
+                } else {
+                    &node.statements
+                };
+                w.write_all(b"{")?;
+                for (child_index, (slot, child)) in map.iter().enumerate() {
+                    if child_index > 0 {
+                        w.write_all(b",")?;
+                    }
+                    serde_json::to_writer(&mut *w, slot)?;
+                    w.write_all(b":")?;
+                    write_kitten4_block(child, None, false, w)?;
+                }
+                w.write_all(b"}")?;
+            }
+            "fields" => write_map_entries(node.fields.iter(), w)?,
+            "shadows" => write_map_entries(node.shadows.iter(), w)?,
+            "mutation" => serde_json::to_writer(&mut *w, expect_some(&node.mutation, "mutation")?)?,
+            // 这三个键同时是 `KITTEN4_DEFAULTS`(键表里恒在)⇒ 值取字段本身;`shield` 不在缺省里
+            "is_shadow" => serde_json::to_writer(&mut *w, &node.is_shadow)?,
+            "is_output" => serde_json::to_writer(&mut *w, &node.is_output)?,
+            "shield" => w.write_all(b"true")?,
+            "disabled" => serde_json::to_writer(&mut *w, &node.disabled)?,
+            "field_constraints" => serde_json::to_writer(
+                &mut *w,
+                expect_some(&node.field_constraints, "field_constraints")?,
+            )?,
+            // 走到这里只可能是 `KITTEN4_DEFAULTS` 的缺省键(已知键与 `extra` 都已在上面处理)
+            other => {
+                let default = KITTEN4_DEFAULTS
+                    .iter()
+                    .find(|(key, _)| *key == other)
+                    .map(|(_, default)| default)
+                    .ok_or_else(|| ConvertError::Other {
+                        msg: format!("反向积木写出:未知键 {other}"),
+                        source: None,
+                    })?;
+                serde_json::to_writer(&mut *w, &default())?;
+            }
+        }
+    }
+    w.write_all(b"}")?;
+    Ok(())
+}
+
+/// 写一个积木(含其整棵子树),返回它最终落盘的 id
+///
+/// 节点**按值**收进来(调用方从树里搬走),编码完连同它的 `parent_id` 一起放进 [`EncodedBlocks`]
+/// —— `Value` 物化推迟到 [`encoded_to_value`] / [`write_encoded_blocks`]。
+fn encode_block(
+    mut node: BlockJson,
+    parent_id: Option<&str>,
+    encoded: &mut EncodedBlocks,
     seen: &mut HashSet<String>,
     ids: &mut IdSource,
 ) -> Result<String> {
@@ -758,8 +1021,8 @@ fn encode_block(
         } else {
             std::mem::take(&mut node.inputs)
         };
-        for (name, mut child) in children {
-            let child_id = encode_block(&mut child, Some(&id), blocks, connections, seen, ids)?;
+        for (name, child) in children {
+            let child_id = encode_block(child, Some(&id), encoded, seen, ids)?;
             links.insert(
                 child_id,
                 json!({
@@ -770,8 +1033,8 @@ fn encode_block(
             );
         }
     }
-    if let Some(mut next) = node.next.take() {
-        let child_id = encode_block(&mut next, Some(&id), blocks, connections, seen, ids)?;
+    if let Some(next) = node.next.take() {
+        let child_id = encode_block(*next, Some(&id), encoded, seen, ids)?;
         links.insert(child_id, json!({ "type": "next" }));
     }
 
@@ -781,20 +1044,10 @@ fn encode_block(
     if node.field_constraints.is_none() {
         node.field_constraints = Some(json!({}));
     }
-    let mut value = node.to_value()?;
-    if let Some(object) = value.as_object_mut() {
-        for (key, default) in KITTEN4_DEFAULTS {
-            object
-                .entry((*key).to_string())
-                .or_insert_with(|| (*default)());
-        }
-        object.insert(
-            String::from("parent_id"),
-            parent_id.map_or(Value::Null, |parent| Value::String(parent.to_string())),
-        );
-    }
-    blocks.insert(id.clone(), value);
-    connections.insert(id.clone(), Value::Object(links));
+    encoded
+        .blocks
+        .insert(id.clone(), (node, parent_id.map(str::to_string)));
+    encoded.connections.insert(id.clone(), links);
     Ok(id)
 }
 
@@ -1697,8 +1950,8 @@ fn write_block(node: &BlockJson, w: &mut impl std::io::Write) -> Result<()> {
                 }
                 w.write_all(b"}")?;
             }
-            "fields" => write_serializable_map(&node.fields, w)?,
-            "shadows" => write_serializable_map(&node.shadows, w)?,
+            "fields" => write_map_entries(node.fields.iter(), w)?,
+            "shadows" => write_map_entries(node.shadows.iter(), w)?,
             "mutation" => serde_json::to_writer(&mut *w, expect_some(&node.mutation, "mutation")?)?,
             "is_shadow" => w.write_all(b"true")?,
             "is_output" => w.write_all(b"true")?,
@@ -1751,13 +2004,14 @@ fn expect_some<'a, T>(value: &'a Option<T>, key: &str) -> Result<&'a T> {
     })
 }
 
-/// `BTreeMap<String, V>` → JSON 对象(键序 = `Map` 字节序)
-fn write_serializable_map<V: serde::Serialize>(
-    map: &BTreeMap<String, V>,
+/// "键在字典序、值交给 `serde_json`" 的 JSON 对象写出(`BTreeMap` 与 `serde_json::Map` 共用:
+/// 两者的 `iter()` 都按各自的序产出 `(&String, &V)`,而两边的序在本库里都是字典序)
+fn write_map_entries<'a, V: serde::Serialize + 'a>(
+    entries: impl Iterator<Item = (&'a String, &'a V)>,
     w: &mut impl std::io::Write,
 ) -> Result<()> {
     w.write_all(b"{")?;
-    for (index, (key, value)) in map.iter().enumerate() {
+    for (index, (key, value)) in entries.enumerate() {
         if index > 0 {
             w.write_all(b",")?;
         }
@@ -1835,6 +2089,48 @@ mod streamed_writer_tests {
         assert_eq!(
             String::from_utf8_lossy(&streamed),
             r#"[{"shield":false,"type":"x"}]"#
+        );
+    }
+
+    /// **常驻门**(`rounds/47` §4 Step 4):反向(`block_data_json` 邻接表)流式写出与
+    /// `encoded_to_value` + `to_writer` 逐字节相同
+    ///
+    /// 覆盖:`KITTEN4_DEFAULTS` 补缺省、`parent_id` 强制(根写 `null`)、`extra` 撞缺省键、
+    /// 重复 id 的现铸(两次编码各用同一确定性 `IdSource`)、嵌套 `inputs`/`statements`/`next`、
+    /// 转义与非 ASCII。
+    #[test]
+    fn encoded_blocks_writer_equals_value_path() {
+        let tree = parse_kn_entity(&serde_json::json!([
+            {
+                "type": "on_running_group_activated",
+                "id": "same",
+                "fields": { "NAME": "跳跃\"引号\\换行\n中文🙂" },
+                "inputs": { "CONDITION": { "type": "math_number", "id": "n1", "fields": { "NUM": 45 } } },
+                "statements": { "DO": { "type": "self_move_to", "id": "same",
+                                        "next": { "type": "self_go_forward", "shield": true } } },
+                "deletable": false, "collapsed": true, "comment": "保真"
+            },
+            { "type": "no_id_block", "extra": [1, { "深": true }] }
+        ]))
+        .expect("解析样例树");
+
+        let expected = serde_json::to_vec(
+            &encoded_to_value(
+                encode_block_data_json(&tree, &mut IdSource::new(true)).expect("编码"),
+            )
+            .expect("物化"),
+        )
+        .expect("序列化");
+        let mut streamed = Vec::new();
+        write_encoded_blocks(
+            &encode_block_data_json(&tree, &mut IdSource::new(true)).expect("编码"),
+            &mut streamed,
+        )
+        .expect("流式写出");
+        assert_eq!(
+            String::from_utf8_lossy(&streamed),
+            String::from_utf8_lossy(&expected),
+            "反向邻接表的流式写出必须与 encoded_to_value + to_writer 逐字节相同"
         );
     }
 }

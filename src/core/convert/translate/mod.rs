@@ -152,9 +152,10 @@ struct FileConversion {
     report: TranslateReport,
 }
 
-/// 文件路径的文档:优先流式,其余(反向 / NEMO / 回落)仍是整份 `Value`
+/// 文件路径的文档:优先流式(正向 / 反向各一种),其余(回落)仍是整份 `Value`
 enum ConvertedDocument {
     Product(assembly::ProductDocument),
+    Kitten4(assembly::Kitten4ProductDocument),
     Value(serde_json::Value),
 }
 
@@ -164,6 +165,9 @@ impl ConvertedDocument {
         use crate::core::convert::shared::FileService;
         match self {
             ConvertedDocument::Product(product) => {
+                FileService::write_json_with(output, |writer| product.write_to(writer))?;
+            }
+            ConvertedDocument::Kitten4(product) => {
                 FileService::write_json_with(output, |writer| product.write_to(writer))?;
             }
             ConvertedDocument::Value(value) => FileService::write_json(output, value)?,
@@ -231,7 +235,28 @@ fn translate_text(
             });
         }
     }
-    let converted = translate_value(serde_json::from_str(text)?, target, options)?;
+    let source: serde_json::Value = serde_json::from_str(text)?;
+    // 反向(KN → Kitten4)同样吃**流式产物**(Step 4):判据与 `translate_value` 的分派一致
+    if matches!(target, TargetEditor::Kitten4)
+        && detect_editor(&source) == Some(crate::core::convert::EditorType::Neko)
+    {
+        let mut report = TranslateReport::new(
+            crate::core::convert::EditorType::Neko,
+            TargetEditor::Kitten4,
+        );
+        let product = pipeline::convert_kn_document_product(&source, options, &mut report)?;
+        if options.is_strict() && report.is_lossy() {
+            return Err(TranslateError::Lossy {
+                report: Box::new(report),
+            });
+        }
+        return Ok(FileConversion {
+            document: ConvertedDocument::Kitten4(product),
+            target,
+            report,
+        });
+    }
+    let converted = translate_value(source, target, options)?;
     Ok(FileConversion {
         document: ConvertedDocument::Value(converted.document),
         target: converted.target,

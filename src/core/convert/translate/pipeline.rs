@@ -604,6 +604,15 @@ pub(super) fn convert_kn_document(
     options: &TranslateOptions,
     report: &mut TranslateReport,
 ) -> std::result::Result<serde_json::Value, TranslateError> {
+    Ok(convert_kn_document_product(source, options, report)?.into_value()?)
+}
+
+/// 同 [`convert_kn_document`],但保留**可流式写出**的产物(文件路径用它,省掉产物侧整份 `Value`)
+pub(super) fn convert_kn_document_product(
+    source: &serde_json::Value,
+    options: &TranslateOptions,
+    report: &mut TranslateReport,
+) -> std::result::Result<assembly::Kitten4ProductDocument, TranslateError> {
     use serde_json::Value;
     let started = std::time::Instant::now();
 
@@ -690,22 +699,20 @@ pub(super) fn convert_kn_document(
     }
 
     // ── 第二遍:编码 + 装配
-    let mut converted = 0usize;
-    let mut blocks_by_entity: Vec<(usize, Value)> = Vec::with_capacity(entities.len());
+    let mut blocks_by_entity: Vec<(usize, model::EncodedBlocks)> =
+        Vec::with_capacity(entities.len());
     for (index, entity) in entities.iter().enumerate() {
         // `blocks` 是 id 字典:同一 id 出现两次(正向 `KC` 的复制语义/菱形展开)必须重铸第二个,
         // 否则互相覆盖 —— 逐条记进报告(`RemintedId` 不算有损:内容都在,换的只是 id)
         for id in assembly::duplicate_ids(&entity.tree) {
             report.warn(TranslateWarning::RemintedId { from: id });
         }
-        let value = model::build_block_data_json(&entity.tree, &mut ids)?;
-        converted += entity.tree.count();
-        blocks_by_entity.push((index, value));
+        let encoded = model::encode_block_data_json(&entity.tree, &mut ids)?;
+        report.blocks_converted += entity.tree.count();
+        blocks_by_entity.push((index, encoded));
     }
-    report.blocks_converted = converted;
     report.elapsed_ms = started.elapsed().as_millis();
-
-    Ok(assembly::build_kitten4_document(
+    Ok(assembly::build_kitten4_document_product(
         src,
         entities,
         blocks_by_entity,

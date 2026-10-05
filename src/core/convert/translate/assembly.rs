@@ -1,5 +1,5 @@
 use super::mapping::truthy;
-use super::model::{ProcedureEntry, procedure_entries, type_name};
+use super::model::{EncodedBlocks, ProcedureEntry, procedure_entries, type_name};
 use super::report::{TranslateReport, TranslateWarning};
 use super::tables_gen::{BCM_VERSION, STAGE_LANDSCAPE, STAGE_PORTRAIT};
 use super::{model, tables_gen};
@@ -1121,12 +1121,8 @@ const KITTEN4_TOOLBOX_ORDER: &[&str] = &[
 /// (它本来就是"不可执行"的占位块)。位置与存在都保住:语句位**原地**渲染成「未收录积木」并留在链里;
 /// 值位因平台块定义**没有 `output` 连接**而落成孤立块(槽位仍空,但块还在画布上)。
 /// "哪个类型没认出来、有多少块"照旧逐类进报告 —— 效果从"悄悄少几块"变成"看得见的损失"。
-fn mark_unknown_blocks(
-    blocks: serde_json::Value,
-    report: &mut TranslateReport,
-) -> serde_json::Value {
-    use serde_json::{Map, Value};
-    use std::collections::{BTreeMap, BTreeSet};
+fn mark_unknown_blocks_encoded(encoded: &mut EncodedBlocks, report: &mut TranslateReport) {
+    use std::collections::BTreeMap;
 
     /// 编辑器认识的「未收录积木」标记(语句位 / 值位)
     const MARKER_STATEMENT: &str = "incompatible_block";
@@ -1134,67 +1130,37 @@ fn mark_unknown_blocks(
 
     let knows = super::kitten4_vocab::kitten4_editor_knows;
 
-    // 就地消费(**rounds/37 P3**):入参本来就按值给到,原先却又 `as_object().cloned()` 整份拷一遍,
-    // 再单独拷 `blocks`/`connections` 表、逐块拷 `shadows` —— 一份 9 MB 级文档因此被深拷 3~4 次。
-    // 现在:拿走所有权 → 原地改。`serde_json::Map` 是 BTreeMap(按键排序),
-    // 重建与插入顺序都不影响产物字节。
-    let Value::Object(mut root) = blocks else {
-        return blocks;
-    };
-
     // 值槽里的子块要落成"值型"标记:`connections` 里 `input_type == "value"` 的那些;
     // 块自己带 `is_output: true` 也算。两处都不认时当语句块(标记块两种都没有连接时,
     // 编辑器一样会把它画成孤立块,只是形状不同)。
-    let value_children: BTreeSet<String> = root
-        .get("connections")
-        .and_then(Value::as_object)
-        .map(|connections| {
-            connections
-                .values()
-                .filter_map(Value::as_object)
-                .flat_map(|children| children.iter())
-                .filter(|(_, info)| info.get("input_type").and_then(Value::as_str) == Some("value"))
-                .map(|(child, _)| child.clone())
-                .collect()
-        })
-        .unwrap_or_default();
+    let value_children = encoded.value_children();
 
     // 计数用 `BTreeMap`(键序稳定 ⇒ 告警顺序稳定)
     let mut marked: BTreeMap<String, u64> = BTreeMap::new();
-    if let Some(Value::Object(table)) = root.get_mut("blocks") {
-        for (id, block) in table.iter_mut() {
-            let Some(map) = block.as_object_mut() else {
-                continue;
-            };
-            let Some(kind) = map.get("type").and_then(Value::as_str).map(str::to_string) else {
-                continue;
-            };
-            if knows(&kind) {
-                continue;
-            }
-            let output = map
-                .get("is_output")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-                || value_children.contains(id);
-            *marked.entry(kind).or_insert(0) += 1;
-            map.insert(
-                String::from("type"),
-                Value::String(
-                    if output {
-                        MARKER_OUTPUT
-                    } else {
-                        MARKER_STATEMENT
-                    }
-                    .to_string(),
-                ),
-            );
-            // 标记块 `args0` 为空 ⇒ 字段/影子/变异都不留(形态与平台一致)
-            map.remove("fields");
-            map.remove("shadows");
-            map.remove("mutation");
-            map.insert(String::from("is_output"), Value::Bool(output));
+    // 登记"已改成标记"的 id(写出/物化时它们不写 `fields`/`shadows` 默认键);
+    // 遍历需要 `&mut blocks`,故先攒 id、循环后再写回 `encoded.marked`。
+    let mut marked_ids: Vec<String> = Vec::new();
+    for (id, node) in encoded.blocks_mut() {
+        if knows(&node.kind) {
+            continue;
         }
+        let output = node.is_output || value_children.contains(id);
+        *marked.entry(node.kind.clone()).or_insert(0) += 1;
+        node.kind = if output {
+            MARKER_OUTPUT
+        } else {
+            MARKER_STATEMENT
+        }
+        .to_string();
+        // 标记块 `args0` 为空 ⇒ 字段/影子/变异都不留(形态与平台一致)
+        node.fields.clear();
+        node.shadows.clear();
+        node.mutation = None;
+        node.is_output = output;
+        marked_ids.push(id.clone());
+    }
+    for id in marked_ids {
+        encoded.mark_as_marker(&id);
     }
     // 块不再被移除 ⇒ 原来那段"重建 `connections` 去掉悬空引用"可以整段删掉:
     // 连接表保持原样,换个类型的块仍挂在原位置(值型标记连不上槽,编辑器会自己画成孤立块)。
@@ -1202,43 +1168,18 @@ fn mark_unknown_blocks(
     // 影子 XML 里也可能写着编辑器不认识的类型(它是**字符串**,清积木表时扫不到)。
     // 实测某作品 9696 条影子里 174 条如此(`get_split_options` 占 158)⇒ 一并清成空串
     // (库里既有的占位写法),并逐类计入报告。
-    // 先探测"这一块到底有没有不认识的影子",没有就整块跳过(原先无条件 `shadows.clone()` 两遍)。
     //
     // 影子**不换标记块**:影子是槽位的默认值,不是用户摆的积木;换成一个"未收录积木"影子没有意义
     // (它没有字段可表达默认值),所以照旧清空 —— 这是 rounds/34 §4quinquies 记的 D2 行为。
     let mut shadow_fixed: BTreeMap<String, u64> = BTreeMap::new();
-    if let Some(Value::Object(blocks)) = root.get_mut("blocks") {
-        for block in blocks.values_mut() {
-            let Some(map) = block.as_object_mut() else {
-                continue;
-            };
-            let needs_fix = map
-                .get("shadows")
-                .and_then(Value::as_object)
-                .is_some_and(|shadows| {
-                    shadows
-                        .values()
-                        .any(|xml| shadow_type(xml).is_some_and(|kind| !knows(kind)))
-                });
-            if !needs_fix {
-                continue;
+    for (_, node) in encoded.blocks_mut() {
+        for xml in node.shadows.values_mut() {
+            if let Some(kind) = shadow_type_str(xml)
+                && !knows(kind)
+            {
+                *shadow_fixed.entry(kind.to_string()).or_insert(0) += 1;
+                xml.clear();
             }
-            let Some(Value::Object(shadows)) = map.remove("shadows") else {
-                continue;
-            };
-            let mut new_shadows = Map::new();
-            for (slot, xml) in shadows {
-                match shadow_type(&xml) {
-                    Some(kind) if !knows(kind) => {
-                        *shadow_fixed.entry(kind.to_string()).or_insert(0) += 1;
-                        new_shadows.insert(slot, Value::String(String::new()));
-                    }
-                    _ => {
-                        new_shadows.insert(slot, xml);
-                    }
-                }
-            }
-            map.insert("shadows".into(), Value::Object(new_shadows));
         }
     }
 
@@ -1256,12 +1197,10 @@ fn mark_unknown_blocks(
             cleared_shadows: 0,
         });
     }
-    Value::Object(root)
 }
 
 /// 影子 XML 串里的 `type="…"` 取值(没有则 `None`)
-fn shadow_type(xml: &serde_json::Value) -> Option<&str> {
-    let text = xml.as_str()?;
+fn shadow_type_str(text: &str) -> Option<&str> {
     let start = text.find("type=\"")? + 6;
     let rest = &text[start..];
     let end = rest.find('"')?;
@@ -1275,19 +1214,167 @@ pub(super) struct StageSize {
     pub(super) kn: (f64, f64),
 }
 
-/// 装配 Kitten4 编辑版文档
-pub(super) fn build_kitten4_document(
+/// 可**流式写出**的反向产物文档(`rounds/47` §4 Step 4)
+///
+/// 每实体的 `block_data_json` 在文档里只留 `null` 占位(键序由 `Map` 决定),真正的
+/// [`EncodedBlocks`] 挂在 [`Kitten4Hook`] 上:
+/// - [`Self::into_value`] 物化回 `Value`(与旧口径逐字节相同);
+/// - [`Self::write_to`] 在占位处**直接写**(不建节点 `Value` —— 与正向 Step 2/3 同一套做法)。
+pub(super) struct Kitten4ProductDocument {
+    doc: Map<String, Value>,
+    hooks: Vec<Kitten4Hook>,
+}
+
+struct Kitten4Hook {
+    is_scene: bool,
+    id: String,
+    blocks: EncodedBlocks,
+}
+
+impl Kitten4ProductDocument {
+    /// 物化回整份文档(`TranslateDocument.document` 口径不变)
+    pub(super) fn into_value(mut self) -> Result<Value> {
+        for hook in std::mem::take(&mut self.hooks) {
+            let container = if hook.is_scene { "scenes" } else { "actors" };
+            let filled = model::encoded_to_value(hook.blocks)?;
+            if let Some(entry) = self
+                .doc
+                .get_mut("theatre")
+                .and_then(Value::as_object_mut)
+                .and_then(|theatre| theatre.get_mut(container))
+                .and_then(Value::as_object_mut)
+                .and_then(|table| table.get_mut(&hook.id))
+                .and_then(Value::as_object_mut)
+            {
+                entry.insert("block_data_json".into(), filled);
+            } else {
+                // 装配端一定放好了占位;真到不了这里(到了就是写出器的 bug,留痕而不是静默丢键)
+                debug_assert!(false, "反向产物缺少 {container}.{} 条目", hook.id);
+            }
+        }
+        Ok(Value::Object(self.doc))
+    }
+
+    /// 直接写整份文档(文件路径):除两处块表外逐键交给 `serde_json`,块表在占位处流式写
+    pub(super) fn write_to(&self, w: &mut impl std::io::Write) -> Result<()> {
+        w.write_all(b"{")?;
+        for (index, (key, value)) in self.doc.iter().enumerate() {
+            if index > 0 {
+                w.write_all(b",")?;
+            }
+            serde_json::to_writer(&mut *w, key)?;
+            w.write_all(b":")?;
+            if key == "theatre" {
+                self.write_theatre(value, w)?;
+            } else {
+                serde_json::to_writer(&mut *w, value)?;
+            }
+        }
+        w.write_all(b"}")?;
+        Ok(())
+    }
+
+    /// `theatre` 段:`actors` / `scenes` 两个字典里挂块表
+    fn write_theatre(&self, theatre: &Value, w: &mut impl std::io::Write) -> Result<()> {
+        let map = theatre
+            .as_object()
+            .ok_or_else(|| ConvertError::TypeMismatch {
+                expected: "object(theatre)".into(),
+                actual: type_name(theatre).into(),
+            })?;
+        w.write_all(b"{")?;
+        for (index, (key, value)) in map.iter().enumerate() {
+            if index > 0 {
+                w.write_all(b",")?;
+            }
+            serde_json::to_writer(&mut *w, key)?;
+            w.write_all(b":")?;
+            match key.as_str() {
+                "actors" => self.write_entity_table(value, false, w)?,
+                "scenes" => self.write_entity_table(value, true, w)?,
+                _ => serde_json::to_writer(&mut *w, value)?,
+            }
+        }
+        w.write_all(b"}")?;
+        Ok(())
+    }
+
+    /// `theatre.{actors,scenes}` 字典:命中挂点的实体走占位处流写
+    fn write_entity_table(
+        &self,
+        table: &Value,
+        is_scene: bool,
+        w: &mut impl std::io::Write,
+    ) -> Result<()> {
+        let map = table
+            .as_object()
+            .ok_or_else(|| ConvertError::TypeMismatch {
+                expected: "object(实体字典)".into(),
+                actual: type_name(table).into(),
+            })?;
+        w.write_all(b"{")?;
+        for (index, (id, entry)) in map.iter().enumerate() {
+            if index > 0 {
+                w.write_all(b",")?;
+            }
+            serde_json::to_writer(&mut *w, id)?;
+            w.write_all(b":")?;
+            match self
+                .hooks
+                .iter()
+                .find(|hook| hook.is_scene == is_scene && hook.id == *id)
+            {
+                Some(hook) => write_entity_with_blocks(entry, &hook.blocks, w)?,
+                None => serde_json::to_writer(&mut *w, entry)?,
+            }
+        }
+        w.write_all(b"}")?;
+        Ok(())
+    }
+}
+
+/// 写一个带块表的实体条目:除 `block_data_json` 占位处外逐键原样写
+fn write_entity_with_blocks(
+    entry: &Value,
+    blocks: &EncodedBlocks,
+    w: &mut impl std::io::Write,
+) -> Result<()> {
+    let map = entry
+        .as_object()
+        .ok_or_else(|| ConvertError::TypeMismatch {
+            expected: "object(实体条目)".into(),
+            actual: type_name(entry).into(),
+        })?;
+    w.write_all(b"{")?;
+    for (index, (key, value)) in map.iter().enumerate() {
+        if index > 0 {
+            w.write_all(b",")?;
+        }
+        serde_json::to_writer(&mut *w, key)?;
+        w.write_all(b":")?;
+        if key == "block_data_json" {
+            model::write_encoded_blocks(blocks, w)?;
+        } else {
+            serde_json::to_writer(&mut *w, value)?;
+        }
+    }
+    w.write_all(b"}")?;
+    Ok(())
+}
+
+/// 装配 Kitten4 编辑版文档(旧口径的入口说明见 [`build_kitten4_document`] 的上方文档)
+pub(super) fn build_kitten4_document_product(
     src: &serde_json::Map<String, serde_json::Value>,
     // `entities` / `blocks_by_entity` 都**按值**收:装配阶段要移动实体源对象与
     // 已编码的积木数据,旧实现每个实体各 clone 一次(含整份 `nekoBlockJsonList`)
     // —— 一份文档级别的白拷贝(方案 23 P0-3)
     entities: Vec<KnEntity>,
-    blocks_by_entity: Vec<(usize, serde_json::Value)>,
+    blocks_by_entity: Vec<(usize, EncodedBlocks)>,
     stage: StageSize,
     // `theatre.groups` 的组 id 由它现铸(`deterministic_ids` 下稳定,见该段的说明)
     ids: &mut model::IdSource,
     report: &mut TranslateReport,
-) -> serde_json::Value {
+) -> Kitten4ProductDocument {
     use serde_json::{Map, Value, json};
 
     let StageSize {
@@ -1319,6 +1406,7 @@ pub(super) fn build_kitten4_document(
 
     let mut actors = Map::new();
     let mut scenes = Map::new();
+    let mut hooks: Vec<Kitten4Hook> = Vec::with_capacity(entities.len());
     // 编码阶段的 `blocks_by_entity` 与 `entities` 同序同长(见调用点)
     for (position, (entity, (index, blocks))) in
         entities.into_iter().zip(blocks_by_entity).enumerate()
@@ -1329,11 +1417,17 @@ pub(super) fn build_kitten4_document(
         // 产物是给 Kitten4 **编辑器**读的:编辑器不认识的积木会让它**整份工作区加载失败**
         // (实机实测:80 种类型里 20 种不认识 ⇒ 画布一块都不显示)。所以写出前把不认识的块
         // 就地改成编辑器认识的「未收录积木」标记(而不是删掉),并逐类记进报告。
-        let blocks = mark_unknown_blocks(blocks, report);
+        let mut blocks = blocks;
+        mark_unknown_blocks_encoded(&mut blocks, report);
+        let hook = Kitten4Hook {
+            is_scene: entity.is_scene,
+            id: entity.source_id.clone(),
+            blocks,
+        };
         if entity.is_scene {
             scenes.insert(
                 entity.source_id.clone(),
-                Value::Object(kitten4_scene(&source, blocks, report)),
+                Value::Object(kitten4_scene(&source, report)),
             );
         } else {
             let scene = scene_of_actor
@@ -1342,9 +1436,10 @@ pub(super) fn build_kitten4_document(
                 .or_else(|| first_scene.clone());
             actors.insert(
                 entity.source_id.clone(),
-                Value::Object(kitten4_actor(&source, blocks, scene, landscape, report)),
+                Value::Object(kitten4_actor(&source, scene, landscape, report)),
             );
         }
+        hooks.push(hook);
     }
 
     let scenes_order: Vec<Value> = match src
@@ -1500,7 +1595,7 @@ pub(super) fn build_kitten4_document(
             });
         }
     }
-    Value::Object(doc)
+    Kitten4ProductDocument { doc, hooks }
 }
 
 /// 一个 KN 实体的公共字段(角色/场景共用):名字、造型、工作区滚动、可见性
@@ -1546,7 +1641,6 @@ fn kitten4_entity_common(
 /// KN 角色 → Kitten4 角色条目
 fn kitten4_actor(
     source: &serde_json::Map<String, serde_json::Value>,
-    blocks: serde_json::Value,
     scene: Option<String>,
     landscape: bool,
     report: &mut TranslateReport,
@@ -1609,7 +1703,8 @@ fn kitten4_actor(
         _ => Value::Array(source.get("currentStyleId").cloned().into_iter().collect()),
     };
     out.insert("styles".into(), styles);
-    out.insert("block_data_json".into(), blocks);
+    // 块表只留占位:真正的内容由 `Kitten4ProductDocument` 的挂点在写出/物化时兑现
+    out.insert("block_data_json".into(), serde_json::Value::Null);
     // 正向会删掉这两个键(官方行为),反向只能给保守默认值
     out.insert("user_change_r_c".into(), json!(false));
     out.insert("editable_in_tuition_mode".into(), json!(false));
@@ -1646,7 +1741,6 @@ fn synthesize_group(
 /// KN 场景 → Kitten4 场景条目
 fn kitten4_scene(
     source: &serde_json::Map<String, serde_json::Value>,
-    blocks: serde_json::Value,
     report: &mut TranslateReport,
 ) -> serde_json::Map<String, serde_json::Value> {
     use serde_json::{Value, json};
@@ -1681,7 +1775,7 @@ fn kitten4_scene(
             }),
         );
     }
-    out.insert("block_data_json".into(), blocks);
+    out.insert("block_data_json".into(), serde_json::Value::Null);
     out
 }
 
@@ -2321,7 +2415,9 @@ mod assembly_tests {
                 "c": { "d": { "input_name": "value", "input_type": "value", "type": "input" } }
             }
         });
-        let out = mark_unknown_blocks(blocks, &mut report);
+        let mut encoded = EncodedBlocks::from_json_for_test(&blocks).expect("读成 encoded");
+        mark_unknown_blocks_encoded(&mut encoded, &mut report);
+        let out = super::super::model::encoded_to_value(encoded).expect("物化");
         let got = out["blocks"].as_object().expect("blocks");
         // 认得的原样;不认识的按位置换标记
         assert_eq!(got["c"]["type"], "text");
@@ -2383,7 +2479,9 @@ mod assembly_tests {
             "connections": {}
         });
         let mut report = report();
-        let out = mark_unknown_blocks(blocks, &mut report);
+        let mut encoded = EncodedBlocks::from_json_for_test(&blocks).expect("读成 encoded");
+        mark_unknown_blocks_encoded(&mut encoded, &mut report);
+        let out = super::super::model::encoded_to_value(encoded).expect("物化");
         let shadows = out["blocks"]["b1"]["shadows"]
             .as_object()
             .expect("shadows 还在");
@@ -2468,6 +2566,76 @@ mod assembly_tests {
             String::from_utf8_lossy(&streamed),
             String::from_utf8_lossy(&expected),
             "流式产物必须与 to_value 路径逐字节相同(角色 / 场景 / 程序集三处挂点)"
+        );
+    }
+
+    /// **常驻门**(`rounds/47` §4 Step 4):反向(`theatre.{actors,scenes}.*.block_data_json`)
+    /// 的流式写出与 `into_value()` 路径逐字节相同
+    #[test]
+    fn streamed_kitten4_product_matches_value_product() {
+        let mut report = report();
+        let mut ids = IdSource::new(true);
+        let kn_source = json!({
+            "stageSize": { "width": 562, "height": 900 },
+            "scenes": { "scenesDict": { "scene-1": { "actorIds": ["actor-1"] } }, "sortList": ["scene-1"] },
+            "actors": { "actorsDict": { "actor-1": { "name": "小明" } } },
+            "procedures": { "proceduresDict": {} }
+        });
+        let src = kn_source.as_object().expect("对象").clone();
+        let entities = vec![
+            KnEntity {
+                source_id: "actor-1".to_string(),
+                is_scene: false,
+                tree: super::super::model::BlockTree::default(),
+                source: json!({ "name": "小明", "currentStyleId": "s1" })
+                    .as_object()
+                    .expect("对象")
+                    .clone(),
+            },
+            KnEntity {
+                source_id: "scene-1".to_string(),
+                is_scene: true,
+                tree: super::super::model::BlockTree::default(),
+                source: json!({ "name": "舞台" }).as_object().expect("对象").clone(),
+            },
+        ];
+        let blocks = json!({
+            "blocks": {
+                "b1": { "id": "b1", "type": "self_move_to", "fields": { "TEXT": "走\"引号\\换行\n中文🙂" },
+                        "shadows": { "S": "<shadow type=\"math_number\" id=\"s1\"/>", "U": "<shadow type=\"get_split_options\"/>" } }
+            },
+            "connections": { "b1": {} }
+        });
+        let blocks_by_entity = vec![
+            (
+                0,
+                EncodedBlocks::from_json_for_test(&blocks).expect("读成 encoded"),
+            ),
+            (
+                1,
+                EncodedBlocks::from_json_for_test(&json!({ "blocks": {}, "connections": {} }))
+                    .expect("空"),
+            ),
+        ];
+        let product = build_kitten4_document_product(
+            &src,
+            entities,
+            blocks_by_entity,
+            StageSize {
+                landscape: false,
+                canvas: (562.0, 900.0),
+                kn: (562.0, 900.0),
+            },
+            &mut ids,
+            &mut report,
+        );
+        let mut streamed = Vec::new();
+        product.write_to(&mut streamed).expect("流式写出");
+        let expected = serde_json::to_vec(&product.into_value().expect("物化")).expect("序列化");
+        assert_eq!(
+            String::from_utf8_lossy(&streamed),
+            String::from_utf8_lossy(&expected),
+            "反向流式产物必须与 into_value 路径逐字节相同(角色 / 场景两处挂点)"
         );
     }
 }
