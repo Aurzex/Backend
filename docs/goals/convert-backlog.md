@@ -30,6 +30,7 @@
 
 | 项 | 出处 | 说明 |
 | --- | --- | --- |
+| **NEMO → KN 的产物侧流式写出是否立项** | `../rounds/47` §4 Step 4(表) | Step 4 的反向已落地;NEMO 未做。实测:NEMO 的**产物侧上界只有 17~20%**(nemo-3.4 e2e 326 / core 233 / 产物侧 55 ms),而 §2.2 的剩余差距是 `nemo-3.4MB` 分配 1 353 318 vs 目标 1 300 000(**差 4%**)、`e2e` 291–315 vs ≤300(贴线);且它的块表是 NEMO 自己的 `nekoBlockJsonList` 形态、程序集在解析器内就位 ⇒ 要做就得写**第三套**写出器。拍板点:按"4% 差距 vs 第三套实现的维护面"决定做/不做 |
 | ~~A1 大作品上传必失败~~ **已完成(修复,2026-09-26)**:上传路径改用请求级超时(`MewRequestBuilder::with_timeout`);**实测读数与常量值见 `../knowledge/nemo-runtime-and-upload.md` §6** | `../rounds/21` §8.4 N1 | 剩下的是**单包上限**(qiniu 413),**已完成(收尾,2026-09-26,决策见 `./pending-decisions.md` A5/D5;读数见 `../knowledge/platform-and-protocol.md` §5bis)** |
 | ~~A2 `keep_source` 上传的是**反编译重建的编辑版**~~ **已完成(已决:方案1)  文档化;2026-09-26)**:`TranslateOptions::keep_source` 的 rustdoc 写明偏差,不改反编译侧 | `../rounds/21` §8.4 N2 | 无(名实不符已写进文档) |
 | B2 KN 到 NEMO 是否立轮 | `../rounds/24` §12.3、`../rounds/27` §1 | 建议不做(平台无对照;要自建 NEMO 编码器) |
