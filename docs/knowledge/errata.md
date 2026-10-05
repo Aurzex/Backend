@@ -7,8 +7,8 @@
 > 为什么不在原文档上直接改:`../rounds/20` §6.1 定为**历史保真** —— 轮次记录不改写,只在本篇集中勘误。
 > 每条的「正确」列都已在**写下时的**当前源码上核过(总表初版 2026-09-25;**此后各节按各自标注日期增补,最晚一节为 2026-10-02**;续修时请连同日期一起更新)。
 >
-> 常见失效类型:1)  文件被重命名/搬迁(`utils/acquire.rs` -> `utils/requests.rs`、`core/compiler.rs` -> `core/convert/**`、
-> `utils/data.rs` -> `utils/filedata.rs`);2)  类型改名(`HTTPStatus` -> `StatusCode`、`CloudError`/`ChatError` -> `SocketError`);3)  行号漂移;
+> 常见失效类型:1)  文件被重命名/搬迁(`utils/acquire.rs` 改名为 `utils/requests.rs`、`core/compiler.rs` 并入 `core/convert/**`、
+> `utils/data.rs` 改名为 `utils/filedata.rs`);2)  类型改名(`HTTPStatus` 改为 `StatusCode`、`CloudError`/`ChatError` 改为 `SocketError`);3)  行号漂移;
 > 4)  整段形态被后续轮次推翻(如 `LoginSession`)。**读老轮次时先查本篇。**
 
 
@@ -85,7 +85,7 @@
   - **为何错**:表格行被竖线切断:Mardown 表格多出空列并把 `ok_or_else(|| ...)` 的 `||` 拆到另一列,渲染后表头错位、规则只显示半句;原文疑似在 `|` 结尾的代码片段被当作单元格分隔符。
   - **正确**:恢复为单行三列:`| 错误传播 | `?` + `ok_or_else(|| ...)`,禁裸 `unwrap`/`expect`(锁除外) | 已执行(P0-1) |`。
   - 出处:docs/rounds/05-style-unify-plan.md「统一规则(目标风格,全仓唯一写法)」表第 1 行
-- **错**:10. **P1-2: workshop_id 同实体同类型 -> i32(2 处 &str 改 i32)** … `shop.rs:81` fetch_workshop_details、`:297` update_workshop `&str` -> `i32`
+- **错**:10. **P1-2: workshop_id 同实体同类型改 i32(2 处 `&str` 改 `i32`)** … `shop.rs:81` fetch_workshop_details、`:297` update_workshop 的 `&str` 改 `i32`
   - **为何错**:行号已漂移,作为索引不可用:当前 shop.rs 中这两个函数的参数已是 i32,且所引行号已不指向对应函数(文件经多轮改动,shop.rs 现约 500 行以上的签名位置已变)。
   - **正确**:类型结论仍有效(workshop_id 统一 i32),但行号需重新定位;不要按 docs/rounds/05 的行号直接跳转。
   - 出处:docs/rounds/05-style-unify-plan.md §10;src/api/shop.rs 当前签名(glob/grep 观测)
@@ -148,7 +148,7 @@
   - **为何错**:与本文档 §1 表及 §P1 标题自相矛盾:§1 写「采纳后回退…保持双哈希」,P1 标题写「采纳后回退:借用检查限制」,结论是无法编译、不实现。开头的 bullet 未同步。
   - **正确**:单次哈希最终未采纳,保持 contains_key+get_mut 双哈希;现码并带 E0499/E0500 根因注释(src/core/cloudvar.rs:463-470)。
   - 出处:docs/rounds/11 开头 bullet vs §1 表/P1 标题 vs src/core/cloudvar.rs:463-470
-- **错**:1. 重命名 `src/utils/acquire.rs` -> `src/utils/requests.rs`(用 `lsp rename_file` 一次性改写全部引用)…… 待分轮落地
+- **错**:1. 把 `src/utils/acquire.rs` 重命名为 `src/utils/requests.rs`(用 `lsp rename_file` 一次性改写全部引用)…… 待分轮落地
   - **为何错**:该计划项现已执行完毕,文中「待执行」状态与现状不符(同日的 docs/rounds/12 已按 `utils/requests.rs` 撰写,说明重命名已落地)。
   - **正确**:src/utils/requests.rs 已存在,src/utils/ 下无 acquire.rs;全仓 grep `utils::acquire`/`utils/acquire` 零命中。
   - 出处:docs/rounds/11 §3.5/§3.6 vs src/utils/ 目录列表与 grep
@@ -216,7 +216,7 @@ pub struct LocalClientProvider {
   - **为何错**:实际执行结果自述该 grep 仍命中 ActionRegistry::new() 的全局委托,归零目标未达成;文档未把该条从「验证清单」中撤回,仅在下文偏差段说明。
   - **正确**:实际终态为「仅 ActionRegistry::new() 委托一处保留」,归零条件应写成例外项。
   - 出处:16-...md §Verification 归零项 2 vs §Verification(实际执行结果)
-- **错**:至此自动举报全链路(登录 -> 举报 -> 恢复身份)统一走 `self.client`,第七轮「保持全局」的限制解除。
+- **错**:至此自动举报全链路(登录、举报、恢复身份)统一走 `self.client`,第七轮「保持全局」的限制解除。
   - **为何错**:表述过强:同轮实际保留 ActionRegistry 的 CodeMaoClient::global() 委托(动作分发路径仍是全局默认),并非「全链路统一」。
   - **正确**:应限定为「登录流与 execute_single_report 内 5 处 api-Manager 统一走 self.client;ActionRegistry::new() 仍委托全局」。
   - 出处:16-...md §Approach Phase 1 末句 / §Verification(实际执行结果)
@@ -240,7 +240,7 @@ pub struct LocalClientProvider {
 
 - **错**:`Other` -> `InvalidArgument` 是公开 API 命名变更(SemVer breaking),crate 处 0.1.0 可接受;grep `MewError::Other` 全仓 9 处一次性改名。(该句在 2026-10-02 的语体清洗中已改写为「`Other` 改名为 `InvalidArgument` 属公开 API 命名变更…」;此处引的是**改写前原文**。)
   - **为何错**:数字与实测不符:范围偏差段记载「实际 10 处而非 9 处」,漏了 auth.rs:498(验证码文件写入失败),且该处语义不同应改 MewError::Io 而非 InvalidArgument。
-  - **正确**:全仓 10 处:9 处参数校验 -> InvalidArgument,auth.rs:498 -> MewError::Io;requests.rs:1619/1627 另走 Json 错误。
+  - **正确**:全仓 10 处:9 处参数校验改 `InvalidArgument`,`auth.rs` 的那处改 `MewError::Io`;requests.rs 的 1619/1627 两处另走 Json 错误。
   - 出处:18-...md §Approach Phase 4 影响面 vs §范围偏差第 1 条
 - **错**:`MewError`->`ClientError`、`MewResult`->`Result`、`Catsona`->`Identity`、`KittyAuth`->`AuthProvider`、`KittyRequestBuilder`->`RequestBuilder`、`HTTPStatus`->`HttpStatus`
   - **为何错**:该建议已被第十一轮否决/修改:MewError/MewResult 按团队决策保留(crate 品牌名);KittyRequestBuilder 因与 ureq::RequestBuilder 冲突改 MewRequestBuilder;HTTPStatus 因与 MewError::HttpStatus 同名易混改 StatusCode。
@@ -280,7 +280,7 @@ pub struct LocalClientProvider {
 - **错**:| `KittyRequestBuilder` | `RequestBuilder` | 15 | 请求构建器 |
 | `HTTPStatus` | `HttpStatus` | 131 | RFC 命名惯例(HTTP->Http) |
   - **为何错**:映射表已被实际实现推翻(RequestBuilder 与 ureq::RequestBuilder 冲突;HttpStatus 与 MewError::HttpStatus 易混),文档只在下文范围偏差段记录新名,映射表本身未同步,单独阅读会得到错误改名。
-  - **正确**:应为 `KittyRequestBuilder` -> `MewRequestBuilder`、`HTTPStatus` -> `StatusCode`。
+  - **正确**:应为 `KittyRequestBuilder` 改名为 `MewRequestBuilder`、`HTTPStatus` 改名为 `StatusCode`。
   - 出处:19-...md §Approach Phase 22 映射表 vs §范围偏差第 2、3 条
 - **错**:审阅日期:2026-08-30 · 基线:HEAD `f8d394a`(第十轮已落地)
   - **为何错**:上下文信息存疑:15/16 文档审阅日期为 2026-08-29(基线 fe2c9e6、9d7b4d9),17 为 2026-08-29(5d76687),18 为 2026-08-30(4a62bb3),19 同为 2026-08-30 但称「第十轮已落地」——同一天内 18(方案)与 19(第十轮已落地)并存,时间线在文档层面无法自洽。
@@ -314,7 +314,7 @@ pub struct LocalClientProvider {
 
 ## 第三十三至三十六轮的结论变更(2026-09-26)
 
-这几轮把反向(KN -> Kitten4)的**判据**换了一茬,历史轮次里下列表述**已不成立**;
+这几轮把反向(KN 到 Kitten4)的**判据**换了一茬,历史轮次里下列表述**已不成立**;
 正确值与证据都在新轮次里(读老轮次时以本节为准):
 
 | 出处 | 已过时的表述 | 正确值 / 证据 |
@@ -380,6 +380,22 @@ W10 落地(`66c0b6b`)后,**"内联对象形态影子 => 拒收该作品"这条�
   - **为何错**:2026-10-03 用本机慢服务器 + 真实 `ureq` 3.4.2 agent 直接复测,三种形态都被 `timeout_global` 掐断:响应体延迟 6 s 时 2.0 s 失败 `timeout: global`;响应体**分片慢送**(每 0.4 s 一字节)同样 2.0 s 失败。ureq 上游文档亦明示 `timeout_global` 是"end-to-end, from DNS lookup to finishing reading the response body"。
   - **正确**:ureq 3 的超时是**三段预算** —— `timeout_global`(整通调用,含响应体)、`timeout_recv_response`(到响应头)、`timeout_recv_body`(响应体总预算);请求级覆盖只改被显式设置的旋钮,其余**继承 agent 配置**。真正的边界是 ureq 没有"逐次读的空闲超时"(响应体中途卡住只会吃掉总预算)。语义、读数与配置策略见 `platform-and-protocol.md` §5ter。
   - 出处:`../rounds/40-gates-cleanup-and-real-defects.md` §7.4/§7.6;复测见 `../rounds/43`;代码落点 `src/utils/requests.rs` 的 `KittyCore::new` 与 `apply_request_config`。
+
+### `DecompilerError` 已改名 `ConvertError`(2026-10-03)
+
+- **已过时(历史正文不改,此处登记)**:`../rounds/14`–`../rounds/33` 等轮次里出现的 `DecompilerError`。
+  - **现状**:该类型现名 `ConvertError`(`src/core/convert/shared.rs`),`TranslateError` 的对应变体也由 `Decompiler` 改为 `Convert`,错误文本由"作品文件解析失败"改为"转换域错误"。
+  - **为何改**:该类型覆盖**反编译 + 转换 + 上传**整域,`Decompiler` 这个名字窄于职责(`../rounds/21` §8.6 的 L4)。
+  - 出处:`../rounds/46`;`repo-conventions.md` §4。
+
+### `ReportProcessor` 的自定义配置入口与两处全局门面已删(2026-10-03)
+
+- **已过时(历史正文不改,此处登记)**:
+  - `../rounds/15` §68/§69 记的 `ReportProcessor::new_with_config(config)` 与 `new_with_config_and_client(config, client)` 两个**公共**构造入口。
+    - **现状**:2026-10-03 收 `pub(crate)`,其中 `new_with_config` 因零调用**直接删除**;对外只剩 `new()` 与 `new_with_client()`。原形态本就是签名假象:配置类型 `CheckConfig` 的字段全是 `pub(crate)`、没有公开构造器,外部只能传 `Default`。
+  - 早期轮次提到的 `api::auth` 全局门面 `global_auth_manager()` / `fetch_current_timestamp()`(及其 `GLOBAL_AUTH_MANAGER`)。
+    - **现状**:三者已于 2026-10-03 **删除**(全仓零调用,含 `tests/`);取当前时间戳请用 `fetch_current_timestamp_with_provider(&provider)`。
+- 出处:`../rounds/46`;`../goals/infra-backlog.md` §6。
 
 ### `AccountStatus` 已并入 `Identity`(2026-10-03)
 

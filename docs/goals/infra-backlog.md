@@ -30,7 +30,7 @@
 
 ## 2. 小改(机械、低风险,可批量做)
 
-1. ~~`DecompilerError` 自带 `Io/Json/Http` 与 `MewError` 重复,改为包装~~ —— **已不成立(2026-10-01 核实)**:`DecompilerError` 已无 `Io`/`Json`/`Http` 变体,`io::Error`/`serde_json::Error` 经 `From` 折进 `Mew`(与 `ProcessorError`/`DataQueryError` 同处置);残留的死变体 `UnsupportedType` **已于 2026-10-02 删除**(`fef30e7`,公共面破坏性变更、已授权;见 `./pending-decisions.md`「已决」的 2026-10-02 移入记录、`../rounds/39` §W52) ),本项**已清零**。
+1. ~~`ConvertError`(当时的 `DecompilerError`)自带 `Io/Json/Http` 与 `MewError` 重复,改为包装~~ —— **已不成立(2026-10-01 核实)**:`ConvertError` 已无 `Io`/`Json`/`Http` 变体,`io::Error`/`serde_json::Error` 经 `From` 折进 `Mew`(与 `ProcessorError`/`DataQueryError` 同处置);残留的死变体 `UnsupportedType` **已于 2026-10-02 删除**(`fef30e7`,公共面破坏性变更、已授权;见 `./pending-decisions.md`「已决」的 2026-10-02 移入记录、`../rounds/39` §W52) ),本项**已清零**。
 2. **已完成(2026-10-02,`cbb167a`)**:非锁裸 `unwrap` 硬化 —— **重新枚举后真实 50 处**(生产 **10** / `cfg(test)` **40**),**硬化 49、按约定保留 1**。
    - **旧计数「49 处」不可复现**:它点名的四族(`auth.rs::time_difference`、`registry.rs` 的 `active.as_mut().unwrap()`、`compiler.rs`(已并入 `core/convert/`)的 `template.unwrap()` 与 10 处 `write!(String).unwrap()`)在本树**已全部不存在**(时差缓存改 `Option` 判定、`active.as_mut()` 已是 `let Some(…) else`、`write!` 现均写作 `let _ = write!(…)`)。
    - **旧口径的坑**:`grep '\.unwrap()' | grep -v 'lock()\.unwrap()'` 会**漏掉跨行书写的 `lock()` 换行后接 `.unwrap()` 的链**、把大量锁的解锁误计为非锁,导致数字虚高且不可复现。正确口径要把 `.unwrap()` 的**接收者跨行回溯**,排除 `.lock()/.read()/.write()`。
@@ -68,13 +68,13 @@
 2. "回调不应 panic"必须写进 rustdoc(`release` 是 `panic="abort"`,catch_unwind 无效)(`../rounds/01` 坑 13)。
 3. 本库(`../knowledge/`、`../goals/`)已替代 `../rounds/` 作为**入口**;新增改动优先更新本库 + 一个新轮次记录。
 
-## 6. 架构盘点(2026-10-03,待决)
+## 6. 架构盘点(2026-10-03;四条已全部处置)
 
-> 只读盘点认为整体分层健康:`utils` 为叶子、`api` 居中层、`core` 居上,全仓无模块环,`core → api` 为既定方向(C8 暂缓)。下面四条是其中**仍未登记**的开放项,证据为符号定位。
+> 只读盘点认为整体分层健康:`utils` 为叶子、`api` 居中层、`core` 居上,全仓无模块环,`core → api` 为既定方向(C8 暂缓)。该节四条**已全部结案**(两条见 `../rounds/44`、两条见 `../rounds/46`),下面保留结论备查。
 
 | 项 | 证据 | 说明与代价 |
 | --- | --- | --- |
 | **公共请求原语把 `ureq` 实现类型泄漏进 `pub` 签名** **已完成(2026-10-03,`../rounds/44`)** | 改后:公共原语返回自有 `requests.rs::MewResponse`(只给 `status()`/`header()`),读取助手收 `MewResponse`;`MewError::Http` 装自有 `requests.rs::TransportError`(文本 + `is_timeout()`);`agent()`/`send_multipart()` 收 `pub(crate)` | 判据:外部消费 crate **不声明 ureq** 即可编译并跑通完整链路(实测 `status=200` + body);ureq 升级不再自动构成本库破坏性变更 |
-| **`CheckConfig` 是 `pub struct` 但字段全 `pub(crate)` 且无公开构造器** | `pipeline.rs::CheckConfig`、`services.rs::ReportProcessor::{new_with_config,new_with_config_and_client}` | 下游只能传 `Default`,公共签名承诺的"自定义配置"实际不可达。要么把两个构造器收 `pub(crate)`(先核调用点),要么公开字段或加 builder。属**公共面变更**(待决) |
-| **`api` 层两处零调用的全局入口** | `auth.rs::{global_auth_manager,GLOBAL_AUTH_MANAGER,fetch_current_timestamp}` | 与 `../knowledge/repo-conventions.md` §3 的注入纪律相悖(同 `KittyFactory` 已删的同类),且 `pub` 项 `unused` 抓不到 ⇒ 长期诱使新代码回落到全局身份槽。零调用可删(属公共面,需授权) |
+| **`CheckConfig` 是 `pub struct` 但字段全 `pub(crate)` 且无公开构造器** **已完成(2026-10-03,`../rounds/46`)** | 取"收窄"这一边:`ReportProcessor::{new_with_config,new_with_config_and_client}` 收 `pub(crate)`;其中 `new_with_config` 收窄后零调用 ⇒ 直接删除。对外只留 `ReportProcessor::{new,new_with_client}`(`CheckConfig` 类型本身保留在 crate 内,由 `ViolationChecker` 消费) | 判据:全仓 `ReportProcessor::` 调用点只有 `new()`(`src/main.rs`)与静态助手(`terminal.rs`)⇒ 无外部使用者受损;公共签名不再承诺不可达的"自定义配置" |
+| **`api` 层两处零调用的全局入口** **已完成(2026-10-03,`../rounds/46`)** | 删除 `auth.rs::{global_auth_manager,GLOBAL_AUTH_MANAGER(static),fetch_current_timestamp}`(零调用);保留在用的 `fetch_current_timestamp_with_provider` | 判据:全仓(含 `tests/`)这三项只出现在定义处 ⇒ 删除后 `clippy -D warnings` 反而抓到两处因此变空的 import(`Arc`/`OnceLock`),已一并清掉;注入纪律不再有"看似可用的全局登录入口" |
 | **错误类型边界不一致** **已完成(2026-10-03,`../rounds/44`)** | `registry.rs::ProcessorError` 现为 `Processing`/`Mew`/`Aborted`(`io`/`serde_json` 由 `From` 折进 `Mew`);`retrieve.rs::DataQueryError` 删 `Json`、`External` 改名 `Mew`;`filedata.rs::FileError` 整型删除,`CodeMaoFile::write_bytes` 返回 `MewResult<()>` | 口径与 `translate/options.rs::TranslateError` 一致;同一个底层失败在全仓只有一种表示 |

@@ -59,7 +59,7 @@
 > **2026-10-02 从 B/C 组移入**(已完成,保留结论与提交号以便回溯):
 > - ~~B5 **恢复 `[lints.rust] unused` 告警**~~ **已完成**:第 40 轮 R2 三阶段(`6414b97` / `30216c5` / `8da596d`),终态 `unused = "warn"`。**读数与口径见 `./infra-backlog.md` §1.1**,耐久约定见 `../knowledge/repo-conventions.md` §6。
 > - ~~C1 **非锁 `unwrap` 硬化**~~ **已完成(`cbb167a`)**:处数、逐类处置与旧计数不可复现的理由**只在 `./infra-backlog.md` §2 第 2 条展开**;其中 1 处(stdin 读失败)转为待决,即 **D64) **。
-> - ~~C2 **`DecompilerError` 包装 `MewError`**(原记"消除自带 `Io/Json/Http` 重复")~~ **已不成立并已清零**:该重复 **2026-10-01 核实已不存在**(`io::Error`/`serde_json::Error` 经 `From` 折进 `Mew`);剩下的零调用死变体 `UnsupportedType` **已于 `fef30e7` 删除**(破坏性公共面变更、已授权)。见 `../rounds/39` §1.3/§W52) /§W12d。
+> - ~~C2 **`ConvertError` 包装 `MewError`**(原记"消除自带 `Io/Json/Http` 重复";该类型 2026-10-03 前叫 `DecompilerError`)~~ **已不成立并已清零**:该重复 **2026-10-01 核实已不存在**(`io::Error`/`serde_json::Error` 经 `From` 折进 `Mew`);剩下的零调用死变体 `UnsupportedType` **已于 `fef30e7` 删除**(破坏性公共面变更、已授权)。见 `../rounds/39` §1.3/§W52) /§W12d。
 
 - `MewError`/`MewResult` **品牌名保留**;`terminal.rs` 留在库内;`HttpClient` trait 不公开;类型级 WS 状态机(`CloudConnection<Connected>`)不做;god file 不拆、不加宏(`impl_api_manager!` 类)。
 - 转换域:**不对齐官方字节**(只语义 diff + 官方 `validateBcm` 硬门);`RawValue` 透传与单遍遍历**判不做**;反向(KN 到 Kitten4)实体级并行**判不做**。

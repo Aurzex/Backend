@@ -63,7 +63,7 @@
 
 - 统一 `MewError` / `MewResult<T>`(`src/utils/requests.rs`);HTTP 状态码枚举已改名为 `StatusCode`(`HTTPStatus` 已不存在)。
 - **底层失败一律折进 `MewError`**(`io::Error` / `serde_json::Error` 由 `From` 折进),域错误类型只留域内变体 + 一个 `Mew` 载体。2026-10-03 前 `ProcessorError`/`DataQueryError` 并列的 `Io`/`Json` 变体已删,两者的 `External` 也统一改名为 `Mew`;`FileError` 整型删除(`CodeMaoFile::write_bytes` 直接返回 `MewResult<()>`)。口径锚点:`translate/options.rs::TranslateError` 与 `convert/shared.rs::DecompilerError`。
-- `DecompilerError` 现只有 `Mew(#[from] MewError)` 加域内变体(`Crypto`/`Decompile`/`InvalidResponse`/`MissingField`/`TypeMismatch`/`Other`)。原先记的两条**都不再成立**:"仍自带 `Io/Json/Http`、与 `MewError` 重复**待改**"已于 2026-10-01 核实消除(见 `../rounds/39` §1.3/§W12d);零调用的死变体 `UnsupportedType` **已于 `fef30e7`(2026-10-02)删除**(破...
+- `ConvertError`(2026-10-03 前叫 `DecompilerError`,见 `errata.md`)现只有 `Mew(#[from] MewError)` 加域内变体(`Crypto`/`Decompile`/`InvalidResponse`/`MissingField`/`TypeMismatch`/`Other`)。原先记的两条**都不再成立**:"仍自带 `Io/Json/Http`、与 `MewError` 重复**待改**"已于 2026-10-01 核实消除(见 `../rounds/39` §1.3/§W12d);零调用的死变体 `UnsupportedType` **已于 `fef30e7`(2026-10-02)删除**(破...
 - 破坏性 API 变更**不留兼容别名**(已授权的前提下直接删)。
 - **第三方 crate 的类型不进公共契约**(2026-10-03):公共请求原语返回自有 `MewResponse`(内部持有 ureq 的响应),传输失败装自有 `TransportError`(只给文本与 `is_timeout()`),不再出现 `ureq::Error` / `Response<Body>` / `Agent` / `Form`;域内专用的 `agent()` / `send_multipart()` 收 `pub(crate)`。判据:下游**不声明 ureq** 也能走完整链路(验收手法见 `../rounds/44`)。
 
@@ -113,4 +113,4 @@
 - **权威**:仓库级文档规范以根目录 `AGENTS.md` 为准(加载协议、体例 9 条红线、收尾 SOP、输出禁忌、正文语体、三库定位)。`../README.md` 的"文档体例"节只登记两库分工与例外,不重复条文。
 - **载体**:`README.md` 首行注释声明进入任务前须读取该契约,因此后续会话无需人工重复提示。
 - **收尾**:完成任务后按契约第四节更新轮次记录、目标库与知识库,并检查引用该事实的目标库条目是否需同步。
-- **指针**:契约 -> `../../AGENTS.md`;本轮落地记录 -> `../rounds/41-agent-contract-and-doc-reformat.md`。
+- **指针**:契约见 `../../AGENTS.md`;该轮的落地记录见 `../rounds/41-agent-contract-and-doc-reformat.md`。

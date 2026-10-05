@@ -23,7 +23,7 @@
 }
 ```
 
-- `blocks` 是 **id -> 积木对象** 字典;`connections` 是父子邻接表,**根积木 = 从未作为子键出现的 id**。
+- `blocks` 是 **id 到积木对象** 的字典;`connections` 是父子邻接表,**根积木 = 从未作为子键出现的 id**。
 - `shadows` 的值仍然是 **XML 字符串**(Kitten4 沿用 XML shadow,KN 亦然 => 双向搬运可直接复用)。
   注意: **例外(老形态)**:平台上还有作品把槽值写成**内联对象**(`{type, id, visible, editable, fields}`;全语料仅一件)。
   正向入口会把它就地改写成平台同款影子 XML 再解析(`pipeline::normalize_object_shadows`,只改解析副本);

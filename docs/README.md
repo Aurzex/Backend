@@ -31,12 +31,12 @@
 
 ## 历史记录 [`rounds/`](rounds/)(过程)
 
-`rounds/01-websocket-pitfalls.md` … `rounds/45-mechanical-batch-and-verification-closeout.md` —— 每轮一份的方案/评审/整改记录。
-**入口先看 [`rounds/README.md`](rounds/README.md)**(28–45 轮的索引 + "该看哪几篇"),再看本篇。
+`rounds/01-websocket-pitfalls.md` … `rounds/46-public-face-closeout-and-notation-rule.md` —— 每轮一份的方案/评审/整改记录。
+**入口先看 [`rounds/README.md`](rounds/README.md)**(28–46 轮的索引 + "该看哪几篇"),再看本篇。
 价值在**证据链**(真机实测、抓包、官方 bundle 逆向、逐条评审),以及"为什么当初这么决定"。
 读它们时先看 [`knowledge/errata.md`](knowledge/errata.md):早期文档里的文件名/类型名/行号多数已经漂移。
 
-**文件分布**:知识库 [`knowledge/`](knowledge/)、目标库 [`goals/`](goals/)、轮次记录 `rounds/01`–`rounds/45`(每轮一篇,40 号已合并为单篇,另设本目录索引 `README.md`;第 38–40 轮为转换域的近期工作,第 41–45 轮为工程与公共面收窄)。
+**文件分布**:知识库 [`knowledge/`](knowledge/)、目标库 [`goals/`](goals/)、轮次记录 `rounds/01`–`rounds/46`(每轮一篇,40 号已合并为单篇,另设本目录索引 `README.md`;第 38–40 轮为转换域的近期工作,第 41–46 轮为工程与公共面收尾)。
 
 > **读老轮次前先做的两件事**:1)  查 [`knowledge/errata.md`](knowledge/errata.md)(它集中列出已过时/写错的表述及正确值,
 > 含"第三十三至三十六轮的结论变更"一节);2)  转换相关的问题先读 [`knowledge/convert-semantics.md`](knowledge/convert-semantics.md) 的
@@ -47,6 +47,7 @@
 规范原文见根目录 [`AGENTS.md`](../AGENTS.md) 第三节(体例 9 条红线)、第五节(输出禁忌)、第六节(正文语体)。本节不重复条文,只登记两库分工与例外。
 
 - **两库分工**:`knowledge/` 篇末统一 `## 依据`;`goals/` 用表内"出处"列;导航页不写易漂的文件数/条目数。
+- **映射记法(2026-10-03 定)**:表格单元格里的 `A -> B` 是**数据记法**(量值变化、节点/条目数、流程、类型签名、旧名到新名的映射对),保留不改写;**正文(表格外)** 只允许出现在代码/命令片段、数值或键值变化、类型签名里,其余写书面语("由 A 改为 B")。`rounds/**` 属历史,不回改(引用与代码保真优先)。
 - **历史稿**:`rounds/01`–`rounds/40` 的正文于 2026-10-02 按 `AGENTS.md` 完成格式与语体清洗,严重度改用文字(`高/中/低`)。此前的"历史稿不改写"约定同时改为"**事实不改写,写法随规范清洗**"。
 
 > **例外(4 项)**:
