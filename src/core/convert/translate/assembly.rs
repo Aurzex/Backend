@@ -3,7 +3,7 @@ use super::model::{ProcedureEntry, procedures_to_json, type_name};
 use super::report::{TranslateReport, TranslateWarning};
 use super::tables_gen::{BCM_VERSION, STAGE_LANDSCAPE, STAGE_PORTRAIT};
 use super::{model, tables_gen};
-use crate::core::convert::shared::{DecompilerError, Result};
+use crate::core::convert::shared::{ConvertError, Result};
 use serde_json::{Map, Value, json};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -101,7 +101,7 @@ pub(super) fn build_document(
 ) -> Result<Value> {
     let src = source
         .as_object()
-        .ok_or_else(|| DecompilerError::TypeMismatch {
+        .ok_or_else(|| ConvertError::TypeMismatch {
             expected: "object(Kitten 作品 JSON)".into(),
             actual: type_name(source).into(),
         })?;

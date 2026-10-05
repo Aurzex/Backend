@@ -5,7 +5,7 @@
 //! (拆分前 `model.rs` 从 `mapping` 借影子构造、`nemo_mapping.rs` 从 `nemo` 借 DOM)。
 //! 本模块只依赖 `shared` 的**类型**,不反向依赖 `model`/`mapping`/`nemo`。
 
-use crate::core::convert::shared::{DecompilerError, XHTML};
+use crate::core::convert::shared::{ConvertError, XHTML};
 use serde_json::Value;
 use std::ops::Range;
 
@@ -170,7 +170,7 @@ pub(super) fn count_source_elements(nodes: &[XmlNode]) -> usize {
 // - 未知实体(`&nbsp;`)直接报错,与 `text/xml` 下的 `DOMParser` 一致
 // (`text/html` 会容错,我们不学它);
 // - 畸形输入(未闭合 / 开闭不匹配 / 属性缺引号 / 意外字符)一律返回
-// [`DecompilerError::Decompile`],带行、列与字节偏移,不 panic、不产出半截结果。
+// [`ConvertError::Decompile`],带行、列与字节偏移,不 panic、不产出半截结果。
 // 已知取舍(与浏览器**不**完全等价的地方,调用方需要知道):
 // - **不做命名空间处理**:`xmlns` / `xmlns:xxx` 只是普通属性,按字符串读写
 // (积木 XML 里的命名空间只是装饰,没有前缀解析/`localName` 语义);
@@ -374,14 +374,14 @@ fn push_text_escaped(out: &mut String, s: &str) {
 /// 注:只被本文件的 `#[cfg(test)]` 用例使用(生产入口是 [`parse_fragment`])⇒ 标 `cfg(test)`;
 /// 它连带 [`Parser::run`](仅此处调用)一起只进测试构建。
 #[cfg(test)]
-pub(super) fn parse(xml: &str) -> Result<XmlNode, DecompilerError> {
+pub(super) fn parse(xml: &str) -> Result<XmlNode, ConvertError> {
     let mut parser = Parser::new(xml);
     let roots = parser.run()?;
     // 顶层可以有多个元素(编辑器把 `<variables></variables>` 与各根积木并排存),
     // `parse` 只要第一个,与"取第一个元素"的调用方一致
     match roots.into_iter().next() {
         Some(node) => Ok(node),
-        None => Err(DecompilerError::Decompile(format!(
+        None => Err(ConvertError::Decompile(format!(
             "积木 XML 解析失败:文档里没有任何元素(输入 {} 字节)",
             xml.len()
         ))),
@@ -408,7 +408,7 @@ pub(super) fn parse(xml: &str) -> Result<XmlNode, DecompilerError> {
 ///
 /// 契约上另外两处放宽(都与**旧的生产路径**一致,只是不再需要包装串):顶层可以有多个元素
 /// (本来就合法),空片段 = 0 个顶层元素。
-pub(super) fn parse_fragment(xml: &str) -> Result<Vec<XmlNode>, DecompilerError> {
+pub(super) fn parse_fragment(xml: &str) -> Result<Vec<XmlNode>, ConvertError> {
     let mut parser = Parser::new(xml);
     let root = parser.run_wrapped("root")?;
     Ok(root.children)
@@ -501,7 +501,7 @@ impl<'a> Parser<'a> {
     }
 
     /// 期望当前字符是 `want`(否则按当前位置报错)
-    fn expect_char(&mut self, want: char, msg: &str) -> Result<(), DecompilerError> {
+    fn expect_char(&mut self, want: char, msg: &str) -> Result<(), ConvertError> {
         match self.peek() {
             Some(c) if c == want => {
                 self.bump();
@@ -512,12 +512,12 @@ impl<'a> Parser<'a> {
     }
 
     /// 构造带定位信息的解析错误
-    fn err_here(&self, msg: impl std::fmt::Display) -> DecompilerError {
+    fn err_here(&self, msg: impl std::fmt::Display) -> ConvertError {
         self.err_at(self.pos, msg)
     }
 
     /// 带行、列与字节偏移的解析错误,便于定位畸形输入
-    fn err_at(&self, pos: usize, msg: impl std::fmt::Display) -> DecompilerError {
+    fn err_at(&self, pos: usize, msg: impl std::fmt::Display) -> ConvertError {
         let mut line = 1usize;
         let mut col = 1usize;
         for (i, c) in self.src.char_indices() {
@@ -531,7 +531,7 @@ impl<'a> Parser<'a> {
                 col += 1;
             }
         }
-        DecompilerError::Decompile(format!(
+        ConvertError::Decompile(format!(
             "积木 XML 解析失败(第 {line} 行第 {col} 列,字节 {pos}): {msg}"
         ))
     }
@@ -540,7 +540,7 @@ impl<'a> Parser<'a> {
     ///
     /// Scratch 积木 XML 的名称是纯 ASCII(`procedures_2_parameter_shadow` 这种),
     /// 这里放宽到 Unicode 字母,避免对合法文档误报。
-    fn parse_name(&mut self) -> Result<String, DecompilerError> {
+    fn parse_name(&mut self) -> Result<String, ConvertError> {
         let start = self.pos;
         match self.peek() {
             Some(c) if is_name_start(c) => self.pos += c.len_utf8(),
@@ -559,19 +559,19 @@ impl<'a> Parser<'a> {
     /// 解析整份文档,返回所有**顶层**元素(调用方决定取第一个还是要求唯一)
     /// 注:只被 [`parse`](cfg(test) 的函数)调用 ⇒ 同样只进测试构建(`run_wrapped` 走 `run_inner`)。
     #[cfg(test)]
-    fn run(&mut self) -> Result<Vec<XmlNode>, DecompilerError> {
+    fn run(&mut self) -> Result<Vec<XmlNode>, ConvertError> {
         self.run_inner(None)
     }
 
     /// 把整份输入当成**某个包装根的内容**来解析,返回那个包装根
     ///
     /// 与 `parse(&format!("<{tag}>{xml}</{tag}>"))` 等价,但**不构造**包装串(见 [`parse_fragment`])。
-    fn run_wrapped(&mut self, tag: &str) -> Result<XmlNode, DecompilerError> {
+    fn run_wrapped(&mut self, tag: &str) -> Result<XmlNode, ConvertError> {
         let roots = self.run_inner(Some(tag))?;
         match roots.into_iter().next() {
             Some(root) => Ok(root),
             // `virtual_root = Some` 时必然产出一个根;真走到这里就是解析器坏了,报错不 panic
-            None => Err(DecompilerError::Decompile(
+            None => Err(ConvertError::Decompile(
                 "积木 XML 片段解析失败:虚拟包装根缺失".to_string(),
             )),
         }
@@ -579,7 +579,7 @@ impl<'a> Parser<'a> {
 
     /// [`run`](Self::run) / [`run_wrapped`](Self::run_wrapped) 的共同实现:
     /// `virtual_root = Some(tag)` 时先压入那个**合成**的包装根。
-    fn run_inner(&mut self, virtual_root: Option<&str>) -> Result<Vec<XmlNode>, DecompilerError> {
+    fn run_inner(&mut self, virtual_root: Option<&str>) -> Result<Vec<XmlNode>, ConvertError> {
         let mut roots: Vec<XmlNode> = Vec::new();
         // 未闭合元素栈:栈顶就是当前正在收文本/子元素的元素
         let mut open: Vec<XmlNode> = Vec::new();
@@ -710,7 +710,7 @@ impl<'a> Parser<'a> {
 
     /// 文档级杂项:空白、注释、`<?…?>` 处理指令(含开头的 `<?xml …?>` 声明)。
     /// 这些都对应 DOM 里的非元素节点,积木 XML 用不到,直接丢弃。
-    fn skip_document_misc(&mut self) -> Result<(), DecompilerError> {
+    fn skip_document_misc(&mut self) -> Result<(), ConvertError> {
         loop {
             self.skip_ws();
             if self.starts_with("<!--") {
@@ -726,7 +726,7 @@ impl<'a> Parser<'a> {
     }
 
     /// 解析开始标签(调用时 `pos` 指向 `<`),返回元素与"是否自闭合"
-    fn parse_open_tag(&mut self) -> Result<(XmlNode, bool), DecompilerError> {
+    fn parse_open_tag(&mut self) -> Result<(XmlNode, bool), ConvertError> {
         let tag_pos = self.pos;
         self.pos += 1; // '<'
         let tag = self.parse_name()?;
@@ -785,7 +785,7 @@ impl<'a> Parser<'a> {
     }
 
     /// 解析一个属性值(`"…"` 或 `'…'`,两种引号都支持),实体在此解码
-    fn parse_attr_value(&mut self, name: &str) -> Result<String, DecompilerError> {
+    fn parse_attr_value(&mut self, name: &str) -> Result<String, ConvertError> {
         let quote_pos = self.pos;
         let quote = match self.peek() {
             Some(c @ ('"' | '\'')) => {
@@ -831,7 +831,7 @@ impl<'a> Parser<'a> {
     }
 
     /// 收一段字符数据直到下一个 `<` 或输入结束;`&…;` 实体在此解码
-    fn parse_text(&mut self) -> Result<String, DecompilerError> {
+    fn parse_text(&mut self) -> Result<String, ConvertError> {
         let mut out = String::new();
         loop {
             match self.peek() {
@@ -853,7 +853,7 @@ impl<'a> Parser<'a> {
     ///
     /// 只认 `amp`/`lt`/`gt`/`quot`/`apos` 与数字实体;未知实体直接报错,
     /// 与浏览器 `text/xml` 下的 `DOMParser` 一致(它不认 `&nbsp;`,也不容忍裸 `&`)。
-    fn parse_entity(&mut self, amp_pos: usize) -> Result<char, DecompilerError> {
+    fn parse_entity(&mut self, amp_pos: usize) -> Result<char, ConvertError> {
         let rest = &self.src[self.pos..];
         let semi = match rest.find(';') {
             Some(i) => i,
@@ -889,7 +889,7 @@ impl<'a> Parser<'a> {
     }
 
     /// 跳过注释 `<!-- … -->`(Pascal/Scratch XML 里可能出现;DOM 里是注释节点,我们丢弃)
-    fn skip_comment(&mut self) -> Result<(), DecompilerError> {
+    fn skip_comment(&mut self) -> Result<(), ConvertError> {
         let start = self.pos;
         self.pos += 4; // "<!--"
         match self.src[self.pos..].find("-->") {
@@ -902,7 +902,7 @@ impl<'a> Parser<'a> {
     }
 
     /// 跳过处理指令 `<? … ?>`(含文档头的 `<?xml version="1.0" encoding="UTF-8"?>`)
-    fn skip_pi(&mut self) -> Result<(), DecompilerError> {
+    fn skip_pi(&mut self) -> Result<(), ConvertError> {
         let start = self.pos;
         self.pos += 2; // "<?"
         match self.src[self.pos..].find("?>") {
@@ -915,7 +915,7 @@ impl<'a> Parser<'a> {
     }
 
     /// 取 CDATA 段内容(`<![CDATA[ … ]]>`):按原文当文本,**不解码**实体
-    fn parse_cdata(&mut self) -> Result<String, DecompilerError> {
+    fn parse_cdata(&mut self) -> Result<String, ConvertError> {
         let start = self.pos;
         self.pos += 9; // "<![CDATA["
         match self.src[self.pos..].find("]]>") {
@@ -929,7 +929,7 @@ impl<'a> Parser<'a> {
     }
 
     /// 跳过 `<!DOCTYPE …>`(含 `[ … ]` 内部子集;内容不做任何解析)
-    fn skip_doctype(&mut self) -> Result<(), DecompilerError> {
+    fn skip_doctype(&mut self) -> Result<(), ConvertError> {
         let start = self.pos;
         self.pos += 9; // "<!DOCTYPE"
         let mut depth = 0usize;
@@ -962,7 +962,7 @@ mod nemo_xml_tests {
     fn parse_err(xml: &str) -> String {
         match parse(xml) {
             Ok(node) => panic!("期望解析失败,却解析出了 <{}>", node.tag),
-            Err(DecompilerError::Decompile(msg)) => msg,
+            Err(ConvertError::Decompile(msg)) => msg,
             Err(other) => panic!("期望 Decompile 错误,实际 {other:?}"),
         }
     }

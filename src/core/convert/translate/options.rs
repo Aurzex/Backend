@@ -244,8 +244,8 @@ pub struct TranslateOutcome {
 pub enum TranslateError {
     #[error("传输/通用错误: {0}")]
     Mew(#[from] crate::utils::requests::MewError),
-    #[error("作品文件解析失败: {0}")]
-    Decompiler(#[from] crate::core::convert::DecompilerError),
+    #[error("转换域错误: {0}")]
+    Convert(#[from] crate::core::convert::ConvertError),
     #[error("不支持的方向:{from:?} → {to:?}(本库当前做 Kitten4 ⇄ KittenN 与 NEMO → KittenN)")]
     Unsupported {
         from: crate::core::convert::EditorType,

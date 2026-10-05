@@ -15,7 +15,7 @@ use crate::core::convert::shared::{
     CodeMaoHttpClient, EditorType, FileService, HttpClient, IdGenerator, Result, ResultExt,
     batch_map,
 };
-use crate::core::convert::shared::{DecompilerError, WorkId};
+use crate::core::convert::shared::{ConvertError, WorkId};
 use crate::core::convert::upload::{DraftUpload, create_draft, supports_account_upload};
 use crate::utils::requests::{CodeMaoClient, MewError};
 use log::error;
@@ -273,7 +273,7 @@ impl CodemaoDecompiler {
             work_ids,
             concurrency,
             |&id| self.decompile_inner(id, options_ref),
-            || DecompilerError::Other {
+            || ConvertError::Other {
                 msg: "反编译线程异常".to_string(),
                 source: None,
             },
@@ -414,7 +414,7 @@ impl CodemaoDecompiler {
     ) -> Result<i64> {
         let editor = context.work_info.work_type;
         if !supports_account_upload(editor) {
-            return Err(DecompilerError::Mew(MewError::InvalidArgument(format!(
+            return Err(ConvertError::Mew(MewError::InvalidArgument(format!(
                 "{editor:?} 没有已知的建作品端点,不能上传到账号\
                  (支持 Kitten4 / KittenN / NEMO;Coco / Wood / Kitten2 / Kitten3 只能反编译到本地)"
             ))));
@@ -571,7 +571,7 @@ impl CodemaoDecompiler {
             .and_then(|v| v.as_array())
             .and_then(|arr| arr.first())
             .and_then(|v| v.as_str())
-            .ok_or_else(|| DecompilerError::InvalidResponse("无法获取source_urls".to_string()))?;
+            .ok_or_else(|| ConvertError::InvalidResponse("无法获取source_urls".to_string()))?;
         http_client.get_json(compiled_url, None)
     }
 }
@@ -837,7 +837,7 @@ pub(crate) fn save_json_result(
             FileService::write_json(&filepath, json)?;
             Ok(filepath)
         }
-        _ => Err(DecompilerError::Decompile(format!(
+        _ => Err(ConvertError::Decompile(format!(
             "{}反编译器应返回JSON",
             decompiler_name
         ))),
@@ -848,7 +848,7 @@ pub(crate) fn save_json_result(
 pub(crate) fn save_path_result(result: &DecompileResult, decompiler_name: &str) -> Result<PathBuf> {
     match result {
         DecompileResult::Path(path) => Ok(PathBuf::from(path)),
-        _ => Err(DecompilerError::Decompile(format!(
+        _ => Err(ConvertError::Decompile(format!(
             "{}反编译器应返回路径",
             decompiler_name
         ))),
@@ -942,8 +942,8 @@ pub(crate) fn referenced_ids(blocks: &serde_json::Map<String, Value>) -> Result<
     fn id_of(value: &Value) -> Option<&str> {
         value.get("id").and_then(Value::as_str)
     }
-    fn reject_string(block_id: &str, field: &str) -> DecompilerError {
-        DecompilerError::InvalidResponse(format!(
+    fn reject_string(block_id: &str, field: &str) -> ConvertError {
+        ConvertError::InvalidResponse(format!(
             "块 {block_id} 的 {field} 是字符串 id:编译版引用恒为内联对象(见 docs/rounds/21 §7-1)"
         ))
     }
@@ -1061,7 +1061,7 @@ impl<'a> BlockDecompilerCore<'a> {
             let parent_id = block_value
                 .get("id")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| DecompilerError::InvalidResponse("当前块缺少 id".to_string()))?
+                .ok_or_else(|| ConvertError::InvalidResponse("当前块缺少 id".to_string()))?
                 .to_string();
 
             // 树内块也经专用分派,保证 callnoreturn/controls_if 等专用反编译器生效
@@ -1073,7 +1073,7 @@ impl<'a> BlockDecompilerCore<'a> {
             let next_id = next_block
                 .get("id")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| DecompilerError::InvalidResponse("next_block缺少id".to_string()))?
+                .ok_or_else(|| ConvertError::InvalidResponse("next_block缺少id".to_string()))?
                 .to_string();
             context.blocks.insert(next_id.clone(), next_block);
             if let Some(b) = context.blocks.get_mut(&next_id)
@@ -1102,7 +1102,7 @@ impl<'a> BlockDecompilerCore<'a> {
             let parent_id = block_value
                 .get("id")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| DecompilerError::InvalidResponse("当前块缺少 id".to_string()))?
+                .ok_or_else(|| ConvertError::InvalidResponse("当前块缺少 id".to_string()))?
                 .to_string();
 
             for (i, child) in children.iter().enumerate() {
@@ -1115,7 +1115,7 @@ impl<'a> BlockDecompilerCore<'a> {
                         .get("id")
                         .and_then(|v| v.as_str())
                         .ok_or_else(|| {
-                            DecompilerError::InvalidResponse("child_block缺少id".to_string())
+                            ConvertError::InvalidResponse("child_block缺少id".to_string())
                         })?
                         .to_string();
                     let input_name =
@@ -1156,7 +1156,7 @@ impl<'a> BlockDecompilerCore<'a> {
             let parent_id = block_value
                 .get("id")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| DecompilerError::InvalidResponse("当前块缺少 id".to_string()))?
+                .ok_or_else(|| ConvertError::InvalidResponse("当前块缺少 id".to_string()))?
                 .to_string();
 
             for (i, condition) in conditions.iter().enumerate() {
@@ -1173,7 +1173,7 @@ impl<'a> BlockDecompilerCore<'a> {
                         .get("id")
                         .and_then(|v| v.as_str())
                         .ok_or_else(|| {
-                            DecompilerError::InvalidResponse("condition_block缺少id".to_string())
+                            ConvertError::InvalidResponse("condition_block缺少id".to_string())
                         })?
                         .to_string();
                     context.blocks.insert(cond_id.clone(), condition_block);
@@ -1235,7 +1235,7 @@ impl<'a> BlockDecompilerCore<'a> {
             let parent_id = block_value
                 .get("id")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| DecompilerError::InvalidResponse("当前块缺少 id".to_string()))?
+                .ok_or_else(|| ConvertError::InvalidResponse("当前块缺少 id".to_string()))?
                 .to_string();
 
             for (name, value) in params {
@@ -1254,7 +1254,7 @@ impl<'a> BlockDecompilerCore<'a> {
                         .get("id")
                         .and_then(|v| v.as_str())
                         .ok_or_else(|| {
-                            DecompilerError::InvalidResponse("param_block缺少id".to_string())
+                            ConvertError::InvalidResponse("param_block缺少id".to_string())
                         })?
                         .to_string();
                     // 先取类型再移动:param_block 的 clone 仅为满足 insert 的取所有权,
@@ -1388,7 +1388,7 @@ impl<'a> BlockDecompiler<'a> for IfBlockDecompiler<'a> {
             .compiled
             .get("child_block")
             .and_then(|v| v.as_array())
-            .ok_or_else(|| DecompilerError::Decompile("child_block不存在".to_string()))?;
+            .ok_or_else(|| ConvertError::Decompile("child_block不存在".to_string()))?;
         let conditions_len = self
             .compiled
             .get("conditions")
@@ -1577,7 +1577,7 @@ impl<'a> BlockDecompiler<'a> for FunctionDefDecompiler<'a> {
             .unwrap_or_default();
         let block = block_value
             .as_object_mut()
-            .ok_or_else(|| DecompilerError::Decompile("block_value不是对象".to_string()))?;
+            .ok_or_else(|| ConvertError::Decompile("block_value不是对象".to_string()))?;
 
         if let Some(shadows) = block.get_mut("shadows").and_then(|s| s.as_object_mut()) {
             // 编辑版 defnoreturn shadows 键集合:DEFINE / PARAMS0..n / MUTATOR / STACK
@@ -1595,7 +1595,7 @@ impl<'a> BlockDecompiler<'a> for FunctionDefDecompiler<'a> {
         let parent_id = block
             .get("id")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| DecompilerError::InvalidResponse("当前块缺少 id".to_string()))?
+            .ok_or_else(|| ConvertError::InvalidResponse("当前块缺少 id".to_string()))?
             .to_string();
 
         for (i, (param_name, _)) in params.iter().enumerate() {
@@ -1650,7 +1650,7 @@ impl<'a> BlockDecompiler<'a> for FunctionDefDecompiler<'a> {
         let fields = block
             .get_mut("fields")
             .and_then(|v| v.as_object_mut())
-            .ok_or_else(|| DecompilerError::Decompile("fields对象不存在".to_string()))?;
+            .ok_or_else(|| ConvertError::Decompile("fields对象不存在".to_string()))?;
         fields.insert(
             "NAME".to_string(),
             Value::String(procedure_name.to_string()),
@@ -1694,7 +1694,7 @@ impl<'a> BlockDecompiler<'a> for FunctionCallDecompiler<'a> {
             .unwrap_or_default();
         let block = block_value
             .as_object_mut()
-            .ok_or_else(|| DecompilerError::Decompile("block_value不是对象".to_string()))?;
+            .ok_or_else(|| ConvertError::Decompile("block_value不是对象".to_string()))?;
 
         block.insert("disabled".to_string(), Value::Bool(disabled));
 
@@ -1719,7 +1719,7 @@ impl<'a> BlockDecompiler<'a> for FunctionCallDecompiler<'a> {
         let parent_id = block
             .get("id")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| DecompilerError::InvalidResponse("当前块缺少 id".to_string()))?
+            .ok_or_else(|| ConvertError::InvalidResponse("当前块缺少 id".to_string()))?
             .to_string();
 
         for (param_index, (_param_name, param_value)) in params.iter().enumerate() {
@@ -1730,12 +1730,10 @@ impl<'a> BlockDecompiler<'a> for FunctionCallDecompiler<'a> {
                 let param_block = param_decompiler.decompile(context)?;
                 let param_id = param_block
                     .get("id")
-                    .ok_or_else(|| {
-                        DecompilerError::InvalidResponse("param_block缺少id".to_string())
-                    })?
+                    .ok_or_else(|| ConvertError::InvalidResponse("param_block缺少id".to_string()))?
                     .as_str()
                     .ok_or_else(|| {
-                        DecompilerError::InvalidResponse("param_block id不是字符串".to_string())
+                        ConvertError::InvalidResponse("param_block id不是字符串".to_string())
                     })?
                     .to_string();
                 context.blocks.insert(param_id.clone(), param_block);
@@ -1769,7 +1767,7 @@ impl<'a> BlockDecompiler<'a> for FunctionCallDecompiler<'a> {
         let fields = block
             .get_mut("fields")
             .and_then(|v| v.as_object_mut())
-            .ok_or_else(|| DecompilerError::Decompile("fields对象不存在".to_string()))?;
+            .ok_or_else(|| ConvertError::Decompile("fields对象不存在".to_string()))?;
         fields.insert(
             "NAME".to_string(),
             Value::String(procedure_name.to_string()),
@@ -2019,7 +2017,7 @@ mod download_tests {
 
     impl HttpClient for FlakyHttp {
         fn get_json(&self, _url: &str, _headers: Option<Vec<(String, String)>>) -> Result<Value> {
-            Err(DecompilerError::InvalidResponse(
+            Err(ConvertError::InvalidResponse(
                 "测试桩:只用 get_binary".into(),
             ))
         }
@@ -2030,13 +2028,13 @@ mod download_tests {
             let count = remaining.entry(url.to_string()).or_insert(0);
             if *count > 0 {
                 *count -= 1;
-                return Err(DecompilerError::InvalidResponse("测试桩:首发失败".into()));
+                return Err(ConvertError::InvalidResponse("测试桩:首发失败".into()));
             }
             Ok(url.as_bytes().to_vec())
         }
 
         fn get_text(&self, _url: &str) -> Result<String> {
-            Err(DecompilerError::InvalidResponse(
+            Err(ConvertError::InvalidResponse(
                 "测试桩:只用 get_binary".into(),
             ))
         }

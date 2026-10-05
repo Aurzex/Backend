@@ -775,17 +775,17 @@ impl crate::core::convert::shared::HttpClient for OfflineHttp {
         _url: &str,
         _headers: Option<Vec<(String, String)>>,
     ) -> crate::core::convert::shared::Result<Value> {
-        Err(crate::core::convert::DecompilerError::InvalidResponse(
+        Err(crate::core::convert::ConvertError::InvalidResponse(
             "测试桩:内存入口不应联网".into(),
         ))
     }
     fn get_binary(&self, _url: &str) -> crate::core::convert::shared::Result<Vec<u8>> {
-        Err(crate::core::convert::DecompilerError::InvalidResponse(
+        Err(crate::core::convert::ConvertError::InvalidResponse(
             "测试桩:内存入口不应联网".into(),
         ))
     }
     fn get_text(&self, _url: &str) -> crate::core::convert::shared::Result<String> {
-        Err(crate::core::convert::DecompilerError::InvalidResponse(
+        Err(crate::core::convert::ConvertError::InvalidResponse(
             "测试桩:内存入口不应联网".into(),
         ))
     }
@@ -847,17 +847,17 @@ fn nemo_decompiler_offers_in_memory_editable_document() {
 /// 说明:`BlockJson` 的字段(字符串 / `Value` / 子节点)全都可序列化,**正常数据构造不出**
 /// `to_value` 失败 ⇒ 这条防御分支直接投喂一个**真实的** `serde_json` 编码错误
 /// (非字符串 map 键报的就是它;与 `BlockJson::to_value` 走同一个 `serde_json::to_value`
-/// → `DecompilerError` 通道),断言生产分支"记报告 + 跳过该根 + 算有损"。
+/// → `ConvertError` 通道),断言生产分支"记报告 + 跳过该根 + 算有损"。
 #[test]
 fn encode_failure_enters_report_instead_of_being_dropped() {
-    use crate::core::convert::shared::DecompilerError;
+    use crate::core::convert::shared::ConvertError;
     use crate::core::convert::translate::{TranslateReport, TranslateWarning, nemo};
 
     // 非字符串 map 键:serde_json 报 `key must be a string`(真实编码错误,非手搓)
     let bad: std::collections::BTreeMap<(i32, i32), i32> =
         std::collections::BTreeMap::from([((1, 2), 3)]);
     let error =
-        DecompilerError::from(serde_json::to_value(&bad).expect_err("非字符串 map 键必须编码失败"));
+        ConvertError::from(serde_json::to_value(&bad).expect_err("非字符串 map 键必须编码失败"));
 
     let mut report = TranslateReport::new(EditorType::Nemo, TargetEditor::KittenN);
     let mut roots = Vec::new();

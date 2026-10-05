@@ -1517,7 +1517,7 @@ mod forward_parallel_tests {
         )
         .expect_err("坏积木图必须报错");
         match &error {
-            TranslateError::Decompiler(inner) => {
+            TranslateError::Convert(inner) => {
                 assert!(inner.to_string().contains("不存在的积木"), "{inner}");
             }
             other => panic!("错误类型不符:{other}"),

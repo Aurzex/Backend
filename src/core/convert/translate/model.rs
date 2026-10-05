@@ -1,7 +1,7 @@
 use super::report::{TranslateReport, TranslateWarning};
 use super::xml::{math_number_shadow, xml_attr_value};
 use crate::core::convert::shared::XHTML;
-use crate::core::convert::shared::{DecompilerError, IdGenerator, Result};
+use crate::core::convert::shared::{ConvertError, IdGenerator, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_json::{Map, Value};
@@ -132,19 +132,18 @@ impl BlockJson {
     /// (方案 23 P0-3)。`kind` 走 `de_string` 容错解析:缺失/显式 null 都折成空串。
     pub(super) fn from_value(value: &Value) -> Result<Self> {
         if !value.is_object() {
-            return Err(DecompilerError::TypeMismatch {
+            return Err(ConvertError::TypeMismatch {
                 expected: "object(block json)".into(),
                 actual: type_name(value).into(),
             });
         }
-        let node: BlockJson =
-            serde::Deserialize::deserialize(value).map_err(DecompilerError::from)?;
+        let node: BlockJson = serde::Deserialize::deserialize(value).map_err(ConvertError::from)?;
         Ok(node)
     }
 
     /// 转回 JSON 对象
     pub(super) fn to_value(&self) -> Result<Value> {
-        serde_json::to_value(self).map_err(DecompilerError::from)
+        serde_json::to_value(self).map_err(ConvertError::from)
     }
 
     /// 深度优先遍历(含 next / inputs / statements)
@@ -429,7 +428,7 @@ impl IdSource {
 pub(super) fn parse_block_data_json(block_data_json: &Value) -> Result<BlockTree> {
     let bdj = block_data_json
         .as_object()
-        .ok_or_else(|| DecompilerError::TypeMismatch {
+        .ok_or_else(|| ConvertError::TypeMismatch {
             expected: "object(block_data_json)".into(),
             actual: type_name(block_data_json).into(),
         })?;
@@ -439,23 +438,23 @@ pub(super) fn parse_block_data_json(block_data_json: &Value) -> Result<BlockTree
         return parse_parts(blocks, bdj.get("connections"));
     }
     if let Some(text) = bdj.get("blocks").and_then(Value::as_str) {
-        let inner: Value = serde_json::from_str(text).map_err(DecompilerError::from)?;
+        let inner: Value = serde_json::from_str(text).map_err(ConvertError::from)?;
         let inner_obj = inner
             .as_object()
-            .ok_or_else(|| DecompilerError::TypeMismatch {
+            .ok_or_else(|| ConvertError::TypeMismatch {
                 expected: "object(block_data_json.blocks 字符串内容)".into(),
                 actual: type_name(&inner).into(),
             })?;
         let inner_blocks = inner_obj
             .get("blocks")
             .and_then(Value::as_object)
-            .ok_or_else(|| DecompilerError::MissingField {
+            .ok_or_else(|| ConvertError::MissingField {
                 field: "block_data_json.blocks.blocks".into(),
             })?;
         return parse_parts(inner_blocks, inner_obj.get("connections"));
     }
 
-    Err(DecompilerError::MissingField {
+    Err(ConvertError::MissingField {
         field: "block_data_json.blocks".into(),
     })
 }
@@ -486,7 +485,7 @@ fn parse_parts(blocks: &Map<String, Value>, connections: Option<&Value>) -> Resu
     // 有积木却没有任何根 = 整张图是环(每个 id 都当过别人的子节点),
     // 官方实现会直接栈溢出,这里明确报错而不是静默产出空树。
     if roots.is_empty() && !blocks.is_empty() {
-        return Err(DecompilerError::Decompile(format!(
+        return Err(ConvertError::Decompile(format!(
             "Kitten 积木图没有根节点({} 个积木互相成环)",
             blocks.len()
         )));
@@ -504,7 +503,7 @@ fn build_node(
     ancestors: &mut Vec<String>,
 ) -> Result<BlockJson> {
     if ancestors.iter().any(|a| a == id) {
-        return Err(DecompilerError::Decompile(format!(
+        return Err(ConvertError::Decompile(format!(
             "Kitten 积木图存在环:节点 {id} 重复出现在自身祖先链上"
         )));
     }
@@ -518,7 +517,7 @@ fn build_node(
     if let Some(children) = connections.get(id).and_then(Value::as_object) {
         for (child_id, link) in children {
             let child_block = blocks.get(child_id).ok_or_else(|| {
-                DecompilerError::Decompile(format!("积木 {id} 的连接指向不存在的子积木 {child_id}"))
+                ConvertError::Decompile(format!("积木 {id} 的连接指向不存在的子积木 {child_id}"))
             })?;
             let child = build_node(child_id, child_block, blocks, connections, ancestors)?;
             match link.get("type").and_then(Value::as_str).unwrap_or("next") {
@@ -530,7 +529,7 @@ fn build_node(
                         .unwrap_or_default()
                         .to_string();
                     if slot.is_empty() {
-                        return Err(DecompilerError::Decompile(format!(
+                        return Err(ConvertError::Decompile(format!(
                             "积木 {id} → {child_id} 的 input 连接缺少 input_name"
                         )));
                     }
@@ -541,7 +540,7 @@ fn build_node(
                     }
                 }
                 other => {
-                    return Err(DecompilerError::Decompile(format!(
+                    return Err(ConvertError::Decompile(format!(
                         "积木 {id} → {child_id} 的连接类型未知:{other}"
                     )));
                 }
@@ -1153,7 +1152,7 @@ pub(super) fn parse_kn_entity(list: &Value) -> Result<BlockTree> {
         // 少数链路把该字段存成 JSON 字符串(与 Kitten 侧 `block_data_json` 的容错一致)
         Value::String(text) if !text.trim().is_empty() => {
             // 取出数组本体(移动),不再 `as_array().cloned()` 白拷一份整表
-            let parsed: Value = serde_json::from_str(text).map_err(DecompilerError::from)?;
+            let parsed: Value = serde_json::from_str(text).map_err(ConvertError::from)?;
             owned = match parsed {
                 Value::Array(items) => items,
                 _ => Vec::new(),

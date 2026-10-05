@@ -6,7 +6,7 @@
 //! 在 `decompile/work.rs`(见 `docs/rounds/39` §W2a / §W2b)。
 //!
 //! 不对外暴露;对外只需要 `convert/mod.rs` 里那一条 `pub use`
-//! (`DecompilerError` / `EditorType` / `WorkId`)。
+//! (`ConvertError` / `EditorType` / `WorkId`)。
 //!
 //! 本文件由 `shared/{mod,error,model,infra}.rs` 合并而成(见
 //! `docs/rounds/31-convert-layout-consolidation-plan.md`),分节注释保留原文件的模块说明。
@@ -31,7 +31,7 @@ use thiserror::Error;
 
 // 错误定义
 #[derive(Error, Debug)]
-pub enum DecompilerError {
+pub enum ConvertError {
     #[error("外部错误: {0}")]
     Mew(#[from] MewError),
     #[error("加密错误: {0}")]
@@ -52,19 +52,19 @@ pub enum DecompilerError {
     },
 }
 
-impl From<std::io::Error> for DecompilerError {
+impl From<std::io::Error> for ConvertError {
     fn from(e: std::io::Error) -> Self {
-        DecompilerError::Mew(e.into())
+        ConvertError::Mew(e.into())
     }
 }
 
-impl From<serde_json::Error> for DecompilerError {
+impl From<serde_json::Error> for ConvertError {
     fn from(e: serde_json::Error) -> Self {
-        DecompilerError::Mew(e.into())
+        ConvertError::Mew(e.into())
     }
 }
 
-pub(crate) type Result<T> = std::result::Result<T, DecompilerError>;
+pub(crate) type Result<T> = std::result::Result<T, ConvertError>;
 
 // 错误上下文扩展
 pub(crate) trait ResultExt<T> {
@@ -73,7 +73,7 @@ pub(crate) trait ResultExt<T> {
 
 impl<T> ResultExt<T> for Result<T> {
     fn with_context<F: FnOnce() -> String>(self, f: F) -> Result<T> {
-        self.map_err(|e| DecompilerError::Other {
+        self.map_err(|e| ConvertError::Other {
             msg: f(),
             source: Some(Box::new(e)),
         })
@@ -245,7 +245,7 @@ impl CryptoService {
     pub(crate) fn base64_to_bytes(data: &str) -> Result<Vec<u8>> {
         general_purpose::STANDARD
             .decode(data)
-            .map_err(|e| DecompilerError::Crypto(format!("Base64解码失败: {}", e)))
+            .map_err(|e| ConvertError::Crypto(format!("Base64解码失败: {}", e)))
     }
 
     pub(crate) fn reverse_string(data: &str) -> String {
@@ -267,21 +267,21 @@ impl CryptoService {
 
         let key = self.generate_aes_key();
         let key_array = AesKey::try_from(key.as_slice())
-            .map_err(|e| DecompilerError::Crypto(format!("Invalid AES key: {}", e)))?;
+            .map_err(|e| ConvertError::Crypto(format!("Invalid AES key: {}", e)))?;
         let cipher = Aes256Gcm::new(&key_array);
         let nonce = Nonce::try_from(iv)
-            .map_err(|e| DecompilerError::Crypto(format!("Invalid nonce: {}", e)))?;
+            .map_err(|e| ConvertError::Crypto(format!("Invalid nonce: {}", e)))?;
 
         cipher
             .decrypt(&nonce, ciphertext)
-            .map_err(|e| DecompilerError::Crypto(format!("AES解密失败: {}", e)))
+            .map_err(|e| ConvertError::Crypto(format!("AES解密失败: {}", e)))
     }
 
     pub(crate) fn decrypt_bcmkn(&self, encrypted_content: &str) -> Result<Vec<u8>> {
         let reversed = Self::reverse_string(encrypted_content);
         let decoded = Self::base64_to_bytes(&reversed)?;
         if decoded.len() <= NONCE_SIZE {
-            return Err(DecompilerError::Crypto(format!(
+            return Err(ConvertError::Crypto(format!(
                 "数据长度 {} 不足,至少需要 {} 字节",
                 decoded.len(),
                 NONCE_SIZE + 1
@@ -289,7 +289,7 @@ impl CryptoService {
         }
         let (iv, ciphertext) = decoded
             .split_at_checked(NONCE_SIZE)
-            .ok_or_else(|| DecompilerError::Crypto("IV 长度不足".into()))?;
+            .ok_or_else(|| ConvertError::Crypto("IV 长度不足".into()))?;
         self.decrypt_aes_gcm(ciphertext, iv)
     }
 
@@ -298,7 +298,7 @@ impl CryptoService {
     pub(crate) fn decrypt_bcmkn_json(&self, encrypted_content: &str) -> Result<Value> {
         let decrypted_bytes = self.decrypt_bcmkn(encrypted_content)?;
         let decrypted_str = String::from_utf8(decrypted_bytes)
-            .map_err(|e| DecompilerError::Crypto(format!("UTF-8转换失败: {}", e)))?;
+            .map_err(|e| ConvertError::Crypto(format!("UTF-8转换失败: {}", e)))?;
         Ok(serde_json::from_str(&decrypted_str)?)
     }
 }

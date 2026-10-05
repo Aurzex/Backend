@@ -14,7 +14,7 @@ use crate::api::work::{
     CreateKittenWorkArgs, CreateKnWorkArgs, CreateNemoWorkArgs, KittenWorkManager, NekoWorkManager,
     NemoWorkManager,
 };
-use crate::core::convert::shared::{DecompilerError, EditorType, Result, WorkId};
+use crate::core::convert::shared::{ConvertError, EditorType, Result, WorkId};
 use crate::utils::filedata::value_to_i64;
 use crate::utils::requests::{CodeMaoClient, MewError, UploadChannel};
 use serde_json::Value;
@@ -83,7 +83,7 @@ const SINGLE_PACKAGE_LIMIT: u64 = 20 * 1024 * 1024;
 fn ensure_single_package_fits(path: &Path) -> Result<()> {
     let size = std::fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
     if size > SINGLE_PACKAGE_LIMIT {
-        return Err(DecompilerError::Other {
+        return Err(ConvertError::Other {
             msg: format!(
                 "产物 {:.1} MB 超过平台单包上传上限(实测 20 MB 可传、24 MB 被 413 拒):{}",
                 size as f64 / (1024.0 * 1024.0),
@@ -162,7 +162,7 @@ pub(crate) fn create_draft(client: &CodeMaoClient, spec: &DraftUpload<'_>) -> Re
             },
         )?,
         other => {
-            return Err(DecompilerError::Mew(MewError::InvalidArgument(format!(
+            return Err(ConvertError::Mew(MewError::InvalidArgument(format!(
                 "{other:?} 没有已知的建作品端点,不能上传到账号(支持 Kitten4 / KittenN / NEMO)"
             ))));
         }
@@ -179,7 +179,7 @@ pub(crate) fn create_draft(client: &CodeMaoClient, spec: &DraftUpload<'_>) -> Re
                 .and_then(value_to_i64)
         })
         .ok_or_else(|| {
-            DecompilerError::Mew(MewError::InvalidArgument(format!(
+            ConvertError::Mew(MewError::InvalidArgument(format!(
                 "新建作品成功但响应里没有 id:{created}"
             )))
         })

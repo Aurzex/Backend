@@ -7,7 +7,6 @@ use log::{debug, warn};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 // 枚举定义
@@ -248,16 +247,6 @@ impl ClientProvider for LocalClientProvider {
     }
 }
 
-// 全局单例
-
-static GLOBAL_AUTH_MANAGER: OnceLock<Arc<AuthManager>> = OnceLock::new();
-
-pub fn global_auth_manager() -> Arc<AuthManager> {
-    GLOBAL_AUTH_MANAGER
-        .get_or_init(|| Arc::new(AuthManager::new()))
-        .clone()
-}
-
 // 辅助函数
 
 /// 通过任意 `ClientProvider` 获取服务器当前时间戳(秒)
@@ -269,11 +258,6 @@ pub fn fetch_current_timestamp_with_provider(provider: &dyn ClientProvider) -> M
     let json = client.response_to_json(response)?;
     // 服务端可能返回数字或数字字符串,统一经 value_to_i64 解析
     Ok(json.get("data").and_then(value_to_i64).unwrap_or(0))
-}
-
-/// 使用全局客户端获取当前时间戳
-pub fn fetch_current_timestamp() -> MewResult<i64> {
-    fetch_current_timestamp_with_provider(&GlobalClientProvider::new())
 }
 
 /// 根据提供的令牌,身份,密码自动推断普通用户登录方式

@@ -228,13 +228,8 @@ impl ReportProcessor {
         Self::new_with_config_and_client(CheckConfig::default(), client)
     }
 
-    /// 使用自定义配置构造(全局客户端)
-    pub fn new_with_config(config: CheckConfig) -> Self {
-        Self::new_with_config_and_client(config, CodeMaoClient::global().clone())
-    }
-
-    /// 使用注入的客户端与自定义配置构造
-    pub fn new_with_config_and_client(config: CheckConfig, client: CodeMaoClient) -> Self {
+    /// 使用注入的客户端与自定义配置构造(同 [`ReportProcessor::new_with_client`] 的口径)
+    pub(crate) fn new_with_config_and_client(config: CheckConfig, client: CodeMaoClient) -> Self {
         let fetcher = ReportFetcher::new_with_client(client.clone());
         let batch_manager = Arc::new(Mutex::new(BatchActionManager::new()));
         let network_lock = Arc::new(Mutex::new(()));

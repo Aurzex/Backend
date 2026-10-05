@@ -20,7 +20,7 @@ pub mod translate;
 pub(crate) mod upload;
 
 // 跨子域类型:域内两处都要用,只在这里留一条公开路径
-pub use crate::core::convert::shared::{DecompilerError, EditorType, WorkId};
+pub use crate::core::convert::shared::{ConvertError, EditorType, WorkId};
 
 use crate::core::convert::decompile::{CodemaoDecompiler, DecompileOptions, DecompiledArtifact};
 use crate::core::convert::shared::FileService;
@@ -88,7 +88,7 @@ fn translate_work_in(
             work_id,
             DecompileOptions::new().output_dir(staging).save_raw(false),
         )
-        .map_err(TranslateError::Decompiler)?;
+        .map_err(TranslateError::Convert)?;
     let (source_document, source_file_name, source_version, preview) = match artifact {
         DecompiledArtifact::Document {
             document,
@@ -238,7 +238,7 @@ fn create_draft_work(
         n_blocks: Some(outcome.report.blocks_converted as i32),
         preview: preview.as_deref(),
     };
-    crate::core::convert::upload::create_draft(&client, &spec).map_err(TranslateError::Decompiler)
+    crate::core::convert::upload::create_draft(&client, &spec).map_err(TranslateError::Convert)
 }
 
 #[cfg(test)]

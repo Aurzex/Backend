@@ -9,10 +9,10 @@ use crate::core::convert::decompile::{
 use crate::core::convert::decompile::{
     EditableDocument, ResourceTask, download_resources_parallel, save_path_result,
 };
-use crate::core::convert::shared::{CryptoService, FileService, WorkId};
 use crate::core::convert::shared::{
-    DecompilerError, EditorType, HttpClient, IdGenerator, Result, ResultExt, ValueExt,
+    ConvertError, EditorType, HttpClient, IdGenerator, Result, ResultExt, ValueExt,
 };
+use crate::core::convert::shared::{CryptoService, FileService, WorkId};
 use log::info;
 use log::warn;
 use serde_json::{Value, json};
@@ -68,7 +68,7 @@ impl RawWorkData {
     fn expect_kitten(self) -> Result<Arc<Value>> {
         match self {
             RawWorkData::Kitten(data) => Ok(data),
-            _ => Err(DecompilerError::Decompile(
+            _ => Err(ConvertError::Decompile(
                 "KittenDecompiler 只能处理 Kitten 数据".into(),
             )),
         }
@@ -77,7 +77,7 @@ impl RawWorkData {
     fn expect_nemo(self) -> Result<(Arc<Value>, Arc<Value>)> {
         match self {
             RawWorkData::Nemo(bcm, source_info) => Ok((bcm, source_info)),
-            _ => Err(DecompilerError::Decompile(
+            _ => Err(ConvertError::Decompile(
                 "NemoDecompiler 需要 Nemo 数据".into(),
             )),
         }
@@ -86,7 +86,7 @@ impl RawWorkData {
     fn expect_coco(self) -> Result<Arc<Value>> {
         match self {
             RawWorkData::Coco(data) => Ok(data),
-            _ => Err(DecompilerError::Decompile(
+            _ => Err(ConvertError::Decompile(
                 "CocoDecompiler 需要 Coco 数据".into(),
             )),
         }
@@ -95,7 +95,7 @@ impl RawWorkData {
     fn expect_neko_encrypted(self) -> Result<String> {
         match self {
             RawWorkData::NekoEncrypted(encrypted) => Ok(encrypted),
-            _ => Err(DecompilerError::Decompile(
+            _ => Err(ConvertError::Decompile(
                 "NekoDecompiler 需要 NekoEncrypted 数据".into(),
             )),
         }
@@ -104,7 +104,7 @@ impl RawWorkData {
     fn expect_wood(self) -> Result<Arc<Value>> {
         match self {
             RawWorkData::Wood(data) => Ok(data),
-            _ => Err(DecompilerError::Decompile(
+            _ => Err(ConvertError::Decompile(
                 "WoodDecompiler 需要 Wood 数据".into(),
             )),
         }
@@ -159,7 +159,7 @@ impl WorkFetcher for KittenFetcher {
             .and_then(|v| v.as_array())
             .and_then(|arr| arr.first())
             .and_then(|v| v.as_str())
-            .ok_or_else(|| DecompilerError::InvalidResponse("无法获取source_urls".to_string()))?;
+            .ok_or_else(|| ConvertError::InvalidResponse("无法获取source_urls".to_string()))?;
         let compiled = self.ctx.http_client.get_json(compiled_url, None)?;
         Ok(RawWorkData::Kitten(Arc::new(compiled)))
     }
@@ -211,7 +211,7 @@ impl WorkDecompiler for KittenDecompiler {
             .get_mut("compile_result")
             .and_then(|v| v.as_array_mut())
             .map(std::mem::take)
-            .ok_or_else(|| DecompilerError::InvalidResponse("compile_result不存在".to_string()))?;
+            .ok_or_else(|| ConvertError::InvalidResponse("compile_result不存在".to_string()))?;
 
         let work_type = context.work_info.work_type;
         // Kitten2/3 编辑版用 blocksXML(Blockly XML 字符串),Kitten4 用 block_data_json
@@ -264,7 +264,7 @@ impl WorkDecompiler for KittenDecompiler {
                     // remove 移出所有权:场景整表已在循环前从 work 取出(mem::take),
                     // 直接转移所有权避免整场景深克隆
                     let scene_info = scenes.remove(actor_id).ok_or_else(|| {
-                        DecompilerError::InvalidResponse(format!("场景 {} 不存在", actor_id))
+                        ConvertError::InvalidResponse(format!("场景 {} 不存在", actor_id))
                     })?;
                     let updated_scene = Self::decompile_scene_blocks(
                         &context.config,
@@ -546,7 +546,7 @@ impl KittenDecompiler {
     ) -> Result<()> {
         let work_obj = work
             .as_object_mut()
-            .ok_or_else(|| DecompilerError::Decompile("work不是对象".to_string()))?;
+            .ok_or_else(|| ConvertError::Decompile("work不是对象".to_string()))?;
 
         let feature_keys = [
             "physics2",
@@ -610,7 +610,7 @@ impl KittenDecompiler {
     pub(crate) fn clean_work_data(work: &mut Value, work_type: EditorType) -> Result<()> {
         let work_obj = work
             .as_object_mut()
-            .ok_or_else(|| DecompilerError::Decompile("work不是对象".to_string()))?;
+            .ok_or_else(|| ConvertError::Decompile("work不是对象".to_string()))?;
         let keys_to_remove = ["compile_result", "preview", "author_nickname"];
         for key in &keys_to_remove {
             work_obj.remove(*key);
@@ -856,7 +856,7 @@ impl WorkFetcher for NemoFetcher {
             .and_then(|v| v.as_array())
             .and_then(|arr| arr.first())
             .and_then(|v| v.as_str())
-            .ok_or_else(|| DecompilerError::InvalidResponse("无法获取work_urls".to_string()))?;
+            .ok_or_else(|| ConvertError::InvalidResponse("无法获取work_urls".to_string()))?;
 
         let bcm_data = self.ctx.http_client.get_json(bcm_url, None)?;
         Ok(RawWorkData::Nemo(Arc::new(bcm_data), Arc::new(source_info)))
@@ -929,7 +929,7 @@ impl WorkDecompiler for NemoDecompiler {
                 document: (**bcm).clone(),
                 source_version: source_info.get_str_or("bcm_version", "").to_string(),
             })),
-            _ => Err(DecompilerError::Decompile(
+            _ => Err(ConvertError::Decompile(
                 "NemoDecompiler 需要 Nemo 数据".into(),
             )),
         }
@@ -989,13 +989,10 @@ impl<'a> NemoResourceManager<'a> {
     }
 
     pub(crate) fn save_core_files(&self, bcm_data: &Value, source_info: &Value) -> Result<()> {
-        let works_dir = self
-            .dirs
-            .get("works")
-            .ok_or_else(|| DecompilerError::Other {
-                msg: "works目录不存在".to_string(),
-                source: None,
-            })?;
+        let works_dir = self.dirs.get("works").ok_or_else(|| ConvertError::Other {
+            msg: "works目录不存在".to_string(),
+            source: None,
+        })?;
 
         let bcm_path = works_dir.join(format!("{}.bcm", self.config.work_id));
         FileService::write_json(&bcm_path, bcm_data)?;
@@ -1099,7 +1096,7 @@ impl<'a> NemoResourceManager<'a> {
         let material_dir = self
             .dirs
             .get("material")
-            .ok_or_else(|| DecompilerError::Other {
+            .ok_or_else(|| ConvertError::Other {
                 msg: "material目录不存在".to_string(),
                 source: None,
             })?;
@@ -1166,7 +1163,7 @@ impl WorkFetcher for CocoFetcher {
             .get("data")
             .and_then(|v| v.get("bcmc_url"))
             .and_then(|v| v.as_str())
-            .ok_or_else(|| DecompilerError::InvalidResponse("无法获取bcmc_url".to_string()))?;
+            .ok_or_else(|| ConvertError::InvalidResponse("无法获取bcmc_url".to_string()))?;
         let compiled = self.ctx.http_client.get_json(compiled_url, None)?;
         Ok(RawWorkData::Coco(Arc::new(compiled)))
     }
@@ -1178,7 +1175,7 @@ impl CocoDecompiler {
     fn reorganize(work: &mut Value, context: &DecompilerContext) -> Result<()> {
         let work_obj = work
             .as_object_mut()
-            .ok_or_else(|| DecompilerError::Decompile("work不是对象".to_string()))?;
+            .ok_or_else(|| ConvertError::Decompile("work不是对象".to_string()))?;
 
         let mut widget_map = work_obj
             .remove("widgetMap")
@@ -1201,13 +1198,13 @@ impl CocoDecompiler {
             let mut screen_obj = match screen {
                 Value::Object(map) => map,
                 _ => {
-                    return Err(DecompilerError::Decompile("screen不是对象".to_string()));
+                    return Err(ConvertError::Decompile("screen不是对象".to_string()));
                 }
             };
             let screen_id = screen_obj
                 .get("id")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| DecompilerError::InvalidResponse("screen缺少id".to_string()))?
+                .ok_or_else(|| ConvertError::InvalidResponse("screen缺少id".to_string()))?
                 .to_string();
             screen_obj.insert("snapshot".to_string(), json!(""));
             screen_obj.insert("primitiveVariables".to_string(), json!([]));
@@ -1384,9 +1381,9 @@ impl WorkFetcher for NekoFetcher {
         let mut auth = CloudAuthenticator::new(None);
         let device_auth = auth
             .generate_x_device_auth()
-            .map_err(|e| DecompilerError::Other {
+            .map_err(|e| ConvertError::Other {
                 msg: format!("生成设备认证失败: {}", e),
-                source: Some(Box::new(DecompilerError::Other {
+                source: Some(Box::new(ConvertError::Other {
                     msg: e.to_string(),
                     source: None,
                 })),
@@ -1405,7 +1402,7 @@ impl WorkFetcher for NekoFetcher {
             .and_then(|v| v.as_array())
             .and_then(|arr| arr.first())
             .and_then(|v| v.as_str())
-            .ok_or_else(|| DecompilerError::InvalidResponse("无法获取source_urls".to_string()))?;
+            .ok_or_else(|| ConvertError::InvalidResponse("无法获取source_urls".to_string()))?;
 
         let encrypted_content = self.ctx.http_client.get_text(encrypted_url)?;
         Ok(RawWorkData::NekoEncrypted(encrypted_content))
@@ -1547,13 +1544,10 @@ impl<'a> WoodResourceManager<'a> {
     }
 
     fn save_work_info(&self, work_data: &Value) -> Result<()> {
-        let root_dir = self
-            .dirs
-            .get("root")
-            .ok_or_else(|| DecompilerError::Other {
-                msg: "root目录不存在".to_string(),
-                source: None,
-            })?;
+        let root_dir = self.dirs.get("root").ok_or_else(|| ConvertError::Other {
+            msg: "root目录不存在".to_string(),
+            source: None,
+        })?;
         let info = json!({
             "id": work_data.get_i64_or_default("work_id", 0),
             "name": work_data.get_str_or("work_name", ""),
@@ -1567,13 +1561,10 @@ impl<'a> WoodResourceManager<'a> {
     }
 
     fn save_code_files(&self, work_data: &Value) -> Result<()> {
-        let root_dir = self
-            .dirs
-            .get("root")
-            .ok_or_else(|| DecompilerError::Other {
-                msg: "root目录不存在".to_string(),
-                source: None,
-            })?;
+        let root_dir = self.dirs.get("root").ok_or_else(|| ConvertError::Other {
+            msg: "root目录不存在".to_string(),
+            source: None,
+        })?;
         if let Some(content) = work_data.get("content").and_then(|v| v.as_array()) {
             for file_info in content {
                 if file_info.get_i64_or_default("file_type", 0) == 2 {
@@ -1608,13 +1599,10 @@ impl<'a> WoodResourceManager<'a> {
             info!("已按 skip_resources 跳过 WOOD 资源下载");
             return Ok(());
         }
-        let images_dir = self
-            .dirs
-            .get("images")
-            .ok_or_else(|| DecompilerError::Other {
-                msg: "images目录不存在".to_string(),
-                source: None,
-            })?;
+        let images_dir = self.dirs.get("images").ok_or_else(|| ConvertError::Other {
+            msg: "images目录不存在".to_string(),
+            source: None,
+        })?;
         // 收集任务:同一 url 只下一次;文件名按平台给的 `file_name`,缺失时从 URL 推
         let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
         let mut tasks = Vec::new();
@@ -1855,20 +1843,16 @@ mod error_path_tests {
         fn get_json(&self, _url: &str, _headers: Option<Vec<(String, String)>>) -> Result<Value> {
             match &self.reply {
                 StubReply::Json(v) => Ok(v.clone()),
-                StubReply::Fail => {
-                    Err(DecompilerError::InvalidResponse("测试桩:网络不可达".into()))
-                }
+                StubReply::Fail => Err(ConvertError::InvalidResponse("测试桩:网络不可达".into())),
             }
         }
 
         fn get_binary(&self, _url: &str) -> Result<Vec<u8>> {
-            Err(DecompilerError::InvalidResponse(
-                "测试桩:不提供二进制".into(),
-            ))
+            Err(ConvertError::InvalidResponse("测试桩:不提供二进制".into()))
         }
 
         fn get_text(&self, _url: &str) -> Result<String> {
-            Err(DecompilerError::InvalidResponse("测试桩:不提供文本".into()))
+            Err(ConvertError::InvalidResponse("测试桩:不提供文本".into()))
         }
 
         fn box_clone(&self) -> Box<dyn HttpClient> {
@@ -1919,7 +1903,7 @@ mod error_path_tests {
 
     /// 把抓取器的 `Result<RawWorkData>` 展开成错误(桩下必然失败;
     /// `RawWorkData` 未实现 `Debug`,不能用 `expect_err`)。
-    fn expect_fetch_err(result: Result<RawWorkData>) -> DecompilerError {
+    fn expect_fetch_err(result: Result<RawWorkData>) -> ConvertError {
         match result {
             Ok(_) => panic!("缺关键字段时必须报错"),
             Err(e) => e,
@@ -1949,7 +1933,7 @@ mod error_path_tests {
                 .decompile(RawWorkData::Kitten(Arc::new(bad)), &ctx)
                 .expect_err("缺/坏 compile_result 必须报错");
             assert!(
-                matches!(&err, DecompilerError::InvalidResponse(m) if m.contains("compile_result")),
+                matches!(&err, ConvertError::InvalidResponse(m) if m.contains("compile_result")),
                 "应为点明 compile_result 的 InvalidResponse,实际:{err:?}"
             );
         }
@@ -1965,7 +1949,7 @@ mod error_path_tests {
             .decompile(RawWorkData::Kitten(Arc::new(work)), &ctx)
             .expect_err("字符串引用必须报错");
         assert!(
-            matches!(err, DecompilerError::Other { .. }),
+            matches!(err, ConvertError::Other { .. }),
             "应带 with_context 的 Other,实际:{err:?}"
         );
         let text = format!("{err:?}");
@@ -2033,7 +2017,7 @@ mod error_path_tests {
                 .decompile(RawWorkData::NekoEncrypted(bad.to_string()), &ctx)
                 .expect_err("损坏密文必须报错");
             assert!(
-                matches!(err, DecompilerError::Crypto(_)),
+                matches!(err, ConvertError::Crypto(_)),
                 "应为 Crypto,实际:{err:?}"
             );
         }
@@ -2062,7 +2046,7 @@ mod error_path_tests {
             .expect_err("不可写的输出路径必须报错");
 
         assert!(
-            matches!(err, DecompilerError::Mew(_)),
+            matches!(err, ConvertError::Mew(_)),
             "应为 I/O 类错误,实际:{err:?}"
         );
         assert!(blocked.is_file(), "占位文件不得被覆盖/删除");
@@ -2086,7 +2070,7 @@ mod error_path_tests {
             .expect_err("不可写的输出路径必须报错");
 
         assert!(
-            matches!(err, DecompilerError::Mew(_)),
+            matches!(err, ConvertError::Mew(_)),
             "应为 I/O 类错误,实际:{err:?}"
         );
         assert!(blocked.is_file(), "占位文件不得被覆盖/删除");
@@ -2108,7 +2092,7 @@ mod error_path_tests {
             KittenFetcher::new(empty(), config.clone()).fetch(&work_info(EditorType::Kitten4)),
         );
         assert!(
-            matches!(&err, DecompilerError::InvalidResponse(m) if m.contains("source_urls")),
+            matches!(&err, ConvertError::InvalidResponse(m) if m.contains("source_urls")),
             "Kitten:{err:?}"
         );
 
@@ -2116,14 +2100,14 @@ mod error_path_tests {
             NemoFetcher::new(empty(), config.clone()).fetch(&work_info(EditorType::Nemo)),
         );
         assert!(
-            matches!(&err, DecompilerError::InvalidResponse(m) if m.contains("work_urls")),
+            matches!(&err, ConvertError::InvalidResponse(m) if m.contains("work_urls")),
             "Nemo:{err:?}"
         );
 
         let err =
             expect_fetch_err(CocoFetcher::new(empty(), config).fetch(&work_info(EditorType::Coco)));
         assert!(
-            matches!(&err, DecompilerError::InvalidResponse(m) if m.contains("bcmc_url")),
+            matches!(&err, ConvertError::InvalidResponse(m) if m.contains("bcmc_url")),
             "Coco:{err:?}"
         );
     }

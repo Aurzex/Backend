@@ -7,7 +7,7 @@ use super::nemo_mapping::{
 use super::options::{TranslateError, TranslateOptions};
 use super::report::{TranslateReport, TranslateWarning};
 use super::xml::{XmlNode, count_source_elements, parse_fragment};
-use crate::core::convert::shared::DecompilerError;
+use crate::core::convert::shared::ConvertError;
 use serde_json::{Map, Value, json};
 
 // 来自 src/core/convert/translate/nemo.rs
@@ -622,7 +622,7 @@ fn prepare_blocks_xml(
     split_options: &Map<String, Value>,
     scenes_order: &[String],
     ids: &mut IdSource,
-) -> Result<(Vec<XmlNode>, usize, Option<String>), crate::core::convert::shared::DecompilerError> {
+) -> Result<(Vec<XmlNode>, usize, Option<String>), crate::core::convert::shared::ConvertError> {
     let mut roots = parse_fragment(xml)?;
     let source_elements = count_source_elements(&roots);
     if qc {
@@ -1385,7 +1385,7 @@ pub(super) fn tree_to_json(
 /// 正常数据构造不出 `Err`(`nemo_tests` 里直接投喂一个真实的 `serde_json` 编码错误来守这条)。
 pub(super) fn push_root(
     out: &mut Vec<Value>,
-    encoded: Result<Value, DecompilerError>,
+    encoded: Result<Value, ConvertError>,
     report: &mut TranslateReport,
 ) {
     match encoded {
