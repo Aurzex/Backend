@@ -123,9 +123,27 @@
 
 ### Step 5(候选,需先过 spike)— 源侧 `block_data_json` 不再先落成 `Value`
 
+> **Spike 已过(2026-10-05,一次性探针,跑完即删)**:在 `tests/tmp_skeleton_probe.rs` 里用
+> `#[derive(Deserialize)]` 的骨架类型(`theatre.{scenes,actors}.<id>` 的 `block_data_json` 记为
+> `IgnoredAny`,即**只扫描、不建节点**)量了"省掉这份子树"的上界:
+>
+> | 样本 | 现状(整份 → `Value`) | 骨架(扫过 bdj) | 差 |
+> | --- | --- | --- | --- |
+> | `原气骑士 且听风吟`(10.3 MiB) | 110.8 ms / 555 517 次 / 61.3 MiB | **24.7 ms / 29 302 次 / 4.6 MiB** | −78% / −95% / −92% |
+> | `几何对战-联机`(0.3 MiB) | 2.7 ms / 16 148 次 | 0.6 ms / 697 次 | −78% / −96% |
+>
+> 骨架的覆盖性也核过:两样本各 209 / 4 个实体**全部**落在 `theatre.{scenes,actors}` 下,`theatre` 其余键 5 个、顶层其余键 27 个(**与 `collect_forward_items`/装配读取的层次一致**)。
+> 换算到整条流水线:这份子树的物化占了 `kitten4-10.8MB` **总分配次数的约 34%**(555 517 / 1 538 778),而它对应的时间几乎全在 `core` 的 `parse` 列里 ⇒ **本步是正向 `core`(277 → ≤200)的唯一大头**,故**提前到 Step 2/3 之前**(见 §4 的顺序修订)。
+>
+> 落地设计(按上述读数定):
+> 1. 开 `serde_json` 的 `raw_value` feature,骨架里 `block_data_json: Option<Box<RawValue>>`(保留原文,供强类型解析入口使用);
+> 2. `ForwardItem.block_data_json` 由 `Option<Value>` 改成 `Option<Box<RawValue>>`;`parse_forward_item` 增一条"从原文直接反序列化成 `BlockTree`"的路径,旧形态(字符串化 `blocks`、内联对象影子)才回落成 `Value` 走现有逻辑;
+> 3. **绝不把 `RawValue` 透传进产物**(源文件不是紧凑 JSON,透传会改字节);产物仍由同一套序列化器写出;
+> 4. 文档级 `Value` 仍会被构造(骨架里 `rest` 就是 `Value`),但**不再含 bdj**;公开面 `translate_value(Value)` 路径不动(它没有原文,回落即可)。
+
 **为什么不能"从 `Value` 里取 `RawValue`"**:serde_json 在 `Value` 上反序列化 `Box<RawValue>` 时走 `OwnedRawDeserializer { raw_value: Some(self.to_string()) }`,会把整棵子树**重新序列化成 String** —— 此时那份待省的 `Value` 早已构造完毕,净收益为零。
 
-要真省掉,必须让源文件直接 `serde_json::from_str::<骨架类型>`(文档级 `Value` 不再存在,`block_data_json` 以 `Box<RawValue>` 承载),而这会牵动所有读源文档的装配代码(`assembly::build_document` 的 `src`/`theatre`、`build_audios`、`stage_size` 等)。因此该步**先做一次性 spike**:同一批语料下,骨架解析 + `RawValue → BlockTree` 与现状 `Value → BlockTree` 得到**逐字段相同**的树(`forward_parallel_tests` 的串行参考 + SHA 门交叉验证),证明后再决定是否落地。**该步不计入 §2.2 的目标**。
+要真省掉,必须让源文件直接 `serde_json::from_str::<骨架类型>`(文档级 `block_data_json` 不再成为 `Value`),而这会牵动所有读源文档的装配代码(`assembly::build_document` 的 `src`/`theatre`、`build_audios`、`stage_size`、`detect_editor`)—— 骨架把这些仍然留作 `Value`,故改动面收敛在"实体表 + bdj"这一层。
 
 **字节陷阱**:语料源文件**不是紧凑 JSON**(实测 `download/compile/k4edit/174408420-0.bcm4` 含 14 580 个空白字符)。`RawValue` 只做"解析入口",**绝不能原样透传到产物**;产物一律由同一套序列化器重新写出。
 
