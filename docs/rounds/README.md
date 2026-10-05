@@ -43,7 +43,7 @@ Kitten 与 KN 之间的转换方案与落地(20–21)、NEMO 路线(22–24)、�
 
 | 轮次 | 一句话 | 状态 |
 | --- | --- | --- |
-| [47](47-data-layer-rewrite-plan.md) | **数据表示层重写**:减少中间 `serde_json::Value` 的物化(Step 1 去 `json!` 深拷贝 · Step 2 流式写出 · Step 3 块树直写 · Step 4 反向/NEMO 对齐 · Step 5 源侧骨架)· 含硬指标、验收矩阵、评审与修订 | **Step 1 已落地**;Step 2/3 为下一步 |
+| [47](47-data-layer-rewrite-plan.md) | **数据表示层重写**:减少中间 `serde_json::Value` 的物化(Step 1 去 `json!` 深拷贝 · Step 2 流式写出 · Step 3 块树直写 · Step 4 反向/NEMO 对齐 · Step 5 源侧骨架)· 含硬指标、验收矩阵、评审与修订 | **Step 1、Step 5 已落地**;Step 5b 经复核不立项;Step 2/3 为下一步 |
 
 ## 转换域"该看哪几篇"
 

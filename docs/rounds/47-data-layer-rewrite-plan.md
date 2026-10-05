@@ -34,6 +34,8 @@
 
 现状取自已提交基线(正向两行与本轮同机读数一致;反向两行用基线值,与 §2bis.2 的同机读数差 0.3–0.5%,属构建差异)。
 
+**Step 5 已落地后的实测(2026-10-05)**:`kitten4-10.8MB` 分配 1 538 778 → 1 329 054、`e2e` 595/580 → 546/545 ms;`kitten4-0.3MB` 分配 48 436 → 42 277。表内目标值不变 —— 正向两行仍需 Step 2/3 与 Step 5b(`../rounds/47-data-layer-rewrite-plan.md` §4)共同达标。
+
 ## 3. 现状数据流(符号级)
 
 ### 3.1 正向(Kitten4 → KittenN)
@@ -121,31 +123,50 @@
 
 当步期望:按 §2.2 的三行目标。
 
-### Step 5(候选,需先过 spike)— 源侧 `block_data_json` 不再先落成 `Value`
+### Step 5 — 源侧 `block_data_json` 不再先落成 `Value`(2026-10-05 已落地,`d9652f2`)
 
-> **Spike 已过(2026-10-05,一次性探针,跑完即删)**:在 `tests/tmp_skeleton_probe.rs` 里用
-> `#[derive(Deserialize)]` 的骨架类型(`theatre.{scenes,actors}.<id>` 的 `block_data_json` 记为
-> `IgnoredAny`,即**只扫描、不建节点**)量了"省掉这份子树"的上界:
->
-> | 样本 | 现状(整份 → `Value`) | 骨架(扫过 bdj) | 差 |
-> | --- | --- | --- | --- |
-> | `原气骑士 且听风吟`(10.3 MiB) | 110.8 ms / 555 517 次 / 61.3 MiB | **24.7 ms / 29 302 次 / 4.6 MiB** | −78% / −95% / −92% |
-> | `几何对战-联机`(0.3 MiB) | 2.7 ms / 16 148 次 | 0.6 ms / 697 次 | −78% / −96% |
->
-> 骨架的覆盖性也核过:两样本各 209 / 4 个实体**全部**落在 `theatre.{scenes,actors}` 下,`theatre` 其余键 5 个、顶层其余键 27 个(**与 `collect_forward_items`/装配读取的层次一致**)。
-> 换算到整条流水线:这份子树的物化占了 `kitten4-10.8MB` **总分配次数的约 34%**(555 517 / 1 538 778),而它对应的时间几乎全在 `core` 的 `parse` 列里 ⇒ **本步是正向 `core`(277 → ≤200)的唯一大头**,故**提前到 Step 2/3 之前**(见 §4 的顺序修订)。
->
-> 落地设计(按上述读数定):
-> 1. 开 `serde_json` 的 `raw_value` feature,骨架里 `block_data_json: Option<Box<RawValue>>`(保留原文,供强类型解析入口使用);
-> 2. `ForwardItem.block_data_json` 由 `Option<Value>` 改成 `Option<Box<RawValue>>`;`parse_forward_item` 增一条"从原文直接反序列化成 `BlockTree`"的路径,旧形态(字符串化 `blocks`、内联对象影子)才回落成 `Value` 走现有逻辑;
-> 3. **绝不把 `RawValue` 透传进产物**(源文件不是紧凑 JSON,透传会改字节);产物仍由同一套序列化器写出;
-> 4. 文档级 `Value` 仍会被构造(骨架里 `rest` 就是 `Value`),但**不再含 bdj**;公开面 `translate_value(Value)` 路径不动(它没有原文,回落即可)。
+> **Spike 记录(2026-10-05,一次性探针,跑完即删)**:骨架读法(把 `block_data_json` 记为 `IgnoredAny`,只扫描不建节点)对"整份 → `Value`"的读数(10.3 MiB 样本):110.8 ms / 555 517 次 / 61.3 MiB → 24.7 ms / 29 302 次 / 4.6 MiB(0.3 MiB 样本:2.7 ms / 16 148 次 → 0.6 ms / 697 次);覆盖性核过:两样本各 209 / 4 个实体**全部**落在 `theatre.{scenes,actors}` 下。**这是上界,不是实际收益** —— 实际收益 −13.6%,差额归因见 `../knowledge/convert-performance.md` §2bis.8。由此定下的四条落地约束(骨架不用 `flatten` 收其余字段、`RawValue` 只做解析入口且**绝不透传进产物**(源语料非紧凑 JSON)、旧形态回落、公开面 `translate_value` 不动)均已落在实现里。
 
 **为什么不能"从 `Value` 里取 `RawValue`"**:serde_json 在 `Value` 上反序列化 `Box<RawValue>` 时走 `OwnedRawDeserializer { raw_value: Some(self.to_string()) }`,会把整棵子树**重新序列化成 String** —— 此时那份待省的 `Value` 早已构造完毕,净收益为零。
 
-要真省掉,必须让源文件直接 `serde_json::from_str::<骨架类型>`(文档级 `block_data_json` 不再成为 `Value`),而这会牵动所有读源文档的装配代码(`assembly::build_document` 的 `src`/`theatre`、`build_audios`、`stage_size`、`detect_editor`)—— 骨架把这些仍然留作 `Value`,故改动面收敛在"实体表 + bdj"这一层。
+**落地内容**(与初版设计的两处偏离都标在括注里):
 
-**字节陷阱**:语料源文件**不是紧凑 JSON**(实测 `download/compile/k4edit/174408420-0.bcm4` 含 14 580 个空白字符)。`RawValue` 只做"解析入口",**绝不能原样透传到产物**;产物一律由同一套序列化器重新写出。
+1. `serde_json` 开 `raw_value`(`Cargo.toml`);
+2. 新增 `src/core/convert/translate/source.rs`:对"文档 / `theatre` / 实体"三层各写一个**流式 `Visitor`** 读源文本,`theatre.{scenes,actors}.*.block_data_json` 留成 `Box<RawValue>`(旁表,键 = (容器, id)),其余仍是 `Value`;形状不合即 `Err`,调用方回落整份 `Value` 解析。**不用 `#[serde(flatten)]` 收"其余字段"** —— 那会把整份文档重新缓冲成 `Content`(见 `../knowledge/convert-performance.md` §2bis.8 结论 3,读数 29 302 次 vs 454 次);
+3. `translate_file` 改走 `translate_text`:先 `text.contains("\"block_data_json\"")` 设闸,骨架成立、`detect_editor`(以旁表里"演员是否带该键"为准)判为 Kitten4、且目标为 KN 时走快速通道;其余一切(骨架不成立 / Kitten2·3 / NEMO·Neko / 反向目标)回落成整份 `Value` + `translate_value`,与旧口径逐字一致;
+4. `pipeline` 新增 `enum BlockData { Raw(Box<RawValue>), Value(Value) }`(**偏离初版设计**:初版写的是 `ForwardItem.block_data_json: Option<Box<RawValue>>`,但公开面 `translate_value(Value)` 没有原文,保留一个 `Value` 变体才不用在内存路径上反向序列化);`collect_forward_items` 增旁表形参,`restore_forward_items` 只放回 `Value` 变体;装箱权重在原文路径改用**原文字节数**(权重只影响并行均衡,不进产物);
+5. `model::parse_block_data_json_typed` / `parse_parts_typed` / `build_node_typed`:与 `Value` 版**逐句对齐**(祖先环检查、缺 id 兜底、连接类型与错误文案);`TypedBdj` 反序列化失败(字符串化 `blocks`、内联对象影子)即回落成"物化 `Value` 走老路径"。
+
+**验证**(装置:`--profile bench_perf`,`git worktree` 双树同轮交替;A = `dcb23f4`):
+
+| 样本 / 指标 | A(改动前) | B(本步) |
+| --- | --- | --- |
+| kitten4-10.8MB `e2e` | 595 / 580 ms | **546 / 545 ms** |
+| kitten4-10.8MB 分配(串行腿) | 1 538 778 | **1 329 054(−13.6%)** |
+| kitten4-0.3MB `e2e` / 分配 | 17 / 18 ms;48 436 | 12 / 15 ms;**42 277** |
+| nemo-3.4MB 分配 | 1 353 316 | 1 353 318(持平) |
+| kn-9.4MB 分配 | 798 341 | 798 343(持平) |
+
+- **产物 SHA256:六个样本 × 串行/并发 8 两条腿全绿**;`#meta` 除 `alloc_*` 四个记录键外全等;并发 1 与 8 同 SHA;
+- `cargo test`:lib 135 项全过(其中 `k4_corpus_round_trip_sweep` 走的就是这条新路径)+ 集成测试全过;
+- `cargo fmt --check` / `cargo clippy --all-targets -- -D warnings` 全绿。
+
+**两个必须记住的坑**:
+
+1. **`core` 的口径漂了**:`report.elapsed_ms` 自管线入口起算,而原文路径把"bdj 解析"从 `translate_file` 里那次 `from_str`(core 之外)挪进了管线内 ⇒ 本步 `core` 在 10.8MB 上 302 → 379 ms **是口径变化,不是变慢**;判收益看 `e2e`(−40 ms)。这条只影响读数解释,不影响产物。
+2. **快速通道必须按格式设闸**:无条件试骨架时,KN/NEMO 文本会白付一次全量骨架解析(实测 nemo-3.4MB `e2e` +26 ms、分配 +50 638 次 / +3.7%)。已改为先做定长键的字节扫描。
+
+**归因(为什么只省 13.6%,而 spike 的上界是 36%)**:见 `../knowledge/convert-performance.md` §2bis.8 —— 强类型流式解析(596 110 次分配)比先建 `Value`(532 116 次)还贵,本步真正省掉的是 `Value → BlockJson` 的 `from_value` 那一趟;根因是 `BlockJson` 的 `#[serde(flatten)] extra` 让派生实现把整块积木先缓冲成 `Content` 再逐字段转换。
+
+### Step 5b(不立项)— 去掉 `BlockJson` 的 `flatten`,手写 `Deserialize`
+
+本次探针给出了这一处的**单点**读数:`bdj` 强类型解析由 `flatten` 版的 596 110 次 / 155.5 ms 降到手写版(未知键直接进 `Map`)531 907 次 / 136.1 ms(**−12% 分配 / −12% 时间 / −35% 分配字节**,同一份 9.1 MiB `bdj`;见 `../knowledge/convert-performance.md` §2bis.8)。
+
+**但这条已经试过并被回退**:`../rounds/37` §10.6(P6,2026-09-26)去掉 `extra` 的 `#[serde(flatten)]`、手写 `from_value`/`to_value`(约 150 行),产物逐字节不变、`cargo test` 全绿,而**同轮 A/B 三轮交替量不到收益** ⇒ 回退。原因也写在那一节:40.7% 的 libc 大头是**整份 `Value` 树本身的构造与析构**,手写解析仍要 clone 同样多的 `String`/`Value`,省下的只是"未匹配键的缓冲机制"这一小块。
+
+两者对得上:单点的 −12% 换算到整条流水线只有约 **−5% 分配**,低于 A/B 的可测门 —— 与 P6 的端到端结论一致。**故本步不立项(维持 `../rounds/37` §10.6 的判定)**;若将来要吃这一块,必须与 §11.1 #2 那条"少建中间 `Value` 树"的大改**同批**做,并自带同轮 A/B,单独做只会重演 P6。
+
+**未覆盖**:`translate_work`(域门面)这条内存直通路的源文档来自平台的 `http_client.get_json`(`decompile/editors.rs` 里 Coco 走 HTTP 拿 "compiled"),不在本步范围 —— 要吃到同一份收益,得让那条 GET 也按骨架读(记进 `../goals/convert-backlog.md`,待方案)。
 
 ## 5. 不变量与风险(重构不得打破)
 
