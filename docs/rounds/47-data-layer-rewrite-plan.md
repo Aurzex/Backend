@@ -110,6 +110,9 @@
 
 当步期望:`e2e` −10% 以上、分配次数 −10%~−20%(省掉整棵产物积木 `Value` 的构造、序列化遍历与析构);`core` 同向下降(正向两行目标是 `core` ≤ 200 ms)。
 
+> **顺序修订(2026-10-05,按读数)**:§2.2 的约束项是**正向 `core`**(277 → ≤200),而 Step 2/3 主要打在 `assembly`/`ser` 一侧(对 `e2e` 大、对 `core` 小)。正向 `core` 里当前最大的单块是**源侧**:`parse`(整份文档 → `Value`)约 104 ms + `parse_block_data_json` 把 `Value` 再翻成强类型树 —— 即 `block_data_json` 这份**最大的 `Value` 子树**被完整物化了一次,随后又被翻译成 `BlockTree`、最后随文档一起析构。
+> 因此把 **Step 5(源侧)提前到 Step 2/3 之前**先做 spike:若 spike 成立(`RawValue` 直喂强类型 + 旧形态回落),先落 Step 5,再落 Step 2/3;若 spike 不成立(旧形态回落比例高、或字节/行为出现偏差),回到 Step 2/3 并按 §2.2 重新界定正向 `core` 目标(记录原因,不静默降级)。
+
 ### Step 4 — 反向与 NEMO 对齐同一套写出(必做,承载 §2.2 的三行目标)
 
 改动:反向 `model::build_block_data_json`(相邻表 `Value`)与 `assembly::build_kitten4_document`、NEMO `nemo::tree_to_json` 与 `convert_nemo_document` 的逐段装配,改用与 Step 2/3 同族的流式写出。
