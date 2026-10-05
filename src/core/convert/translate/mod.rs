@@ -61,6 +61,7 @@ mod pipeline;
 mod report;
 #[cfg(test)]
 mod reverse_tests;
+mod source;
 pub(in crate::core::convert) mod tables_gen;
 mod xml;
 
@@ -144,6 +145,61 @@ pub fn translate_value(
     })
 }
 
+/// 文本 → 文档 → 文档:文件路径的专用入口(源侧骨架快速通道)
+///
+/// 先按骨架读一遍([`source::parse`]):这条路上 `theatre.{scenes,actors}.*.block_data_json`
+/// 不建 `Value` 中间树,直接以**原文**交给管线(读数与设计见
+/// `../rounds/47-data-layer-rewrite-plan.md` Step 5)。只有「源格式确为 Kitten4 且目标为 KN」
+/// 走快速通道;其余(骨架不成立、Kitten2/3、NEMO/Neko、反向目标)一律回落成整份
+/// `Value` 解析 + [`translate_value`] —— 回落路径与旧口径逐字一致。
+fn translate_text(
+    text: &str,
+    target: TargetEditor,
+    options: &TranslateOptions,
+) -> std::result::Result<TranslateDocument, TranslateError> {
+    // 只对"可能带 `block_data_json` 的文本"先试骨架:KN/NEMO 文档里没有这个键,直接
+    // 整份 `Value` 解析即可 —— 否则会白付一次全量骨架解析(同轮 A/B 实测:nemo-3.4MB
+    // 的 `e2e` +26 ms、分配 +50 638 次,见 `../rounds/47-data-layer-rewrite-plan.md` Step 5)。
+    // 扫描是纯字节 memchr,10 MB 级文本在毫秒量级;键名是定长 ASCII,JSON 里不可能有其他写法。
+    if matches!(target, TargetEditor::KittenN)
+        && text.contains("\"block_data_json\"")
+        && let Ok(skeleton) = source::parse(text)
+    {
+        let actors_have_bdj = skeleton
+            .block_data
+            .keys()
+            .any(|(container, _)| container == "actors");
+        // 判据与 `detect_editor` 相同:演员带 `block_data_json`(现在在旁表里)且没有
+        // `blocksXML` ⇒ Kitten4(混合文档、Kitten3 都据此排除,走回落)
+        if actors_have_bdj
+            && detect_editor_with_actors_bdj(&skeleton.doc, actors_have_bdj)
+                == Some(crate::core::convert::EditorType::Kitten4)
+        {
+            let source::Skeleton {
+                mut doc,
+                block_data,
+            } = skeleton;
+            let mut report = TranslateReport::new(
+                crate::core::convert::EditorType::Kitten4,
+                TargetEditor::KittenN,
+            );
+            let document =
+                pipeline::convert_kitten4_document_raw(&mut doc, block_data, options, &mut report)?;
+            if options.is_strict() && report.is_lossy() {
+                return Err(TranslateError::Lossy {
+                    report: Box::new(report),
+                });
+            }
+            return Ok(TranslateDocument {
+                document,
+                target,
+                report,
+            });
+        }
+    }
+    translate_value(serde_json::from_str(text)?, target, options)
+}
+
 /// 把一个作品文件转化成另一种编辑器的作品文件
 pub fn translate_file(
     input: &std::path::Path,
@@ -153,8 +209,7 @@ pub fn translate_file(
     use crate::core::convert::shared::FileService;
 
     let text = std::fs::read_to_string(input)?;
-    let source: serde_json::Value = serde_json::from_str(&text)?;
-    let converted = translate_value(source, target, &options)?;
+    let converted = translate_text(&text, target, &options)?;
 
     let output = product_path(input, target, &options)?;
 
@@ -253,16 +308,26 @@ pub(in crate::core::convert) fn detect_editor(
     source: &serde_json::Value,
 ) -> Option<crate::core::convert::EditorType> {
     use serde_json::Value;
+    let has_bdj = source
+        .pointer("/theatre/actors")
+        .and_then(Value::as_object)
+        .map(|m| m.values().any(|a| a.get("block_data_json").is_some()))
+        .unwrap_or(false);
+    detect_editor_with_actors_bdj(source, has_bdj)
+}
+
+/// [`detect_editor`] 的骨架版:源侧骨架路径已把 `block_data_json` 摘走,
+/// 「演员是否带该字段」由调用方给(判据与 [`detect_editor`] 逐字相同)
+pub(super) fn detect_editor_with_actors_bdj(
+    source: &serde_json::Value,
+    has_bdj: bool,
+) -> Option<crate::core::convert::EditorType> {
+    use serde_json::Value;
     if source.get("theatre").is_some() {
         let has_xml = source
             .pointer("/theatre/actors")
             .and_then(Value::as_object)
             .map(|m| m.values().any(|a| a.get("blocksXML").is_some()))
-            .unwrap_or(false);
-        let has_bdj = source
-            .pointer("/theatre/actors")
-            .and_then(Value::as_object)
-            .map(|m| m.values().any(|a| a.get("block_data_json").is_some()))
             .unwrap_or(false);
         if has_xml && !has_bdj {
             return Some(crate::core::convert::EditorType::Kitten3);

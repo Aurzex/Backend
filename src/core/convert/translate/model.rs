@@ -459,6 +459,130 @@ pub(super) fn parse_block_data_json(block_data_json: &Value) -> Result<BlockTree
     })
 }
 
+/// `block_data_json` 的**强类型**视图:直接从原文反序列化,不经过 `Value` 中间树
+///
+/// 为什么:源侧最大的 `Value` 子树就是 `block_data_json`(10.3 MiB 样本实测:整份走 `Value`
+/// 要 110.8 ms / 555 517 次分配,只扫描跳过这份子树只要 24.7 ms / 29 302 次 —— 见
+/// `../rounds/47-data-layer-rewrite-plan.md` Step 5 的 spike)。这里把它的**外壳**类型化,
+/// 积木本体仍由 `BlockJson` 自己的 `Deserialize`(与 `from_value` 同一套容错)读入。
+///
+/// **失败即回落**:旧形态(字符串化的 `blocks`、内联对象影子 —— 后者写不进
+/// `BTreeMap<String, String>` 的 `shadows`)在这里会**反序列化失败**,调用方据此回落到
+/// `Value` 路径(见 `pipeline::parse_forward_item`),行为与旧口径逐字一致。
+#[derive(Deserialize)]
+struct TypedBdj {
+    blocks: BTreeMap<String, BlockJson>,
+    #[serde(default)]
+    connections: BTreeMap<String, BTreeMap<String, TypedLink>>,
+}
+
+/// 连接表的一条边(只取解析用得到的三个键;其余键官方也不写)
+#[derive(Deserialize, Default)]
+struct TypedLink {
+    #[serde(rename = "type", default)]
+    kind: Option<String>,
+    #[serde(default)]
+    input_type: Option<String>,
+    #[serde(default)]
+    input_name: Option<String>,
+}
+
+/// 从 `block_data_json` 原文直接解析出积木树(快速通道;失败即回落,见 [`TypedBdj`])
+pub(super) fn parse_block_data_json_typed(raw: &serde_json::value::RawValue) -> Result<BlockTree> {
+    let bdj: TypedBdj = serde_json::from_str(raw.get())?;
+    parse_parts_typed(&bdj.blocks, &bdj.connections)
+}
+
+/// [`parse_parts`] 的强类型版本(语义、顺序与错误文案都对齐;见 `parse_parts`)
+fn parse_parts_typed(
+    blocks: &BTreeMap<String, BlockJson>,
+    connections: &BTreeMap<String, BTreeMap<String, TypedLink>>,
+) -> Result<BlockTree> {
+    let mut child_ids: HashSet<&str> = HashSet::new();
+    for entry in connections.values() {
+        child_ids.extend(entry.keys().map(String::as_str));
+    }
+
+    let mut roots = Vec::new();
+    for (id, block) in blocks {
+        if child_ids.contains(id.as_str()) {
+            continue;
+        }
+        let mut ancestors = Vec::new();
+        roots.push(build_node_typed(
+            id,
+            block,
+            blocks,
+            connections,
+            &mut ancestors,
+        )?);
+    }
+
+    if roots.is_empty() && !blocks.is_empty() {
+        return Err(ConvertError::Decompile(format!(
+            "Kitten 积木图没有根节点({} 个积木互相成环)",
+            blocks.len()
+        )));
+    }
+
+    Ok(BlockTree::new(roots))
+}
+
+/// [`build_node`] 的强类型版本(逐句对齐:祖先环检查、缺 id 兜底、连接类型与错误文案)
+fn build_node_typed(
+    id: &str,
+    block: &BlockJson,
+    blocks: &BTreeMap<String, BlockJson>,
+    connections: &BTreeMap<String, BTreeMap<String, TypedLink>>,
+    ancestors: &mut Vec<String>,
+) -> Result<BlockJson> {
+    if ancestors.iter().any(|a| a == id) {
+        return Err(ConvertError::Decompile(format!(
+            "Kitten 积木图存在环:节点 {id} 重复出现在自身祖先链上"
+        )));
+    }
+    ancestors.push(id.to_string());
+
+    // `from_value(&Value)` 的等价物:从已类型化的节点复制一份新节点
+    let mut node = block.clone();
+    if node.id.is_none() {
+        node.id = Some(id.to_string());
+    }
+
+    if let Some(children) = connections.get(id) {
+        for (child_id, link) in children {
+            let child_block = blocks.get(child_id).ok_or_else(|| {
+                ConvertError::Decompile(format!("积木 {id} 的连接指向不存在的子积木 {child_id}"))
+            })?;
+            let child = build_node_typed(child_id, child_block, blocks, connections, ancestors)?;
+            match link.kind.as_deref().unwrap_or("next") {
+                "next" => node.next = Some(Box::new(child)),
+                "input" => {
+                    let slot = link.input_name.clone().unwrap_or_default();
+                    if slot.is_empty() {
+                        return Err(ConvertError::Decompile(format!(
+                            "积木 {id} → {child_id} 的 input 连接缺少 input_name"
+                        )));
+                    }
+                    if link.input_type.as_deref() == Some("statement") {
+                        node.statements.insert(slot, child);
+                    } else {
+                        node.inputs.insert(slot, child);
+                    }
+                }
+                other => {
+                    return Err(ConvertError::Decompile(format!(
+                        "积木 {id} → {child_id} 的连接类型未知:{other}"
+                    )));
+                }
+            }
+        }
+    }
+
+    ancestors.pop();
+    Ok(node)
+}
+
 fn parse_parts(blocks: &Map<String, Value>, connections: Option<&Value>) -> Result<BlockTree> {
     // 借用源文档里的连接表(`connections` 是每实体一份的大表,原先整份 `cloned()`;
     // 这里只需要读,见 `docs/rounds/47-data-layer-rewrite-plan.md` Step 1)。

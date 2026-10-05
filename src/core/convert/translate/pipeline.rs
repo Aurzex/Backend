@@ -26,10 +26,22 @@ struct ForwardItem {
     is_scene: bool,
     /// 源实体元数据(`block_data_json` 已取走;装配侧本来也会删它)
     source: Option<serde_json::Map<String, serde_json::Value>>,
-    /// 源积木树(`block_data_json`),转换结束后原样放回源文档
-    block_data_json: Option<serde_json::Value>,
-    /// 装箱权重(源 `blocks` 条数):只影响并行均衡,不进产物
+    /// 源积木树(`block_data_json`),转换结束后原样放回源文档(仅 `Value` 路径有内容可放;
+    /// 原文路径下源文档里本就没有该字段,见 [`BlockData`])
+    block_data_json: Option<BlockData>,
+    /// 装箱权重:只影响并行均衡,不进产物。`Value` 路径 = 源 `blocks` 条数;
+    /// 原文路径 = 原文**字节数**(同向且免解析,见 [`collect_forward_items`])
     weight: usize,
+}
+
+/// 一个实体待解析的 `block_data_json`
+///
+/// - `Raw`:源侧骨架路径(`translate_file`)—— 保留原文,解析时**直接反序列化成强类型树**,
+///   不建源 `Value` 中间树(读数见 `../rounds/47-data-layer-rewrite-plan.md` Step 5);
+/// - `Value`:公开面 `translate_value(Value)` 路径 —— 调用方给的就是已解析的 `Value`,没有原文。
+enum BlockData {
+    Raw(Box<serde_json::value::RawValue>),
+    Value(serde_json::Value),
 }
 
 /// 阶段 1 的产出:本项的树、抽出的程序集、铸造账本与**局部**报告
@@ -54,6 +66,9 @@ struct ForwardRewritten {
 /// (serde_json 的 `Map` 默认有序)。**这是唯一接触源文档的步骤**,后续阶段只碰工作项自己的数据。
 fn collect_forward_items(
     source: &mut serde_json::Value,
+    raw_blocks: &mut Option<
+        std::collections::BTreeMap<(String, String), Box<serde_json::value::RawValue>>,
+    >,
 ) -> std::result::Result<Vec<ForwardItem>, TranslateError> {
     use serde_json::Value;
     let theatre = source
@@ -71,12 +86,22 @@ fn collect_forward_items(
             };
             // 取走 `block_data_json`:它只服务解析,装配侧本来就会删掉它
             // (assembly `actor_entry` 里那句 `remove` 保留作兜底)
-            let block_data_json = entity.remove("block_data_json");
-            let weight = block_data_json
-                .as_ref()
-                .and_then(|bdj| bdj.get("blocks"))
-                .and_then(Value::as_object)
-                .map_or(0, serde_json::Map::len);
+            let block_data_json = match raw_blocks {
+                // 源侧骨架路径:源文档里没有该字段,原文在旁表里按 (容器, id) 取
+                Some(map) => map
+                    .remove(&(container.to_string(), id.clone()))
+                    .map(BlockData::Raw),
+                None => entity.remove("block_data_json").map(BlockData::Value),
+            };
+            let weight = match &block_data_json {
+                Some(BlockData::Value(bdj)) => bdj
+                    .get("blocks")
+                    .and_then(Value::as_object)
+                    .map_or(0, serde_json::Map::len),
+                // 原文路径:权重只用于并行装箱(不进产物),取原文字节数 —— 与"块数"同向且免解析
+                Some(BlockData::Raw(raw)) => raw.get().len(),
+                None => 0,
+            };
             items.push(ForwardItem {
                 id: id.clone(),
                 container,
@@ -97,7 +122,8 @@ fn restore_forward_items(source: &mut serde_json::Value, items: &mut [ForwardIte
         return;
     };
     for item in items.iter_mut() {
-        let Some(block_data_json) = item.block_data_json.take() else {
+        // 原文路径没有可放回的东西:源文档里本来就没有该字段
+        let Some(BlockData::Value(block_data_json)) = item.block_data_json.take() else {
             continue;
         };
         let Some(entity) = theatre
@@ -112,12 +138,22 @@ fn restore_forward_items(source: &mut serde_json::Value, items: &mut [ForwardIte
     }
 }
 
+/// 旧口径的 `block_data_json` → 积木树(内联对象影子先在**副本**上改写成影子 XML,源文档不动)
+fn parse_value_block_data(
+    value: &serde_json::Value,
+) -> std::result::Result<model::BlockTree, TranslateError> {
+    match normalize_object_shadows(value) {
+        Some(owned) => Ok(model::parse_block_data_json(&owned)?),
+        None => Ok(model::parse_block_data_json(value)?),
+    }
+}
+
 /// 阶段 1(单个工作项,项内自足):解析 → 语义映射 → 抽程序集
 ///
 /// 铸造走**临时 id**(`IdSource::recording`),账本交给串行阶段兑现最终 id。
 fn parse_forward_item(
     index: usize,
-    block_data_json: Option<&serde_json::Value>,
+    block_data: Option<&BlockData>,
     landscape: bool,
 ) -> std::result::Result<ForwardParsed, TranslateError> {
     let mut ids = model::IdSource::recording(index);
@@ -125,19 +161,18 @@ fn parse_forward_item(
         crate::core::convert::EditorType::Kitten4,
         TargetEditor::KittenN,
     );
-    let mut tree = match block_data_json {
-        Some(block_data_json) => {
-            // 内联对象形态的影子先在**副本**上改写成影子 XML(源文档不动)
-            let normalized;
-            let block_data_json = match normalize_object_shadows(block_data_json) {
-                Some(owned) => {
-                    normalized = owned;
-                    &normalized
-                }
-                None => block_data_json,
-            };
-            model::parse_block_data_json(block_data_json)?
-        }
+    let mut tree = match block_data {
+        // 快速通道:原文直接反序列化成强类型树(不建源 `Value` 中间树)
+        Some(BlockData::Raw(raw)) => match model::parse_block_data_json_typed(raw) {
+            Ok(tree) => tree,
+            // 旧形态(字符串化的 `blocks`、内联对象影子:写不进 `BTreeMap<String, String>` 的
+            // `shadows`)在这里失败 ⇒ 物化成 `Value` 走下面同一条老路径,行为逐字一致。
+            Err(_) => {
+                let value: serde_json::Value = serde_json::from_str(raw.get())?;
+                parse_value_block_data(&value)?
+            }
+        },
+        Some(BlockData::Value(value)) => parse_value_block_data(value)?,
         None => model::BlockTree::default(),
     };
     local.blocks_total += tree.count(); // 源文件里的积木数(映射前)
@@ -182,6 +217,31 @@ pub(super) fn convert_kitten4_document(
     options: &TranslateOptions,
     report: &mut TranslateReport,
 ) -> std::result::Result<serde_json::Value, TranslateError> {
+    convert_kitten4_document_impl(source, None, options, report)
+}
+
+/// 与 [`convert_kitten4_document`] 同一条管线,但 `block_data_json` 由**原文**提供
+///
+/// 源侧骨架路径(`translate::parse_source_skeleton`)已经把每个实体的 `block_data_json`
+/// 原样摘出来、没有建成 `Value`,所以这里按 (容器, id) 交回;源文档里本就没有该字段,
+/// 也就不存在"放回"一步(读数与设计见 `../rounds/47-data-layer-rewrite-plan.md` Step 5)。
+pub(super) fn convert_kitten4_document_raw(
+    source: &mut serde_json::Value,
+    block_data: std::collections::BTreeMap<(String, String), Box<serde_json::value::RawValue>>,
+    options: &TranslateOptions,
+    report: &mut TranslateReport,
+) -> std::result::Result<serde_json::Value, TranslateError> {
+    convert_kitten4_document_impl(source, Some(block_data), options, report)
+}
+
+fn convert_kitten4_document_impl(
+    source: &mut serde_json::Value,
+    mut raw_blocks: Option<
+        std::collections::BTreeMap<(String, String), Box<serde_json::value::RawValue>>,
+    >,
+    options: &TranslateOptions,
+    report: &mut TranslateReport,
+) -> std::result::Result<serde_json::Value, TranslateError> {
     use serde_json::Value;
     let started = std::time::Instant::now();
 
@@ -217,9 +277,13 @@ pub(super) fn convert_kitten4_document(
         .flat_map(|map| map.values())
         .collect();
     if !entities.is_empty()
-        && !entities
-            .iter()
-            .any(|entity| entity.get("block_data_json").is_some())
+        && !match &raw_blocks {
+            // 原文路径:源文档里已经没有 `block_data_json`,以旁表为准
+            Some(map) => !map.is_empty(),
+            None => entities
+                .iter()
+                .any(|entity| entity.get("block_data_json").is_some()),
+        }
     {
         return Err(TranslateError::InvalidArgument(
             "源作品的实体里没有 block_data_json:这看起来是 Kitten2/3(.bcm + blocksXML)作品,本库暂不支持该方向"
@@ -231,7 +295,7 @@ pub(super) fn convert_kitten4_document(
     // 影子是**内联对象**(`shadows: {槽: {type, fields, …}}`,第三十三轮实测 `A28社区-开幕_174408420`)。
     // 这一类现在**能转换**了 —— 对象在解析前就地改写成平台同款影子 XML,见
     // [`normalize_object_shadows`](它在 [`parse_forward_item`] 里按项做,不改源文档)。
-    let mut items = collect_forward_items(source)?;
+    let mut items = collect_forward_items(source, &mut raw_blocks)?;
     let weights: Vec<usize> = items.iter().map(|item| item.weight).collect();
     let workers = workers(options.entity_workers(), items.len());
     let deterministic = options.ids_deterministic();
@@ -243,12 +307,12 @@ pub(super) fn convert_kitten4_document(
         //
         // 只**借用**源积木树:`block_data_json` 之后要放回源文档。`.collect::<Result<…>>()`
         // 让"首个错误按项序冒泡"与串行一致。
-        let block_data: Vec<Option<&Value>> = items
+        let block_data: Vec<Option<&BlockData>> = items
             .iter()
             .map(|item| item.block_data_json.as_ref())
             .collect();
-        let parsed = run_items(block_data, &weights, workers, |index, block_data_json| {
-            parse_forward_item(index, block_data_json, landscape)
+        let parsed = run_items(block_data, &weights, workers, |index, block_data| {
+            parse_forward_item(index, block_data, landscape)
         })
         .into_iter()
         .collect::<std::result::Result<Vec<ForwardParsed>, TranslateError>>()?;
