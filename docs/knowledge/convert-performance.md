@@ -8,13 +8,15 @@
 | 场景 | 优化前 | 现在 |
 | --- | --- | --- |
 | NEMO 作品反编译(含资源下载) | **2m42s** | **13s**(并发 + `skip_resources`) |
-| KN 作品反编译(模式分派) | 46s | **1.5s** |
+| KN 作品反编译 | 46s(待核验) | **1.5s** |
 | Kitten4 作品反编译 | 单块 `from_value` | **1.5s**(逐块克隆改掉) |
 | 转换 Kitten4->KN(离线、确定性) | — | **38 ms**(374 输入积木 -> 439 产物节点) |
 | 转换 NEMO->KN(离线、确定性) | — | **core 365–442 ms / e2e 466–556 ms**(3.5 MB 源 -> 7.7 MB 产物;15 482 源元素 -> 13 637 产物节点) |
 | 转换 NEMO->KN(老版本 0.11.0,**含 YC 迁移**) | — | **core 108–121 ms / e2e 142–152 ms**(1.5 MB 源 -> 2.4 MB 产物;4 862 源元素 -> 4 421 产物节点) |
 | 转换(官方 JS 同输入参照) | 355 ms(Node) | — |
 | 资源删除(批量) | 7.9s | **5.3s**(并行 delete) |
+
+> KN 行的**机制待核验**(2026-10-05 复核):`46s` 这个读数的测量方法与日志**不在仓内**(`git log -S'46 s'` 在 `docs/` 零命中,该行由三库重构时写就),原先附的"模式分派"因此**没有证据支撑**。可核验的部分:当时与现在的 KN 路径形状相同 —— 详情 GET -> 取 `source_urls[0]` -> GET -> reversed-base64 + AES-256-GCM 解密 -> 一次 `serde_json::from_str` -> 落盘(对照 `338fb8f^:src/core/decoders.rs` 的 `NekoFetcher`/`NekoDecompiler` 与今 `src/core/convert/decompile/editors.rs::NekoDecompiler`),即 KN 的**反编译本体从来不是 CPU 热点**。`[INFERENCE]` 46s 更可能出在当时的请求侧(每次取件重建 `CloudAuthenticator` 白付一次串行 `currentTime` RTT,见 `../rounds/29` 第 2 条;该条已改为进程级缓存)。坐实办法:今日按同一作品复量(`cargo test --test compile_live`),旧值需翻回旧提交再量。
 
 ## 2. 瓶颈归因(按证据)
 
@@ -245,6 +247,7 @@
 - `../rounds/22-nemo-decompile-performance.md` §1–§4(现象/根因/实测 A-B)、§7(复现)。
 - `../rounds/23-convert-performance-plan.md` §1–§3、§5、§7(落地记录)。
 - `../rounds/25-convert-entity-parallelism-plan.md` §1(分布)、§9(正向落地)、§10(反向判不做)。
-- `../rounds/29-optimization-scan-ledger.md`(P0/P1 台账)。
+- `../rounds/29-optimization-scan-ledger.md`(P0/P1 台账;第 2 条 = `CloudAuthenticator` 每次取件重建)。
+- KN 行的机制复核(2026-10-05):`git log -S'46 s' -- docs/` 零命中;旧/今 KN 路径对照 = `338fb8f^:src/core/decoders.rs`(`NekoFetcher`/`NekoDecompiler`)vs `src/core/convert/decompile/editors.rs::NekoDecompiler`。
 - `../rounds/47-data-layer-rewrite-plan.md`(2026-10-05 数据表示层重写方案与分步读数;§2bis/§2bis.6/§2bis.7 的剖析、`opt-level` 与 Step 1 读数都出自该轮的会话与提交)。
 - 代码锚点:`src/core/convert/decompile/mod.rs`(`RESOURCE_DOWNLOAD_BUDGET`)、`src/core/convert/mod.rs`(两级预算折算)、`src/core/convert/shared.rs::json_obj`(搬所有权、不重新物化)、`tests/convert_bench.rs`(自有 SHA256 基线:6 样本,4 Kitten + 2 NEMO)。
