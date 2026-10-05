@@ -35,7 +35,7 @@
    - **旧计数「49 处」不可复现**:它点名的四族(`auth.rs::time_difference`、`registry.rs` 的 `active.as_mut().unwrap()`、`compiler.rs`(已并入 `core/convert/`)的 `template.unwrap()` 与 10 处 `write!(String).unwrap()`)在本树**已全部不存在**(时差缓存改 `Option` 判定、`active.as_mut()` 已是 `let Some(…) else`、`write!` 现均写作 `let _ = write!(…)`)。
    - **旧口径的坑**:`grep '\.unwrap()' | grep -v 'lock()\.unwrap()'` 会**漏掉跨行书写的 `lock()` 换行后接 `.unwrap()` 的链**、把大量锁的解锁误计为非锁,导致数字虚高且不可复现。正确口径要把 `.unwrap()` 的**接收者跨行回溯**,排除 `.lock()/.read()/.write()`。
    - **保留 1 处**:`utils/socketio.rs` 的 `Condvar::wait_timeout(...).unwrap()` —— 错误来源是**同一 Mutex 毒化**,与紧邻的 `lock().unwrap()` 同失败类,按"锁解锁保留"的约定**判为保留**。
-   - **待核验 1 处**:`core/terminal.rs` 的 stdin 读失败本应错误返回,但 `ProcessorUi::input(&mut self, &str) -> String` 是**公共 trait 形状**,现退为 `expect` fail-fast(避免空串让 `choose/menu` 死循环)。**已登记为 `./pending-decisions.md` D64) **(是否改 `MewResult<String>` 并逐调用点传播 —— 破坏性,需拍板)。
+   - **已完成(2026-10-03,见 `../rounds/43`)**:`core/terminal.rs` 的 stdin 读失败原先只有 `expect` fail-fast(避免空串让 `choose`/`menu` 死循环);现按 `./pending-decisions.md` D6 的 4) 落地 —— `ProcessorUi::{input,choose,menu}` 返回 `MewResult<String>`,**读到 EOF 也算错误**并逐调用点传播,`panic = "abort"` 下直接终结进程的风险随之消失。
    - 另:测试夹具层的 5 处(`tests/**`)不在本口径内,未动。逐处说明见 `cbb167a` 的 diff。
 3. **P2 收尾四项已逐项结案(2026-10-03,见 `../rounds/45`)**:
    - `simple.rs` 的 `Arc<Value>`:**已完成** —— `CocoDecompiler::decompile` 改为 `Arc::try_unwrap`,拿不到唯一所有权才回退克隆。
