@@ -9,12 +9,17 @@ crate-type = ["rlib"]
 
 [profile.release]
 strip = true
-opt-level = "z"
+opt-level = 3
 lto = true
 panic = "abort"
+# 2026-10-05 由 `opt-level = "z"` 改为 `3`(用户拍板):同树同输入实测(3 轮取最小,均 `lto = true`)
+# `"z"` 比 `3` 慢 `core` 12.5%–28.5%、`e2e` 19%–31%、整套 test 墙钟 19.6%,代价是 bin 体积 2.20 → 2.90 MiB。
+# 适用范围:`[profile.*]` 只作用于**本仓作为顶层**的构建(bin/测试);rlib 的下游用自己的档。
+# 读数与命令见 `docs/knowledge/convert-performance.md` §2bis.6。
 
-# 性能基准专用档:发布档是 `opt-level = "z"` + `panic = "abort"`(为体积/嵌入),
-# 量测热路径会失真。本档只服务 `tests/convert_bench.rs`(方案 23 §5),
+# 性能基准专用档:发布档 2026-10-05 前是 `opt-level = "z"` + `panic = "abort"`(为体积/嵌入),
+# 现已改为 `opt-level = 3`;本档仍保留自己的设置(关 LTO、开 unwind)以便在测试框架下量测热路径,
+# 且**不随发布档变化**,保证历史读数可比。本档只服务 `tests/convert_bench.rs`(方案 23 §5),
 # 不影响发布产物;跑法见该文件头注释。
 [profile.bench_perf]
 inherits = "release"
