@@ -97,6 +97,24 @@
 4. **并发不是这些样本的瓶颈**:正向实体级 `core` 1.44–1.56×、`e2e` 1.12–1.17×;反向与 NEMO 均 1.00×(与 `rounds/25` 的 Amdahl 结论一致)。
 5. **`e2e` 未归类占比**在 kitten4-10.8MB 高达 32%(227 ms),而 NEMO 只有 4–5% —— [INFERENCE] 前者对应"巨型 `Value` 文档的物化与析构 + 写盘",与 2bis.3 里 `drop_glue`/`BTreeMap` 析构的读数一致;要坐实需在 `translate_file` 内部再加一次快照(本轮未做)。
 
+### 2bis.6 构建档位:`opt-level` 的代价(2026-10-05 实测)
+
+同一棵树、同一输入,只改 `opt-level`(两者都 `lto = true`、`panic` 覆写为 `unwind` 以便跑测试),3 轮取最小:
+
+| 样本 | `"z"`(现行发布档)`core`/`e2e` | `3`(bench_perf 档)`core`/`e2e` | 差 |
+| --- | --- | --- | --- |
+| kitten4-10.8 | 361 / 843 | 282 / 684 | −21.9% / −18.9% |
+| kn-9.4 | 223 / 406 | 185 / 321 | −17.0% / −20.9% |
+| kn-3.7 | 64 / 123 | 56 / 98 | −12.5% / −20.3% |
+| nemo-3.4 | 376 / 490 | 280 / 361 | −25.5% / −26.3% |
+| nemo-old-1.5 | 123 / 163 | 88 / 113 | −28.5% / −30.7% |
+| 整套 test 墙钟 | 34.59 s | 27.82 s | −19.6% |
+| `backend` bin 体积 | 2.20 MiB | 2.90 MiB | +32% |
+
+- 命令:`CARGO_PROFILE_RELEASE_PANIC=unwind [CARGO_PROFILE_RELEASE_OPT_LEVEL=3] CARGO_TARGET_DIR=target/rel… cargo test --profile release --test convert_bench --no-run`(profile 覆盖用环境变量,不改 `Cargo.toml`)。
+- 适用范围:`[profile.*]` 只对**本仓作为顶层**的构建生效(`cargo build` / `cargo test` / 把本仓当顶层);rlib 被下游消费时用的是**下游自己的 profile**。故该差值是"本仓自建产物"的代价,不是下游必然承担的。
+- `bench_perf` 档本来就是 `opt-level = 3` ⇒ 本文件其余读数都代表 **3 档**。
+
 依据:2026-10-05 的剖析会话(命令与读数见本节方法段;`#meta` 分配读数同时落 `tests/fixtures/translate/convert_bench_baseline.json`)。
 
 ## 3. 已落地的优化(都有数字)
