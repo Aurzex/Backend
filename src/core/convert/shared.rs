@@ -453,6 +453,22 @@ impl FileService {
     }
 }
 
+/// 由 `(键, 值)` 直接构造 JSON 对象(键按 [`Map`] 的字典序输出)。
+///
+/// 存在的理由:`json!({ "k": v })` 对**已是 [`Value`]** 的 `v` 会展开成
+/// `serde_json::to_value(&v)`(见 serde_json 的 `macros.rs`),即按 `Serialize` 把整份子树
+/// **重新物化一遍** —— 装配期因此把产物主体多深拷一次。这里只搬所有权,不重新序列化;
+/// 键序仍由 `Map` 的字典序决定,与 `json!` 逐字节一致。读数见
+/// `docs/rounds/47-data-layer-rewrite-plan.md` §3.1。
+pub(crate) fn json_obj<const N: usize>(entries: [(&str, Value); N]) -> Value {
+    Value::Object(
+        entries
+            .into_iter()
+            .map(|(key, value)| (key.to_string(), value))
+            .collect(),
+    )
+}
+
 // ---------------------------------------------------------------------------
 // 常量
 

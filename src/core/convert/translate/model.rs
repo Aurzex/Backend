@@ -1,7 +1,7 @@
 use super::report::{TranslateReport, TranslateWarning};
 use super::xml::{math_number_shadow, xml_attr_value};
 use crate::core::convert::shared::XHTML;
-use crate::core::convert::shared::{ConvertError, IdGenerator, Result};
+use crate::core::convert::shared::{ConvertError, IdGenerator, Result, json_obj};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_json::{Map, Value};
@@ -460,10 +460,10 @@ pub(super) fn parse_block_data_json(block_data_json: &Value) -> Result<BlockTree
 }
 
 fn parse_parts(blocks: &Map<String, Value>, connections: Option<&Value>) -> Result<BlockTree> {
-    let connections = connections
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_default();
+    // 借用源文档里的连接表(`connections` 是每实体一份的大表,原先整份 `cloned()`;
+    // 这里只需要读,见 `docs/rounds/47-data-layer-rewrite-plan.md` Step 1)。
+    let empty: Map<String, Value> = Map::new();
+    let connections = connections.and_then(Value::as_object).unwrap_or(&empty);
     // 子键集合(判定根):出现的 id 一律不是根
     let mut child_ids: HashSet<&str> = HashSet::new();
     for entry in connections.values() {
@@ -479,7 +479,7 @@ fn parse_parts(blocks: &Map<String, Value>, connections: Option<&Value>) -> Resu
             continue;
         }
         let mut ancestors = Vec::new();
-        roots.push(build_node(id, block, blocks, &connections, &mut ancestors)?);
+        roots.push(build_node(id, block, blocks, connections, &mut ancestors)?);
     }
 
     // 有积木却没有任何根 = 整张图是环(每个 id 都当过别人的子节点),
@@ -599,11 +599,11 @@ pub(super) fn build_block_data_json(tree: &BlockTree, ids: &mut IdSource) -> Res
             ids,
         )?;
     }
-    Ok(json!({
-        "blocks": Value::Object(blocks),
-        "connections": Value::Object(connections),
-        "comments": Value::Object(Map::new()),
-    }))
+    Ok(json_obj([
+        ("blocks", Value::Object(blocks)),
+        ("connections", Value::Object(connections)),
+        ("comments", Value::Object(Map::new())),
+    ]))
 }
 
 /// 写一个积木(含其整棵子树),返回它最终落盘的 id
@@ -1516,13 +1516,16 @@ pub(super) fn procedures_to_json(procedures: &[ProcedureEntry]) -> Result<Map<St
             .iter()
             .map(|p| json!({ "id": p.id, "type": p.kind, "name": p.name }))
             .collect::<Vec<_>>();
-        let body = json!({
-            "id": entry.id,
-            "name": entry.name,
-            "type": entry.kind,
-            "params": params,
-            "nekoBlockJsonList": tree_to_json(&entry.tree)?,
-        });
+        let body = json_obj([
+            ("id", Value::String(entry.id.clone())),
+            ("name", Value::String(entry.name.clone())),
+            ("type", Value::String(entry.kind.clone())),
+            ("params", Value::Array(params)),
+            (
+                "nekoBlockJsonList",
+                Value::Array(tree_to_json(&entry.tree)?),
+            ),
+        ]);
         dict.insert(entry.id.clone(), body);
     }
     Ok(dict)

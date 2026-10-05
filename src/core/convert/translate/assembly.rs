@@ -3,7 +3,7 @@ use super::model::{ProcedureEntry, procedures_to_json, type_name};
 use super::report::{TranslateReport, TranslateWarning};
 use super::tables_gen::{BCM_VERSION, STAGE_LANDSCAPE, STAGE_PORTRAIT};
 use super::{model, tables_gen};
-use crate::core::convert::shared::{ConvertError, Result};
+use crate::core::convert::shared::{ConvertError, Result, json_obj};
 use serde_json::{Map, Value, json};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -153,21 +153,31 @@ pub(super) fn build_document(
         .unwrap_or_else(|| Value::String(String::new()));
 
     let mut doc = Map::new();
-    doc.insert("projectName".into(), json!(project_name(src)));
+    doc.insert("projectName".into(), Value::String(project_name(src)));
     doc.insert(
         "scenes".into(),
-        json!({ "scenesDict": scenes, "currentSceneId": current_scene, "sortList": scenes_order }),
+        json_obj([
+            ("scenesDict", Value::Object(scenes)),
+            ("currentSceneId", current_scene),
+            ("sortList", Value::Array(scenes_order)),
+        ]),
     );
     doc.insert(
         "styles".into(),
-        json!({ "stylesDict": build_styles(theatre, landscape, report) }),
+        json_obj([("stylesDict", build_styles(theatre, landscape, report))]),
     );
     doc.insert(
         "variables".into(),
-        json!({ "variablesDict": build_variables(src, src_w, src_h, landscape, now_ms) }),
+        json_obj([(
+            "variablesDict",
+            build_variables(src, src_w, src_h, landscape, now_ms),
+        )]),
     );
     doc.insert("broadcasts".into(), build_broadcasts(src));
-    doc.insert("actors".into(), json!({ "actorsDict": actors }));
+    doc.insert(
+        "actors".into(),
+        json_obj([("actorsDict", Value::Object(actors))]),
+    );
     // audios:字典 + `sortList`(官方 `audio_order` 为真值时照抄,否则按遍历顺序)+ 首个 currentAudioId
     let (audios_dict, audios_traversed) = build_audios(src, report);
     let audio_order = match src.get("audio_order") {
@@ -180,25 +190,35 @@ pub(super) fn build_document(
         .unwrap_or_else(|| Value::String(String::new()));
     doc.insert(
         "audios".into(),
-        json!({ "audiosDict": audios_dict, "sortList": audio_order, "currentAudioId": current_audio }),
+        json_obj([
+            ("audiosDict", Value::Object(audios_dict)),
+            ("sortList", Value::Array(audio_order)),
+            ("currentAudioId", current_audio),
+        ]),
     );
     doc.insert(
         "procedures".into(),
-        json!({ "proceduresDict": procedures_to_json(procedures)? }),
+        json_obj([(
+            "proceduresDict",
+            Value::Object(procedures_to_json(procedures)?),
+        )]),
     );
     doc.insert("stageSize".into(), stage_size(landscape));
-    doc.insert("version".into(), json!(BCM_VERSION));
-    doc.insert("toolType".into(), json!("KN"));
-    doc.insert("previewUrl".into(), json!(""));
-    doc.insert("resourceZip".into(), json!(""));
-    doc.insert("guideUrl".into(), json!(""));
-    doc.insert("textToBlock".into(), json!([]));
-    doc.insert("aiImageUrls".into(), json!([]));
+    doc.insert("version".into(), Value::String(BCM_VERSION.to_string()));
+    doc.insert("toolType".into(), Value::String("KN".to_string()));
+    doc.insert("previewUrl".into(), Value::String(String::new()));
+    doc.insert("resourceZip".into(), Value::String(String::new()));
+    doc.insert("guideUrl".into(), Value::String(String::new()));
+    doc.insert("textToBlock".into(), Value::Array(Vec::new()));
+    doc.insert("aiImageUrls".into(), Value::Array(Vec::new()));
     doc.insert(
         "hidden_toolbox".into(),
-        json!({ "toolbox": [], "blocks": [] }),
+        json_obj([
+            ("toolbox", Value::Array(Vec::new())),
+            ("blocks", Value::Array(Vec::new())),
+        ]),
     );
-    doc.insert("courseMaterials".into(), json!([]));
+    doc.insert("courseMaterials".into(), Value::Array(Vec::new()));
     Ok(Value::Object(doc))
 }
 

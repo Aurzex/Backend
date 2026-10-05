@@ -7,7 +7,7 @@ use super::nemo_mapping::{
 use super::options::{TranslateError, TranslateOptions};
 use super::report::{TranslateReport, TranslateWarning};
 use super::xml::{XmlNode, count_source_elements, parse_fragment};
-use crate::core::convert::shared::ConvertError;
+use crate::core::convert::shared::{ConvertError, json_obj};
 use serde_json::{Map, Value, json};
 
 // 来自 src/core/convert/translate/nemo.rs
@@ -164,7 +164,7 @@ pub(super) fn convert_nemo_document(
         }
         document.insert(
             "procedures".to_string(),
-            json!({ "proceduresDict": Value::Object(procedures) }),
+            json_obj([("proceduresDict", Value::Object(procedures))]),
         );
     } else {
         document.insert("procedures".to_string(), json!({}));
@@ -230,7 +230,7 @@ pub(super) fn convert_nemo_document(
     }
     document.insert(
         "actors".to_string(),
-        json!({ "actorsDict": Value::Object(actors) }),
+        json_obj([("actorsDict", Value::Object(actors))]),
     );
 
     // ── 场景
@@ -353,11 +353,11 @@ pub(super) fn convert_nemo_document(
         .unwrap_or(Value::String(String::new()));
     document.insert(
         "audios".to_string(),
-        json!({
-            "audiosDict": Value::Object(audios),
-            "sortList": Value::Array(audio_ids),
-            "currentAudioId": current_audio,
-        }),
+        json_obj([
+            ("audiosDict", Value::Object(audios)),
+            ("sortList", Value::Array(audio_ids)),
+            ("currentAudioId", current_audio),
+        ]),
     );
 
     // ── 造型(官方第 7 步)
@@ -395,7 +395,7 @@ pub(super) fn convert_nemo_document(
     }
     document.insert(
         "styles".to_string(),
-        json!({ "stylesDict": Value::Object(styles) }),
+        json_obj([("stylesDict", Value::Object(styles))]),
     );
 
     // ── 广播按场景重组(官方第 8 步)
@@ -424,7 +424,7 @@ pub(super) fn convert_nemo_document(
     }
     document.insert(
         "broadcasts".to_string(),
-        json!({ "broadcastsDict": Value::Object(broadcasts) }),
+        json_obj([("broadcastsDict", Value::Object(broadcasts))]),
     );
 
     // ── 变量(官方第 9 步)
@@ -514,7 +514,7 @@ pub(super) fn convert_nemo_document(
     }
     document.insert(
         "variables".to_string(),
-        json!({ "variablesDict": Value::Object(variables) }),
+        json_obj([("variablesDict", Value::Object(variables))]),
     );
 
     // ── 舞台尺寸归一(官方第 10 步)
