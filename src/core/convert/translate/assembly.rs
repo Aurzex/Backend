@@ -1,5 +1,5 @@
 use super::mapping::truthy;
-use super::model::{ProcedureEntry, procedures_to_json, type_name};
+use super::model::{ProcedureEntry, procedure_entries, type_name};
 use super::report::{TranslateReport, TranslateWarning};
 use super::tables_gen::{BCM_VERSION, STAGE_LANDSCAPE, STAGE_PORTRAIT};
 use super::{model, tables_gen};
@@ -82,23 +82,226 @@ pub(super) struct ConvertedEntity {
     pub source_id: String,
     /// 场景还是角色(决定走 `scene_entry` 还是 `actor_entry`)
     pub is_scene: bool,
-    /// 已转换好的 `nekoBlockJsonList`
-    pub blocks: Vec<Value>,
+    /// 已转换好的积木树
+    ///
+    /// **不再是 `Vec<Value>`**:块表的编码推迟到写出那一刻(`rounds/47` §4 Step 2/3)——
+    /// 旧口径在阶段 4 就把每块物化成 `Map<String, Value>`,再拼进文档 `Value`,最后整体析构。
+    pub blocks: model::BlockTree,
     /// 阶段 1 之后的源实体对象(含 `x/y/scale/lock/current_style_id/workspace_offset/…`)
     pub source: Map<String, Value>,
 }
 
-/// 装配 KN 作品文档(官方 `De`)
+/// 装配 KN 作品文档(官方 `De`)—— **测试专用**的整份 `Value` 包装
 ///
-/// `source` 是项目根 JSON(Kitten4 编辑版,或已经过 `mapping`/`neko` 处理的阶段 1 产物——
-/// 两种输入都能吃:`broadcasts` 已包成 `{broadcastsDict}` 时原样透传,否则只包一层)。
+/// 只服务测试(装配的十余条单测按 `doc["actors"]["actorsDict"][id][…]` 取值更直观);
+/// 生产路径要么走 [`build_document_product`](文件路径,流式写出),要么由
+/// `pipeline::convert_kitten4_document` 在管线末尾 `.to_value()`。两条路径**逐字节相同**
+/// (常驻门:`assembly::tests::streamed_product_matches_value_product`)。
+#[cfg(test)]
 pub(super) fn build_document(
     source: &Value,
     entities: Vec<ConvertedEntity>,
-    procedures: &[ProcedureEntry],
+    procedures: &mut [ProcedureEntry],
     now_ms: u128,
     report: &mut TranslateReport,
 ) -> Result<Value> {
+    build_document_product(source, entities, procedures, now_ms, report)?.into_value()
+}
+
+/// 可**流式写出**的产物文档(`rounds/47` §4 Step 2/3)
+///
+/// 三处 `nekoBlockJsonList`(角色 / 场景 / 程序集定义体)在 `doc` 里只留 `null` **占位**
+/// (位置由 `Map` 的字典序决定),真正的块表挂在 [`BlockHook`] 上:
+///
+/// - 内存路径([`Self::to_value`])把树物化回 `Value` 填占位 —— 与旧口径**逐字节相同**;
+/// - 文件路径([`Self::write_to`])在占位处**直接写**块树,不建那份产物 `Value`
+///   (产物侧最大的分配来源:十万级块的整份物化 + 序列化遍历 + 整体析构)。
+pub(super) struct ProductDocument {
+    doc: Map<String, Value>,
+    hooks: Vec<BlockHook>,
+}
+
+/// 一处 `nekoBlockJsonList` 的挂点
+struct BlockHook {
+    container: BlockContainer,
+    id: String,
+    tree: model::BlockTree,
+}
+
+/// 挂点所在的三处容器(各自的"段名"与"字典键"不同,官方口径见 `build_document`)
+#[derive(Clone, Copy, PartialEq)]
+enum BlockContainer {
+    Actors,
+    Scenes,
+    Procedures,
+}
+
+impl BlockContainer {
+    fn section_key(self) -> &'static str {
+        match self {
+            BlockContainer::Actors => "actors",
+            BlockContainer::Scenes => "scenes",
+            BlockContainer::Procedures => "procedures",
+        }
+    }
+
+    fn dict_key(self) -> &'static str {
+        match self {
+            BlockContainer::Actors => "actorsDict",
+            BlockContainer::Scenes => "scenesDict",
+            BlockContainer::Procedures => "proceduresDict",
+        }
+    }
+}
+
+impl ProductDocument {
+    /// 物化回整份文档(`TranslateDocument.document`,公开面口径不变)
+    pub(super) fn into_value(mut self) -> Result<Value> {
+        for hook in std::mem::take(&mut self.hooks) {
+            let missing = || ConvertError::Other {
+                msg: format!(
+                    "产物缺少 {} 段的 {} 条目:无法放回块表",
+                    hook.container.section_key(),
+                    hook.id
+                ),
+                source: None,
+            };
+            let entry = self
+                .doc
+                .get_mut(hook.container.section_key())
+                .and_then(|section| section.get_mut(hook.container.dict_key()))
+                .and_then(|dict| dict.get_mut(&hook.id))
+                .and_then(Value::as_object_mut)
+                .ok_or_else(missing)?;
+            entry.insert(
+                "nekoBlockJsonList".into(),
+                Value::Array(model::tree_to_json(&hook.tree)?),
+            );
+        }
+        Ok(Value::Object(self.doc))
+    }
+
+    /// 直接写整份文档(文件路径):除三处块表外逐键交给 `serde_json`,块表在占位处流式写
+    pub(super) fn write_to(&self, w: &mut impl std::io::Write) -> Result<()> {
+        w.write_all(b"{")?;
+        for (index, (key, value)) in self.doc.iter().enumerate() {
+            if index > 0 {
+                w.write_all(b",")?;
+            }
+            serde_json::to_writer(&mut *w, key)?;
+            w.write_all(b":")?;
+            match key.as_str() {
+                "actors" => write_section(value, BlockContainer::Actors, &self.hooks, w)?,
+                "scenes" => write_section(value, BlockContainer::Scenes, &self.hooks, w)?,
+                "procedures" => write_section(value, BlockContainer::Procedures, &self.hooks, w)?,
+                _ => serde_json::to_writer(&mut *w, value)?,
+            }
+        }
+        w.write_all(b"}")?;
+        Ok(())
+    }
+}
+
+/// 写一个"段"(`{<字典键>: {...}, 其余键原样}`):只有字典键里带块表挂点
+fn write_section(
+    section: &Value,
+    container: BlockContainer,
+    hooks: &[BlockHook],
+    w: &mut impl std::io::Write,
+) -> Result<()> {
+    let map = section
+        .as_object()
+        .ok_or_else(|| ConvertError::TypeMismatch {
+            expected: format!("object({} 段)", container.section_key()),
+            actual: type_name(section).into(),
+        })?;
+    w.write_all(b"{")?;
+    for (index, (key, value)) in map.iter().enumerate() {
+        if index > 0 {
+            w.write_all(b",")?;
+        }
+        serde_json::to_writer(&mut *w, key)?;
+        w.write_all(b":")?;
+        if key == container.dict_key() {
+            write_entries(value, container, hooks, w)?;
+        } else {
+            serde_json::to_writer(&mut *w, value)?;
+        }
+    }
+    w.write_all(b"}")?;
+    Ok(())
+}
+
+/// 写"条目字典"(`{<id>: {…}}`):命中挂点的条目走 [`write_entry_with_blocks`]
+fn write_entries(
+    dict: &Value,
+    container: BlockContainer,
+    hooks: &[BlockHook],
+    w: &mut impl std::io::Write,
+) -> Result<()> {
+    let map = dict.as_object().ok_or_else(|| ConvertError::TypeMismatch {
+        expected: format!("object({} 字典)", container.dict_key()),
+        actual: type_name(dict).into(),
+    })?;
+    w.write_all(b"{")?;
+    for (index, (id, entry)) in map.iter().enumerate() {
+        if index > 0 {
+            w.write_all(b",")?;
+        }
+        serde_json::to_writer(&mut *w, id)?;
+        w.write_all(b":")?;
+        match hooks
+            .iter()
+            .find(|hook| hook.container == container && hook.id == *id)
+        {
+            Some(hook) => write_entry_with_blocks(entry, &hook.tree, w)?,
+            None => serde_json::to_writer(&mut *w, entry)?,
+        }
+    }
+    w.write_all(b"}")?;
+    Ok(())
+}
+
+/// 写一个带块表的条目:除 `nekoBlockJsonList` 占位处外逐键原样写
+fn write_entry_with_blocks(
+    entry: &Value,
+    tree: &model::BlockTree,
+    w: &mut impl std::io::Write,
+) -> Result<()> {
+    let map = entry
+        .as_object()
+        .ok_or_else(|| ConvertError::TypeMismatch {
+            expected: "object(实体/程序集条目)".into(),
+            actual: type_name(entry).into(),
+        })?;
+    w.write_all(b"{")?;
+    for (index, (key, value)) in map.iter().enumerate() {
+        if index > 0 {
+            w.write_all(b",")?;
+        }
+        serde_json::to_writer(&mut *w, key)?;
+        w.write_all(b":")?;
+        if key == "nekoBlockJsonList" {
+            model::write_block_tree(tree, w)?;
+        } else {
+            serde_json::to_writer(&mut *w, value)?;
+        }
+    }
+    w.write_all(b"}")?;
+    Ok(())
+}
+
+/// 装配 KN 作品文档(官方 `De`):边装配边登记三处块表挂点
+///
+/// `source` 是项目根 JSON(Kitten4 编辑版,或已经过 `mapping`/`neko` 处理的阶段 1 产物——
+/// 两种输入都能吃:`broadcasts` 已包成 `{broadcastsDict}` 时原样透传,否则只包一层)。
+pub(super) fn build_document_product(
+    source: &Value,
+    entities: Vec<ConvertedEntity>,
+    procedures: &mut [ProcedureEntry],
+    now_ms: u128,
+    report: &mut TranslateReport,
+) -> Result<ProductDocument> {
     let src = source
         .as_object()
         .ok_or_else(|| ConvertError::TypeMismatch {
@@ -118,6 +321,7 @@ pub(super) fn build_document(
     let mut scene_used: Vec<String> = Vec::new();
     let mut actors = Map::new();
     let mut scenes = Map::new();
+    let mut hooks: Vec<BlockHook> = Vec::with_capacity(entities.len() + procedures.len());
     for entity in entities {
         // P7(rounds/37):`entities` 是按值收的 Vec ⇒ 解构搬走,不再 clone 每个实体对象
         // (与上方 `build_kitten4_document` 的同段改法同一口径)。
@@ -129,12 +333,23 @@ pub(super) fn build_document(
         } = entity;
         let mut value = source;
         value.remove("block_data_json");
-        value.insert("nekoBlockJsonList".into(), Value::Array(blocks));
-        if is_scene {
+        // 块表只留占位(键序由 `Map` 决定);真正的树挂到钩子上,写出/物化时在这一格兑现
+        value.insert("nekoBlockJsonList".into(), Value::Null);
+        let container = if is_scene {
             scene_entry(&mut value, groups, &mut scene_used);
-            scenes.insert(source_id, Value::Object(value));
+            BlockContainer::Scenes
         } else {
             actor_entry(&mut value, groups, &mut actor_used, landscape);
+            BlockContainer::Actors
+        };
+        hooks.push(BlockHook {
+            container,
+            id: source_id.clone(),
+            tree: blocks,
+        });
+        if is_scene {
+            scenes.insert(source_id, Value::Object(value));
+        } else {
             actors.insert(source_id, Value::Object(value));
         }
     }
@@ -196,12 +411,17 @@ pub(super) fn build_document(
             ("currentAudioId", current_audio),
         ]),
     );
+    let (procedure_dict, procedure_blocks) = procedure_entries(procedures);
+    for (id, tree) in procedure_blocks {
+        hooks.push(BlockHook {
+            container: BlockContainer::Procedures,
+            id,
+            tree,
+        });
+    }
     doc.insert(
         "procedures".into(),
-        json_obj([(
-            "proceduresDict",
-            Value::Object(procedures_to_json(procedures)?),
-        )]),
+        json_obj([("proceduresDict", Value::Object(procedure_dict))]),
     );
     doc.insert("stageSize".into(), stage_size(landscape));
     doc.insert("version".into(), Value::String(BCM_VERSION.to_string()));
@@ -219,7 +439,7 @@ pub(super) fn build_document(
         ]),
     );
     doc.insert("courseMaterials".into(), Value::Array(Vec::new()));
-    Ok(Value::Object(doc))
+    Ok(ProductDocument { doc, hooks })
 }
 
 // ---------------------------------------------------------------- 实体(官方 78620-78680)
@@ -1640,7 +1860,10 @@ mod assembly_tests {
         ConvertedEntity {
             source_id: id.to_string(),
             is_scene,
-            blocks: vec![json!({ "type": "on_running_group_activated", "id": "hat" })],
+            blocks: model::parse_kn_entity(&json!([
+                { "type": "on_running_group_activated", "id": "hat" }
+            ]))
+            .expect("测试积木树"),
             source: source.as_object().expect("实体是对象").clone(),
         }
     }
@@ -1705,7 +1928,8 @@ mod assembly_tests {
             actor_source("actor-1", "UI", 0.0, -500.0, json!(false)),
         )];
         let mut report = report();
-        let doc = build_document(&sample_source(), entities, &[], 0, &mut report).expect("装配");
+        let doc =
+            build_document(&sample_source(), entities, &mut [], 0, &mut report).expect("装配");
 
         let actor = &doc["actors"]["actorsDict"]["actor-1"];
         // 横屏(960>720):坐标乘 10/13,并删掉 x/y
@@ -1752,7 +1976,7 @@ mod assembly_tests {
             actor_source("actor-1", "UI", 100.0, 200.0, json!(true)),
         )];
         let mut report = report();
-        let doc = build_document(&source, entities, &[], 0, &mut report).expect("装配");
+        let doc = build_document(&source, entities, &mut [], 0, &mut report).expect("装配");
 
         let actor = &doc["actors"]["actorsDict"]["actor-1"];
         assert_eq!(actor["locked"], json!(true), "真值 lock 换成 locked");
@@ -1777,7 +2001,7 @@ mod assembly_tests {
         let mut source = sample_source();
         source["theatre"]["scenes_order"] = json!(["scene-1", "scene-2"]);
         let mut report = report();
-        let doc = build_document(&source, entities, &[], 0, &mut report).expect("装配");
+        let doc = build_document(&source, entities, &mut [], 0, &mut report).expect("装配");
 
         let scene = &doc["scenes"]["scenesDict"]["scene-1"];
         // 有 groups:actorIds 按 group_order 展开(照抄 scene.actors 的那半不生效)
@@ -1817,7 +2041,7 @@ mod assembly_tests {
                 true,
                 scene_source("scene-1", "主页", json!([])),
             )],
-            &[],
+            &mut [],
             0,
             &mut report,
         )
@@ -1863,7 +2087,8 @@ mod assembly_tests {
             ),
         ];
         let mut report = report();
-        let doc = build_document(&sample_source(), entities, &[], 0, &mut report).expect("装配");
+        let doc =
+            build_document(&sample_source(), entities, &mut [], 0, &mut report).expect("装配");
         let name = |id: &str| doc["actors"]["actorsDict"][id]["name"].clone();
         assert_eq!(name("actor-1"), json!("小明"));
         assert_eq!(name("actor-2"), json!("小明1"));
@@ -1890,7 +2115,8 @@ mod assembly_tests {
         });
         let mut report = report();
         // 时钟由门面传入:确定性模式传 0,否则传当前毫秒;这里显式传一个固定值验证落键
-        let doc = build_document(&source, vec![], &[], 1700000000123, &mut report).expect("装配");
+        let doc =
+            build_document(&source, vec![], &mut [], 1700000000123, &mut report).expect("装配");
         let vars = &doc["variables"]["variablesDict"];
         assert_eq!(vars["v-score"]["style"], json!("icon_medal"));
         assert_eq!(vars["v-score"]["isGlobal"], json!(false));
@@ -1929,7 +2155,7 @@ mod assembly_tests {
             "c-private": { "id": "c-private", "type": "private", "name": "私有", "position": { "x": 480, "y": 360 } },
             "c-other": { "id": "c-other", "type": "public", "name": "公开", "position": { "x": 0, "y": 0 } }
         });
-        let doc = build_document(&private, vec![], &[], 0, &mut report).expect("装配");
+        let doc = build_document(&private, vec![], &mut [], 0, &mut report).expect("装配");
         let vars = &doc["variables"]["variablesDict"];
         assert_eq!(vars["c-private"]["type"], json!("any"));
         assert_eq!(vars["c-private"]["value"], json!(0));
@@ -1941,7 +2167,7 @@ mod assembly_tests {
     #[test]
     fn broadcast_wrap_stage_size_and_document_skeleton() {
         let mut report = report();
-        let doc = build_document(&sample_source(), vec![], &[], 0, &mut report).expect("装配");
+        let doc = build_document(&sample_source(), vec![], &mut [], 0, &mut report).expect("装配");
         assert_eq!(
             doc["broadcasts"],
             json!({ "broadcastsDict": { "scene-1": ["初始主页"] } })
@@ -1975,9 +2201,9 @@ mod assembly_tests {
         let tree = super::super::model::BlockTree::new(vec![
             super::super::model::BlockJson::from_value(&def).expect("节点"),
         ]);
-        let (_, procedures) = split_procedures(tree, &mut ids, &mut report);
-        let doc =
-            build_document(&sample_source(), vec![], &procedures, 0, &mut report).expect("装配");
+        let (_, mut procedures) = split_procedures(tree, &mut ids, &mut report);
+        let doc = build_document(&sample_source(), vec![], &mut procedures, 0, &mut report)
+            .expect("装配");
         let entry = &doc["procedures"]["proceduresDict"]["proc-1"];
         assert_eq!(entry["name"], json!("跳跃"));
         assert_eq!(entry["type"], json!("NORMAL"));
@@ -1991,7 +2217,7 @@ mod assembly_tests {
         // 已经包好的 broadcasts 原样透传(阶段 1 之后再装配)
         let mut wrapped = sample_source();
         wrapped["broadcasts"] = json!({ "broadcastsDict": { "scene-1": ["初始主页"] } });
-        let doc = build_document(&wrapped, vec![], &[], 0, &mut report).expect("装配");
+        let doc = build_document(&wrapped, vec![], &mut [], 0, &mut report).expect("装配");
         assert_eq!(
             doc["broadcasts"],
             json!({ "broadcastsDict": { "scene-1": ["初始主页"] } })
@@ -2004,7 +2230,7 @@ mod assembly_tests {
             .as_object_mut()
             .expect("obj")
             .remove("project_name");
-        let doc = build_document(&portrait, vec![], &[], 0, &mut report).expect("装配");
+        let doc = build_document(&portrait, vec![], &mut [], 0, &mut report).expect("装配");
         assert_eq!(doc["stageSize"], json!({ "width": 562, "height": 900 }));
         assert_eq!(doc["projectName"], json!("空白作品"));
         // 竖屏造型:url 被 cdn_url 覆盖(官方 portrait 分支),所以不再报"要上传"
@@ -2035,7 +2261,7 @@ mod assembly_tests {
     #[test]
     fn styles_and_audio_keep_source_urls_and_report_uploads() {
         let mut report = report();
-        let doc = build_document(&sample_source(), vec![], &[], 0, &mut report).expect("装配");
+        let doc = build_document(&sample_source(), vec![], &mut [], 0, &mut report).expect("装配");
         // 横屏:官方对每个造型都重采样上传 → 源 url 原样保留 + 报 dropped
         let style = &doc["styles"]["stylesDict"]["style-1"];
         assert_eq!(style["url"], json!("data:image/png;base64,AAAA"));
@@ -2070,7 +2296,7 @@ mod assembly_tests {
         // 没有 audio_order 时 sortList = 遍历顺序,currentAudioId 取首个
         let mut source = sample_source();
         source.as_object_mut().expect("obj").remove("audio_order");
-        let doc = build_document(&source, vec![], &[], 0, &mut report).expect("装配");
+        let doc = build_document(&source, vec![], &mut [], 0, &mut report).expect("装配");
         assert_eq!(doc["audios"]["sortList"], json!(["audio-1"]));
     }
 
@@ -2209,5 +2435,39 @@ mod assembly_tests {
         assert_eq!(increment_suffix("小明9"), "小明10");
         assert_eq!(increment_suffix(""), "1");
         assert_eq!(increment_digits("009"), "010");
+    }
+
+    /// **常驻门**(`rounds/47` §4 Step 2/3):流式写出与 `to_value()` 路径**逐字节相同**
+    ///
+    /// 三处块表挂点(角色 / 场景 / 程序集定义体)都要覆盖:只盖其一的话,另外两处的占位键序
+    /// 或漏写不会被发现 —— 而产物门(SHA256 基线)只在"整条正向管线"上抓,抓不到单元级错位。
+    #[test]
+    fn streamed_product_matches_value_product() {
+        let mut report = report();
+        let mut ids = IdSource::new(true);
+        let def = json!({
+            "type": "procedures_2_defnoreturn", "id": "proc-1",
+            "fields": { "NAME": "跳跃" },
+            "inputs": { "STACK": { "type": "self_go_forward", "id": "fwd" } }
+        });
+        let tree = super::super::model::BlockTree::new(vec![
+            super::super::model::BlockJson::from_value(&def).expect("节点"),
+        ]);
+        let (_, mut procedures) = split_procedures(tree, &mut ids, &mut report);
+        let entities = vec![
+            entity("actor-1", false, json!({ "name": "小明", "x": 1, "y": 2 })),
+            entity("scene-1", true, json!({ "name": "舞台" })),
+        ];
+        let product =
+            build_document_product(&sample_source(), entities, &mut procedures, 0, &mut report)
+                .expect("装配");
+        let mut streamed = Vec::new();
+        product.write_to(&mut streamed).expect("流式写出");
+        let expected = serde_json::to_vec(&product.into_value().expect("物化")).expect("序列化");
+        assert_eq!(
+            String::from_utf8_lossy(&streamed),
+            String::from_utf8_lossy(&expected),
+            "流式产物必须与 to_value 路径逐字节相同(角色 / 场景 / 程序集三处挂点)"
+        );
     }
 }

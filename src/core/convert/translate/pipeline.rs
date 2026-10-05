@@ -202,7 +202,7 @@ fn parse_forward_item(
 ///    兑现最终 id(与旧实现"先所有实体 parse/mapping/split,再所有实体 rewrite_calls"
 ///    的铸造序列逐次对应),再把临时 id 的值 / 键 / mutation·shadow XML 一并改写;
 ///    程序集条目与告警串同表改写;
-/// 5. **阶段 4(并行)**:改写完的树按今天同一入口编码(`model::tree_to_json`)。
+/// 5. **阶段 4(并行)**:改写完的树直接交给装配(块表编码推迟到写出,见 [`assembly::ProductDocument`])。
 ///
 /// `entity_concurrency = 1`(默认)时三个阶段都在当前线程按项序跑,但仍然走同一条
 /// 临时 id 路径 —— 因此"默认产物与今天逐字节一致"由基准的 SHA256 基线直接守住
@@ -217,20 +217,21 @@ pub(super) fn convert_kitten4_document(
     options: &TranslateOptions,
     report: &mut TranslateReport,
 ) -> std::result::Result<serde_json::Value, TranslateError> {
-    convert_kitten4_document_impl(source, None, options, report)
+    Ok(convert_kitten4_document_impl(source, None, options, report)?.into_value()?)
 }
 
-/// 与 [`convert_kitten4_document`] 同一条管线,但 `block_data_json` 由**原文**提供
+/// 与 [`convert_kitten4_document`] 同一条管线,但 `block_data_json` 由**原文**提供,
+/// 且保留**可流式写出**的产物(文件路径用它,省掉产物侧整份 `Value`)
 ///
 /// 源侧骨架路径(`translate::parse_source_skeleton`)已经把每个实体的 `block_data_json`
 /// 原样摘出来、没有建成 `Value`,所以这里按 (容器, id) 交回;源文档里本就没有该字段,
 /// 也就不存在"放回"一步(读数与设计见 `../rounds/47-data-layer-rewrite-plan.md` Step 5)。
-pub(super) fn convert_kitten4_document_raw(
+pub(super) fn convert_kitten4_document_raw_product(
     source: &mut serde_json::Value,
     block_data: std::collections::BTreeMap<(String, String), Box<serde_json::value::RawValue>>,
     options: &TranslateOptions,
     report: &mut TranslateReport,
-) -> std::result::Result<serde_json::Value, TranslateError> {
+) -> std::result::Result<assembly::ProductDocument, TranslateError> {
     convert_kitten4_document_impl(source, Some(block_data), options, report)
 }
 
@@ -241,7 +242,7 @@ fn convert_kitten4_document_impl(
     >,
     options: &TranslateOptions,
     report: &mut TranslateReport,
-) -> std::result::Result<serde_json::Value, TranslateError> {
+) -> std::result::Result<assembly::ProductDocument, TranslateError> {
     use serde_json::Value;
     let started = std::time::Instant::now();
 
@@ -302,7 +303,7 @@ fn convert_kitten4_document_impl(
     // 可观测事实:本次转换真的开了几个实体级线程(供基准/单测挡空门,见 `TranslateReport`)
     report.entity_workers = workers;
 
-    let outcome = (|| -> std::result::Result<Value, TranslateError> {
+    let outcome = (|| -> std::result::Result<assembly::ProductDocument, TranslateError> {
         // ── 阶段 1(并行):解析 + 语义映射 + 抽程序集(官方:scenes.forEach → actors.forEach → zC)
         //
         // 只**借用**源积木树:`block_data_json` 之后要放回源文档。`.collect::<Result<…>>()`
@@ -386,11 +387,10 @@ fn convert_kitten4_document_impl(
             unmatched += missed;
         }
 
-        // ── 阶段 4(并行):改写实体树 + 编码(编码入口与旧实现同一个)
+        // ── 阶段 4(并行):改写实体树(块表的**编码推迟到写出**,见 `assembly::ProductDocument`)
         let encoded = run_items(trees, &weights, workers, |_, mut tree| {
             let (nodes, missed) = remap_tree(&mints, &mut tree);
-            let blocks = model::tree_to_json(&tree)?;
-            Ok::<_, TranslateError>((blocks, nodes, missed))
+            Ok::<_, TranslateError>((tree, nodes, missed))
         });
 
         // ── 装配
@@ -399,14 +399,14 @@ fn convert_kitten4_document_impl(
         let mut entities = Vec::with_capacity(items.len());
         let mut converted = procedures_nodes;
         for (item, encoded) in items.iter_mut().zip(encoded) {
-            let (blocks, nodes, missed) = encoded?;
+            let (tree, nodes, missed) = encoded?;
             unmatched += missed;
             converted += nodes;
             entities.push(assembly::ConvertedEntity {
                 // 源实体 id 也是"放回源文档"的键,所以只克隆(短串);元数据按值搬走
                 source_id: item.id.clone(),
                 is_scene: item.is_scene,
-                blocks,
+                blocks: tree,
                 source: item.source.take().unwrap_or_default(),
             });
         }
@@ -435,7 +435,7 @@ fn convert_kitten4_document_impl(
         } else {
             assembly::current_epoch_ms()
         };
-        assembly::build_document(source, entities, &procedures, now_ms, report)
+        assembly::build_document_product(source, entities, &mut procedures, now_ms, report)
             .map_err(TranslateError::from)
     })();
 
@@ -1306,18 +1306,17 @@ mod forward_parallel_tests {
         let mut converted: usize = procedures.iter().map(|p| p.tree.count()).sum();
         let mut entities = Vec::with_capacity(parsed.len());
         for (id, is_scene, tree, src) in parsed {
-            let blocks = model::tree_to_json(&tree).expect("编码");
             converted += tree.count();
             entities.push(assembly::ConvertedEntity {
                 source_id: id,
                 is_scene,
-                blocks,
+                blocks: tree,
                 source: src,
             });
         }
         report.blocks_converted = converted;
-        let document =
-            assembly::build_document(source, entities, &procedures, 0, &mut report).expect("装配");
+        let document = assembly::build_document(source, entities, &mut procedures, 0, &mut report)
+            .expect("装配");
         (document, report)
     }
 

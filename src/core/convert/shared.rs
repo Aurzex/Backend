@@ -447,6 +447,20 @@ impl FileService {
         Ok(())
     }
 
+    /// 与 [`Self::write_json`] 同一套缓冲/收尾,但**序列化交给调用方**(流式产物用它:
+    /// 产物侧的块表不建整份 `Value`,直接写进同一个 `BufWriter`,见 `rounds/47` §4 Step 2/3)
+    pub(crate) fn write_json_with<F>(path: &Path, write: F) -> Result<()>
+    where
+        F: FnOnce(&mut std::io::BufWriter<std::fs::File>) -> Result<()>,
+    {
+        use std::io::Write as _;
+        let file = std::fs::File::create(path)?;
+        let mut writer = std::io::BufWriter::new(file);
+        write(&mut writer)?;
+        writer.flush()?;
+        Ok(())
+    }
+
     pub(crate) fn write_binary(path: &Path, data: &[u8]) -> Result<()> {
         std::fs::write(path, data)?;
         Ok(())

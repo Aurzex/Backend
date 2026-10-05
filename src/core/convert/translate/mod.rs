@@ -145,18 +145,48 @@ pub fn translate_value(
     })
 }
 
-/// 文本 → 文档 → 文档:文件路径的专用入口(源侧骨架快速通道)
+/// 文件路径的内部产物:文档可能是**流式**产物(正向 Kitten4 → KN 不建整份产物 `Value`)
+struct FileConversion {
+    document: ConvertedDocument,
+    target: TargetEditor,
+    report: TranslateReport,
+}
+
+/// 文件路径的文档:优先流式,其余(反向 / NEMO / 回落)仍是整份 `Value`
+enum ConvertedDocument {
+    Product(assembly::ProductDocument),
+    Value(serde_json::Value),
+}
+
+impl ConvertedDocument {
+    /// 落盘:`Product` 直接写(省掉产物侧那份 `Value`),`Value` 走原有流式 `write_json`
+    fn write_to_file(&self, output: &std::path::Path) -> std::result::Result<(), TranslateError> {
+        use crate::core::convert::shared::FileService;
+        match self {
+            ConvertedDocument::Product(product) => {
+                FileService::write_json_with(output, |writer| product.write_to(writer))?;
+            }
+            ConvertedDocument::Value(value) => FileService::write_json(output, value)?,
+        }
+        Ok(())
+    }
+}
+
+/// 文本 → 文档 → 文档:文件路径的专用入口(源侧骨架快速通道 + 流式产物)
 ///
 /// 先按骨架读一遍([`source::parse`]):这条路上 `theatre.{scenes,actors}.*.block_data_json`
 /// 不建 `Value` 中间树,直接以**原文**交给管线(读数与设计见
 /// `../rounds/47-data-layer-rewrite-plan.md` Step 5)。只有「源格式确为 Kitten4 且目标为 KN」
 /// 走快速通道;其余(骨架不成立、Kitten2/3、NEMO/Neko、反向目标)一律回落成整份
 /// `Value` 解析 + [`translate_value`] —— 回落路径与旧口径逐字一致。
+///
+/// 快速通道的产物是 [`assembly::ProductDocument`](可流式写出):块表不建整份 `Value`,
+/// 由 [`ConvertedDocument::write_to_file`] 直接写盘(Step 2/3)。
 fn translate_text(
     text: &str,
     target: TargetEditor,
     options: &TranslateOptions,
-) -> std::result::Result<TranslateDocument, TranslateError> {
+) -> std::result::Result<FileConversion, TranslateError> {
     // 只对"可能带 `block_data_json` 的文本"先试骨架:KN/NEMO 文档里没有这个键,直接
     // 整份 `Value` 解析即可 —— 否则会白付一次全量骨架解析(同轮 A/B 实测:nemo-3.4MB
     // 的 `e2e` +26 ms、分配 +50 638 次,见 `../rounds/47-data-layer-rewrite-plan.md` Step 5)。
@@ -183,21 +213,30 @@ fn translate_text(
                 crate::core::convert::EditorType::Kitten4,
                 TargetEditor::KittenN,
             );
-            let document =
-                pipeline::convert_kitten4_document_raw(&mut doc, block_data, options, &mut report)?;
+            let product = pipeline::convert_kitten4_document_raw_product(
+                &mut doc,
+                block_data,
+                options,
+                &mut report,
+            )?;
             if options.is_strict() && report.is_lossy() {
                 return Err(TranslateError::Lossy {
                     report: Box::new(report),
                 });
             }
-            return Ok(TranslateDocument {
-                document,
+            return Ok(FileConversion {
+                document: ConvertedDocument::Product(product),
                 target,
                 report,
             });
         }
     }
-    translate_value(serde_json::from_str(text)?, target, options)
+    let converted = translate_value(serde_json::from_str(text)?, target, options)?;
+    Ok(FileConversion {
+        document: ConvertedDocument::Value(converted.document),
+        target: converted.target,
+        report: converted.report,
+    })
 }
 
 /// 把一个作品文件转化成另一种编辑器的作品文件
@@ -206,15 +245,15 @@ pub fn translate_file(
     target: TargetEditor,
     options: TranslateOptions,
 ) -> std::result::Result<TranslateOutcome, TranslateError> {
-    use crate::core::convert::shared::FileService;
-
     let text = std::fs::read_to_string(input)?;
     let converted = translate_text(&text, target, &options)?;
 
     let output = product_path(input, target, &options)?;
 
-    // 流式写盘(方案 23 P0-1):与 `to_string` 逐字节相同,省掉整份中间串与一次整块拷贝
-    FileService::write_json(&output, &converted.document)?;
+    // 流式写盘(方案 23 P0-1):与 `to_string` 逐字节相同,省掉整份中间串与一次整块拷贝。
+    // 正向快速通道更进一步:产物里那三份块表**不建 `Value`**,直接写进同一个 `BufWriter`
+    // (Step 2/3,见 `assembly::ProductDocument`)。
+    converted.document.write_to_file(&output)?;
 
     Ok(TranslateOutcome {
         output,

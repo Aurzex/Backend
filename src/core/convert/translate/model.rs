@@ -1608,6 +1608,237 @@ pub(super) fn tree_to_json(tree: &BlockTree) -> Result<Vec<Value>> {
         .collect()
 }
 
+/// 把实体/程序集的积木树**直接写成** `nekoBlockJsonList` 数组(不建中间 `Value`)
+///
+/// 与 [`tree_to_json`] + `serde_json::to_writer` **逐字节相同**(常驻门:本文件
+/// `streamed_block_tree_equals_value_path`):键序 = `serde_json::Map`(= `BTreeMap`)的字节序;
+/// 每块的键 = "存在的已知键" ∪ `extra` 的键;`shield` **恒写出**(官方必写,见 [`fill_shield`]),
+/// 其余布尔键只在真值时写;键名与字符串值一律交给 `serde_json::to_writer` 转义。
+///
+/// 为什么要有这条:旧路径 [`BlockJson::to_value`] 会把每块按 `Serialize` **重新物化**一份
+/// `Map<String, Value>`(字段值全是 clone),10 MB 级作品是十万级块的整份拷贝 —— 这既是产物侧
+/// 最大的分配来源,也是 `e2e` 里那段"未归类"耗时的主体(实测见
+/// `../../../../docs/rounds/47-data-layer-rewrite-plan.md` §4 Step 2/3)。本函数按**引用**直写。
+pub(super) fn write_block_tree(tree: &BlockTree, w: &mut impl std::io::Write) -> Result<()> {
+    w.write_all(b"[")?;
+    for (index, root) in tree.roots.iter().enumerate() {
+        if index > 0 {
+            w.write_all(b",")?;
+        }
+        write_block(root, w)?;
+    }
+    w.write_all(b"]")?;
+    Ok(())
+}
+
+/// 单块 → JSON 对象(键序与 [`BlockJson::to_value`] 的 `Map` 一致)
+fn write_block(node: &BlockJson, w: &mut impl std::io::Write) -> Result<()> {
+    // 每块一份小键表(容量取已知键数,免增长);与 `to_value` 的 Map 同序要求见函数文档
+    let mut keys: Vec<&str> = Vec::with_capacity(KNOWN_BLOCK_KEYS.len() + node.extra.len());
+    for (present, key) in [
+        (true, "type"),
+        (node.id.is_some(), "id"),
+        (node.location.is_some(), "location"),
+        (node.next.is_some(), "next"),
+        (!node.inputs.is_empty(), "inputs"),
+        (!node.statements.is_empty(), "statements"),
+        (!node.fields.is_empty(), "fields"),
+        (!node.shadows.is_empty(), "shadows"),
+        (node.mutation.is_some(), "mutation"),
+        (node.is_shadow, "is_shadow"),
+        (node.is_output, "is_output"),
+        // `shield` **恒写**:官方每个节点都写 `shield: !!t.shield`,而字段本身是
+        // `skip_serializing_if = "is_false"` —— 旧路径靠 `fill_shield` 补,这里直接写
+        (true, "shield"),
+        (node.disabled, "disabled"),
+        (node.parent_id.is_some(), "parent_id"),
+        (node.field_constraints.is_some(), "field_constraints"),
+    ] {
+        if present {
+            keys.push(key);
+        }
+    }
+    keys.extend(node.extra.keys().map(String::as_str));
+    keys.sort_unstable();
+    keys.dedup();
+
+    w.write_all(b"{")?;
+    for (index, key) in keys.iter().enumerate() {
+        if index > 0 {
+            w.write_all(b",")?;
+        }
+        serde_json::to_writer(&mut *w, key)?;
+        w.write_all(b":")?;
+        // `extra` 与已知键撞名时 **`extra` 胜**:`to_value` 是"已知字段先写、flatten 的
+        // `extra` 后写覆盖",序列化结果取后者(见 `streamed_block_tree_equals_value_path`)
+        if let Some(value) = node.extra.get(*key) {
+            serde_json::to_writer(&mut *w, value)?;
+            continue;
+        }
+        match *key {
+            "type" => serde_json::to_writer(&mut *w, &node.kind)?,
+            "id" => serde_json::to_writer(&mut *w, expect_some(&node.id, "id")?)?,
+            "location" => serde_json::to_writer(&mut *w, expect_some(&node.location, "location")?)?,
+            "next" => write_block(expect_some(&node.next, "next")?, w)?,
+            "inputs" | "statements" => {
+                let map = if *key == "inputs" {
+                    &node.inputs
+                } else {
+                    &node.statements
+                };
+                w.write_all(b"{")?;
+                for (child_index, (slot, child)) in map.iter().enumerate() {
+                    if child_index > 0 {
+                        w.write_all(b",")?;
+                    }
+                    serde_json::to_writer(&mut *w, slot)?;
+                    w.write_all(b":")?;
+                    write_block(child, w)?;
+                }
+                w.write_all(b"}")?;
+            }
+            "fields" => write_serializable_map(&node.fields, w)?,
+            "shadows" => write_serializable_map(&node.shadows, w)?,
+            "mutation" => serde_json::to_writer(&mut *w, expect_some(&node.mutation, "mutation")?)?,
+            "is_shadow" => w.write_all(b"true")?,
+            "is_output" => w.write_all(b"true")?,
+            "shield" => w.write_all(if node.shield { b"true" } else { b"false" })?,
+            "disabled" => w.write_all(b"true")?,
+            "parent_id" => {
+                serde_json::to_writer(&mut *w, expect_some(&node.parent_id, "parent_id")?)?
+            }
+            "field_constraints" => serde_json::to_writer(
+                &mut *w,
+                expect_some(&node.field_constraints, "field_constraints")?,
+            )?,
+            // 键表只由已知键与 `extra` 组成,走到这里说明两处口径不一致(改键表时忘了同步)
+            other => {
+                return Err(ConvertError::Other {
+                    msg: format!("积木写出:未知键 {other}"),
+                    source: None,
+                });
+            }
+        }
+    }
+    w.write_all(b"}")?;
+    Ok(())
+}
+
+/// 已知块键(键表容量用;真值仍是 [`write_block`] 里那张 `(存在, 键名)` 表)
+const KNOWN_BLOCK_KEYS: [&str; 15] = [
+    "type",
+    "id",
+    "location",
+    "next",
+    "inputs",
+    "statements",
+    "fields",
+    "shadows",
+    "mutation",
+    "is_shadow",
+    "is_output",
+    "shield",
+    "disabled",
+    "parent_id",
+    "field_constraints",
+];
+
+/// 上面那张"存在才写"的表保证键存在;真到不了 `None`(到了就是写出器的 bug,直接报)
+fn expect_some<'a, T>(value: &'a Option<T>, key: &str) -> Result<&'a T> {
+    value.as_ref().ok_or_else(|| ConvertError::Other {
+        msg: format!("积木写出:键 {key} 被标为存在但值为空"),
+        source: None,
+    })
+}
+
+/// `BTreeMap<String, V>` → JSON 对象(键序 = `Map` 字节序)
+fn write_serializable_map<V: serde::Serialize>(
+    map: &BTreeMap<String, V>,
+    w: &mut impl std::io::Write,
+) -> Result<()> {
+    w.write_all(b"{")?;
+    for (index, (key, value)) in map.iter().enumerate() {
+        if index > 0 {
+            w.write_all(b",")?;
+        }
+        serde_json::to_writer(&mut *w, key)?;
+        w.write_all(b":")?;
+        serde_json::to_writer(&mut *w, value)?;
+    }
+    w.write_all(b"}")?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod streamed_writer_tests {
+    //! 流式块写出与 `to_value` 路径的**逐字节**等价门(`rounds/47` §4 Step 2/3 的常驻证据)
+
+    use super::*;
+
+    /// 覆盖:`extra` 撞名与嵌套、`shield` 真/假、三槽嵌套、转义与非 ASCII、空槽
+    fn sample_tree() -> BlockTree {
+        let mut tree = parse_kn_entity(&serde_json::json!([
+            {
+                "type": "controls_if",
+                "id": "b1",
+                "location": { "x": 1, "y": -2.5 },
+                "fields": { "CONDITION": "x", "NOTES": "引号\"反斜杠\\换行\n制表\t中文🙂" },
+                "inputs": {
+                    "CONDITION": { "type": "math_number", "id": "b2", "shield": true, "fields": { "NUM": 45 } }
+                },
+                "statements": {
+                    "DO": { "type": "self_move_to", "extra": [1, { "深": true }],
+                            "next": { "type": "self_go_forward", "disabled": true } },
+                    "ELSE": { "type": "self_go_forward", "is_output": true }
+                },
+                "shadows": { "DO": "<shadow type=\"text\">x</shadow>", "EMPTY": "" },
+                "parent_id": "p1",
+                "field_constraints": { "min": 0, "max": 10, "float": 1.5 }
+            },
+            { "type": "unknown_editor_specific", "custom": null, "nested": { "a": [1, 2, 3] } }
+        ]))
+        .expect("解析样例树");
+        // 程序化造出"`extra` 与已知键撞名":解析路径下不可能出现(JSON 不允许重复键)
+        tree.roots[0]
+            .extra
+            .insert("id".to_string(), serde_json::json!("override"));
+        tree
+    }
+
+    #[test]
+    fn streamed_block_tree_equals_value_path() {
+        let tree = sample_tree();
+        let mut streamed = Vec::new();
+        write_block_tree(&tree, &mut streamed).expect("流式写出");
+        let expected = serde_json::to_vec(&Value::Array(tree_to_json(&tree).expect("to_value")))
+            .expect("序列化 to_value 路径");
+        assert_eq!(
+            String::from_utf8_lossy(&streamed),
+            String::from_utf8_lossy(&expected),
+            "流式写出必须与 to_value + to_writer 逐字节相同"
+        );
+        // 顺带钉住"`extra` 撞名时 extra 胜"这条口径(否则两条路径会在这类树上分叉)
+        assert!(String::from_utf8_lossy(&streamed).contains("\"id\":\"override\""));
+    }
+
+    /// 空树与最小块:数组外壳与 `shield` 补键都不能少
+    #[test]
+    fn streamed_block_tree_handles_empty_and_minimal() {
+        let empty = BlockTree::default();
+        let mut streamed = Vec::new();
+        write_block_tree(&empty, &mut streamed).expect("空树");
+        assert_eq!(streamed, b"[]");
+
+        let minimal = parse_kn_entity(&serde_json::json!([{ "type": "x" }])).expect("解析");
+        let mut streamed = Vec::new();
+        write_block_tree(&minimal, &mut streamed).expect("最小树");
+        assert_eq!(
+            String::from_utf8_lossy(&streamed),
+            r#"[{"shield":false,"type":"x"}]"#
+        );
+    }
+}
+
 /// 补齐 `shield` 键:官方 `jC.parseBlock` 给**每个**节点写 `shield: !!t.shield`
 /// (Kitten4 源里根本没有这个键,所以恒为 `false`),而 [`BlockJson`] 的 `shield` 字段是
 /// `skip_serializing_if = "is_false"` —— 不补这一下,产物里就少了官方必写的 `shield`。
@@ -1631,9 +1862,16 @@ fn fill_shield(node: &mut Value) {
     }
 }
 
-/// 程序集条目 → `proceduresDict`(调用方再包一层 `{"proceduresDict": …}`)
-pub(super) fn procedures_to_json(procedures: &[ProcedureEntry]) -> Result<Map<String, Value>> {
+/// 程序集条目 → `proceduresDict` 的**条目表**(定义体积木位置留 `null` 占位)+ 每条的积木树
+///
+/// 拆成"条目表 + 树"是为了让两条路径共用同一套字段拼装:内存路径把树物化回 `Value` 填进占位
+/// ([`tree_to_json`]),文件路径把树登记成装配侧的流式挂点(`rounds/47` §4 Step 2/3)。
+/// 树**按值搬出**(`mem::take`):调用方之后不再需要它(占位从此只作位置锚点)。
+pub(super) fn procedure_entries(
+    procedures: &mut [ProcedureEntry],
+) -> (Map<String, Value>, Vec<(String, BlockTree)>) {
     let mut dict = Map::new();
+    let mut blocks = Vec::with_capacity(procedures.len());
     for entry in procedures {
         let params = entry
             .params
@@ -1645,12 +1883,30 @@ pub(super) fn procedures_to_json(procedures: &[ProcedureEntry]) -> Result<Map<St
             ("name", Value::String(entry.name.clone())),
             ("type", Value::String(entry.kind.clone())),
             ("params", Value::Array(params)),
-            (
-                "nekoBlockJsonList",
-                Value::Array(tree_to_json(&entry.tree)?),
-            ),
+            // 占位:位置由 `Map`(BTreeMap)的字典序决定,写出/物化时在这一点换成块表
+            ("nekoBlockJsonList", Value::Null),
         ]);
         dict.insert(entry.id.clone(), body);
+        blocks.push((entry.id.clone(), std::mem::take(&mut entry.tree)));
+    }
+    (dict, blocks)
+}
+
+/// 程序集条目 → `proceduresDict`(调用方再包一层 `{"proceduresDict": …}`;块表直接物化)
+///
+/// 只服务测试:装配的两条路径都走 [`procedure_entries`](内存路径再由
+/// `assembly::ProductDocument::to_value` 填占位),这里保留"一步到位出 `Value`"的老口径。
+#[cfg(test)]
+pub(super) fn procedures_to_json(procedures: &[ProcedureEntry]) -> Result<Map<String, Value>> {
+    let mut owned = procedures.to_vec();
+    let (mut dict, blocks) = procedure_entries(&mut owned);
+    for (id, tree) in blocks {
+        if let Some(body) = dict.get_mut(&id).and_then(Value::as_object_mut) {
+            body.insert(
+                "nekoBlockJsonList".into(),
+                Value::Array(tree_to_json(&tree)?),
+            );
+        }
     }
     Ok(dict)
 }
