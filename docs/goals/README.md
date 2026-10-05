@@ -9,7 +9,7 @@
 - **`pending-decisions.md` A 组**:只剩 **A4**(NEMO 上传是否真机验证;A1/A2/A3/A5 已处理)。
 - **B 组**:大方向 B1–B8(B5 已完成并移入"已决")。
 - **C 组**:只剩 **C8**(暂缓);C3–C7 已于 2026-10-03 结案(其中 C7 判不做,见 `../rounds/45`),C9/C10 见 `../rounds/43`。
-- **D 组**:D1–D6 已全部落定(D6 的 2)  与 4)  已于 2026-10-03 落地,见 `../rounds/43`)。
+- **D 组**:D1–D6 已全部落定(D6 的 2)  与 4)  已于 2026-10-03 落地,见 `../rounds/43`);**D7(是否指定全局分配器,读数见 `../knowledge/convert-performance.md` §2bis)待拍板**。
 - **`convert-backlog.md` §1**:另有待决项(B2 / A4 / `entity_concurrency` / 反向并行是否重开)。
 - **`infra-backlog.md` §6 架构盘点**:**四条已全部结案**(两条见 `../rounds/44`,两条见 `../rounds/46`),该节不再有待拍板项。
 
