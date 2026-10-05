@@ -140,11 +140,14 @@
     临时处置)。**彻底修 = 把"语料/夹具目录"与"输出目录"分离**(较大的布局约定变更),需先出方案。
     出处:`../rounds/40-gates-cleanup-and-real-defects.md` §8.4。
 
-14. **待做**(小,防复发):三个基准的临时目录不清理 —— `tests/convert_bench.rs` / `convert_facade_bench.rs` /
-    `convert_work_bench.rs` 的 `bench_dir()` 每跑一次就在 `std::env::temp_dir()` 留一个约 33 MB 的目录;
-    2026-10-05 整理时实测 `/tmp` 里积了 **46 个 ≈ 1.5 GB**(tmpfs 1.9 GB),把**无关测试**打红:
-    `translate_file_writes_bcm4_from_bcmkn` 因 `Disk quota exceeded (os error 122)` 假红一次。
-    修法:基准跑到末尾删掉自己那份目录(或改成 `TempDir` 语义);改完核一次产物 SHA 不受影响。
+14. **已完成(2026-10-05,`be92ee2`)**:测试临时目录不清理 —— `tests/convert_bench.rs` / `convert_facade_bench.rs` /
+    `convert_work_bench.rs` 的 `bench_dir()` 与 crate 内 `translate::unique_test_dir()` 的两处调用
+    (官方 `validateBcm` 校验门、`translate_file_writes_bcm4_from_bcmkn`)每跑一次就在
+    `std::env::temp_dir()` 留一份产物;实测 `/tmp`(tmpfs 1.9 GB)里积了 **46 份基准目录 ≈ 1.5 GB**,
+    把 tmpfs 打满后让**无关测试**假红一次(`translate_file_writes_bcm4_from_bcmkn` 报
+    `Disk quota exceeded (os error 122)`)。修法:各测试跑到末尾 `remove_dir_all`(失败/panic 保留现场);
+    验证:改后连跑基准 + `cargo test --lib`,临时目录零残留(`ls -d /tmp/backend-convert-*`)。
+    例外:`tests/convert_live.rs` 的 `backend-convert-live-*`(固定名、真机测试的调试工作区)不清理,保持原样。
 
 ## 3. 已在案、不做的(不再重开)
 
