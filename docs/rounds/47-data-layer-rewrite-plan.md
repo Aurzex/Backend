@@ -174,6 +174,12 @@
 > | nemo-old-1.5 | 104 | 71 | 1 | 5 | 6.2(18 483 次) | 2.3 MiB | **21 ms** | 20% |
 >
 > ⇒ **反向方向的产物侧占比与正向(Step 2/3 前的 30%)同量级**,所以"对齐同一套写出"在**反向先做**是有依据的(上界约 −20% `e2e`);NEMO 只有 17~20%,预期收益约为其一半。**注意**反向的产物块表是**邻接表形态**(`build_block_data_json` 出 `{blocks, connections}`),不能直接复用 `model::write_block_tree`(那是数组形态),要另写一份字节等价的邻接表写出 + 对应的常驻等价门。
+>
+> **接线时发现的真正障碍(2026-10-05,已实测并回退,留给下一单元)**:
+> 1. **反向写出器本身可行,且已写出+gated 过**(本次会话实现并过了常驻等价门:把 `encode_block` 从"就地 `to_value` + 补 `KITTEN4_DEFAULTS` + 强制 `parent_id`"改成"节点按值搬进 `EncodedBlocks{blocks, connections}`",再按引用直写;门抓到一处真分歧 —— `is_shadow`/`is_output`/`disabled` 同时是 `KITTEN4_DEFAULTS`,键表里恒在,值必须取字段本身而不是"只在真值时入表")。因为接线没完成,该实现**已回退**(不留死代码)。
+> 2. **真正卡住的是装配期那道 `mark_unknown_blocks`**:它把"编辑器不认识的积木"就地改成 `incompatible_block`/`incompatible_output_block` 标记(rounds/34 §4nonies、rounds/38),而它**是在 `Value` 形态上做的**(读 `blocks.<id>.type`/`fields`/`shadows`、用 `connections` 判值位)。流式路径里没有那份 `Value` ⇒ **必须先把它移植到 `EncodedBlocks` 上**(typed 形态其实更好写:type/fields/shadows/mutation 与 connections 都是现成字段),再接线。
+> 3. 因此 Step 4 的**下一单元 = "移植 `mark_unknown_blocks` 到 `EncodedBlocks` + 反向 `ProductDocument` + 接线"**;验收仍是产物 SHA(反向两样本 + `MARKER_BUDGET` 语料门)与同轮 A/B。`KnEntity.tree: BlockTree` 已在装配签名里,`build_kitten4_document` 收 `blocks_by_entity: Vec<(usize, Value)>` —— 接线时这两处一起换成 `EncodedBlocks`。
+
 
 
 风险(评审补充):三端**默认键策略不同**(见 §3.3)⇒ 写出必须**按方向参数化**,不能强行统一;反向 `mark_unknown_blocks` 需要先有整份连接表;NEMO 的 `normalize_integral_numbers` 必须仍在装配之后。反向还有**形状 id 现铸**(见 §5 第 6 条)。
