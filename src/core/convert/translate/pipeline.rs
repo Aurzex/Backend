@@ -850,7 +850,10 @@ where
 // ---------------------------------------------------------------- 临时 id 改写
 
 /// 原地改写一个字符串字段;返回未命中数(见 [`remap_text`])
-fn remap_string(map: &IdRemap, text: &mut String) -> usize {
+///
+/// `pub(super)`:NEMO 方向的"迁移后整份 XML"快照里也会落进临时 id(见 `nemo::convert_nemo_document`
+/// 阶段 3 的注释),那一处同样要走这张表。
+pub(super) fn remap_string(map: &IdRemap, text: &mut String) -> usize {
     if !text.contains(TEMP_ID_PREFIX) {
         return 0;
     }

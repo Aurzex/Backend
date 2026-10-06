@@ -172,10 +172,11 @@ impl TranslateOptions {
         self
     }
 
-    /// 实体级并发(正向;≥1,默认 1):单个作品文档内按实体/程序集并行(方案 25 S3a)。
+    /// 实体级并发(正向与 NEMO;≥1,默认 1):单个作品文档内按实体/程序集并行(方案 25 S3a)。
     ///
-    /// 实现见 [`super::pipeline::convert_kitten4_document`]:每个实体用自己的临时 id,串行阶段按
-    /// 「阶段 1 全项 → 阶段 2 全项」的账本兑现最终 id,所以
+    /// 实现见 [`super::pipeline::convert_kitten4_document`](Kitten4 方向)与
+    /// [`super::nemo::convert_nemo_document`](NEMO 方向,同构的四阶段):每个实体用自己的临时 id,
+    /// 串行阶段按项序的账本兑现最终 id,所以
     ///
     /// - `deterministic_ids(true)`(基准/回归测试口径)下,产物与并发 1 **逐字节相同**
     ///   (也有 `tests/convert_bench.rs` 的 1 vs N 同 SHA256 门);

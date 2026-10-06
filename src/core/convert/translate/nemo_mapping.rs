@@ -7,7 +7,7 @@ use crate::core::convert::shared::XHTML;
 use super::mapping::is_text_placeholder;
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, HashMap};
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 // 来自 src/core/convert/translate/nemo_mapping.rs
 // 体量:**2617 行(含本行)**,超过 `repo-conventions` §5 的 ≈2500 行软上限 —— **intentional,不拆**(rounds/31 §3.5② 已评审执行:表并入本模块、不进生成物文件;rounds/39 §5-C2 复核后维持)。
@@ -110,10 +110,11 @@ pub(super) enum NemoSubject<'a> {
 /// 程序集的形参;这里照抄(只有 `procedures_2_*` 分支会读到,真实作品里不会在演员里出现)。
 #[derive(Debug, Default)]
 pub(super) struct NemoParseContext {
-    /// 程序集字典(键 = [`NemoProcedure::id`])
-    pub procedures: BTreeMap<String, NemoProcedure>,
+    /// 程序集字典(键 = [`NemoProcedure::id`]);`Arc` 让实体级并行的每个工作项只加一次引用计数
+    /// (这两个表在程序集阶段建好后**只读**,见 [`NemoParseContext`] 的文档)
+    pub procedures: Arc<BTreeMap<String, NemoProcedure>>,
     /// 广播 id → 名称(官方 `nemoBcm.broadcast.broadcast_dict` 的 `name`)
-    pub broadcast_names: BTreeMap<String, String>,
+    pub broadcast_names: Arc<BTreeMap<String, String>>,
     /// `broadcast_dict` 是否非空:官方 `getBroadcastMessage` 靠它决定"查不到给 `?`"还是"原样返回"
     pub has_broadcasts: bool,
     pub current_actor: Option<NemoEntity>,
@@ -646,7 +647,7 @@ pub(super) fn nemo_parse_procedures(
         );
         plan.push((entry, params));
     }
-    ctx.procedures = skeleton;
+    ctx.procedures = Arc::new(skeleton);
 
     // ④ 逐个解析 `blocksXML`(官方 `_h(r, …)`)
     let mut out = Vec::with_capacity(plan.len());

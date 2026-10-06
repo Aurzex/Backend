@@ -1,14 +1,16 @@
-use super::model::IdSource;
+use super::model::{IdSource, MintKind};
 use super::nemo_mapping::NEMO_BCM_VERSION;
 use super::nemo_mapping::{
     NemoEntity, NemoParseContext, NemoSubject, PROCEDURE_NORMAL, nemo_parse_procedures,
     translate_nemo_to_kn,
 };
-use super::options::{TranslateError, TranslateOptions};
+use super::options::{TargetEditor, TranslateError, TranslateOptions};
 use super::report::{TranslateReport, TranslateWarning};
 use super::xml::{XmlNode, count_source_elements, parse_fragment};
-use crate::core::convert::shared::{ConvertError, json_obj};
+use crate::core::convert::shared::{ConvertError, EditorType, json_obj};
 use serde_json::{Map, Value, json};
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 // 来自 src/core/convert/translate/nemo.rs
 // NEMO 编辑版 → KN 编辑版(官方 `nemoBcmToNekoBcmUtils`,即 bundle 模块 41888 里的 `gI`)。
@@ -106,14 +108,16 @@ pub(super) fn convert_nemo_document(
         .and_then(Value::as_object)
     {
         ctx.has_broadcasts = !dict.is_empty();
+        let mut names: BTreeMap<String, String> = BTreeMap::new();
         for (id, entry) in dict {
             let name = entry
                 .get("name")
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string();
-            ctx.broadcast_names.insert(id.clone(), name);
+            names.insert(id.clone(), name);
         }
+        ctx.broadcast_names = Arc::new(names);
     }
     let split_option_names = split_option_names(source);
 
@@ -170,95 +174,149 @@ pub(super) fn convert_nemo_document(
         document.insert("procedures".to_string(), json!({}));
     }
 
-    // ── 演员(官方第 4 步;先演员后场景)
+    // ── 演员 + 场景(官方第 4 步;先演员后场景)= 实体级并行的工作项
+    //
+    // 每个工作项只带这个实体需要的输入:源对象(读 `blocksXML`、装配期按它克隆条目)、由 id 与造型
+    // 算出的 `NemoEntity`、是否场景,以及装箱权重(= `blocksXML` 字节数:单实体工作量与它成正比,
+    // 负载分布见 `docs/knowledge/convert-performance.md` §2bis.11)。
+    struct NemoEntityItem<'a> {
+        id: &'a str,
+        source: &'a Map<String, Value>,
+        entity: NemoEntity,
+        is_scene: bool,
+        weight: usize,
+    }
+
     let scenes_order = scenes_order(source);
-    let mut actors = Map::new();
-    if let Some(dict) = source
-        .pointer("/actors/actors_dict")
-        .and_then(Value::as_object)
-    {
-        for (id, actor) in dict {
-            let Some(actor) = actor.as_object() else {
+    let mut items: Vec<NemoEntityItem<'_>> = Vec::new();
+    for (is_scene, container) in [
+        (
+            false,
+            source
+                .pointer("/actors/actors_dict")
+                .and_then(Value::as_object),
+        ),
+        (
+            true,
+            source
+                .pointer("/scenes/scenes_dict")
+                .and_then(Value::as_object),
+        ),
+    ] {
+        let Some(dict) = container else { continue };
+        for (id, value) in dict {
+            let Some(object) = value.as_object() else {
                 continue;
             };
-            let entity = NemoEntity {
-                id: id.clone(),
-                styles: style_ids_value(actor),
-            };
-            let (tree, migrated_xml) = parse_entity(
-                actor,
-                NemoSubject::Entity(&entity),
-                &mut ctx,
-                &mut ids,
-                report,
-                &split_option_names,
-                &scenes_order,
-                qc,
-                yc,
-            );
-            let mut entry = actor.clone();
-            if qc {
-                // 官方 `QC`:角色 rotation 取反(0 / 缺失 / NaN 是 falsy,跳过)
-                if let Some(rotation) = actor.get("rotation").filter(|value| truthy_value(value)) {
-                    let negated = rotation.as_f64().map(|value| number_value(-value));
-                    if let Some(negated) = negated {
-                        entry.insert("rotation".to_string(), negated);
-                    }
-                }
-            }
-            entry.insert(
-                "locked".to_string(),
-                Value::Bool(actor.get("locked").map(truthy_value).unwrap_or(false)),
-            );
-            if let Some(xml) = migrated_xml {
-                entry.insert("blocksXML".to_string(), Value::String(xml));
-            }
-            entry.insert("position".to_string(), position_of(actor));
-            entry.insert("scale".to_string(), floored(actor.get("scale")));
-            insert_if_present(&mut entry, "currentStyleId", actor.get("current_style_id"));
-            entry.insert(
-                "nekoBlockJsonList".to_string(),
-                Value::Array(tree_to_json(&tree, report)),
-            );
-            entry.insert(
-                "workspaceScrollXy".to_string(),
-                json!({ "x": WORKSPACE_SCROLL.0, "y": WORKSPACE_SCROLL.1 }),
-            );
-            report.blocks_converted += tree.count();
-            actors.insert(id.clone(), Value::Object(entry));
+            items.push(NemoEntityItem {
+                id,
+                source: object,
+                entity: NemoEntity {
+                    id: id.clone(),
+                    styles: style_ids_value(object),
+                },
+                is_scene,
+                weight: object
+                    .get("blocksXML")
+                    .and_then(Value::as_str)
+                    .map_or(0, str::len),
+            });
         }
     }
-    document.insert(
-        "actors".to_string(),
-        json_obj([("actorsDict", Value::Object(actors))]),
-    );
+    let weights: Vec<usize> = items.iter().map(|item| item.weight).collect();
+    let workers = super::pipeline::workers(options.entity_workers(), items.len());
+    // 可观测事实:本次转换真的开了几个实体级线程(供基准/单测挡空门,见 `TranslateReport`)
+    report.entity_workers = workers;
 
-    // ── 场景
-    let mut scenes = Map::new();
-    if let Some(dict) = source
-        .pointer("/scenes/scenes_dict")
-        .and_then(Value::as_object)
-    {
-        for (id, scene) in dict {
-            let Some(scene) = scene.as_object() else {
-                continue;
-            };
-            let entity = NemoEntity {
-                id: id.clone(),
-                styles: style_ids_value(scene),
-            };
-            let (tree, migrated_xml) = parse_entity(
-                scene,
-                NemoSubject::Entity(&entity),
-                &mut ctx,
-                &mut ids,
-                report,
-                &split_option_names,
-                &scenes_order,
-                qc,
-                yc,
+    // 实体阶段开始时上下文里"残留"的形参与演员:官方只置不清(见 `NemoParseContext` 的文档),
+    // 并行后每个工作项各持一份上下文,因此先照原值播种,行为与串行逐项跑一致。
+    let carry_actor = ctx.current_actor.clone();
+    let carry_params = ctx.current_params.clone();
+
+    // ── 阶段 1(并行):前置改写 + 解析 + 语义映射(铸造**临时 id**)
+    struct NemoParsed<'a> {
+        item: NemoEntityItem<'a>,
+        tree: super::model::BlockTree,
+        migrated_xml: Option<String>,
+        log: Vec<(String, MintKind)>,
+        report: TranslateReport,
+    }
+    let parsed = super::pipeline::run_items(items, &weights, workers, |index, item| {
+        let mut ids = IdSource::recording(index);
+        let mut local = TranslateReport::new(EditorType::Nemo, TargetEditor::KittenN);
+        // 程序集表与广播字典是 `Arc`:每项只加一次引用计数,不复制表本身
+        let mut ctx = NemoParseContext {
+            procedures: ctx.procedures.clone(),
+            broadcast_names: ctx.broadcast_names.clone(),
+            has_broadcasts: ctx.has_broadcasts,
+            current_actor: carry_actor.clone(),
+            current_params: carry_params.clone(),
+        };
+        let (tree, migrated_xml) = parse_entity(
+            item.source,
+            NemoSubject::Entity(&item.entity),
+            &mut ctx,
+            &mut ids,
+            &mut local,
+            &split_option_names,
+            &scenes_order,
+            qc,
+            yc,
+        );
+        NemoParsed {
+            item,
+            tree,
+            migrated_xml,
+            log: ids.into_log(),
+            report: local,
+        }
+    });
+
+    // ── 阶段 2(串行):临时 id → 最终 id
+    //
+    // 铸造顺序 = 项序(程序集的 id 已在它那一步用真源铸好,排在前面)⇒ 与串行实现逐次铸造一一对应。
+    let mut mints = super::pipeline::IdRemap::new();
+    for parsed_item in &parsed {
+        for (temp, kind) in &parsed_item.log {
+            let previous = mints.insert(temp.clone(), kind.mint(&mut ids));
+            // 临时 id 撞车 = 记录模式给了两个不同的铸造点同一个名字(槽位没错开),表会被后来的
+            // 覆盖,产物 id 静默错位。调试构建直接抓。
+            debug_assert!(
+                previous.is_none(),
+                "临时 id 冲突:{temp:?}(记账槽位在同一份文档里必须唯一)"
             );
-            let mut entry = scene.clone();
+        }
+    }
+
+    // ── 阶段 3(并行):兑现 id + 组装实体条目 + 编码积木表
+    struct NemoEncoded<'a> {
+        item: NemoEntityItem<'a>,
+        entry: Value,
+        nodes: usize,
+        unmatched: usize,
+        parsed_report: TranslateReport,
+        encode_report: TranslateReport,
+    }
+    let encoded = super::pipeline::run_items(parsed, &weights, workers, |_, parsed_item| {
+        let NemoParsed {
+            item,
+            mut tree,
+            mut migrated_xml,
+            log: _,
+            report: parsed_report,
+        } = parsed_item;
+        let (nodes, mut unmatched) = super::pipeline::remap_tree(&mints, &mut tree);
+        // QC 迁移把注入节点的 id 写进了"迁移后的整份 XML"快照(它在本文件里早于 `replace_*`),
+        // 字符串这一处也必须走同一张表,否则临时哨兵会落进产物。
+        if let Some(xml) = &mut migrated_xml {
+            unmatched += super::pipeline::remap_string(&mints, xml);
+        }
+        let id = item.id;
+        let source = item.source;
+        let mut local = TranslateReport::new(EditorType::Nemo, TargetEditor::KittenN);
+        let mut entry = source.clone();
+        if item.is_scene {
+            // ── 场景
             if let Some(xml) = migrated_xml {
                 entry.insert("blocksXML".to_string(), Value::String(xml));
             }
@@ -267,33 +325,99 @@ pub(super) fn convert_nemo_document(
             entry.insert("currentStyleId".to_string(), Value::String(String::new()));
             entry.insert(
                 "nekoBlockJsonList".to_string(),
-                Value::Array(tree_to_json(&tree, report)),
+                Value::Array(tree_to_json(&tree, &mut local)),
             );
             entry.insert(
                 "workspaceScrollXy".to_string(),
                 json!({ "x": WORKSPACE_SCROLL.0, "y": WORKSPACE_SCROLL.1 }),
             );
             entry.insert("name".to_string(), Value::String("背景".to_string()));
-            let index = scenes_order.iter().position(|order| order == id);
+            let index = scenes_order.iter().position(|order| order.as_str() == id);
             entry.insert(
                 "screenName".to_string(),
                 Value::String(format!("屏幕{}", index.map_or(0, |at| at + 1))),
             );
-            if let Some(Value::Array(list)) = scene.get("actors") {
+            if let Some(Value::Array(list)) = source.get("actors") {
                 let mut reversed = list.clone();
                 reversed.reverse();
                 entry.insert("actorIds".to_string(), Value::Array(reversed));
             }
-            if let Some(style) = scene
+            if let Some(style) = source
                 .get("current_style_id")
                 .filter(|value| truthy_value(value))
             {
                 entry.insert("currentStyleId".to_string(), style.clone());
             }
-            report.blocks_converted += tree.count();
-            scenes.insert(id.clone(), Value::Object(entry));
+        } else {
+            // ── 演员
+            if qc {
+                // 官方 `QC`:角色 rotation 取反(0 / 缺失 / NaN 是 falsy,跳过)
+                if let Some(rotation) = source.get("rotation").filter(|value| truthy_value(value)) {
+                    let negated = rotation.as_f64().map(|value| number_value(-value));
+                    if let Some(negated) = negated {
+                        entry.insert("rotation".to_string(), negated);
+                    }
+                }
+            }
+            entry.insert(
+                "locked".to_string(),
+                Value::Bool(source.get("locked").map(truthy_value).unwrap_or(false)),
+            );
+            if let Some(xml) = migrated_xml {
+                entry.insert("blocksXML".to_string(), Value::String(xml));
+            }
+            entry.insert("position".to_string(), position_of(source));
+            entry.insert("scale".to_string(), floored(source.get("scale")));
+            insert_if_present(&mut entry, "currentStyleId", source.get("current_style_id"));
+            entry.insert(
+                "nekoBlockJsonList".to_string(),
+                Value::Array(tree_to_json(&tree, &mut local)),
+            );
+            entry.insert(
+                "workspaceScrollXy".to_string(),
+                json!({ "x": WORKSPACE_SCROLL.0, "y": WORKSPACE_SCROLL.1 }),
+            );
+        }
+        NemoEncoded {
+            item,
+            entry: Value::Object(entry),
+            nodes,
+            unmatched,
+            parsed_report,
+            encode_report: local,
+        }
+    });
+
+    // ── 阶段 4(串行):装两桶 + 按项序并入报告
+    let mut actors = Map::new();
+    let mut scenes = Map::new();
+    let mut unmatched = 0usize;
+    for encoded_item in encoded {
+        let NemoEncoded {
+            item,
+            entry,
+            nodes,
+            unmatched: missed,
+            parsed_report,
+            encode_report,
+        } = encoded_item;
+        unmatched += missed;
+        report.blocks_converted += nodes;
+        // 告警顺序:每项「解析期 → 装配期」,与旧实现逐项 push 的顺序逐条相同
+        unmatched += super::pipeline::merge_report(report, parsed_report, &mints);
+        unmatched += super::pipeline::merge_report(report, encode_report, &mints);
+        if item.is_scene {
+            scenes.insert(item.id.to_string(), entry);
+        } else {
+            actors.insert(item.id.to_string(), entry);
         }
     }
+    // 便宜的兜底:改写后产物里不得残留哨兵(真实 id 不含控制字符 ⇒ 哨兵只可能来自临时 id)
+    debug_assert_eq!(unmatched, 0, "改写后产物里不得残留临时 id 哨兵");
+    document.insert(
+        "actors".to_string(),
+        json_obj([("actorsDict", Value::Object(actors))]),
+    );
     let mut scene_container = Map::new();
     scene_container.insert("scenesDict".to_string(), Value::Object(scenes));
     if !scenes_order.is_empty() {

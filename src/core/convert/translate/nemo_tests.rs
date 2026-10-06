@@ -269,6 +269,14 @@ fn version_migration_rewrites_legacy_documents() {
         "{:?}",
         play["shadows"]["audio_id"]
     );
+    // QC 迁移注入节点的 id 落在了"迁移后的整份 XML"快照里,那一处也必须走同一张 id 改写表;
+    // 否则临时哨兵(控制字符前缀)会落进产物。这条扫整份产物,任何位置残留都抓。
+    assert!(
+        !serde_json::to_string(&qc)
+            .expect("序列化")
+            .contains('\u{1}'),
+        "产物里不得残留临时 id 哨兵"
+    );
 }
 
 /// `actor-1` 的积木列表(测试里多一处复用)
@@ -878,4 +886,51 @@ fn encode_failure_enters_report_instead_of_being_dropped() {
     }
     assert!(report.is_lossy(), "编码失败 = 丢块 ⇒ 必须计入有损");
     assert_eq!(report.blocks_total, 0);
+}
+
+/// 实体级并行的守门门(真作品;缺样本即跳过,与仓库其它夹具测试同约定):
+/// NEMO 方向并发 1 与并发 8 必须**逐字节相同**,且并发 8 那一次必须**真的**开了多线程
+/// (否则"1 vs 8 相同"只是串行 vs 串行 —— 方案 25 §9 的空门口径)。
+#[test]
+fn nemo_entity_parallelism_is_byte_identical_and_really_parallel() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+        "download/compile/蛋仔派对2-奥姆返场新盲盒生存赛重做_194684070/user_works/194684070/194684070.bcm",
+    );
+    if !path.exists() {
+        super::missing_fixture(&format!("真作品样本 {}", path.display()));
+        return;
+    }
+    let text = std::fs::read_to_string(&path).expect("读取样本");
+    let source: Value = serde_json::from_str(&text).expect("样本应是明文编辑版 JSON");
+
+    let convert_at = |concurrency: usize| {
+        let options = TranslateOptions::new()
+            .deterministic_ids(true)
+            .entity_concurrency(concurrency)
+            .source_version("0.16.2");
+        let outcome = translate_value(source.clone(), TargetEditor::KittenN, &options)
+            .expect("NEMO → KN 转化");
+        (
+            serde_json::to_string(&outcome.document).expect("序列化产物"),
+            outcome.report,
+        )
+    };
+
+    let (serial, serial_report) = convert_at(1);
+    let (parallel, parallel_report) = convert_at(8);
+    assert_eq!(serial_report.entity_workers, 1, "并发 1 不应开工作线程");
+    // 该样本有 847 个演员 + 38 个场景,实体数远大于核数 ⇒ "没开线程"只可能是空门
+    // (把可用核数折成 1 的环境里只报事实,不判失败)
+    let available = std::thread::available_parallelism().map_or(1, |n| n.get());
+    if available >= 2 {
+        assert!(
+            parallel_report.entity_workers > 1,
+            "请求并发 8 应真的并行(可用核数 {available})"
+        );
+    }
+    assert_eq!(serial, parallel, "NEMO 实体级并行必须与并发 1 逐字节相同");
+    assert!(
+        !serial.contains('\u{1}'),
+        "产物里不得残留临时 id 哨兵(临时 id 方案见 model::TEMP_ID_PREFIX)"
+    );
 }
