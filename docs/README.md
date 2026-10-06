@@ -31,12 +31,12 @@
 
 ## 历史记录 [`rounds/`](rounds/)(过程)
 
-`rounds/01-websocket-pitfalls.md` … `rounds/48-nemo-entity-parallelism.md` —— 每轮一份的方案/评审/整改记录。
-**入口先看 [`rounds/README.md`](rounds/README.md)**(28–47 轮的索引 + "该看哪几篇"),再看本篇。
+`rounds/01-websocket-pitfalls.md` … `rounds/49-nemo-product-streaming.md` —— 每轮一份的方案/评审/整改记录。
+**入口先看 [`rounds/README.md`](rounds/README.md)**(28–49 轮的索引 + "该看哪几篇"),再看本篇。
 价值在**证据链**(真机实测、抓包、官方 bundle 逆向、逐条评审),以及"为什么当初这么决定"。
 读它们时先看 [`knowledge/errata.md`](knowledge/errata.md):早期文档里的文件名/类型名/行号多数已经漂移。
 
-**文件分布**:知识库 [`knowledge/`](knowledge/)、目标库 [`goals/`](goals/)、轮次记录 `rounds/01`–`rounds/48`(每轮一篇,40 号已合并为单篇,另设本目录索引 `README.md`;第 38–40 轮为转换域的近期工作,第 41–46 轮为工程与公共面收尾,第 47 轮为在案的数据表示层重写方案,第 48 轮为 NEMO 方向的实体级并行)。
+**文件分布**:知识库 [`knowledge/`](knowledge/)、目标库 [`goals/`](goals/)、轮次记录 `rounds/01`–`rounds/49`(每轮一篇,40 号已合并为单篇,另设本目录索引 `README.md`;第 38–40 轮为转换域的近期工作,第 41–46 轮为工程与公共面收尾,第 47 轮为数据表示层重写方案(其 NEMO 两行的落地见第 49 轮),第 48 轮为 NEMO 方向的实体级并行,第 49 轮为 NEMO 产物侧流式写出)。
 
 > **读老轮次前先做的两件事**:1)  查 [`knowledge/errata.md`](knowledge/errata.md)(它集中列出已过时/写错的表述及正确值,
 > 含"第三十三至三十六轮的结论变更"一节);2)  转换相关的问题先读 [`knowledge/convert-semantics.md`](knowledge/convert-semantics.md) 的

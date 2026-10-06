@@ -39,7 +39,13 @@
 Kitten 与 KN 之间的转换方案与落地(20–21)、NEMO 路线(22–24)、性能(25–26)、NEMO 转 KN(27)。
 **路径/类型名多数已漂移**,以 `../knowledge/` 与 `../knowledge/errata.md` 为准。
 
-## 最新落地(48)
+## 最新落地(49)
+
+| 轮次 | 一句话 | 状态 |
+| --- | --- | --- |
+| [49](49-nemo-product-streaming.md) | **NEMO 产物侧流式写出**:NEMO → KN 的文件入口复用正向那套 `assembly::ProductDocument`(按"块表 `shield` 补键口径"参数化),三处 `nekoBlockJsonList` 不再建整份 `Value`;数字归一改成"非块表部分照旧 + 块表在 typed 树上就地归一" | **已落地**(同轮 A/B:NEMO 两样本分配 −14.2% / −14.3%、`core` 各 −18%;产物 SHA256 与 `#meta` 全绿;`nemo-old-1.5MB` 三行硬指标全达标,读数见该文 §4/§5) |
+
+## 更早的落地(48)
 
 | 轮次 | 一句话 | 状态 |
 | --- | --- | --- |
@@ -49,7 +55,7 @@ Kitten 与 KN 之间的转换方案与落地(20–21)、NEMO 路线(22–24)、�
 
 | 轮次 | 一句话 | 状态 |
 | --- | --- | --- |
-| [47](47-data-layer-rewrite-plan.md) | **数据表示层重写**:减少中间 `serde_json::Value` 的物化(Step 1 去 `json!` 深拷贝 · Step 2 流式写出 · Step 3 块树直写 · Step 4 反向/NEMO 对齐 · Step 5 源侧骨架)· 含硬指标、验收矩阵、评审与修订 | **Step 1、Step 2+3、Step 4(反向)、Step 5 已落地**(正向 + 反向四行达标);Step 5b 经复核不立项;NEMO 两行未做 |
+| [47](47-data-layer-rewrite-plan.md) | **数据表示层重写**:减少中间 `serde_json::Value` 的物化(Step 1 去 `json!` 深拷贝 · Step 2 流式写出 · Step 3 块树直写 · Step 4 反向/NEMO 对齐 · Step 5 源侧骨架)· 含硬指标、验收矩阵、评审与修订 | **六行硬指标里的 NEMO 两行由 `49` 接手落地**(产物侧流式写出,机制见 `49` §2);Step 1、Step 2+3、Step 4(反向)、Step 5 已落地;Step 5b 经复核不立项 |
 
 ## 转换域"该看哪几篇"
 
