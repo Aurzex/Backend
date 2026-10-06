@@ -346,7 +346,7 @@ W10 落地(`66c0b6b`)后,**"内联对象形态影子即拒收该作品"这条老
 | --- | --- | --- |
 | rounds/34 §1、§2 | `A28社区-开幕_174408420.bcm4` 报 `invalid type: map, expected a string` =>「**前置拦截**,报"内联影子是对象形态…暂不支持该作品"」,并把"支持对象形态影子"**列入待做**;§2 记"实测 **21/22** 件正向吃得下(Kitten3 一件、对象影子一件按形态跳过)" | **待做已做**(W10,`66c0b6b`):正向入口把对象影子就地改写成平台同款影子 XML,**不再拒收**。该件转换成功(源积木 6029 / 告警 19 / `validateBcm` = VALID),该语料 **`[跳过]` 归零**;Kitten2/3(`.bcm` + `blocksXML`)仍按形态守卫跳过。见 `../rounds/39` §W10 落地段、`convert-semantics.md` §3 |
 | rounds/33 §1 表 1)  | 上传格式(`download/compile/*.bcm4`)=> 正向「**报错** `invalid type: map, expected a string`」 | **不再成立**:那条报错的根因正是对象形态影子,已由 `66c0b6b` 容错 |
-| rounds/17(错误收敛一节第 2 条) | 「保留 `Crypto`/`Decompile`/**`UnsupportedType`**/`InvalidResponse`/…(反编译专属变体)」 | **`UnsupportedType` 已不存在**:它是全仓零调用点的死变体,已于 `fef30e7`(2026-10-02,W52) )删除(破坏性公共面变更、已授权);其它变体未动。见 `../rounds/39` §W52) 、`repo-conventions.md` §4 |
+| rounds/17(错误收敛一节第 2 条) | 「保留 `Crypto`/`Decompile`/**`UnsupportedType`**/`InvalidResponse`/…(反编译专属变体)」 | **`UnsupportedType` 已不存在**:它是全仓零调用点的死变体,已于 `fef30e7`(2026-10-02,`../rounds/39` §W52)删除(破坏性公共面变更、已授权);其它变体未动。另见 `repo-conventions.md` §4 |
 
 ## 第三十一轮 §3.6 N4 的"同一约定"结论(2026-10-02 核实)
 
@@ -372,7 +372,7 @@ NEMO 产物侧流式写出(`../rounds/49-nemo-product-streaming.md`)把块表写
 | 出处 | 已过时的表述 | 正确值 / 证据 |
 | --- | --- | --- |
 | rounds/47 §4 Step 5、`../knowledge/convert-performance.md` §2bis.8 | 骨架路径写作"读 `theatre.{scenes,actors}.*.block_data_json`"(像是它唯一的形状) | 该实现已参数化为 `source::SourceShape`(`Kitten4Shape` / `KnShape`),`source::parse` 是 Kitten4 那一支;反向新增 `source::parse_kn`(摘 `{actors.actorsDict,scenes.scenesDict,procedures.proceduresDict}.*.nekoBlockJsonList`)。旁表键仍是 `(容器, 实体 id)`,Kitten4 的键集**逐字未变** |
-| rounds/49 §7 | "**未做**:反向(KN → Kitten4)的源侧骨架……" | **已做**(2026-10-06,`../rounds/50`):`kn-9.4MB` 分配 602 799 → **442 291(−26.6%)**、`kn-3.7MB` 141 085 → **108 224(−23.3%)**,正向逐位不变 |
+| rounds/49 §7 | "**未做**:反向(KN → Kitten4)的源侧骨架……" | **已完成**(2026-10-06,`845b2c2`);读数见 `../knowledge/convert-performance.md` §2bis.14 |
 | rounds/37 P2 注、`pipeline` 的克隆循环注释 | "实体对象里最大的键是 `nekoBlockJsonList`(上一步已解析成 `tree`),克隆时跳过" | 对骨架路径这句要读成"源文档里**已经没有**这个键"(它被摘进旁表)⇒ 跳过循环同样成立,但省下的那份深拷在骨架路径下**根本不存在** |
 
 ## 第五十一轮实施期间的口径变更(2026-10-06)
@@ -381,10 +381,10 @@ NEMO 产物侧流式写出(`../rounds/49-nemo-product-streaming.md`)把块表写
 
 | 出处 | 已过时的表述 | 正确值 / 证据 |
 | --- | --- | --- |
-| rounds/25 §9、rounds/48 §4/§6、rounds/49 §7、`../knowledge/convert-performance.md` §2bis.12 | "`entity_concurrency` 默认 1(由使用者显式传入)"、"是否对大作品自动开仍待决" | **已改**(`../rounds/51`):默认 = **自动**,作品够大才开(阈值 1 000 条源积木 / 400 KB 块表原文,一次性探针夹逼);显式给值仍是固定值,`0` 与 `1` 都等于强制串行;`../goals/convert-backlog.md` §1 的待决项结案 |
+| rounds/25 §9、rounds/48 §4/§6、rounds/49 §7、`../knowledge/convert-performance.md` §2bis.12 | "`entity_concurrency` 默认 1(由使用者显式传入)"、"是否对大作品自动开仍待决" | **已改**(`../rounds/51`):默认 = **自动**,作品够大才开(阈值的数值、夹逼读数与判据只在 `../knowledge/convert-performance.md` §2bis.16 展开);显式给值仍是固定值,`0` 与 `1` 都等于强制串行;`../goals/convert-backlog.md` §1 的待决项结案 |
 | `report::entity_workers` 的文档与 `pipeline::workers` 的调用点 | "= `min(entity_concurrency, 工作项数, 可用核数)`" | 取值改由 `pipeline::entity_workers(plan, items, Σweight, unit)` 解析(`Auto` 先判阈值,`Fixed` 才直接用);字段语义(实际开了几个线程)不变 |
 
-## 第五十一轮实施期间的文档测绘(2026-10-06)
+## 第五十二轮的三库复核(2026-10-06)
 
 2026-10-06 的 `docs-tidy` 复核按测绘顺序做了一次三库核对(live 文档的漂移已直接修,见该轮提交)。测绘同时报了**历史轮次正文**里的三处缺陷 —— 按"轮次记录不改写、勘误集中在本篇"的约定,只在此登记:
 

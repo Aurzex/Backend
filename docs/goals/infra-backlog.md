@@ -28,7 +28,7 @@
 
 ## 2. 小改(机械、低风险,可批量做)
 
-1. ~~`ConvertError`(当时的 `DecompilerError`)自带 `Io/Json/Http` 与 `MewError` 重复,改为包装~~ —— **已不成立(2026-10-01 核实)**:`ConvertError` 已无 `Io`/`Json`/`Http` 变体,`io::Error`/`serde_json::Error` 经 `From` 折进 `Mew`(与 `ProcessorError`/`DataQueryError` 同处置);残留的死变体 `UnsupportedType` **已于 2026-10-02 删除**(`fef30e7`,公共面破坏性变更、已授权;见 `./pending-decisions.md`「已决」的 2026-10-02 移入记录、`../rounds/39` §W52) ),本项**已清零**。
+1. ~~`ConvertError`(当时的 `DecompilerError`)自带 `Io/Json/Http` 与 `MewError` 重复,改为包装~~ —— **已不成立(2026-10-01 核实)**:`ConvertError` 已无 `Io`/`Json`/`Http` 变体,`io::Error`/`serde_json::Error` 经 `From` 折进 `Mew`(与 `ProcessorError`/`DataQueryError` 同处置);残留的死变体 `UnsupportedType` **已于 2026-10-02 删除**(`fef30e7`,公共面破坏性变更、已授权;见 `./pending-decisions.md`「已决」的 2026-10-02 移入记录、`../rounds/39` §W52),本项**已清零**。
 2. **已完成(2026-10-02,`cbb167a`)**:非锁裸 `unwrap` 硬化 —— **重新枚举后真实 50 处**(生产 **10** / `cfg(test)` **40**),**硬化 49、按约定保留 1**。
    - **旧计数「49 处」不可复现**:它点名的四族(`auth.rs::time_difference`、`registry.rs` 的 `active.as_mut().unwrap()`、`compiler.rs`(已并入 `core/convert/`)的 `template.unwrap()` 与 10 处 `write!(String).unwrap()`)在本树**已全部不存在**(时差缓存改 `Option` 判定、`active.as_mut()` 已是 `let Some(…) else`、`write!` 现均写作 `let _ = write!(…)`)。
    - **旧口径的坑**:`grep '\.unwrap()' | grep -v 'lock()\.unwrap()'` 会**漏掉跨行书写的 `lock()` 换行后接 `.unwrap()` 的链**、把大量锁的解锁误计为非锁,导致数字虚高且不可复现。正确口径要把 `.unwrap()` 的**接收者跨行回溯**,排除 `.lock()/.read()/.write()`。

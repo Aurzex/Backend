@@ -12,10 +12,10 @@
 | 云存储事件帧是否容忍**无空格** `42[…]` **已完成(2026-10-03 实测;`c5bbb13`)**:`parse_frame` 的实现使两种写法都接受,无需改动 | 原计划:现实现无空格且工作正常,但 `../rounds/01` 坑 5 要求"统一带空格",故以真机为准定论(不要盲改) | `../rounds/01` 坑 5;判定见 `../rounds/43` §2 |
 | WS 连接行为 **已完成(2026-10-03 实测;`c5bbb13`)**:并发 `connect` 串行化成立;`close` 的事件序列与"无虚假 `Error`"的结论见 `../knowledge/platform-and-protocol.md` §5 | 原计划:并发 `connect` 串行化、断连**不发虚假 `Error`** 需真实 WS 服务人工验证 | `../rounds/04` Phase 4;证据见 `../rounds/43` §2 |
 
-## 2. 已核验(先前怀疑的"证据不足"已消;逐条状态见下表)
+## 2. 已核验(先前怀疑的"证据不足"已消;逐条状态见下)
 
-1.  **已完成(核对;早已办妥)**:`fetch_organization_ids` 的绝对 URL 调用点只有一处且传 `None` —— `src/api/education.rs` 的 `build_request(..., None)`;全仓绝对 URL 调用点均为 `None`(`../rounds/13` §P3-5)。
-2.  **已完成(核对;早已办妥)**:`fetch_7day_hot_posts_iter`(`src/api/forum.rs`)端点固定为 `"/web/forums/boards/posts/7dayHot"`,`board_id` 走 `with_iter_param`(`../rounds/13` §P3-6)。
+1.  **已完成(2026-10-03 核实;出处见右列)**:`fetch_organization_ids` 的绝对 URL 调用点只有一处且传 `None` —— `src/api/education.rs` 的 `build_request(..., None)`;全仓绝对 URL 调用点均为 `None`(`../rounds/13` §P3-5)。
+2.  **已完成(2026-10-03 核实;出处见右列)**:`fetch_7day_hot_posts_iter`(`src/api/forum.rs`)端点固定为 `"/web/forums/boards/posts/7dayHot"`,`board_id` 走 `with_iter_param`(`../rounds/13` §P3-6)。
 3.  **已完成(`60d5358`)**:`src/core/converse.rs` 补注释「chat 事件无字符串化载荷,刻意不二次解析(与 cloudvar 不同),勿改」(`../rounds/11` §P4-3),零行为改动。
 
 ## 3. 待方案 + 评审(已完成项与剩余项见下表)
@@ -31,7 +31,7 @@
 ## 4. P2 性能小项(择机清)
 
 1. **已完成(2026-10-03)**:`requests.rs` 的 Bearer 头不再逐请求构造 —— 身份槽在 `set_token` 时预计算 `"Bearer {token}"`(`IdentitySlot`),`AuthProvider::auth_header` 改为返回 `Option<(&'static str, Arc<str>)>`,请求路径只做一次引用计数克隆(内置实现全部覆写;trait 默认实现保留给外部实现者)。见 `../rounds/45`。
-2. **判不做(已核实,2026-10-03)**:`PaginatedIter::build_params` 的克隆要真正省掉,必须让 `MewRequestBuilder::with_params` 改收 `&[(String, String)]`(公共面破坏)或把整条链改成 `&mut self`——而 `with_params` 按值消费 `Vec` 的现状下,`&mut self` 也省不掉克隆;`base_params` 通常只有个位数条目 ⇒ **收益 < 改动面**,不立项。
+2. **判不做(已核实,2026-10-03)**:`PaginatedIter::build_params` 的克隆要真正省掉,必须让 `MewRequestBuilder::with_params` 改收 `&[(String, String)]`(公共面破坏)或把整条链改成 `&mut self`——而 `with_params` 按值消费 `Vec` 的现状下,`&mut self` 也省不掉克隆;`base_params` 通常只有个位数条目 ⇒ **收益 < 改动面**,判不做。
 3. **已完成(2026-10-03)**:`cloudvar.rs` 的 flush 循环不再固定 `sleep(100 ms)` 轮询 —— 入队走新增的 `flush_pending` 标记 + `Notify::notify_with` 按需唤醒,`flush_loop` 用 `wait_flag(.., flush_interval, ..)` 等待;**保留超时兜底**(断线回退的批次仍会定期重试),标记在 `commands` 锁内清除以消除丢失唤醒窗口。见 `../rounds/45`。
 
 > 本节条目一律**按符号定位**(不写 `文件:行`);原始行号见 `../rounds/29` §3。

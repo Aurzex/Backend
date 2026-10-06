@@ -1,6 +1,6 @@
 # 转换与反编译性能(实测基线)
 
-> 知识库条目:**已经量到的数字、瓶颈归因、已落地优化及其收益、判定不做的项**。
+> 知识库条目:**已经量到的数字、瓶颈归因、已完成优化及其收益、判定不做的项**。
 > 方案与执行记录见 `../rounds/22-*`(NEMO 反编译)、`../rounds/23-*`(转换总体)、`../rounds/25-*`(实体级并行)、`../rounds/29-*`(扫描台账)。
 
 ## 1. 基线(实测)
@@ -16,7 +16,7 @@
 | 转换(官方 JS 同输入参照) | 355 ms(Node) | — |
 | 资源删除(批量) | 7.9s | **5.3s**(并行 delete) |
 
-> KN 行的**机制待核验**(2026-10-05 复核):`46s` 这个读数的测量方法与日志**不在仓内**(`git log -S'46 s'` 在 `docs/` 零命中,该行由三库重构时写就),原先附的"模式分派"因此**没有证据支撑**。可核验的部分:当时与现在的 KN 路径形状相同 —— 详情 GET -> 取 `source_urls[0]` -> GET -> reversed-base64 + AES-256-GCM 解密 -> 一次 `serde_json::from_str` -> 落盘(对照 `338fb8f^:src/core/decoders.rs` 的 `NekoFetcher`/`NekoDecompiler` 与今 `src/core/convert/decompile/editors.rs::NekoDecompiler`),即 KN 的**反编译本体从来不是 CPU 热点**。`[INFERENCE]` 46s 更可能出在当时的请求侧(每次取件重建 `CloudAuthenticator` 白付一次串行 `currentTime` RTT,见 `../rounds/29` 第 2 条;该条已改为进程级缓存)。坐实办法:今日按同一作品复量(`cargo test --test compile_live`),旧值需翻回旧提交再量。
+> KN 行的**机制待核验**(2026-10-05 复核):`46s` 这个读数的测量方法与日志**不在仓内**(`git log -S'46 s'` 在 `docs/` 零命中,该行由三库重构时写就),原先附的"模式分派"因此**没有证据支撑**。可核验的部分:当时与现在的 KN 路径形状相同 —— 先取详情、再取 `source_urls[0]`、再 GET 到 `reversed-base64` 载荷并做 AES-256-GCM 解密、最后一次 `serde_json::from_str` 后落盘(对照 `338fb8f^:src/core/decoders.rs` 的 `NekoFetcher`/`NekoDecompiler` 与今 `src/core/convert/decompile/editors.rs::NekoDecompiler`),即 KN 的**反编译本体从来不是 CPU 热点**。`[INFERENCE]` 46s 更可能出在当时的请求侧(每次取件重建 `CloudAuthenticator` 白付一次串行 `currentTime` RTT,见 `../rounds/29` 第 2 条;该条已改为进程级缓存)。坐实办法:今日按同一作品复量(`cargo test --test compile_live`),旧值需翻回旧提交再量。
 
 ## 2. 瓶颈归因(按证据)
 
@@ -26,7 +26,7 @@
    | --- | --- | --- | --- | --- |
    | 耗时 | 402 s | 103 s | **92 s** | 127 s + **CDN 限流丢 2 个文件** |
 
-   故最优区间为 8–16。下载是 I/O 密集,**不能用 `available_parallelism` 折算**(低核机器会折到近串行、高核机器会放宽到限流区)。本库把"作品级 × 单作品资源级"总线程**封顶 16**(常量 `RESOURCE_DOWNLOAD_BUDGET`)。
+   由该曲线得到最优区间为 8–16。下载是 I/O 密集,**不能用 `available_parallelism` 折算**(低核机器会折到近串行、高核机器会放宽到限流区)。本库把"作品级 × 单作品资源级"总线程**封顶 16**(常量 `RESOURCE_DOWNLOAD_BUDGET`)。
 2. **`locate_resource` 在 hot path 上占比最大**(转换剖析里约 2/3)。
 3. **NEMO 逐条 XML 解析**:3.5 MB 在 Node 下要 4–5 分钟(逐条 `DOMParser`);Rust 侧按"单文件秒级"设计。
 4. **整份文档 JSON 三进三出**:`translate_file` 先 `read_to_string + from_str`,产物再 `to_string + write`;`translate_work` 还多一轮"先落盘再读回"。
@@ -102,7 +102,7 @@
 
 ### 2bis.6 构建档位:`opt-level` 的代价(2026-10-05 实测;**已采纳,发布档改为 3**)
 
-> **结论已落地(2026-10-05,用户拍板)**:`[profile.release]` 的 `opt-level` 由 `"z"` 改为 `3`(`Cargo.toml`);
+> **结论已完成(2026-10-05,用户拍板;`ea7e8c9`)**:`[profile.release]` 的 `opt-level` 由 `"z"` 改为 `3`(`Cargo.toml`);
 > 该档只作用于**本仓作为顶层**的构建,下游 rlib 消费者仍用自己的档,因此不构成本库的对外变更。
 > `bench_perf` 档保持自身设置不变(关 LTO、`unwind`),历史读数可比。
 
@@ -154,7 +154,7 @@
 
 1. **`#[serde(flatten)]` 是本域最大的单点税**:同一形状的强类型结构与手写 `Deserialize`(未知键直接进 `Map`)相比,`flatten` 版多 12% 分配、14% 时间、54% 分配字节。原因是派生实现必须把**整个结构**先缓冲成 `Content` 再逐字段转换(`FlatMapDeserializer` 口径)——`BlockJson` 在 `flatten extra: Map<String, Value>` 上正好踩中。凡是要对源/产物积木做"强类型解析"的地方,这条都成立。
    **引用本条时必须带上端到端尺度**:这一点换算到整条流水线只有约 −5% 分配,低于同轮 A/B 的可测门 —— 2026-09-26 已按此规模试过并回退(`../rounds/37` §10.6,P6:去 `flatten` + 手写 `from_value`/`to_value`,产物逐字节等价、三轮交替量不到收益),2026-10-05 的探针不翻该结论。要真吃这一块,须与"少建中间 `Value` 树"的大改同批做并自带 A/B。
-2. **"省掉 `Value` 中间树"≠"省掉整份成本"**:`bdj` 直接流式强类型解析(596 110 次)比先建 `Value`(532 116 次)还贵 —— 中间树省掉的那一趟,被"文本 → 强类型"的流式解析又付了一遍(同一份 `flatten` 税)。**Step 5 的净收益来自省掉 `Value → BlockJson` 的 `from_value` 那一趟**(实测约 −209 700 次分配),不是省掉 `Value` 本身。故 Step 5 之后再继续"绕开 `Value`"已无剩余空间;剩下的那一处(`flatten`)按其附注不立项。
+2. **"省掉 `Value` 中间树"≠"省掉整份成本"**:`bdj` 直接流式强类型解析(596 110 次)比先建 `Value`(532 116 次)还贵 —— 中间树省掉的那一趟,被"文本 → 强类型"的流式解析又付了一遍(同一份 `flatten` 税)。**Step 5 的净收益来自省掉 `Value → BlockJson` 的 `from_value` 那一趟**(实测约 −209 700 次分配),不是省掉 `Value` 本身。故 Step 5 之后再继续"绕开 `Value`"已无剩余空间;剩下的那一处(`flatten`)按其附注判不做。
 3. **原文捕获本身很便宜,但骨架必须手写 `Deserialize` 才拿得到这个数**:捕获 9.1 MiB `bdj` 原文只花 454 次分配 / 9.9 MiB 字节(≈一次 9.9 MiB 复制);而探针里带 `#[serde(flatten)] rest: Map<String, Value>` 的骨架版要 29 302 次分配 —— `flatten` 会把整份文档重新缓冲一遍,等于把刚省下的中间树又建回来(故上表前两行不可直接相减,差异里含 `flatten` 那一项)。落地实现(`translate/source.rs`)因此对"文档/theatre/实体"三层各写一个流式 `Visitor`。
 
 **隐藏契约(必须遵守)**:`RawValue` 只做**解析入口**,绝不透传进产物 —— 源语料不是紧凑 JSON(实测 `download/compile/k4edit/174408420-0.bcm4` 含 14 580 个空白字符),透传会改产物字节;产物一律由同一套序列化器重新写出。另:`Box<RawValue>` 只能在 `serde_json::from_str` 这类**文本**反序列化器上捕获;对 `Value` 反序列化它时 serde_json 会走 `OwnedRawDeserializer { raw_value: Some(self.to_string()) }`(先把子树重新序列化成 `String`),此时待省的 `Value` 早已建好,净收益为零。
@@ -194,8 +194,8 @@
 
 **三条结论**(与 §2bis.9 同族,但反向的产物形态不同):
 
-1. **"同一套做法"要按产物形态各写一份**:反向的块表是**邻接表**(`{blocks, connections}`)而不是数组,默认键策略也不同(Kitten4 每块补 12 个缺省键、`parent_id` 强制、`shield` 不恒写)⇒ 复用不了正向的写出器;但**方法论完全可复用**(快照现状 → 按引用直写 → 常驻字节等价门 → SHA 门 → 同轮 A/B),2026-10-05 的两次都一次到位。
-2. **流式化的真正障碍往往是"夹在中间的那道 `Value` 改造"**:本步卡住的不是写出器,而是装配期的 `mark_unknown_blocks`(把编辑器不认识的积木改成 `incompatible_*` 标记)——它在 `Value` 上做,而流式路径没有那份 `Value`。移植到 typed 形态后反而更直白(kind/fields/shadows/mutation 与 connections 都是现成字段),但**必须逐条对齐旧口径的时序**:旧流程是"先补缺省键 → 再由标记删掉 `fields`/`shadows`",移植版若照抄"标记块也补缺省",产物就多出两个空键 —— 这条由常驻等价门当场抓出(单测红),否则会一路走到 SHA 门才发现。
+1. **"同一套做法"要按产物形态各写一份**:反向的块表是**邻接表**(`{blocks, connections}`)而不是数组,默认键策略也不同(Kitten4 每块补 12 个缺省键、`parent_id` 强制、`shield` 不恒写)⇒ 复用不了正向的写出器;但**方法论完全可复用**(快照现状、按引用直写、常驻字节等价门、SHA 门、同轮 A/B),2026-10-05 的两次都一次到位。
+2. **流式化的真正障碍往往是"夹在中间的那道 `Value` 改造"**:本步卡住的不是写出器,而是装配期的 `mark_unknown_blocks`(把编辑器不认识的积木改成 `incompatible_*` 标记)——它在 `Value` 上做,而流式路径没有那份 `Value`。移植到 typed 形态后反而更直白(kind/fields/shadows/mutation 与 connections 都是现成字段),但**必须逐条对齐旧口径的时序**:旧流程是"先补缺省键,再由标记删掉 `fields`/`shadows`",移植版若照抄"标记块也补缺省",产物就多出两个空键 —— 这条由常驻等价门当场抓出(单测红),否则会一路走到 SHA 门才发现。
 3. **共用一个变换是硬要求**:移植后 `mark_unknown_blocks_encoded` 是内存路径与文件路径**唯一**的实现(旧 `Value` 版已删),不存在"两条路径对同一输入行为不同"的分叉。
 
 ### 2bis.11 NEMO 侧符号级剖面(2026-10-05;`rounds/37` §4 P9「去重复解析」据此判不做)
@@ -316,7 +316,7 @@ perf report --stdio -i /tmp/bench.perf --no-children --sort symbol -g none
 
 1. **省掉的是"整份源文档的 `Value` 中间树"**:反向的块表(三处 `nekoBlockJsonList`)在源文档里占比高于 Kitten4 的
    `block_data_json`,所以同法收益更大(−26.6% / −23.3% 对正向 Step 5 的 −13.6%)。**判据是"这份字段在源文档里有多大"**。
-2. **"文档形状参数化"是可复用做法**:两个方向的骨架路径**同深**(文档 → 段 → 字典 → 实体 → 叶子键),只是键名不同 ⇒
+2. **"文档形状参数化"是可复用做法**:两个方向的骨架路径**同深**(依次为文档、段、字典、实体、叶子键),只是键名不同 ⇒
    键名提成编译期挂点表(`SourceShape { TARGETS, LEAF }` + `PhantomData`),三层 `Visitor` 一份实现两个形状,
    不必写第二套解析、也不需要 `DeserializeSeed` 样板。前提是"段名/字典名在同一形状内唯一"。
 3. **`core` 在该步会"涨",那是口径漂移不是变慢**:`report.elapsed_ms` 自管线入口起算,而骨架路径把块表的 JSON 解析
@@ -339,7 +339,7 @@ perf report --stdio -i /tmp/bench.perf --no-children --sort symbol -g none
 3. **时间收益此前两次同轮 A/B 都量不到**(`../rounds/37` §10.6:逐字节等价、三轮交替零收益 ⇒ 回退;
    `../rounds/47` §4 Step 5b 复核同一结论)。
 
-⇒ 判定维持"不立项"。**重开条件(正面口径)**:出现"分配成为一等指标 **且** 需要 5% 级削减"的新前提,
+⇒ 判定维持"判不做"。**重开条件(正面口径)**:出现"分配成为一等指标 **且** 需要 5% 级削减"的新前提,
 且届时"单点 −12% 摊到流水线"的换算仍成立 —— 按本篇 §5 的基准纪律,先探针、再同轮 A/B。
 
 ### 2bis.16 实体级并发"默认自动"的阈值标定(2026-10-06,`0ead279`,`../rounds/51-entity-concurrency-auto.md`)
@@ -368,7 +368,7 @@ perf report --stdio -i /tmp/bench.perf --no-children --sort symbol -g none
 4. **代价仍要记账**:NEMO 侧并行使分配 +13.9%(§2bis.12);"自动"只是把这笔代价收窄到"够大的作品",
    2026-10-06 按**时间收益**开(1.2–1.5×),没有做新的分配规避。
 
-## 3. 已落地的优化(都有数字)
+## 3. 已完成的优化(都有数字)
 
 | 优化 | 做法 | 收益 |
 | --- | --- | --- |
@@ -387,15 +387,15 @@ perf report --stdio -i /tmp/bench.perf --no-children --sort symbol -g none
 | **源侧骨架(反向)** | `source.rs` 按**文档形状**参数化(Kitten4 / KittenN 共用一套三层 `Visitor`;键名是编译期挂点表),反向的三处 `nekoBlockJsonList` 留原文直喂 `model::parse_kn_entity_typed`;定义体解析拆出"树来源由调用方给"的入口;形态不合在**实体粒度**回落 `Value` | kn-9.4MB:分配 602 799 → **442 291(−26.6%)**、分配 MiB 141.0 → 124.9;kn-3.7MB:分配 141 085 → **108 224(−23.3%)**;正向两样本分配逐位不变(−1 且可解释),**产物 SHA256 与 `#meta` 全绿**;读数与结论见 §2bis.14 与 `../rounds/50-kn-source-skeleton.md` |
 | **实体级并发默认自动** | `EntityConcurrency::{Auto, Fixed}`;"够大" = `Σ权重 ≥ 阈值`(条数 1 000 / 字节 400 KB);显式给值即固定(0 与 1 都是串行);批量折算对"自动"只压低核数预算、不动阈值判断 | 阈值由一次性探针夹逼(**1 491 条起 `e2e` 1.30–1.51×**;374 条测不到收益,但那档 `core` 只有 6 ms 属量级问题)⇒ 小作品默认串行、大作品默认并行;产物 SHA256 与"1 vs 8 同 SHA256"门不变;读数与结论见 §2bis.16 与 `../rounds/51-entity-concurrency-auto.md` |
 
-## 4. 判定**不做**(有证据)
+## 4. 判定**判不做**(有证据)
 
 | 项 | 结论 | 理由 |
 | --- | --- | --- |
-| 反向(KN->Kitten4)实体级并行 | **不做** | 63 个工作项、最大一项占 **36.7%**,且两段必须串行(`unrewrite_calls` 依赖全局 `call_targets`、`def_root_from_entry` 把定义根挂进宿主实体)=> Amdahl 上限 1.9×,**实际远低于 1.5×**,而反向 `core` 只有 ~200 ms |
-| `RawValue` 顶层只透传 | **不做** | 透传占比 ≈0%(见 `convert-semantics.md` §7) |
-| 单遍遍历合并 | **不做** | 只省遍历,不省逐块匹配/字段改写 |
-| NEMO 去重复解析(`rounds/37` §4 P9:程序集条目的 `blocksXML` 被解析两到三次、`text_content` 每次一个 String、三趟 `replace_*`) | **不做**(2026-10-05 判) | 符号级剖面:XML 全链只占基准 self 的 **1.9%**(折算约 NEMO 腿耗时的 5%),而 P9 能动的只是其中"程序集条目多解析一两次"那一小半;`text_content` 0.04%、三趟 `replace_*` 均未进 0.05% 榜 => 上界远低于噪声。读数与命令见 §2bis.11 |
-| P6 手写去 `#[serde(flatten)]`(逐节点 serde;`rounds/37` §10.6 试过并回退) | **不做**(2026-10-06 按**分配口径**复核) | 它唯一能影响的正向分配目标已达标且余量 24%(909 986 vs ≤1 200 000);唯一未达标的那一行(NEMO 的 `e2e`/分配)走的是**不经过该 serde** 的写出路径(文件路径直写块表);时间收益两次同轮 A/B 均量不到。判据与重开条件见 §2bis.15 |
+| 反向(KN->Kitten4)实体级并行 | **判不做** | 63 个工作项、最大一项占 **36.7%**,且两段必须串行(`unrewrite_calls` 依赖全局 `call_targets`、`def_root_from_entry` 把定义根挂进宿主实体)=> Amdahl 上限 1.9×,**实际远低于 1.5×**,而反向 `core` 只有 ~200 ms |
+| `RawValue` 顶层只透传 | **判不做** | 透传占比 ≈0%(见 `convert-semantics.md` §7) |
+| 单遍遍历合并 | **判不做** | 只省遍历,不省逐块匹配/字段改写 |
+| NEMO 去重复解析(`rounds/37` §4 P9:程序集条目的 `blocksXML` 被解析两到三次、`text_content` 每次一个 String、三趟 `replace_*`) | **判不做**(2026-10-05 判) | 符号级剖面:XML 全链只占基准 self 的 **1.9%**(折算约 NEMO 腿耗时的 5%),而 P9 能动的只是其中"程序集条目多解析一两次"那一小半;`text_content` 0.04%、三趟 `replace_*` 均未进 0.05% 榜 => 上界远低于噪声。读数与命令见 §2bis.11 |
+| P6 手写去 `#[serde(flatten)]`(逐节点 serde;`rounds/37` §10.6 试过并回退) | **判不做**(2026-10-06 按**分配口径**复核) | 它唯一能影响的正向分配目标已达标且余量 24%(909 986 vs ≤1 200 000);唯一未达标的那一行(NEMO 的 `e2e`/分配)走的是**不经过该 serde** 的写出路径(文件路径直写块表);时间收益两次同轮 A/B 均量不到。判据与重开条件见 §2bis.15 |
 
 ## 5. 基准方法(避免自欺)
 

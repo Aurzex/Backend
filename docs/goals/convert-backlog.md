@@ -22,7 +22,7 @@
 > **Step 2+3(正向产物侧流式写出)** 已完成(2026-10-05,`61e2c33`;读数见 §2bis.9)⇒ **§2.2 正向两行达标**;
 > **Step 4 反向(KN → Kitten4)产物侧流式写出** 已完成(2026-10-05,`bf33544`;读数见 §2bis.10)⇒ §2.2 反向两行达标;
 > **Step 4 NEMO 产物侧流式写出** 已完成(2026-10-06,`9cf1616`;读数见 §2bis.13;与 `../rounds/47` §2.2 的逐行对账见 `../rounds/49` §5);
-> **Step 5b(手写去 `#[serde(flatten)]`)** 不立项 —— 该处已试并回退(`../rounds/37` §10.6);2026-10-06 的单点读数摊到全流水线约 −5% 分配,不足以翻案(判据与重开条件见 `../knowledge/convert-performance.md` §2bis.15);
+> **Step 5b(手写去 `#[serde(flatten)]`)** 判不做 —— 该处已试并回退(`../rounds/37` §10.6);2026-10-06 的单点读数摊到全流水线约 −5% 分配,不足以翻案(判据与重开条件见 `../knowledge/convert-performance.md` §2bis.15);
 > **源侧骨架的同族延伸** 已完成(2026-10-06,`845b2c2`):反向(KN → Kitten4)的**源侧**也已吃骨架,两个方向共用一套 `Visitor`(读数见 §2bis.14)⇒ Step 5 那一族"源侧 `Value`"在正反两个方向都已处置;
 > 该方案同时是 `../rounds/40` §5(R6)两条**重开条件**的兑现(硬指标 + 完整重写)。
 > **与末尾"已判不做"清单的边界**:Step 5 里的 `RawValue` 只做**解析入口**、产物一律由同一套序列化器重新写出 —— **不是**清单里的"`RawValue` 透传"(那一条仍是判不做)。
@@ -34,8 +34,8 @@
 | 项 | 出处 | 说明 |
 | --- | --- | --- |
 | ~~NEMO → KN 的产物侧流式写出是否立项~~ **已完成(2026-10-06,`9cf1616`)** | `../rounds/47` §4 Step 4(表) | 拍板点的前提("NEMO 的块表形态不同 ⇒ 要做就得写第三套写出器")经复核不成立:NEMO 的 KN 产物与正向同形(三处挂点与键名一致),差别只有块表 `shield` 补键口径 ⇒ 按口径参数化复用 `assembly::ProductDocument`。读数见 `../knowledge/convert-performance.md` §2bis.13 |
-| ~~A1 大作品上传必失败~~ **已完成(修复,2026-09-26)**:上传路径改用请求级超时(`MewRequestBuilder::with_timeout`);**实测读数与常量值见 `../knowledge/nemo-runtime-and-upload.md` §6** | `../rounds/21` §8.4 N1 | 剩下的是**单包上限**(qiniu 413),**已完成(收尾,2026-09-26,决策见 `./pending-decisions.md` A5/D5;读数见 `../knowledge/platform-and-protocol.md` §5bis)** |
-| ~~A2 `keep_source` 上传的是**反编译重建的编辑版**~~ **已完成(已决:方案1)  文档化;2026-09-26)**:`TranslateOptions::keep_source` 的 rustdoc 写明偏差,不改反编译侧 | `../rounds/21` §8.4 N2 | 无(名实不符已写进文档) |
+| ~~A1 大作品上传必失败~~ **已完成(2026-09-26:修复 + 单包上限收尾)**:上传路径改用请求级超时(`MewRequestBuilder::with_timeout`);**实测读数与常量值见 `../knowledge/nemo-runtime-and-upload.md` §6** | `../rounds/21` §8.4 N1 | 剩下的是**单包上限**(qiniu 413,同批收尾:决策见 `./pending-decisions.md` A5/D5;读数见 `../knowledge/platform-and-protocol.md` §5bis) |
+| ~~A2 `keep_source` 上传的是**反编译重建的编辑版**~~ **已完成(2026-09-26;已决:方案 1,文档化)**:`TranslateOptions::keep_source` 的 rustdoc 写明偏差,不改反编译侧 | `../rounds/21` §8.4 N2 | 无(名实不符已写进文档) |
 | B2 KN 到 NEMO 是否立轮 | `../rounds/24` §12.3、`../rounds/27` §1 | 建议不做(平台无对照;要自建 NEMO 编码器) |
 | **A4 NEMO 是否真机验证"上传到账号"** | `../rounds/30` §4、`../rounds/24` §13.4 | 链路已就绪(渠道 + 编排 + 选项);只差是否建立一份擦不掉的 NEMO 草稿(KN 侧已端到端验证) |
 | ~~`entity_concurrency` 是否对**大作品自动开**~~ **已完成(2026-10-06,`0ead279`)** | `../rounds/25` §9 | **已改**:默认从"固定 1"改为**自动**(作品够大才开);显式给值仍是固定值(`0`/`1` = 强制串行);批量折算对"自动"只压低核数预算。NEMO 侧的分配代价(+13.9%)收窄到"够大的作品"。阈值(条数 / 字节)、夹逼读数与判据见 `../knowledge/convert-performance.md` §2bis.16 与 `../rounds/51-entity-concurrency-auto.md` |
@@ -120,7 +120,7 @@
     处理口径:仅测试用则标 `#[cfg(test)]` 或保留并注明;完全不用的则删(删除前按仓库约定确证零调用)。
     **已完成(2026-10-02,rounds/40 R2,`30216c5`)**:两处 `count_types` 都标了 `#[cfg(test)]` —— 从生产构建里彻底移出、函数体保留,`reverse_tests` 的 census 仍可用(1 参版本调用 2 参版本,两处必须同标)。
 0b. **已完成(2026-10-03 收尾)**:词汇表新鲜度:`kitten4_vocab.rs` 里的编辑器类型快照(条目数与导出日期以该文件的 `KITTEN4_VOCAB_EXPORTED` 为**单一事实源**,见 `../knowledge/convert-semantics.md` §5bis 第 3 条);
-   编辑器升级后名字会漂移(名字认错 = 整份打不开)。原先只记日期、没有可复跑流程的缺口**已补**:文件头注释给出三步(无头浏览器打开 Kitten4 并等 `window.Blockly.Blocks` 就绪 → 控制台 `Object.keys(window.Blockly.Blocks).sort()` 逐行打印可直接粘进 Rust 数组的形式 → 整体替换数组并更新 `KITTEN4_VOCAB_EXPORTED` 的 `(日期, 条目数)`),`cargo test --lib editor_type_list_` 是验收门。
+   编辑器升级后名字会漂移(名字认错 = 整份打不开)。原先只记日期、没有可复跑流程的缺口**已补**:文件头注释给出三步(无头浏览器打开 Kitten4 并等 `window.Blockly.Blocks` 就绪;在控制台把 `Object.keys(window.Blockly.Blocks).sort()` 的输出逐行打印成可直接粘进 Rust 数组的形式;最后整体替换数组并更新 `KITTEN4_VOCAB_EXPORTED` 的 `(日期, 条目数)`),`cargo test --lib editor_type_list_` 是验收门。
 0c. **已完成(2026-09-26;rounds/38 起由"剔除量门"改成 `MARKER_BUDGET`)**:标记量的预算门:原先只有定义体侧有预算断言;
    块/影子的"剔除量"没有门(rounds/36 的人工 A/B 读数见 `./pending-decisions.md` D4)。现有口径:守"每件作品
    **改成「未收录积木」标记的块数 + 清空影子数**"(只许变小,已对 `download/compile/*.bcmkn` 全语料记基线)。
@@ -154,7 +154,7 @@
     验证:改后连跑基准 + `cargo test --lib`,临时目录零残留(`ls -d /tmp/backend-convert-*`)。
     例外:`tests/convert_live.rs` 的 `backend-convert-live-*`(固定名、真机测试的调试工作区)不清理,保持原样。
 
-## 3. 已在案、不做的(不再重开)
+## 3. 已在案、判不做的(不再重开)
 
 - `RawValue` 顶层只透传、单遍遍历合并(`../rounds/26` §6;判据与读数见 `../knowledge/convert-semantics.md` §7):**判不做**。
 - 反向实体级并行(`../rounds/25` §10):Amdahl 上限 1.9×,反向 `core` 仅 ~200 ms。
@@ -180,10 +180,10 @@
 | --- | --- | --- | --- |
 | 1 | ~~**把两条扫描器的"差异类别"升级成基线门(只许变少)**~~,**经 rounds/39 W3c 改判**:差异类别**不升格为门**(保留"只打印 + 人工分诊"),只**删掉** `reverse_tests.rs` 那份死 allow-list 副本(活的那份仍按名引用)。**已完成(死副本已删,2026-10-01,`e8e19d6`)**。理由:`download/` 是 gitignored 的**增量**语料,集合门必然假红;与仓库"按文件名索引 + 表外取表内最大值"的门口径不合 | — | 见 `../rounds/39` §W3c/§4 |
 | 2 | 性能:P8–P11 | — | **实测判定不再做**:P2/P3/P5/P6 同轮 A/B 都落在噪声内(±2%,rounds/37 §6.2bis/§10.6);要真收益只有"少建中间 `Value` 树"那条重写装配层的路,风险极高,除非有硬性指标。**R6 已量(2026-10-02,判定类任务,零落地)**:把一次 `translate_file` 的分配拆成「源解析 `A_parse` / 产物物化 `A_mat` / 转换自己 `core`」三段(`convert_bench` 的同一批样本,一次性探针)= `A_mat` **1.49–1.59 次/节点**、`core` **52–79% 的 A**、产物 **79–98%** 节点是积木,因此**上界显著(远超 ±2%)**,但同方向两个最小切片(P6 `../rounds/37` §10.6、W9 `../rounds/39` §W9)实测收益均为 **0**,因此只能靠"拿掉 `BlockJson` 中间表示、由 parse 到 mapping 直接写流"的**完整重写**才可能吃到,且**必须先有硬指标**。因此该方向在"有硬指标 + 认领完整重写"之前**关闭**,连同 P8–P11 一起不再单独提起(注意:NEMO 两行的 `core` 含输入 **XML(DOM)构建**,不能全按"中间 `Value` 冗余"读)。**2026-10-05 补充(平坦热点 + 分配器 A/B,读数见 `../knowledge/convert-performance.md` §2bis)**:进程 CPU 里 `libc` 分配/释放占 **36.8%**、`Value` 树解析/析构加 `BTreeMap` 与序列化转义合计约 **35%**,而本库转换逻辑合计只有 **8.5%** 且无单点超过 1% —— 与该判断一致;另:只换分配器(jemalloc)即省 `core` 14%–26%、整套墙钟 12%–16% 且产物逐字节不变,已登记为 `./pending-decisions.md` **D7** |
-| 3 | ~~NEMO 方向:补 SHA 基线~~ **已完成(2026-10-01,见 §6.3 G6)**:样本进 `SAMPLES`(`source_version` 逐样本透传 + `#meta` 记该字段),两件 NEMO 作品入基线 | — | 加样本时 `Sample` **必须能传 `source_version`**(否则基线锁死"不迁移"口径,门绿但证错东西)。**W8 已处置(2026-10-02)**:2)  已做(`6057a88`:虚拟包装根,每实体省一次整串拷贝,NEMO 两样本分配字节 −3.4%/−3.1%、产物字节不变);1)  量到上界过小(≤ 0.11% 次数)且要换峰值内存,因此**不做**(见 `../rounds/39` §W8 落地段) |
+| 3 | ~~NEMO 方向:补 SHA 基线~~ **已完成(2026-10-01,见 §6.3 G6)**:样本进 `SAMPLES`(`source_version` 逐样本透传 + `#meta` 记该字段),两件 NEMO 作品入基线 | — | 加样本时 `Sample` **必须能传 `source_version`**(否则基线锁死"不迁移"口径,门绿但证错东西)。**W8 已处置(2026-10-02)**:2)  已完成(`6057a88`:虚拟包装根,每实体省一次整串拷贝,NEMO 两样本分配字节 −3.4%/−3.1%、产物字节不变);1)  量到上界过小(≤ 0.11% 次数)且要换峰值内存,因此**不做**(见 `../rounds/39` §W8 落地段) |
 | 4 | 实机门进 CI | — | 离线替身:官方 `validateBcm` 可 headless 跑。**CI 现状(2026-10-02 起,`f68c2e6`)**:`build` 矩阵 + `hygiene` + **`offline-gate`**(fmt --check / clippy -D warnings / 逐目标点名的离线测试);**刻意不跑**真机门与吃 `download/` 的语料基准(口径见 `../knowledge/repo-conventions.md` §6),因此任何 CI 门都得先有**入库的**夹具。已挂到**第 40 轮 R5**(见 `./README.md`) |
 | 5 | `wrap_arithmetic` 移动不重铸(`../rounds/39` W13) | — | **暂缓(待重新立项)**(2026-10-02 拍板登记):**不列入执行队列**。收益主要是"本库往返 id 台账更干净 / 往返 id 更稳",**不是用户可见差异**;代价是**偏离官方实现 + 改产物字节 + 需重做实体机与刷基线**。证据:`../rounds/38` §8、`../rounds/39` §W13 |
-| 6 | ~~**NEMO 实体级并行**(2026-10-05 新测出,此前无轮次评估过)~~ **已完成(2026-10-05,`rounds/48`)**:每实体 83% 的 `core` 已并行化,同轮 1 vs 8 实测 `core` 1.44×/1.21×、`e2e` 1.31×/1.21×,产物 SHA256 与 `#meta` 全绿;代价是分配 +13.9%(记录法),读数见 `../knowledge/convert-performance.md` §2bis.12 | — | 落地形态:与正向同构的四阶段;`NemoParseContext` 的两张只读表改 `Arc` 共享;默认并发 1 逐字节不变 |
+| 6 | ~~**NEMO 实体级并行**(2026-10-05 新测出,此前无轮次评估过)~~ **已完成(2026-10-05,`rounds/48`)**:每实体 83% 的 `core` 已并行化,同轮 1 vs 8 实测 `core` 1.44×/1.21×、`e2e` 1.31×/1.21×,产物 SHA256 与 `#meta` 全绿;代价是分配 +13.9%(记录法;默认已由第 51 轮改为"够大才自动开" —— 开销相应收窄到够大的作品),读数见 `../knowledge/convert-performance.md` §2bis.12 | — | 落地形态:与正向同构的四阶段;`NemoParseContext` 的两张只读表改 `Arc` 共享;并发 1 与并发 N 的产物 SHA256 相同(第 51 轮起默认值改为"自动") |
 
 ---
 
@@ -218,8 +218,8 @@
 | --- | --- | --- | --- |
 | **G0** **已完成(2026-10-03)** | 先把门跑绿并留读数 —— `cargo test --lib`(含两台语料扫描器)与 `BACKEND_REQUIRE_BENCH=1 cargo test --profile bench_perf --test convert_bench -- --ignored` 均绿 | 读数(定义体缺口预算 / `LOST_ID_BUDGET` / `LOST_ID_BUDGET_REVERSE` / `MARKER_BUDGET`)已入 `../knowledge/convert-semantics.md` §6 的硬门表,扫描器每次跑都打印 `[预算]`/`[id台账]`/`[标记量]` | 无(常态门;2026-10-03 复跑见 `../rounds/45` §3) |
 | **G1** **已完成(2026-10-01,rounds/38)** | **反向腿 id 口径定案**:两条悬案判「真丢 / 归一化」,各附 (c) 口径证据或最小复现 | 1)  `lists_get`(等价类代表 `pure_list_get`)大减 = **归一化**(丢的逐个都是 KN 侧 `is_shadow` 的 `pure_list_get`,折回父块 `fields`);2)  `bcm_translator_text_return_value_block` 由 4 变为 0 = **真缺陷**(187 个占位映射里 43 个没有 `RC` 标题,因此正向不写 mutation,反向反查失败,被写出阶段整块剔除) | 已出结论 + 证据(`../rounds/38` §3) |
-| **G2** **已完成(2026-10-01,rounds/38 §7bis)** | **减损:把「不认识就剔除」在信息层降级为「保留为编辑器认识的不可用标记」** | 写出阶段统一处理:**所有**编辑器不认识的块就地改成 `incompatible_block`(语句位)/ `incompatible_output_block`(值位),位置与连接保持、字段/影子/变异清空;影子仍是清空。覆盖占位积木(43 类型)+ D1 的 Neko 专有块族(`temporary_list`/`script_variables*` …)。正向补了由 `incompatible_*` 到 `bcm_translator_text_*` 的手工映射,往返稳定 | 已落地 + 单测 + 全语料 + 实机(`HEX Editor` 182 个标记,角色 `raw` 4/4 对上) |
-| **G3** 部分(两腿 id 台账均已落地;类别集合门改判不做,2026-10-01) | **id 口径台账**(正/反两腿)+ 差异类别集合门 | 已完成(正向扫描器 `k4_corpus_round_trip_sweep`):**`LOST_ID_BUDGET`**(只许变小,每次打印 `[id台账]`;基线 = 59 件里 33 件非零,构成已逐类查过)。**已完成(反向 id 台账已建)**(`../rounds/39` §W3d):反向扫描器 `kn_corpus_round_trip_sweep` 的 **`LOST_ID_BUDGET_REVERSE`**(正向同口径,逐件打印 `[id台账·反向]`;`d10d0cb` 首版、`ef37978` 把口径收窄到真正的积木节点)。基线读数:多数作品 **0/0**,`FjDQB…bcmkn` 真块 0 / 影子 120,`FjSw…bcmkn` 真块 110 / 影子 32(全名见 `reverse_tests` 的 `LOST_ID_BUDGET_REVERSE`)。**差异类别集合门已改判不做**(gitignored 增量语料,必然假红,`../rounds/39` §W3c;那份死 allow-list 副本已随 `e8e19d6` 删除) | 成本低;口径已稳 |
+| **G2** **已完成(2026-10-01,rounds/38 §7bis)** | **减损:把「不认识就剔除」在信息层降级为「保留为编辑器认识的不可用标记」** | 写出阶段统一处理:**所有**编辑器不认识的块就地改成 `incompatible_block`(语句位)/ `incompatible_output_block`(值位),位置与连接保持、字段/影子/变异清空;影子仍是清空。覆盖占位积木(43 类型)+ D1 的 Neko 专有块族(`temporary_list`/`script_variables*` …)。正向补了由 `incompatible_*` 到 `bcm_translator_text_*` 的手工映射,往返稳定 | 已生效 + 单测 + 全语料 + 实机(`HEX Editor` 182 个标记,角色 `raw` 4/4 对上) |
+| **G3** 部分(两腿 id 台账均已建立;类别集合门改判不做,2026-10-01) | **id 口径台账**(正/反两腿)+ 差异类别集合门 | 已完成(正向扫描器 `k4_corpus_round_trip_sweep`):**`LOST_ID_BUDGET`**(只许变小,每次打印 `[id台账]`;基线 = 59 件里 33 件非零,构成已逐类查过)。**已完成(反向 id 台账已建)**(`../rounds/39` §W3d):反向扫描器 `kn_corpus_round_trip_sweep` 的 **`LOST_ID_BUDGET_REVERSE`**(正向同口径,逐件打印 `[id台账·反向]`;`d10d0cb` 首版、`ef37978` 把口径收窄到真正的积木节点)。基线读数:多数作品 **0/0**,`FjDQB…bcmkn` 真块 0 / 影子 120,`FjSw…bcmkn` 真块 110 / 影子 32(全名见 `reverse_tests` 的 `LOST_ID_BUDGET_REVERSE`)。**差异类别集合门已改判不做**(gitignored 增量语料,必然假红,`../rounds/39` §W3c;那份死 allow-list 副本已随 `e8e19d6` 删除) | 成本低;口径已稳 |
 | **G4** **已完成(2026-10-02)** | **覆盖度**:真原件语料常态化(并入常规扫描)+ 词表新鲜度检查 | 已完成(语料常态化):`download/compile/k4edit/` 的平台原件已由正向扫描器常规吃到(`k4_corpus_round_trip_sweep` 扫 `k4edit/*.bcm4`,默认 `cargo test` 即覆盖)。已完成(词表侧):`kitten4_vocab::tests::editor_type_list_is_sorted_and_queryable`(严格升序 + 抽样查询,含两个「未收录积木」标记)+ **新鲜度读数** `editor_type_list_freshness_is_reported_not_enforced`(打印条目数 / 导出日期 / 距今天数,条目数与记录不一致或 >180 天时醒目提醒;单一事实源 = `kitten4_vocab::KITTEN4_VOCAB_EXPORTED`)。**刻意不做按挂钟时间失败**(如"导出超 N 天就 panic"):那会让整套测试在某个日期之后**自动变红**、门沦为噪音而被忽略(仓库的门是 `-D warnings` + 全绿)—— 新鲜度**只打印,不参与断言** | 成本低;扩语料需登录采样 |
 | **G5** 待决(已挂到第 40 轮 R5) | **加载门离线化进 CI**:`validateBcm` headless 接进 CI(实机浏览器门仍手动) | CI 上一条"产物可被编辑器加载"的校验;故意写一个编辑器不认识的类型,预期被拦下 | 重:`download/` 与官方 bundle 都不入库,因此要先决定**入库最小夹具**。CI 现状(2026-10-02,`f68c2e6`)= `build` 矩阵 + `hygiene` + `offline-gate`;真机门与语料基准**刻意不进**(见 `../knowledge/repo-conventions.md` §6) |
 | **G6** **已完成(2026-10-01)** | **NEMO 补门**:加 SHA 字节基线 + 耗时读数 | NEMO 样本进了 `convert_bench` 的 `SAMPLES` 并有 `#meta`:1)  `nemo-3.4MB`(`download/compile/` 的真作品,`source_version` = 0.16.2 = 迁移目标版本,迁移为 no-op;与官方产物**语义 diff 0 处**、`validateBcm` 判定为 VALID);2)  `nemo-old-1.5MB`(公开作品 `103791894`,0.11.0 < 0.15.0,因此**YC 迁移生效**;文件已挪进语料目录 `download/compile/`(`1d0be93`;R2 前在 `temp/harness/`),缺失仍只跳过不假红)。`elapsed_ms` 非 0(实测)。另:`tree_to_json` 的编码失败不再静默丢块(进报告、计有损) | 已完成(含基线刷新) |
@@ -229,7 +229,7 @@
 **顺序**:`G0`、`G1`(定案,决定后面是否还有真正可做的工作)、`G3` 与 `G4`(成本低、防复发)、`G2`(真收益,依赖 G1 结论 + 载体研究),最后 `G5`/`G6`。
 
 **G2 的载体路线已决(2026-10-01,rounds/38 §7bis,用户拍板)**:「不认识就保留为编辑器认识的标记」
-(`incompatible_block` / `incompatible_output_block`)已落地并实机验证 —— 它不是 D1 的语义降级(不声称等价、
+(`incompatible_block` / `incompatible_output_block`)已生效并实机验证 —— 它不是 D1 的语义降级(不声称等价、
 不冒充可用),而是"把丢失变成可看见的损失"。**该问句已关闭,不再挂起**。
 
 **拍板处与逐项状态见 `../rounds/39` §5 / §0.3**(2026-10-02 已按证据全部拍板并落地:C1 = 做、C2 = 不拆、C3 = 做;另 W52)  已完成、W13 暂缓)—— **本节不复制结论与提交号**。
@@ -242,8 +242,8 @@
 | --- | --- | --- |
 | 1 | **反向半边不走已有索引** | **已完成(2026-10-03,`9ddacbb`)**:`mapping.rs::{is_renamed_lc_key,unmapped_field_text,reverse_slot_name}` 改用新索引(`group_index`,**不去重**——反向靠"命中数唯一"判歧义);另补 `zh_title` 的键索引 |
 | 2 | **反向值向反查缺索引** | **已完成(2026-10-03,`9ddacbb`)**:`reverse_field_name` 的两趟线性扫换成 `flat_reverse_index`(值 → 全部命中,保序);`reverse_appearance_attribute` 换成 `pair_reverse_index` |
-| 3 | **`resolve_callee` 逐调用块扫 `procedures`** | **不立项**:量级上限 = 调用块数 × 定义数 × ≤3,典型作品为万级短串比较(比 P5 那次的百万级低两个量级),且要为此把索引穿进 `rewrite_node`/`unrewrite_node` 递归链;除非某件作品实测显示它进热路径,否则不动 |
+| 3 | **`resolve_callee` 逐调用块扫 `procedures`** | **判不做**:量级上限 = 调用块数 × 定义数 × ≤3,典型作品为万级短串比较(比 P5 那次的百万级低两个量级),且要为此把索引穿进 `rewrite_node`/`unrewrite_node` 递归链;除非某件作品实测显示它进热路径,否则不动 |
 | 4 | **NEMO `parse_block` 的 `<field>` 分支克隆整份 fields** | **已核实不可行**:该 `fields` 在 `extend` 之后还要被读两次(`message` 与 `handle_procedure_fields`),而 `extend` 需要所有权 ⇒ 这次克隆是结构必需;换 `&Map` 也仍要逐条克隆,省不掉 |
-| 5 | **正向 `collect_forward_items` 每实体深拷 `source`** | **不立项**:消费方(`assembly` 的 `kitten4_scene/actor`)只读 `&source`,但要免掉这次深拷只能把整份实体搬出源文档再搬回(动"唯一接触源文档"的跨阶段不变量),而同族的反向 P2 实测收益只有 2~3% ⇒ 收益与风险不成比 |
+| 5 | **正向 `collect_forward_items` 每实体深拷 `source`** | **判不做**:消费方(`assembly` 的 `kitten4_scene/actor`)只读 `&source`,但要免掉这次深拷只能把整份实体搬出源文档再搬回(动"唯一接触源文档"的跨阶段不变量),而同族的反向 P2 实测收益只有 2~3% ⇒ 收益与风险不成比 |
 
-**已判不做(不要重开)**:`find_object_shadow` 惰性化(P4,`../rounds/37` §4;W10 起已由 `normalize_object_shadows` 的廉价探测替代)、P6 手写去 `#[serde(flatten)]`(**2026-10-06 按分配口径复核仍不做**,判据与重开条件见 `../knowledge/convert-performance.md` §2bis.15)、W8 1)、W9、W13、单遍遍历合并、`RawValue` 透传、`BTreeMap` 改 `HashMap`、合并两份 `tree_to_json`、NEMO 每实体多趟全 DOM 遍历(属"单遍遍历合并"家族)。
+**已判不做(不要重开)**:`find_object_shadow` 惰性化(P4,`../rounds/37` §4;W10 起已由 `normalize_object_shadows` 的廉价探测替代)、P6 手写去 `#[serde(flatten)]`(**2026-10-06 按分配口径复核仍判不做**,判据与重开条件见 `../knowledge/convert-performance.md` §2bis.15)、W8 1)、W9、W13、单遍遍历合并、`RawValue` 透传、`BTreeMap` 改 `HashMap`、合并两份 `tree_to_json`、NEMO 每实体多趟全 DOM 遍历(属"单遍遍历合并"家族)。
