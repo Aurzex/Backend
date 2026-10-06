@@ -613,6 +613,55 @@ pub(super) fn convert_kn_document_product(
     options: &TranslateOptions,
     report: &mut TranslateReport,
 ) -> std::result::Result<assembly::Kitten4ProductDocument, TranslateError> {
+    convert_kn_document_impl(source, None, options, report)
+}
+
+/// 同 [`convert_kn_document_product`],但每个实体的 `nekoBlockJsonList` 由**原文**提供
+///
+/// 源侧骨架路径(`translate::source::parse_kn`)已经把三处块表原样摘出来、没有建成 `Value`,
+/// 这里按 (容器, id) 交回:球到了就不必再给整份源文档建 `Value` 中间树
+/// (读数与设计见 `../rounds/50-kn-source-skeleton.md`)。源文档里本就没有这些键,装配侧
+/// `KnEntity.source` 的克隆循环也就少一份整表深拷。
+pub(super) fn convert_kn_document_raw_product(
+    source: &serde_json::Value,
+    blocks: std::collections::BTreeMap<(String, String), Box<serde_json::value::RawValue>>,
+    options: &TranslateOptions,
+    report: &mut TranslateReport,
+) -> std::result::Result<assembly::Kitten4ProductDocument, TranslateError> {
+    convert_kn_document_impl(source, Some(blocks), options, report)
+}
+
+/// 取一个实体的积木树:原文优先(快速通道),缺键 = 空树,原文形态不合规即**在该实体粒度**回落
+///
+/// 回落的做法与正向 `pipeline::parse_forward_item` 逐字同款:把这一份原文物化成 `Value`
+/// 再走老路径(只物化这一份,不回落整份文档)。
+fn kn_tree_from_raw(
+    blocks: &mut std::collections::BTreeMap<(String, String), Box<serde_json::value::RawValue>>,
+    container: &str,
+    id: &str,
+) -> crate::core::convert::shared::Result<model::BlockTree> {
+    // 旁表键是 `(标签, id)`:查一次要现构两个 `String`(847 个实体 ≈ 1.7k 次小分配,
+    // 相对本步省下的整份源 `Value` 可忽略,换来不把 id 复制进旁表)
+    let Some(raw) = blocks.remove(&(container.to_string(), id.to_string())) else {
+        return Ok(model::BlockTree::default());
+    };
+    match model::parse_kn_entity_typed(&raw) {
+        Ok(tree) => Ok(tree),
+        Err(_) => {
+            let value: serde_json::Value = serde_json::from_str(raw.get())?;
+            model::parse_kn_entity(&value)
+        }
+    }
+}
+
+fn convert_kn_document_impl(
+    source: &serde_json::Value,
+    mut raw_blocks: Option<
+        std::collections::BTreeMap<(String, String), Box<serde_json::value::RawValue>>,
+    >,
+    options: &TranslateOptions,
+    report: &mut TranslateReport,
+) -> std::result::Result<assembly::Kitten4ProductDocument, TranslateError> {
     use serde_json::Value;
     let started = std::time::Instant::now();
 
@@ -643,8 +692,13 @@ pub(super) fn convert_kn_document_product(
             continue;
         };
         for (id, entity) in map {
-            let mut tree =
-                model::parse_kn_entity(entity.get("nekoBlockJsonList").unwrap_or(&Value::Null))?;
+            let mut tree = match &mut raw_blocks {
+                // 原文路径:块表在旁表里(源文档里没有这个键)
+                Some(blocks) => kn_tree_from_raw(blocks, container, id)?,
+                None => {
+                    model::parse_kn_entity(entity.get("nekoBlockJsonList").unwrap_or(&Value::Null))?
+                }
+            };
             report.blocks_total += tree.count();
             mapping::translate_kn_to_kitten(&mut tree, landscape, report);
             // P2(rounds/37):实体对象里最大的键是 `nekoBlockJsonList`(上一步已解析成 `tree`),
@@ -668,7 +722,13 @@ pub(super) fn convert_kn_document_product(
     }
 
     // ── 程序集(`proceduresDict`):定义体同样要过一遍语义反演
-    let mut procedures = model::parse_kn_procedures(src.get("procedures").unwrap_or(&Value::Null))?;
+    let procedures_dict = src.get("procedures").unwrap_or(&Value::Null);
+    let mut procedures = match &mut raw_blocks {
+        Some(blocks) => model::parse_kn_procedures_with(procedures_dict, |id, _| {
+            kn_tree_from_raw(blocks, "procedures", id)
+        })?,
+        None => model::parse_kn_procedures(procedures_dict)?,
+    };
     for entry in &mut procedures {
         report.blocks_total += entry.tree.count();
         mapping::translate_kn_to_kitten(&mut entry.tree, landscape, report);

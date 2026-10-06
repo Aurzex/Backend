@@ -183,15 +183,17 @@ impl ConvertedDocument {
 
 /// 文本 → 文档 → 文档:文件路径的专用入口(源侧骨架快速通道 + 流式产物)
 ///
-/// 先按骨架读一遍([`source::parse`]):这条路上 `theatre.{scenes,actors}.*.block_data_json`
-/// 不建 `Value` 中间树,直接以**原文**交给管线(读数与设计见
-/// `../rounds/47-data-layer-rewrite-plan.md` Step 5)。只有「源格式确为 Kitten4 且目标为 KN」
-/// 走快速通道;其余(骨架不成立、Kitten2/3、NEMO/Neko、反向目标)一律回落成整份
-/// `Value` 解析 + [`translate_value`] —— 回落路径与旧口径逐字一致。
+/// **源侧骨架**按方向各一套(同一个 [`source::SourceShape`] 机制,见该模块):
+/// 正向摘 `theatre.{scenes,actors}.*.block_data_json`,反向摘
+/// `{actors.actorsDict,scenes.scenesDict,procedures.proceduresDict}.*.nekoBlockJsonList`
+/// —— 两者都不建那份最大的 `Value` 子树,直接以**原文**交给管线。两条快速通道各自带格式判据
+/// (定长键的字节扫描 + 形状解析成功 + `detect_editor` 认可),其余输入一律回落成整份
+/// `Value` 解析 + [`translate_value`],回落路径与旧口径逐字一致。
 ///
-/// 快速通道的产物是 [`assembly::ProductDocument`](可流式写出):块表不建整份 `Value`,
-/// 由 [`ConvertedDocument::write_to_file`] 直接写盘(Step 2/3)。NEMO → KN 不走骨架(它没有
-/// `block_data_json`),但**产物侧**同样吃 `ProductDocument`(见下方 NEMO 分支)。
+/// **流式产物**:正向(`ProductDocument`)与反向(`Kitten4ProductDocument`)各自省掉产物侧整份
+/// `Value`(Step 2/3、Step 4),由 [`ConvertedDocument::write_to_file`] 直接写盘。
+/// NEMO → KN 不走骨架(它没有 `block_data_json`/`nekoBlockJsonList`),但**产物侧**同样吃
+/// `ProductDocument`(见下方 NEMO 分支)。
 fn translate_text(
     text: &str,
     target: TargetEditor,
@@ -240,6 +242,33 @@ fn translate_text(
                 report,
             });
         }
+    }
+    // 反向(KN → Kitten4)也先试**源侧骨架**:`nekoBlockJsonList` 是三处块表里最大的一份,
+    // 留原文直喂强类型反序列化,省掉"整份源文档建 `Value`"再给每个实体深拷一次的那一趟
+    // (读数见 `docs/rounds/50-kn-source-skeleton.md`)。判据与正向同款:先按定长键做一次
+    // 字节扫描,命中才试 —— 非 KN 文本不得白付一次全量骨架解析。
+    if matches!(target, TargetEditor::Kitten4)
+        && text.contains("\"nekoBlockJsonList\"")
+        && let Ok(skeleton) = source::parse_kn(text)
+        && detect_editor(&skeleton.doc) == Some(crate::core::convert::EditorType::Neko)
+    {
+        let source::Skeleton { doc, block_data } = skeleton;
+        let mut report = TranslateReport::new(
+            crate::core::convert::EditorType::Neko,
+            TargetEditor::Kitten4,
+        );
+        let product =
+            pipeline::convert_kn_document_raw_product(&doc, block_data, options, &mut report)?;
+        if options.is_strict() && report.is_lossy() {
+            return Err(TranslateError::Lossy {
+                report: Box::new(report),
+            });
+        }
+        return Ok(FileConversion {
+            document: ConvertedDocument::Kitten4(product),
+            target,
+            report,
+        });
     }
     let source: serde_json::Value = serde_json::from_str(text)?;
     // 反向(KN → Kitten4)同样吃**流式产物**(Step 4):判据与 `translate_value` 的分派一致
@@ -551,6 +580,48 @@ mod file_path_tests {
             expected["actors"]["actorsDict"]["actor-1"]["nekoBlockJsonList"][0]["type"],
             "self_appear"
         );
+        let mut streamed = Vec::new();
+        product.write_to(&mut streamed).expect("流式写出");
+        assert_eq!(
+            String::from_utf8_lossy(&streamed),
+            serde_json::to_string(&expected).expect("序列化内存入口产物"),
+            "文件入口的字节必须与内存入口逐字节相同"
+        );
+    }
+
+    /// 反向(KN → Kitten4)的**源侧骨架**走线门(`rounds/50`)
+    ///
+    /// 与上一条同路数:先证明快速通道的前置条件对这份文本成立(键扫描命中 + 骨架成立 +
+    /// `detect_editor` 认 KN),再证明走完之后产物与内存入口逐字节相同。字节一致本身证不了走线
+    /// (回落路径的字节也对),所以前置条件必须显式断言。
+    #[test]
+    fn kn_source_uses_skeleton_fast_path() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("download/compile/HEX Editor_317683843.bcmkn");
+        if !path.exists() {
+            missing_fixture(&format!("真作品样例 {}", path.display()));
+            return;
+        }
+        let text = std::fs::read_to_string(&path).expect("读样本");
+        // 前置条件 1:定长键的字节扫描命中(否则走不到骨架那段)
+        assert!(text.contains("\"nekoBlockJsonList\""));
+        // 前置条件 2:骨架成立,且摘掉块表之后仍能认出是 KN
+        let skeleton = source::parse_kn(&text).expect("骨架解析");
+        assert_eq!(
+            detect_editor(&skeleton.doc),
+            Some(crate::core::convert::EditorType::Neko),
+            "骨架路径的判据必须仍认 KN"
+        );
+
+        let options = TranslateOptions::new().deterministic_ids(true);
+        let conversion = translate_text(&text, TargetEditor::Kitten4, &options).expect("文件路径");
+        let ConvertedDocument::Kitten4(product) = &conversion.document else {
+            panic!("KN → Kitten4 的文件入口应走反向外形产物");
+        };
+        let source: serde_json::Value = serde_json::from_str(&text).expect("解析源");
+        let expected = translate_value(source, TargetEditor::Kitten4, &options)
+            .expect("内存入口")
+            .document;
         let mut streamed = Vec::new();
         product.write_to(&mut streamed).expect("流式写出");
         assert_eq!(

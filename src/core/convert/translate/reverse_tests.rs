@@ -2769,6 +2769,77 @@ mod reverse_tests_inner {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// **常驻字节等价门**(`rounds/50`):反向的**源侧骨架**路径(`nekoBlockJsonList` 留原文、
+    /// 直喂强类型反序列化)与内存路径逐字节相同
+    ///
+    /// 三处块表都必须覆盖(角色 / 场景 / 程序集定义体 —— 样本三处齐全,先断言旁表命中了它们):
+    /// 这条路径省掉的是"整份源文档建 `Value`"再给每个实体深拷一次那一趟,产物不得有一字之差。
+    #[test]
+    fn kn_source_skeleton_is_byte_identical_to_value_path() {
+        let Some(path) = ({
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("download/compile/HEX Editor_317683843.bcmkn");
+            path.exists().then_some(path)
+        }) else {
+            missing_fixture("真作品样例 download/compile/HEX Editor_317683843.bcmkn");
+            return;
+        };
+        let text = std::fs::read_to_string(&path).expect("读样本");
+        let options = TranslateOptions::new().deterministic_ids(true);
+
+        // 内存路径:整份文档 → `Value` → 管线
+        let source: Value = serde_json::from_str(&text).expect("样本应是明文编辑版 JSON");
+        let mut value_report = TranslateReport::new(
+            crate::core::convert::EditorType::Neko,
+            TargetEditor::Kitten4,
+        );
+        let value = convert_kn_document(&source, &options, &mut value_report).expect("内存路径");
+        let expected = serde_json::to_string(&value).expect("序列化内存路径产物");
+
+        // 骨架路径:三处块表留原文,其余仍是 `Value`
+        let skeleton = source::parse_kn(&text).expect("骨架解析");
+        for label in ["actors", "scenes", "procedures"] {
+            assert!(
+                skeleton
+                    .block_data
+                    .keys()
+                    .any(|(container, _)| container == label),
+                "骨架旁表缺 {label} 段:{:?}",
+                skeleton.block_data.keys().collect::<Vec<_>>()
+            );
+        }
+        let mut raw_report = TranslateReport::new(
+            crate::core::convert::EditorType::Neko,
+            TargetEditor::Kitten4,
+        );
+        let raw_product = convert_kn_document_raw_product(
+            &skeleton.doc,
+            skeleton.block_data,
+            &options,
+            &mut raw_report,
+        )
+        .expect("骨架路径");
+        let mut streamed = Vec::new();
+        raw_product.write_to(&mut streamed).expect("流式写出");
+        assert_eq!(
+            String::from_utf8_lossy(&streamed),
+            expected,
+            "骨架路径的字节必须与内存路径逐字节相同"
+        );
+        assert_eq!(
+            serde_json::to_string(&raw_product.into_value().expect("物化")).expect("序列化"),
+            expected,
+            "产物物化回 `Value` 也必须逐字节相同"
+        );
+        // 份量对账:两条路径的源块数与告警条数逐条相同
+        assert_eq!(raw_report.blocks_total, value_report.blocks_total, "源块数");
+        assert_eq!(
+            raw_report.warnings().len(),
+            value_report.warnings().len(),
+            "告警条数"
+        );
+    }
+
     /// 实机现象(rounds/34 §4nonies):产物在 Kitten4 编辑器里**作品名/变量能进,但角色一个都不显示**。
     /// 根因是 `theatre.groups` 与场景 `group_order` 都是空的 —— 平台原件用"每组一个角色 + 组上带
     /// `scene` 归属"表达"谁在场景里"。反向必须**合成**这张表(见 `synthesize_group`)。

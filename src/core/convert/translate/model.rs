@@ -1550,8 +1550,82 @@ pub(super) fn parse_kn_entity(list: &Value) -> Result<BlockTree> {
     Ok(BlockTree::new(roots))
 }
 
+/// KN 的 `nekoBlockJsonList` 的**原文** → 中核树(快速通道,不建源 `Value` 中间树)
+///
+/// 与 [`parse_kn_entity`] 同口径:数组直接按 `BlockJson` 反序列化,字符串形态在 `visit_str` 里
+/// 解析内层数组,`null`/缺失 = 空树,`type == ""` 的垃圾节点照旧过滤。
+///
+/// **失败即回落**:调用方在该实体粒度改走 [`parse_kn_entity`](把原文物化成 `Value`),
+/// 行为与旧口径逐字一致(与正向的 [`parse_block_data_json_typed`] 同一套约定)。
+pub(super) fn parse_kn_entity_typed(raw: &serde_json::value::RawValue) -> Result<BlockTree> {
+    use serde::Deserializer as _;
+    use serde::de::{SeqAccess, Visitor};
+
+    struct ListVisitor;
+
+    impl<'de> Visitor<'de> for ListVisitor {
+        type Value = Vec<BlockJson>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("积木数组(或它的 JSON 字符串形态)")
+        }
+
+        fn visit_seq<A: SeqAccess<'de>>(
+            self,
+            mut seq: A,
+        ) -> std::result::Result<Vec<BlockJson>, A::Error> {
+            let mut roots = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+            while let Some(node) = seq.next_element::<BlockJson>()? {
+                roots.push(node);
+            }
+            Ok(roots)
+        }
+
+        fn visit_str<E: serde::de::Error>(
+            self,
+            text: &str,
+        ) -> std::result::Result<Vec<BlockJson>, E> {
+            // 少数链路把该字段存成 JSON 字符串(与 `parse_kn_entity` 的容错一致)
+            serde_json::from_str(text).map_err(E::custom)
+        }
+
+        fn visit_unit<E: serde::de::Error>(self) -> std::result::Result<Vec<BlockJson>, E> {
+            Ok(Vec::new())
+        }
+
+        fn visit_none<E: serde::de::Error>(self) -> std::result::Result<Vec<BlockJson>, E> {
+            Ok(Vec::new())
+        }
+    }
+
+    let roots: Vec<BlockJson> =
+        serde_json::Deserializer::from_str(raw.get()).deserialize_any(ListVisitor)?;
+    Ok(BlockTree::new(
+        roots
+            .into_iter()
+            .filter(|node| !node.kind.is_empty())
+            .collect(),
+    ))
+}
+
 /// `procedures.proceduresDict`(或裸字典)→ 程序集条目(字段与 KN 完全一致)
 pub(super) fn parse_kn_procedures(dict: &Value) -> Result<Vec<ProcedureEntry>> {
+    parse_kn_procedures_with(dict, |_, entry| {
+        parse_kn_entity(entry.get("nekoBlockJsonList").unwrap_or(&Value::Null))
+    })
+}
+
+/// 同 [`parse_kn_procedures`],但定义体积木表的来源由调用方给
+///
+/// 内存路径从条目自己的 `nekoBlockJsonList` 取;源侧骨架路径那份键已被摘成原文,按 id 回调取
+/// (见 `pipeline::convert_kn_document_raw_product`)。
+pub(super) fn parse_kn_procedures_with<F>(
+    dict: &Value,
+    mut tree_of: F,
+) -> Result<Vec<ProcedureEntry>>
+where
+    F: FnMut(&str, &Map<String, Value>) -> Result<BlockTree>,
+{
     let dict = match dict {
         Value::Object(map) => match map.get("proceduresDict") {
             Some(inner) => inner,
@@ -1608,7 +1682,8 @@ pub(super) fn parse_kn_procedures(dict: &Value) -> Result<Vec<ProcedureEntry>> {
                 .unwrap_or(KIND_NORMAL)
                 .to_string(),
             params,
-            tree: parse_kn_entity(entry.get("nekoBlockJsonList").unwrap_or(&Value::Null))?,
+            // 回调按**字典键**取原文(骨架旁表的键是它;`entry.id` 可能是另一个值)
+            tree: tree_of(key.as_str(), entry)?,
         });
     }
     Ok(out)
@@ -3026,5 +3101,53 @@ mod kitten_tests {
         let parsed = parse_block_data_json(&diamond).expect("parse");
         assert_eq!(parsed.roots.len(), 1);
         assert_eq!(parsed.count(), 4, "s 在两个槽下各展开一份");
+    }
+}
+
+#[cfg(test)]
+mod kn_typed_tests {
+    //! `parse_kn_entity_typed`(源侧骨架的快速通道)与 [`parse_kn_entity`] 的逐项等价
+    //! (`rounds/50`)
+
+    use super::*;
+
+    /// 原文与 `Value` 两条入口在三种形态上产出同一棵树:数组、JSON 字符串、`null`
+    #[test]
+    fn typed_matches_value_entry_for_all_shapes() {
+        for text in [
+            r#"[{"type": "wait", "id": "n1", "fields": {"DURATION": 1}}, {"type": "", "id": "junk"}]"#,
+            r#""[{\"type\": \"wait\", \"id\": \"n1\"}]""#,
+            "null",
+            "[]",
+        ] {
+            let value: Value = serde_json::from_str(text).expect("样例应是合法 JSON");
+            let raw = serde_json::value::RawValue::from_string(text.to_string()).expect("RawValue");
+            let from_value = parse_kn_entity(&value).expect("Value 路径");
+            let from_raw = parse_kn_entity_typed(&raw).expect("原文路径");
+            assert_eq!(
+                from_raw.roots, from_value.roots,
+                "两条入口必须产出同一棵树(输入 {text})"
+            );
+        }
+    }
+
+    /// `type == ""` 的垃圾节点按官方 `HC` 过滤(两条入口都过滤)
+    #[test]
+    fn typed_filters_empty_kinds() {
+        let raw = serde_json::value::RawValue::from_string(
+            r#"[{"type": ""}, {"type": "wait", "id": "n1"}]"#.to_string(),
+        )
+        .expect("RawValue");
+        let tree = parse_kn_entity_typed(&raw).expect("原文路径");
+        assert_eq!(tree.count(), 1);
+        assert_eq!(tree.roots[0].kind, "wait");
+    }
+
+    /// 形状不合的原文(对象而非数组)失败 ⇒ 调用方在该实体粒度回落 `Value` 口径
+    #[test]
+    fn typed_rejects_wrong_shape() {
+        let raw = serde_json::value::RawValue::from_string(r#"{"blocks": {}}"#.to_string())
+            .expect("RawValue");
+        assert!(parse_kn_entity_typed(&raw).is_err());
     }
 }
