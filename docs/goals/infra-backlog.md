@@ -9,9 +9,7 @@
 | ~~恢复 `[lints.rust] unused` 告警~~ | **已完成(2026-10-02,rounds/40 R2,三阶段 `6414b97` / `30216c5` / `8da596d`)**,终态读数、逐条处置、两条实测坑与对外形状四项的去向**只在 §1.1 展开** | R2;`../rounds/40-gates-cleanup-and-real-defects.md` §2 |
 | ~~CI 产物名列与 `crate-type` 不符(导致 job 静默绿、产物实际未上传)~~ | **已完成(2026-10-02,`f68c2e6`)**:走"改 CI"这一边 —— **删掉 artifact 上传步**及矩阵里 5 组 `artifact:`/`libname:` 键,理由:本仓 `[lib] crate-type=["rlib"]` 只产 rlib、`src/main.rs` 是需账号的**交互式控制台**、仓内没有消费这些 artifact 的地方,因此**没有可分发的产物**(不恢复 `cdylib`)。同时新增 `offline-gate` job(fmt/clippy/逐目标点名的离线测试)。旧症状与根因线索:期待 `libbackend.so`/`backend.dll`/`libbackend.dylib` 而实际不产,`if-no-files-found` 默认 `warn`,因此一直静默绿 | `f68c2e6`;口径见 `../knowledge/repo-conventions.md` §6 与 `../knowledge/errata.md` 的「非轮次条目」节 |
 | ~~`src/main.rs` 作第二个 crate root,把整棵树重复编译一遍~~ | **已完成(2026-10-02,`47a8c5e`)**:`src/main.rs` 开头的 `mod api; mod core; mod utils;` 已删,顶部四条 `use crate::…` 全改成 `use backend::…`,**公共 API 零改动**(bin 用到的 11 个符号逐条核对皆 `pub`,与下方只读结论一致)。判据:bin 单元 dep-info 输入**由 49 降为 1**(`src/main.rs`;lib 单元仍覆盖整棵树);bin 单测目标**由 121 tests / 214 s 变为 0 tests / 0.00 s**;`unused = "warn"` 下 bin 侧**由 896 降为 0**。`Cargo.toml` 未动(bin 仍由 `src/main.rs` 自动发现) | `47a8c5e` |
-| api 层类型化 DTO(351 处 `MewResult<Value>`) | 逐端点核对响应形态;建议按域分批 | `../rounds/15/16/17` §不落地 |
-| newtype ID 推广(`UserId` 等) | 先看 `WorkId` 试点收益 | `../rounds/19` §不落地 |
-| `work.rs` 再切 `WorkDataFetcher` | 纯搬迁,`re-export` 保路径;按需 | `../rounds/19` §不落地 |
+| api 层类型化 DTO(B1)/ newtype ID 推广(B7)/ `work.rs` 再切 `WorkDataFetcher`(B8) | **唯一权威落 `./pending-decisions.md` B 组**(问题 / 选项 / 建议都在那里);本表只留指针 —— 其中 B1 自 2026-10-02 起属"明确不做" | `./pending-decisions.md` B1/B7/B8;`../rounds/15/16/17/19` §不落地 |
 
 ### 1.1 `unused` 落地记录(rounds/40 R2:基线经三阶段到 **0 条**)
 
@@ -55,7 +53,7 @@
 
 | 项 | 结论 | 出处 |
 | --- | --- | --- |
-| `core` 向 `api` 的依赖倒置 | **暂缓(待重新立项)**(架构级重构,收益不明确) | `../rounds/05` 未执行项 |
+| `core` 向 `api` 的依赖倒置(**C8**) | **暂缓(待重新立项)** —— 唯一权威落 `./pending-decisions.md` C8(架构级重构,收益不明确) | `./pending-decisions.md` C8;`../rounds/05` 未执行项 |
 | `cloudvar.rs` 深拆 | 判不做(需 60+ 处可见性提升 + `Arc<CloudInner>` 贯通,非纯搬迁) | `../rounds/18/19` §不落地 |
 | `compiler.rs` 切子模块 | 判不做(用户指定"两个文件、不放 core 子文件夹") | `../rounds/18` §不落地 |
 | 公开 `HttpClient` trait / 类型级 WS 状态机 | 判不做(前者可经 `CodeMaoClient` 注入;后者维持运行时 `connect_and_wait()`) | `../rounds/18/19` §不落地 |

@@ -75,7 +75,7 @@
 - **域内文件组织(以 `../rounds/31-convert-layout-consolidation-plan.md` §2「目标结构」的模块图 + §2.3「组织规则」为准;该文没有 §2.1)**:一个文件一个职责;
   生成物单独一处(`translate/tables_gen.rs`,**不可与手写表混放**);测试默认内联在被测文件末尾,
   「本体 + 测试 > 3 000 行」时才独立成 `*_tests.rs`;**单文件上限 ≈ 2 500 行**。
-  当前布局:`mod.rs` + `shared.rs` + `upload.rs` + `decompile/{mod,editors,config,shadow,work}.rs` + `translate/{mod,model,mapping,assembly,pipeline,options,report,xml,nemo,nemo_mapping,tables_gen,kitten4_vocab,reverse_tests,nemo_tests}.rs`(**22 文件**;W2 后新增 4 个:`upload.rs` 是**域级工具层**(与门面同级,`shared.rs` 零反向依赖),`decompile/{config,shadow,work}.rs` 是反编译**私有件**。权威清单见 `../rounds/39` §W2 落地段;其 §1.1 的表是 W2 之前的快照)。
+  当前布局:`mod.rs` + `shared.rs` + `upload.rs` + `decompile/{mod,editors,config,shadow,work}.rs` + `translate/{mod,model,mapping,assembly,pipeline,options,report,xml,nemo,nemo_mapping,source,tables_gen,kitten4_vocab,reverse_tests,nemo_tests}.rs`(**23 文件**;W2 后新增 4 个:`upload.rs` 是**域级工具层**(与门面同级,`shared.rs` 零反向依赖),`decompile/{config,shadow,work}.rs` 是反编译**私有件**;`translate/source.rs` 是源侧骨架解析(rules/47 Step 5、rounds/50 参数化)。权威清单见 `../rounds/39` §W2 落地段;其 §1.1 的表是 W2 之前的快照)。
 - 分层纪律:`translate` 子域**不碰网络**;需要网络(上传/建作品)的编排放 `core/convert/mod.rs` 门面
   (反编译侧的可选「上传到账号」同理,见 `../rounds/30`)。
 - 文档:记录放 `docs/`;**历史轮次不改写**(保真),勘误集中到本库 `errata.md`。
@@ -102,15 +102,15 @@
 - 提交信息用中文、`type: 摘要` 形式(如 `perf(convert): …`、`docs: …`);一个提交一件事,搬迁与行为改动**不混在一个提交**。
 - 交付前自检:`cargo fmt`、`cargo clippy`(零新增告警)、`cargo test`;`.githooks/pre-commit` 会在可用时执行这些。CI 侧由 `offline-gate` 跑同一套**离线**门(`fmt --check` + `clippy --all-targets -D warnings` + 逐目标点名的离线测试,见 §6)——真机门与吃语料的基准**不在 CI 里**。
 
-## 依据
-
-- `CONTRIBUTING.md`;`../rounds/05/06/07-style|call|typing*.md`;`../rounds/08/09-protocol-compliance*.md`;
-  `../rounds/14/15/16-*injection*.md`;`../rounds/17-error-convergence*.md`;`../rounds/18/19-*`;`../rounds/21-*`(域化)。
-- 代码锚点:`src/utils/requests.rs`、`src/prelude.rs`、`src/utils.rs`、`src/core/convert/mod.rs`、`tests/repo_hygiene.rs`。
-
 ## 文档规范
 
 - **权威**:仓库级文档规范以根目录 `AGENTS.md` 为准(加载协议、体例 9 条红线、收尾 SOP、输出禁忌、正文语体、三库定位)。`../README.md` 的"文档体例"节只登记两库分工与例外,不重复条文。
 - **载体**:`README.md` 首行注释声明进入任务前须读取该契约,因此后续会话无需人工重复提示。
 - **收尾**:完成任务后按契约第四节更新轮次记录、目标库与知识库,并检查引用该事实的目标库条目是否需同步。
 - **指针**:契约见 `../../AGENTS.md`;该轮的落地记录见 `../rounds/41-agent-contract-and-doc-reformat.md`。
+
+## 依据
+
+- `CONTRIBUTING.md`;`../rounds/05/06/07-style|call|typing*.md`;`../rounds/08/09-protocol-compliance*.md`;
+  `../rounds/14/15/16-*injection*.md`;`../rounds/17-error-convergence*.md`;`../rounds/18/19-*`;`../rounds/21-*`(域化)。
+- 代码锚点:`src/utils/requests.rs`、`src/prelude.rs`、`src/utils.rs`、`src/core/convert/mod.rs`、`tests/repo_hygiene.rs`。

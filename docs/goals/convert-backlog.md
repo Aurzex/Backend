@@ -108,7 +108,7 @@
 
    - **判据**:1)  平台把根块坐标当**用户拖出来的位置**(含负数/小数),从不构成协议;2)  编辑器自己排出来的网格是 **0 + 80·k** —— 起点 **0** 出现在 **257/711** 个实体里,起点 **80 一次都没有**,因此若问"平台起点",答案是 **0**,但平台的**步长(80)**与 `XmlBlockWriter`/`model.rs` 的 220 **也不是一套**;3)  两处唯一的硬要求只是"**根块互不重叠**",而坐标本身**非语义**(`location` 在 `nemo_mapping` 语义 diff 的 allow-list 里,注释原话"根的位置是编辑器布局,不是语义")。
    - **为何不把 80 改成 0(实测数字)**:同选项(与 `convert_bench` 的 `kn-3.7MB` 样本完全一致:`deterministic_ids(true)` / `keep_source(false)` / `entity_concurrency(1)`)下把常量临时改成 0,产物 SHA256 由 `0d3cf2e3…`(与基线一致)变成 `15d7d050…`,字节数由 4117977 变为 4117976;`kn-9.4MB`(`Phigros`)则**逐字节不变**(`dac08917…`,与基线一致)。因此改数值零行为收益,却要重刷 `kn-3.7MB-kitten4` 这一个基线键。2026-10-02 的取证按"非语义字段不换来字节漂移"处理。(A/B 用的是一次性探针测试,跑完已删,未入库。)
-   - **为何不共享常量**:两处是**同名不同物** —— `decompile/editors.rs` 的 `XmlBlockWriter` 写 Kitten2/3 blocksXML(`y=0.0`,0+220·i),`translate/model.rs` 写 Kitten4 `block_data_json` 的 `location`(`[0, 80+220·i]`,只在 KN 侧缺 `location` 时兜底;常量名 `ROOT_LAYOUT_Y`/`ROOT_LAYOUT_STEP`);格式、编辑器、方向三者皆不同,合并还要跨子域并统一 `f64`/`i64`,与 §11 已归档的"不可合并"定性一致。
+   - **为何不共享常量**:两处是**同名不同物** —— `decompile/editors.rs` 的 `XmlBlockWriter` 写 Kitten2/3 blocksXML(`y=0.0`,0+220·i),`translate/model.rs` 写 Kitten4 `block_data_json` 的 `location`(`[0, 80+220·i]`,只在 KN 侧缺 `location` 时兜底;常量名 `ROOT_LAYOUT_Y`/`ROOT_LAYOUT_STEP`);格式、编辑器、方向三者皆不同,合并还要跨子域并统一 `f64`/`i64`,与 §2 第 11 条已归档的"不可合并"定性一致。
    - 出处:第三十一轮只读审计 `../rounds/31-convert-layout-consolidation-plan.md` §3.6 N4。
 9. **已完成(2026-09-26,`b7d4e07`)**:生成物里的零消费者常量 `translate/tables_gen.rs` 的 `TOP_BLOCKS` / `KN_TYPES` 已删(含生成器同步;核对时发现 `.gitignore` 的 `bin/` 通配误伤 `src/bin/`,生成器此前**从未入库**,已修)。原记录:全仓无使用点。
    注意它们是 `src/bin/gen_translate_tables.rs` **整文件生成**的,因此要删得改**生成器**再重新生成,
@@ -191,7 +191,7 @@
 
 > 与"性能"分开:性能在 `../rounds/37` 已收口(同轮 A/B 全部落在噪声内,判不再做)。本节只谈**转换质量** ——
 > "编辑器能打开"已达成之后,产物里**少没少东西、少得对不对**。
-> 依据:`../rounds/37` §11/§13、`../knowledge/convert-semantics.md` §5/§5bis/§9bis、本库 §1(D1–D5)。
+> 依据:`../rounds/37` §11/§13、`../knowledge/convert-semantics.md` §5/§5bis/§9bis、`./pending-decisions.md` D 组(D1–D5)。
 
 ### 6.1 方向(一句话)
 
@@ -216,7 +216,7 @@
 
 | # | 目标 | 验收(可观测) | 前置/成本 |
 | --- | --- | --- | --- |
-| **G0** **已完成(2026-10-03)** | 先把门跑绿并留读数 —— `cargo test --lib`(含两台语料扫描器)与 `BACKEND_REQUIRE_BENCH=1 cargo test --profile bench_perf --test convert_bench -- --ignored` 均绿;读数(定义体缺口预算 / `LOST_ID_BUDGET` / `LOST_ID_BUDGET_REVERSE` / `MARKER_BUDGET`)已入 `../knowledge/convert-semantics.md` §6 的硬门表,扫描器每次跑都打印 `[预算]`/`[id台账]`/`[标记量]` | 无(常态门;2026-10-03 复跑见 `../rounds/45` §3) |
+| **G0** **已完成(2026-10-03)** | 先把门跑绿并留读数 —— `cargo test --lib`(含两台语料扫描器)与 `BACKEND_REQUIRE_BENCH=1 cargo test --profile bench_perf --test convert_bench -- --ignored` 均绿 | 读数(定义体缺口预算 / `LOST_ID_BUDGET` / `LOST_ID_BUDGET_REVERSE` / `MARKER_BUDGET`)已入 `../knowledge/convert-semantics.md` §6 的硬门表,扫描器每次跑都打印 `[预算]`/`[id台账]`/`[标记量]` | 无(常态门;2026-10-03 复跑见 `../rounds/45` §3) |
 | **G1** **已完成(2026-10-01,rounds/38)** | **反向腿 id 口径定案**:两条悬案判「真丢 / 归一化」,各附 (c) 口径证据或最小复现 | 1)  `lists_get`(等价类代表 `pure_list_get`)大减 = **归一化**(丢的逐个都是 KN 侧 `is_shadow` 的 `pure_list_get`,折回父块 `fields`);2)  `bcm_translator_text_return_value_block` 由 4 变为 0 = **真缺陷**(187 个占位映射里 43 个没有 `RC` 标题,因此正向不写 mutation,反向反查失败,被写出阶段整块剔除) | 已出结论 + 证据(`../rounds/38` §3) |
 | **G2** **已完成(2026-10-01,rounds/38 §7bis)** | **减损:把「不认识就剔除」在信息层降级为「保留为编辑器认识的不可用标记」** | 写出阶段统一处理:**所有**编辑器不认识的块就地改成 `incompatible_block`(语句位)/ `incompatible_output_block`(值位),位置与连接保持、字段/影子/变异清空;影子仍是清空。覆盖占位积木(43 类型)+ D1 的 Neko 专有块族(`temporary_list`/`script_variables*` …)。正向补了由 `incompatible_*` 到 `bcm_translator_text_*` 的手工映射,往返稳定 | 已落地 + 单测 + 全语料 + 实机(`HEX Editor` 182 个标记,角色 `raw` 4/4 对上) |
 | **G3** 部分(两腿 id 台账均已落地;类别集合门改判不做,2026-10-01) | **id 口径台账**(正/反两腿)+ 差异类别集合门 | 已完成(正向扫描器 `k4_corpus_round_trip_sweep`):**`LOST_ID_BUDGET`**(只许变小,每次打印 `[id台账]`;基线 = 59 件里 33 件非零,构成已逐类查过)。**已完成(反向 id 台账已建)**(`../rounds/39` §W3d):反向扫描器 `kn_corpus_round_trip_sweep` 的 **`LOST_ID_BUDGET_REVERSE`**(正向同口径,逐件打印 `[id台账·反向]`;`d10d0cb` 首版、`ef37978` 把口径收窄到真正的积木节点)。基线读数:多数作品 **0/0**,`FjDQB…bcmkn` 真块 0 / 影子 120,`FjSw…bcmkn` 真块 110 / 影子 32(全名见 `reverse_tests` 的 `LOST_ID_BUDGET_REVERSE`)。**差异类别集合门已改判不做**(gitignored 增量语料,必然假红,`../rounds/39` §W3c;那份死 allow-list 副本已随 `e8e19d6` 删除) | 成本低;口径已稳 |
