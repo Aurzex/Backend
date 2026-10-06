@@ -365,6 +365,16 @@ NEMO 产物侧流式写出(`../rounds/49-nemo-product-streaming.md`)把块表写
 | rounds/47 §4 Step 2/3、§3.2 | 产物挂点类型写作 `BlockHook` | 已改名 **`assembly::BlockPlacement`** 并放开为 `pub(super)`(NEMO 装配侧同样登记它);`ProductDocument` 另加 `shield: model::ShieldPolicy` 字段 |
 | rounds/47 §4 Step 4(表)、`../goals/convert-backlog.md` §1(旧行) | "NEMO 要做就得写**第三套**写出器"(块表形态不同) | **前提不成立**:NEMO 的 KN 产物与正向同形(三处挂点/键名一致),差别只有 `shield` 口径 ⇒ 复用同一份 `assembly::ProductDocument`。落地与读数见 `../rounds/49` |
 
+## 第五十轮实施期间的符号漂移(2026-10-06)
+
+反向源侧骨架(`../rounds/50-kn-source-skeleton.md`)把骨架解析从"硬编码一个文档形状"改成**按形状参数化**,并补上反向:
+
+| 出处 | 已过时的表述 | 正确值 / 证据 |
+| --- | --- | --- |
+| rounds/47 §4 Step 5、`../knowledge/convert-performance.md` §2bis.8 | 骨架路径写作"读 `theatre.{scenes,actors}.*.block_data_json`"(像是它唯一的形状) | 该实现已参数化为 `source::SourceShape`(`Kitten4Shape` / `KnShape`),`source::parse` 是 Kitten4 那一支;反向新增 `source::parse_kn`(摘 `{actors.actorsDict,scenes.scenesDict,procedures.proceduresDict}.*.nekoBlockJsonList`)。旁表键仍是 `(容器, 实体 id)`,Kitten4 的键集**逐字未变** |
+| rounds/49 §7 | "**未做**:反向(KN → Kitten4)的源侧骨架……" | **已做**(2026-10-06,`../rounds/50`):`kn-9.4MB` 分配 602 799 → **442 291(−26.6%)**、`kn-3.7MB` 141 085 → **108 224(−23.3%)**,正向逐位不变 |
+| rounds/37 P2 注、`pipeline` 的克隆循环注释 | "实体对象里最大的键是 `nekoBlockJsonList`(上一步已解析成 `tree`),克隆时跳过" | 对骨架路径这句要读成"源文档里**已经没有**这个键"(它被摘进旁表)⇒ 跳过循环同样成立,但省下的那份深拷在骨架路径下**根本不存在** |
+
 ## 非轮次条目(仓库配置 · 文档读数与体例)
 
 > 本节收的是**不是某篇轮次正文写错**、而是**仓库配置 / 文档读数 / 文档体例与现实不符**的条目。

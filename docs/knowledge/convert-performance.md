@@ -300,6 +300,29 @@ perf report --stdio -i /tmp/bench.perf --no-children --sort symbol -g none
    块表在 typed 树上就地归一(`BlockJson` 的四个 `Value` 字段 + 三处子槽)"。这类"整份 `Value` 上的后处理"是流式重写的**必付迁移项**
    (同族先例:反向的 `mark_unknown_blocks` 从 `Value` 形态移植到 typed 形态,见 §2bis.10)。
 
+### 2bis.14 反向(KN → Kitten4)源侧骨架落地后的读数(2026-10-06,`845b2c2`,`../rounds/50-kn-source-skeleton.md`)
+
+同轮 A/B(A = 改动前即 `9cf1616` 的落地状态;B 侧两轮,分配读数两轮逐位相同;`taskset -c 0-3`,可用核数 4;分配窗口 = 一轮 `translate_file` 串行腿):
+
+| 样本 | 分配次数 A → B | 分配 MiB A → B | `e2e` A → B | 产物 SHA256 |
+| --- | --- | --- | --- | --- |
+| kn-9.4MB | 602 799 → **442 291**(**−26.6%**) | 141.0 → 124.9 | 269 → 221 / 134 | 与基线一致 |
+| kn-3.7MB | 141 085 → **108 224**(**−23.3%**) | 43.8 → 41.2 | 71 → 62 / 36 | 与基线一致 |
+| kitten4-10.8MB(未改动对照) | 909 987 → 909 986(−1) | 184.6 → 184.6 | 435 → 316 / 453 | 与基线一致 |
+| nemo-3.4MB(未改动对照) | 1 322 584 → 1 322 584(逐位相同) | 155.3 → 155.3 | 348 → 336 / 319 | 与基线一致 |
+
+**读法与耐久结论**:
+
+1. **省掉的是"整份源文档的 `Value` 中间树"**:反向的块表(三处 `nekoBlockJsonList`)在源文档里占比高于 Kitten4 的
+   `block_data_json`,所以同法收益更大(−26.6% / −23.3% 对正向 Step 5 的 −13.6%)。**判据是"这份字段在源文档里有多大"**。
+2. **"文档形状参数化"是可复用做法**:两个方向的骨架路径**同深**(文档 → 段 → 字典 → 实体 → 叶子键),只是键名不同 ⇒
+   键名提成编译期挂点表(`SourceShape { TARGETS, LEAF }` + `PhantomData`),三层 `Visitor` 一份实现两个形状,
+   不必写第二套解析、也不需要 `DeserializeSeed` 样板。前提是"段名/字典名在同一形状内唯一"。
+3. **`core` 在该步会"涨",那是口径漂移不是变慢**:`report.elapsed_ms` 自管线入口起算,而骨架路径把块表的 JSON 解析
+   从 `translate_file` 的 `from_str`(`core` 之外)挪进管线 ⇒ 与 Step 5 复盘里记的同名现象一致(判收益看 `e2e`/分配)。
+4. **摘掉源文档里的键不影响识别**:`detect_editor` 认 KN 只看 `actors.actorsDict` 在不在(与块表无关);
+   装配侧按既有约定从不读块表(`rounds/37` P2)⇒ 源侧骨架对这两处都是透明替换。
+
 ## 3. 已落地的优化(都有数字)
 
 | 优化 | 做法 | 收益 |
@@ -317,6 +340,7 @@ perf report --stdio -i /tmp/bench.perf --no-children --sort symbol -g none
 
 | **实体级并行(NEMO)** | 与正向同构的四阶段(临时 id 记录 → 串行兑现 → 并行 `remap_tree` + 条目组装 + `tree_to_json` → 串行装配);`NemoParseContext` 的两张只读表改 `Arc` 共享;默认并发 1 | nemo-3.4MB:`core` 282 → **196 ms(1.44×)**、`e2e` 398 → **303 ms(1.31×)**;nemo-old-1.5MB 两项均 1.21×;**产物 SHA256 与 `#meta` 全绿**;代价:分配 +13.9%(记录法);读数与结论见 §2bis.12 与 `../rounds/48-nemo-entity-parallelism.md` |
 | **产物流式写出(NEMO)** | NEMO → KN 的文件入口复用**正向同一份** `assembly::ProductDocument`:块表编码按 `model::ShieldPolicy` 参数化(正向恒写 `shield`、NEMO 假值不写);装配两条路径共用 `nemo::assemble_nemo`,分叉只在 `put_block_table`;数字归一拆成"非块表部分照旧 + 块表在 typed 树上就地归一" | nemo-3.4MB:分配 1 541 425 → **1 322 584(−14.2%)**、`core` 255–260 → **207–209 ms**、`e2e` 352–357 → **307–310 ms**;nemo-old-1.5MB:分配 472 850 → **405 054(−14.3%)**、`core` 77–84 → **63–65 ms**;未改动方向分配逐位不变,**产物 SHA256 与 `#meta` 全绿**;读数与结论见 §2bis.13 与 `../rounds/49-nemo-product-streaming.md` |
+| **源侧骨架(反向)** | `source.rs` 按**文档形状**参数化(Kitten4 / KittenN 共用一套三层 `Visitor`;键名是编译期挂点表),反向的三处 `nekoBlockJsonList` 留原文直喂 `model::parse_kn_entity_typed`;定义体解析拆出"树来源由调用方给"的入口;形态不合在**实体粒度**回落 `Value` | kn-9.4MB:分配 602 799 → **442 291(−26.6%)**、分配 MiB 141.0 → 124.9;kn-3.7MB:分配 141 085 → **108 224(−23.3%)**;正向两样本分配逐位不变(−1 且可解释),**产物 SHA256 与 `#meta` 全绿**;读数与结论见 §2bis.14 与 `../rounds/50-kn-source-skeleton.md` |
 
 ## 4. 判定**不做**(有证据)
 
