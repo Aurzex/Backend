@@ -14,9 +14,13 @@
 //!
 //! | 方向 | 前端 | 语义 | 后端 | 装配 |
 //! | --- | --- | --- | --- | --- |
-//! | Kitten4 → KN | [`model::parse_block_data_json`] | [`mapping::translate_kitten_to_kn`] | [`model::split_procedures`]/[`model::rewrite_calls`]/[`model::tree_to_json`] | [`assembly::build_document`] |
+//! | Kitten4 → KN | [`model::parse_block_data_json`] | [`mapping::translate_kitten_to_kn`] | [`model::split_procedures`]/[`model::rewrite_calls`]/[`model::tree_to_value`] | [`assembly::build_document`] |
 //! | KN → Kitten4 | [`model::parse_kn_entity`]/[`model::parse_kn_procedures`] | [`mapping::translate_kn_to_kitten`] | [`model::unrewrite_calls`]/[`model::def_root_from_entry`]/[`model::build_block_data_json`] | [`assembly::build_kitten4_document`] |
 //! | NEMO → KN | [`nemo::prepare_blocks_xml`](`xml` 解析 + 版本迁移 + 9 个前置改写) | [`nemo_mapping::translate_nemo_to_kn`](官方把映射折进解析,见该模块文档) | 不需要(程序集在解析器内就位) | [`nemo::convert_nemo_document`] |
+//!
+//! 两条 **KN 产物**路径(上表第 1、3 行)在文件入口上吃**流式产物**:三处 `nekoBlockJsonList`
+//! 不建整份 `Value`,由 [`assembly::ProductDocument`] 在占位处直写(正向 Step 2/3、NEMO 见
+//! `docs/rounds/49-nemo-product-streaming.md`);内存入口([`translate_value`])口径不变。
 //!
 //! 三条路的**不变量**相同:产物是能过官方 `validateBcm` 的 `.bcmkn`;有损之处一律进
 //! [`TranslateReport`]。NEMO 侧只有 `bcm_version` 这个额外输入(老作品要迁移,`docs/rounds/27` §9.3),
@@ -145,15 +149,16 @@ pub fn translate_value(
     })
 }
 
-/// 文件路径的内部产物:文档可能是**流式**产物(正向 Kitten4 → KN 不建整份产物 `Value`)
+/// 文件路径的内部产物:文档可能是**流式**产物(Kitten4 → KN 与 NEMO → KN 不建整份产物 `Value`)
 struct FileConversion {
     document: ConvertedDocument,
     target: TargetEditor,
     report: TranslateReport,
 }
 
-/// 文件路径的文档:优先流式(正向 / 反向各一种),其余(回落)仍是整份 `Value`
+/// 文件路径的文档:优先流式(正向 / 反向 / NEMO 各一种),其余(回落)仍是整份 `Value`
 enum ConvertedDocument {
+    /// KN 产物的流出形态:Kitten4 → KN 与 NEMO → KN 共用(只有块表 `shield` 口径不同)
     Product(assembly::ProductDocument),
     Kitten4(assembly::Kitten4ProductDocument),
     Value(serde_json::Value),
@@ -185,7 +190,8 @@ impl ConvertedDocument {
 /// `Value` 解析 + [`translate_value`] —— 回落路径与旧口径逐字一致。
 ///
 /// 快速通道的产物是 [`assembly::ProductDocument`](可流式写出):块表不建整份 `Value`,
-/// 由 [`ConvertedDocument::write_to_file`] 直接写盘(Step 2/3)。
+/// 由 [`ConvertedDocument::write_to_file`] 直接写盘(Step 2/3)。NEMO → KN 不走骨架(它没有
+/// `block_data_json`),但**产物侧**同样吃 `ProductDocument`(见下方 NEMO 分支)。
 fn translate_text(
     text: &str,
     target: TargetEditor,
@@ -256,6 +262,27 @@ fn translate_text(
             report,
         });
     }
+    // NEMO → KN 同样吃**流式产物**(`docs/rounds/49-nemo-product-streaming.md`):判据与
+    // `translate_value` 的分派一致(`detect_editor` 认 NEMO 且目标 KN)
+    if matches!(target, TargetEditor::KittenN)
+        && detect_editor(&source) == Some(crate::core::convert::EditorType::Nemo)
+    {
+        let mut report = TranslateReport::new(
+            crate::core::convert::EditorType::Nemo,
+            TargetEditor::KittenN,
+        );
+        let product = nemo::convert_nemo_document_product(&source, options, &mut report)?;
+        if options.is_strict() && report.is_lossy() {
+            return Err(TranslateError::Lossy {
+                report: Box::new(report),
+            });
+        }
+        return Ok(FileConversion {
+            document: ConvertedDocument::Product(product),
+            target,
+            report,
+        });
+    }
     let converted = translate_value(source, target, options)?;
     Ok(FileConversion {
         document: ConvertedDocument::Value(converted.document),
@@ -276,8 +303,8 @@ pub fn translate_file(
     let output = product_path(input, target, &options)?;
 
     // 流式写盘(方案 23 P0-1):与 `to_string` 逐字节相同,省掉整份中间串与一次整块拷贝。
-    // 正向快速通道更进一步:产物里那三份块表**不建 `Value`**,直接写进同一个 `BufWriter`
-    // (Step 2/3,见 `assembly::ProductDocument`)。
+    // 三条快速通道更进一步:产物里那三份块表**不建 `Value`**,直接写进同一个 `BufWriter`
+    // (正向 Step 2/3、反向 Step 4、NEMO rounds/49,见 `assembly::ProductDocument`)。
     converted.document.write_to_file(&output)?;
 
     Ok(TranslateOutcome {
@@ -456,6 +483,84 @@ fn unique_test_dir(tag: &str) -> std::path::PathBuf {
     ))
 }
 
+/// 文件入口的**走线**门
+///
+/// 字节一致说明不了走线(回落路径的字节也对),所以这里直接钉住 [`ConvertedDocument`] 的形态 ——
+/// 与 `nemo_tests::nemo_entity_parallelism_is_byte_identical_and_really_parallel`(钉"真的开了线程")
+/// 同一路数:性能特征由单测挡回归,读数见 `docs/rounds/49-nemo-product-streaming.md`。
+#[cfg(test)]
+mod file_path_tests {
+    use super::*;
+
+    /// 最小 NEMO 编辑版(与 `nemo_tests::nemo_document` 同形):演员带一个积木、场景空
+    fn nemo_source() -> String {
+        serde_json::json!({
+            "app_version": "2.3.0",
+            "project_name": "测试作品",
+            "actors": {
+                "actors_dict": {
+                    "actor-1": {
+                        "id": "actor-1", "name": "角色1", "x": -70, "y": 12, "rotation": 0,
+                        "scale": 70.9, "visible": true, "locked": false, "current_style_id": "style-1",
+                        "styles": ["style-1"], "scene_id": "scene-1",
+                        "blocksXML": r#"<block type="self_appear" id="b0" visible="visible" inline="true"/>"#
+                    }
+                },
+                "current_actor": "actor-1"
+            },
+            "scenes": {
+                "current_scene": "scene-1",
+                "scenes_order": ["scene-1"],
+                "scenes_dict": {
+                    "scene-1": {
+                        "id": "scene-1", "name": "场景1", "actors": ["actor-1"], "styles": ["style-1"],
+                        "current_style_id": "", "visible": true, "blocksXML": ""
+                    }
+                }
+            },
+            "styles": {
+                "styles_dict": {
+                    "style-1": { "id": "style-1", "name": "造型1", "texture": "res/drawable/b_1.png" }
+                }
+            },
+            "audios": { "sounds": {} },
+            "variable": { "variable_dict": {} },
+            "broadcast": { "broadcast_dict": {} },
+            "procedures": {},
+            "split_options": { "options_dict": {} },
+            "block_count": { "all_block_count": 0, "visible_block_count": 0 }
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn nemo_source_uses_streaming_product_and_matches_memory_path() {
+        let text = nemo_source();
+        let options = TranslateOptions::new().deterministic_ids(true);
+        let conversion =
+            translate_text(&text, TargetEditor::KittenN, &options).expect("文件路径转换");
+        let ConvertedDocument::Product(product) = &conversion.document else {
+            panic!("NEMO → KN 的文件入口应走流式产物(见 docs/rounds/49),实际是另一种形态");
+        };
+        let source: serde_json::Value = serde_json::from_str(&text).expect("解析源");
+        let expected = translate_value(source, TargetEditor::KittenN, &options)
+            .expect("内存入口")
+            .document;
+        // 顺着目标本身验一遍:块表必须从占位填回,而不是留 `null`
+        assert_eq!(
+            expected["actors"]["actorsDict"]["actor-1"]["nekoBlockJsonList"][0]["type"],
+            "self_appear"
+        );
+        let mut streamed = Vec::new();
+        product.write_to(&mut streamed).expect("流式写出");
+        assert_eq!(
+            String::from_utf8_lossy(&streamed),
+            serde_json::to_string(&expected).expect("序列化内存入口产物"),
+            "文件入口的字节必须与内存入口逐字节相同"
+        );
+    }
+}
+
 #[cfg(test)]
 mod diff_tests {
     //! 与官方产物对齐的差分门(docs/rounds/20 §7 Phase 2 验收)。
@@ -535,7 +640,7 @@ mod diff_tests {
         let (kept, procs) = model::split_procedures(tree, &mut ids, &mut report);
         let mut kept = kept;
         model::rewrite_calls(&mut kept, &procs, &mut ids, &mut report);
-        let json = model::tree_to_json(&kept).expect("编码");
+        let json = model::tree_to_value(&kept, model::ShieldPolicy::Always).expect("编码");
         (json, procs, report)
     }
 

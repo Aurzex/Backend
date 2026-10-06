@@ -1,3 +1,4 @@
+use super::assembly::{BlockContainer, BlockPlacement, ProductDocument};
 use super::model::{IdSource, MintKind};
 use super::nemo_mapping::NEMO_BCM_VERSION;
 use super::nemo_mapping::{
@@ -68,8 +69,44 @@ pub(super) fn convert_nemo_document(
     options: &TranslateOptions,
     report: &mut TranslateReport,
 ) -> Result<Value, TranslateError> {
-    // 计时(rounds/37 §0.5):基准表的 `core ms` 取自 `report.elapsed_ms`,此前 NEMO 侧从不设它(恒 0)
     let started = std::time::Instant::now();
+    let mut document = assemble_nemo(source, options, report, None)?;
+    finish_document(&mut document);
+    // 计时(rounds/37 §0.5):基准表的 `core ms` 取自 `report.elapsed_ms`,此前 NEMO 侧从不设它(恒 0)
+    report.elapsed_ms = started.elapsed().as_millis();
+    Ok(Value::Object(document))
+}
+
+/// 同 [`convert_nemo_document`],但产物**可流式写出**(文件路径用它)
+///
+/// 三处 `nekoBlockJsonList` 不当场编码成 `Value`,而是把积木树登记成
+/// [`assembly::ProductDocument`] 的挂点,由写出侧在占位处直接写(与正向 Step 2/3 同一套机械,
+/// 见 `docs/rounds/49-nemo-product-streaming.md`)。`shield` 补键口径仍是 NEMO 旧口径
+/// ([`model::ShieldPolicy::OnlyWhenTrue`])。
+pub(super) fn convert_nemo_document_product(
+    source: &Value,
+    options: &TranslateOptions,
+    report: &mut TranslateReport,
+) -> Result<ProductDocument, TranslateError> {
+    let started = std::time::Instant::now();
+    let mut placements: Vec<BlockPlacement> = Vec::new();
+    let mut document = assemble_nemo(source, options, report, Some(&mut placements))?;
+    finish_document(&mut document);
+    report.elapsed_ms = started.elapsed().as_millis();
+    Ok(ProductDocument::new_nemo(document, placements))
+}
+
+/// 装配 NEMO → KN 的整份文档(除块表外)
+///
+/// `placements` 是块表的去向:`None` = 内存路径(每处当场编码成 `Value`),`Some` = 文件路径
+/// (只登记挂点,树按值搬出)。两条路径共用本函数,差别只在 [`put_block_table`]。
+fn assemble_nemo(
+    source: &Value,
+    options: &TranslateOptions,
+    report: &mut TranslateReport,
+    mut placements: Option<&mut Vec<BlockPlacement>>,
+) -> Result<Map<String, Value>, TranslateError> {
+    let product = placements.is_some();
     let (qc, yc) = migration_flags(options.source_version_ref());
     let deterministic = options.ids_deterministic();
     let now_ms = if deterministic {
@@ -155,15 +192,19 @@ pub(super) fn convert_nemo_document(
                         .collect(),
                 ),
             );
-            entry.insert(
-                "nekoBlockJsonList".to_string(),
-                Value::Array(tree_to_json(&procedure.tree, report)),
+            report.blocks_converted += procedure.tree.count();
+            put_block_table(
+                &mut entry,
+                &mut placements,
+                BlockContainer::Procedures,
+                &procedure.key,
+                procedure.tree,
+                report,
             );
             entry.insert(
                 "workspaceScrollXy".to_string(),
                 json!({ "x": WORKSPACE_SCROLL.0, "y": WORKSPACE_SCROLL.1 }),
             );
-            report.blocks_converted += procedure.tree.count();
             procedures.insert(procedure.key, Value::Object(entry));
         }
         document.insert(
@@ -296,6 +337,8 @@ pub(super) fn convert_nemo_document(
         unmatched: usize,
         parsed_report: TranslateReport,
         encode_report: TranslateReport,
+        /// 文件路径下待登记的块表(内存路径已在阶段 3 编码成 `Value`,这里恒 `None`)
+        tree: Option<super::model::BlockTree>,
     }
     let encoded = super::pipeline::run_items(parsed, &weights, workers, |_, parsed_item| {
         let NemoParsed {
@@ -323,10 +366,6 @@ pub(super) fn convert_nemo_document(
             entry.insert("screenName".to_string(), Value::String(String::new()));
             entry.insert("actorIds".to_string(), Value::Array(Vec::new()));
             entry.insert("currentStyleId".to_string(), Value::String(String::new()));
-            entry.insert(
-                "nekoBlockJsonList".to_string(),
-                Value::Array(tree_to_json(&tree, &mut local)),
-            );
             entry.insert(
                 "workspaceScrollXy".to_string(),
                 json!({ "x": WORKSPACE_SCROLL.0, "y": WORKSPACE_SCROLL.1 }),
@@ -370,14 +409,22 @@ pub(super) fn convert_nemo_document(
             entry.insert("scale".to_string(), floored(source.get("scale")));
             insert_if_present(&mut entry, "currentStyleId", source.get("current_style_id"));
             entry.insert(
-                "nekoBlockJsonList".to_string(),
-                Value::Array(tree_to_json(&tree, &mut local)),
-            );
-            entry.insert(
                 "workspaceScrollXy".to_string(),
                 json!({ "x": WORKSPACE_SCROLL.0, "y": WORKSPACE_SCROLL.1 }),
             );
         }
+        // 块表去向(两条路径共用上面这段装配,只有这一步不同):内存路径当场编码(并入 `local`
+        // 的告警),文件路径把树按值搬出、由阶段 4 登记成流出挂点(见 `put_block_table`)。
+        let blocked = if product {
+            entry.insert("nekoBlockJsonList".to_string(), Value::Null);
+            Some(tree)
+        } else {
+            entry.insert(
+                "nekoBlockJsonList".to_string(),
+                Value::Array(tree_to_json(&tree, &mut local)),
+            );
+            None
+        };
         NemoEncoded {
             item,
             entry: Value::Object(entry),
@@ -385,6 +432,7 @@ pub(super) fn convert_nemo_document(
             unmatched,
             parsed_report,
             encode_report: local,
+            tree: blocked,
         }
     });
 
@@ -400,12 +448,26 @@ pub(super) fn convert_nemo_document(
             unmatched: missed,
             parsed_report,
             encode_report,
+            tree,
         } = encoded_item;
         unmatched += missed;
         report.blocks_converted += nodes;
         // 告警顺序:每项「解析期 → 装配期」,与旧实现逐项 push 的顺序逐条相同
         unmatched += super::pipeline::merge_report(report, parsed_report, &mints);
         unmatched += super::pipeline::merge_report(report, encode_report, &mints);
+        // 文件路径:块表登记成流出挂点(顺序 = 项序,与内存路径填占位的顺序无关 —— `Map` 有序)
+        if let (Some(mut tree), Some(list)) = (tree, placements.as_mut()) {
+            normalize_tree_numbers(&mut tree);
+            list.push(BlockPlacement {
+                container: if item.is_scene {
+                    BlockContainer::Scenes
+                } else {
+                    BlockContainer::Actors
+                },
+                id: item.id.to_string(),
+                tree,
+            });
+        }
         if item.is_scene {
             scenes.insert(item.id.to_string(), entry);
         } else {
@@ -687,13 +749,82 @@ pub(super) fn convert_nemo_document(
         .cloned()
         .unwrap_or_else(|| Value::String("新的作品".to_string()));
     document.insert("projectName".to_string(), project_name);
-
-    // ── 数字归一:`JSON.stringify` 把"整数值的浮点"打印成整数(JS 没有 int/float 之分),
-    // 官方产物里的 `stageSize`/`timerPosition`/变量坐标因此都是整数形态;这里统一到同一口径。
-    let mut document = Value::Object(document);
-    normalize_integral_numbers(&mut document);
-    report.elapsed_ms = started.elapsed().as_millis();
     Ok(document)
+}
+
+/// 产物收尾:数字归一(`JSON.stringify` 把"整数值的浮点"打印成整数 —— JS 没有 int/float 之分,
+/// 官方产物里的 `stageSize`/`timerPosition`/变量坐标因此都是整数形态)
+///
+/// 作用范围是**除块表外的整份文档**:块表那份数字在 [`put_block_table`] 里按同一口径在树上就地
+/// 归一(覆盖 [`BlockJson`](super::model::BlockJson) 的四个 `Value` 字段 ⇒ 与整树走一遍等价,
+/// 见 `nemo_tests::tree_normalization_covers_every_value_field`)。
+fn finish_document(document: &mut Map<String, Value>) {
+    for value in document.values_mut() {
+        normalize_integral_numbers(value);
+    }
+}
+
+/// 把一处 `nekoBlockJsonList` 交给去向
+///
+/// - `product = None`(内存路径):当场编码成 `Value`(`tree_to_json`,旧口径,单根失败记告警);
+/// - `product = Some`(文件路径):只登记挂点,树按值搬出给 [`ProductDocument`] 在占位处直写。
+///
+/// 两条路径共用同一份装配:`entry` 里块表位置一律是 `Value::Null` 占位(内存路径由
+/// [`ProductDocument::into_value`] 填回,文件路径由 `write_to` 在占位处直写)。
+fn put_block_table(
+    entry: &mut Map<String, Value>,
+    product: &mut Option<&mut Vec<BlockPlacement>>,
+    container: BlockContainer,
+    id: &str,
+    mut tree: super::model::BlockTree,
+    report: &mut TranslateReport,
+) {
+    match product {
+        Some(list) => {
+            normalize_tree_numbers(&mut tree);
+            list.push(BlockPlacement {
+                container,
+                id: id.to_string(),
+                tree,
+            });
+            entry.insert("nekoBlockJsonList".to_string(), Value::Null);
+        }
+        None => {
+            entry.insert(
+                "nekoBlockJsonList".to_string(),
+                Value::Array(tree_to_json(&tree, report)),
+            );
+        }
+    }
+}
+
+/// 块表数字归一(typed 形态):把 [`BlockJson`](super::model::BlockJson) 里**所有** `Value` 字段
+/// 走一遍 [`normalize_integral_numbers`]
+///
+/// 覆盖 `location` / `fields` / `field_constraints` / `extra` 四个字段(其余字段是字符串或布尔,
+/// 不含数字)并递归 `next`/`inputs`/`statements` ⇒ 与"整棵树物化成 `Value` 再归一"逐字段等价
+/// (守门测试:`nemo_tests::tree_normalization_covers_every_value_field`)。
+pub(super) fn normalize_tree_numbers(tree: &mut super::model::BlockTree) {
+    fn walk(node: &mut super::model::BlockJson) {
+        for value in [node.location.as_mut(), node.field_constraints.as_mut()]
+            .into_iter()
+            .flatten()
+        {
+            normalize_integral_numbers(value);
+        }
+        for value in node.fields.values_mut().chain(node.extra.values_mut()) {
+            normalize_integral_numbers(value);
+        }
+        if let Some(next) = node.next.as_mut() {
+            walk(next);
+        }
+        for child in node.inputs.values_mut().chain(node.statements.values_mut()) {
+            walk(child);
+        }
+    }
+    for root in &mut tree.roots {
+        walk(root);
+    }
 }
 
 /// 解析一个实体的 `blocksXML`(含版本迁移与前置改写)

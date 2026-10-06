@@ -1847,15 +1847,29 @@ fn default_value_shadow(id: &str, value: &str) -> String {
 
 // ---------------------------------------------------------------- 编码
 
-/// 实体/程序集的积木树 → `nekoBlockJsonList` 数组
+/// 块表编码的 `shield` 补键口径 —— 正向与 NEMO 的产物同为 KN 文档,唯一差别在这里
 ///
-/// 编码前会补齐官方一定会写的 `shield` 键(见 [`fill_shield`])。
-pub(super) fn tree_to_json(tree: &BlockTree) -> Result<Vec<Value>> {
+/// 官方 `jC.parseBlock` 给**每个**节点写 `shield: !!t.shield`,而 [`BlockJson::shield`] 是
+/// `skip_serializing_if = "is_false"`。两条旧口径因此不同:正向靠 [`fill_shield`] 补假值,
+/// NEMO 侧 `nemo::tree_to_json` 直吃 `BlockJson::to_value`(**不补**,积木块本来就带
+/// `shield`,见 `nemo::convert_nemo_document` 的产物口径)。
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum ShieldPolicy {
+    /// 正向(Kitten4 → KN):`shield` 键**恒写**
+    Always,
+    /// NEMO → KN:`shield` 只在真值时写(旧路径是 `BlockJson` 的 `skip_serializing_if`)
+    OnlyWhenTrue,
+}
+
+/// 实体/程序集的积木树 → `nekoBlockJsonList` 数组(`shield` 补不补按 [`ShieldPolicy`])
+pub(super) fn tree_to_value(tree: &BlockTree, shield: ShieldPolicy) -> Result<Vec<Value>> {
     tree.roots
         .iter()
         .map(|root| {
             let mut value = BlockJson::to_value(root)?;
-            fill_shield(&mut value);
+            if shield == ShieldPolicy::Always {
+                fill_shield(&mut value);
+            }
             Ok(value)
         })
         .collect()
@@ -1863,29 +1877,33 @@ pub(super) fn tree_to_json(tree: &BlockTree) -> Result<Vec<Value>> {
 
 /// 把实体/程序集的积木树**直接写成** `nekoBlockJsonList` 数组(不建中间 `Value`)
 ///
-/// 与 [`tree_to_json`] + `serde_json::to_writer` **逐字节相同**(常驻门:本文件
+/// 与 [`tree_to_value`] + `serde_json::to_writer` **逐字节相同**(常驻门:本文件
 /// `streamed_block_tree_equals_value_path`):键序 = `serde_json::Map`(= `BTreeMap`)的字节序;
-/// 每块的键 = "存在的已知键" ∪ `extra` 的键;`shield` **恒写出**(官方必写,见 [`fill_shield`]),
-/// 其余布尔键只在真值时写;键名与字符串值一律交给 `serde_json::to_writer` 转义。
+/// 每块的键 = "存在的已知键" ∪ `extra` 的键;`shield` 按 [`ShieldPolicy`] 写(正向恒写、NEMO 只在
+/// 真值时写),其余布尔键只在真值时写;键名与字符串值一律交给 `serde_json::to_writer` 转义。
 ///
 /// 为什么要有这条:旧路径 [`BlockJson::to_value`] 会把每块按 `Serialize` **重新物化**一份
 /// `Map<String, Value>`(字段值全是 clone),10 MB 级作品是十万级块的整份拷贝 —— 这既是产物侧
 /// 最大的分配来源,也是 `e2e` 里那段"未归类"耗时的主体(实测见
 /// `../../../../docs/rounds/47-data-layer-rewrite-plan.md` §4 Step 2/3)。本函数按**引用**直写。
-pub(super) fn write_block_tree(tree: &BlockTree, w: &mut impl std::io::Write) -> Result<()> {
+pub(super) fn write_block_tree(
+    tree: &BlockTree,
+    shield: ShieldPolicy,
+    w: &mut impl std::io::Write,
+) -> Result<()> {
     w.write_all(b"[")?;
     for (index, root) in tree.roots.iter().enumerate() {
         if index > 0 {
             w.write_all(b",")?;
         }
-        write_block(root, w)?;
+        write_block(root, shield, w)?;
     }
     w.write_all(b"]")?;
     Ok(())
 }
 
 /// 单块 → JSON 对象(键序与 [`BlockJson::to_value`] 的 `Map` 一致)
-fn write_block(node: &BlockJson, w: &mut impl std::io::Write) -> Result<()> {
+fn write_block(node: &BlockJson, shield: ShieldPolicy, w: &mut impl std::io::Write) -> Result<()> {
     // 每块一份小键表(容量取已知键数,免增长);与 `to_value` 的 Map 同序要求见函数文档
     let mut keys: Vec<&str> = Vec::with_capacity(KNOWN_BLOCK_KEYS.len() + node.extra.len());
     for (present, key) in [
@@ -1900,9 +1918,9 @@ fn write_block(node: &BlockJson, w: &mut impl std::io::Write) -> Result<()> {
         (node.mutation.is_some(), "mutation"),
         (node.is_shadow, "is_shadow"),
         (node.is_output, "is_output"),
-        // `shield` **恒写**:官方每个节点都写 `shield: !!t.shield`,而字段本身是
-        // `skip_serializing_if = "is_false"` —— 旧路径靠 `fill_shield` 补,这里直接写
-        (true, "shield"),
+        // `shield` 的键在不在:正向**恒写**(官方每个节点都写 `shield: !!t.shield`,而字段本身是
+        // `skip_serializing_if = "is_false"` —— 旧路径靠 `fill_shield` 补);NEMO 只在真值时写
+        (shield == ShieldPolicy::Always || node.shield, "shield"),
         (node.disabled, "disabled"),
         (node.parent_id.is_some(), "parent_id"),
         (node.field_constraints.is_some(), "field_constraints"),
@@ -1932,7 +1950,7 @@ fn write_block(node: &BlockJson, w: &mut impl std::io::Write) -> Result<()> {
             "type" => serde_json::to_writer(&mut *w, &node.kind)?,
             "id" => serde_json::to_writer(&mut *w, expect_some(&node.id, "id")?)?,
             "location" => serde_json::to_writer(&mut *w, expect_some(&node.location, "location")?)?,
-            "next" => write_block(expect_some(&node.next, "next")?, w)?,
+            "next" => write_block(expect_some(&node.next, "next")?, shield, w)?,
             "inputs" | "statements" => {
                 let map = if *key == "inputs" {
                     &node.inputs
@@ -1946,7 +1964,7 @@ fn write_block(node: &BlockJson, w: &mut impl std::io::Write) -> Result<()> {
                     }
                     serde_json::to_writer(&mut *w, slot)?;
                     w.write_all(b":")?;
-                    write_block(child, w)?;
+                    write_block(child, shield, w)?;
                 }
                 w.write_all(b"}")?;
             }
@@ -2062,33 +2080,56 @@ mod streamed_writer_tests {
     #[test]
     fn streamed_block_tree_equals_value_path() {
         let tree = sample_tree();
-        let mut streamed = Vec::new();
-        write_block_tree(&tree, &mut streamed).expect("流式写出");
-        let expected = serde_json::to_vec(&Value::Array(tree_to_json(&tree).expect("to_value")))
+        // 两条 `shield` 口径都要与各自的 `to_value` 路径逐字节相同
+        for policy in [ShieldPolicy::Always, ShieldPolicy::OnlyWhenTrue] {
+            let mut streamed = Vec::new();
+            write_block_tree(&tree, policy, &mut streamed).expect("流式写出");
+            let expected = serde_json::to_vec(&Value::Array(
+                tree_to_value(&tree, policy).expect("to_value"),
+            ))
             .expect("序列化 to_value 路径");
-        assert_eq!(
-            String::from_utf8_lossy(&streamed),
-            String::from_utf8_lossy(&expected),
-            "流式写出必须与 to_value + to_writer 逐字节相同"
-        );
-        // 顺带钉住"`extra` 撞名时 extra 胜"这条口径(否则两条路径会在这类树上分叉)
-        assert!(String::from_utf8_lossy(&streamed).contains("\"id\":\"override\""));
+            assert_eq!(
+                String::from_utf8_lossy(&streamed),
+                String::from_utf8_lossy(&expected),
+                "流式写出必须与 to_value + to_writer 逐字节相同"
+            );
+            // 顺带钉住"`extra` 撞名时 extra 胜"这条口径(否则两条路径会在这类树上分叉)
+            assert!(String::from_utf8_lossy(&streamed).contains("\"id\":\"override\""));
+        }
     }
 
-    /// 空树与最小块:数组外壳与 `shield` 补键都不能少
+    /// 空树与最小块:数组外壳不能少;`shield` 键按口径补(正向恒写、NEMO 假值不写)
     #[test]
     fn streamed_block_tree_handles_empty_and_minimal() {
         let empty = BlockTree::default();
         let mut streamed = Vec::new();
-        write_block_tree(&empty, &mut streamed).expect("空树");
+        write_block_tree(&empty, ShieldPolicy::Always, &mut streamed).expect("空树");
         assert_eq!(streamed, b"[]");
 
         let minimal = parse_kn_entity(&serde_json::json!([{ "type": "x" }])).expect("解析");
         let mut streamed = Vec::new();
-        write_block_tree(&minimal, &mut streamed).expect("最小树");
+        write_block_tree(&minimal, ShieldPolicy::Always, &mut streamed).expect("最小树");
         assert_eq!(
             String::from_utf8_lossy(&streamed),
             r#"[{"shield":false,"type":"x"}]"#
+        );
+
+        let mut streamed = Vec::new();
+        write_block_tree(&minimal, ShieldPolicy::OnlyWhenTrue, &mut streamed).expect("最小树");
+        assert_eq!(
+            String::from_utf8_lossy(&streamed),
+            r#"[{"type":"x"}]"#,
+            "NEMO 口径下假 `shield` 不写键"
+        );
+
+        let shielded =
+            parse_kn_entity(&serde_json::json!([{ "type": "x", "shield": true }])).expect("解析");
+        let mut streamed = Vec::new();
+        write_block_tree(&shielded, ShieldPolicy::OnlyWhenTrue, &mut streamed).expect("最小树");
+        assert_eq!(
+            String::from_utf8_lossy(&streamed),
+            r#"[{"shield":true,"type":"x"}]"#,
+            "NEMO 口径下真 `shield` 照写"
         );
     }
 
@@ -2161,7 +2202,7 @@ fn fill_shield(node: &mut Value) {
 /// 程序集条目 → `proceduresDict` 的**条目表**(定义体积木位置留 `null` 占位)+ 每条的积木树
 ///
 /// 拆成"条目表 + 树"是为了让两条路径共用同一套字段拼装:内存路径把树物化回 `Value` 填进占位
-/// ([`tree_to_json`]),文件路径把树登记成装配侧的流式挂点(`rounds/47` §4 Step 2/3)。
+/// ([`tree_to_value`]),文件路径把树登记成装配侧的流式挂点(`rounds/47` §4 Step 2/3)。
 /// 树**按值搬出**(`mem::take`):调用方之后不再需要它(占位从此只作位置锚点)。
 pub(super) fn procedure_entries(
     procedures: &mut [ProcedureEntry],
@@ -2200,7 +2241,7 @@ pub(super) fn procedures_to_json(procedures: &[ProcedureEntry]) -> Result<Map<St
         if let Some(body) = dict.get_mut(&id).and_then(Value::as_object_mut) {
             body.insert(
                 "nekoBlockJsonList".into(),
-                Value::Array(tree_to_json(&tree)?),
+                Value::Array(tree_to_value(&tree, ShieldPolicy::Always)?),
             );
         }
     }
@@ -2583,7 +2624,7 @@ mod neko_tests {
         let mut report = report();
         let (rest, procedures) = split_procedures(def_tree(), &mut ids, &mut report);
 
-        let json_tree = tree_to_json(&rest).expect("rest 树");
+        let json_tree = tree_to_value(&rest, ShieldPolicy::Always).expect("rest 树");
         assert!(json_tree.is_empty(), "定义被摘走后实体树为空");
 
         let dict = procedures_to_json(&procedures).expect("条目编码");

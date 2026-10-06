@@ -934,3 +934,120 @@ fn nemo_entity_parallelism_is_byte_identical_and_really_parallel() {
         "产物里不得残留临时 id 哨兵(临时 id 方案见 model::TEMP_ID_PREFIX)"
     );
 }
+
+/// **常驻字节等价门**(`rounds/49`):文件路径吃的**流式产物**(三处块表不建 `Value`)与内存路径
+/// 逐字节相同
+///
+/// 用真作品样本(847 演员 + 38 场景 + 程序集,三处挂点全覆盖)把三条口径钉在一起:
+/// 内存 `Value`、产物物化回 `Value`、产物直接写出的字节。块表编码口径是
+/// [`nemo::convert_nemo_document_product`] 的 `ShieldPolicy::OnlyWhenTrue`(不补假 `shield`),
+/// 与旧 `nemo::tree_to_json` 一致 —— 这三条若分叉,产物就与历史基线不同。
+#[test]
+fn nemo_product_path_is_byte_identical_to_value_path() {
+    use crate::core::convert::translate::{TranslateReport, nemo};
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+        "download/compile/蛋仔派对2-奥姆返场新盲盒生存赛重做_194684070/user_works/194684070/194684070.bcm",
+    );
+    if !path.exists() {
+        super::missing_fixture(&format!("真作品样本 {}", path.display()));
+        return;
+    }
+    let text = std::fs::read_to_string(&path).expect("读取样本");
+    let source: Value = serde_json::from_str(&text).expect("样本应是明文编辑版 JSON");
+    let options = TranslateOptions::new()
+        .deterministic_ids(true)
+        .source_version("0.16.2");
+
+    let mut value_report = TranslateReport::new(EditorType::Nemo, TargetEditor::KittenN);
+    let value =
+        nemo::convert_nemo_document(&source, &options, &mut value_report).expect("内存路径");
+    let expected = serde_json::to_string(&value).expect("序列化内存路径产物");
+
+    let mut product_report = TranslateReport::new(EditorType::Nemo, TargetEditor::KittenN);
+    let product = nemo::convert_nemo_document_product(&source, &options, &mut product_report)
+        .expect("流式产物");
+    let mut streamed = Vec::new();
+    product.write_to(&mut streamed).expect("流式写出");
+    assert_eq!(
+        String::from_utf8_lossy(&streamed),
+        expected,
+        "流式写出的字节必须与内存路径逐字节相同"
+    );
+    assert_eq!(
+        serde_json::to_string(&product.into_value().expect("物化")).expect("序列化产物"),
+        expected,
+        "产物物化回 Value 也必须与内存路径逐字节相同"
+    );
+    // 份量对账:两条路径的块数与告警逐条相同(共用一份装配的直接后果)
+    assert_eq!(
+        product_report.blocks_converted, value_report.blocks_converted,
+        "块数"
+    );
+    assert_eq!(
+        product_report.warnings().len(),
+        value_report.warnings().len(),
+        "告警条数"
+    );
+}
+
+/// 流式写出口径钉桩:块表数字归一在**树上**做,必须与"整棵树物化成 `Value` 再归一"等价
+///
+/// `BlockJson` 的 `Value` 字段共四个(`location`/`fields`/`field_constraints`/`extra`),
+/// 这条测试把四个位置 + 三个子树槽位(`inputs`/`statements`/`next`)都放上"整数值的浮点",
+/// 逐字段比两条口径的产物。
+#[test]
+fn tree_normalization_covers_every_value_field() {
+    use crate::core::convert::translate::nemo;
+    let materialize = |tree: &super::model::BlockTree| {
+        Value::Array(
+            super::model::tree_to_value(tree, super::model::ShieldPolicy::Always).expect("物化"),
+        )
+    };
+    let tree = super::model::parse_kn_entity(&serde_json::json!([
+        {
+            "type": "a",
+            "id": "n",
+            "location": [1.0, 2.5],
+            "fields": { "NUM": 3.0, "KEEP": 4.5 },
+            "field_constraints": { "min": 5.0 },
+            "extra": { "x": 6.0, "深": { "y": 7.0 } },
+            "inputs": { "V": { "type": "b", "id": "m", "fields": { "NUM": 8.0 } } },
+            "statements": { "DO": { "type": "c", "id": "o", "extra": { "y": 9.0 } } },
+            "next": { "type": "d", "id": "p", "fields": { "NUM": 10.0 } }
+        }
+    ]))
+    .expect("解析样例树");
+
+    // 旧口径:整棵树物化成 `Value`,再整份递归归一
+    let mut materialized = materialize(&tree);
+    let raw = materialized.clone();
+    nemo::normalize_integral_numbers(&mut materialized);
+    assert_ne!(
+        materialized, raw,
+        "样例必须真的含'整数值的浮点',否则本测试是空门"
+    );
+
+    // 流式口径:在 typed 树上就地归一,再物化
+    let mut typed = tree.clone();
+    nemo::normalize_tree_numbers(&mut typed);
+    let normalized_typed = materialize(&typed);
+
+    assert_eq!(
+        normalized_typed, materialized,
+        "树上归一必须覆盖整树归一的每个数字位置"
+    );
+    // 顺带钉住两个方向:整数值的浮点折成整数、真小数不动
+    assert_eq!(normalized_typed[0]["fields"]["NUM"], json!(3));
+    assert_eq!(normalized_typed[0]["fields"]["KEEP"], json!(4.5));
+    assert_eq!(normalized_typed[0]["location"], json!([1, 2.5]));
+    assert_eq!(normalized_typed[0]["extra"]["深"]["y"], json!(7));
+    assert_eq!(
+        normalized_typed[0]["inputs"]["V"]["fields"]["NUM"],
+        json!(8)
+    );
+    assert_eq!(
+        normalized_typed[0]["statements"]["DO"]["extra"]["y"],
+        json!(9)
+    );
+    assert_eq!(normalized_typed[0]["next"]["fields"]["NUM"], json!(10));
+}

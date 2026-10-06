@@ -111,26 +111,35 @@ pub(super) fn build_document(
 /// 可**流式写出**的产物文档(`rounds/47` §4 Step 2/3)
 ///
 /// 三处 `nekoBlockJsonList`(角色 / 场景 / 程序集定义体)在 `doc` 里只留 `null` **占位**
-/// (位置由 `Map` 的字典序决定),真正的块表挂在 [`BlockHook`] 上:
+/// (位置由 `Map` 的字典序决定),真正的块表挂在 [`BlockPlacement`] 上:
 ///
-/// - 内存路径([`Self::to_value`])把树物化回 `Value` 填占位 —— 与旧口径**逐字节相同**;
+/// - 内存路径([`Self::into_value`])把树物化回 `Value` 填占位 —— 与旧口径**逐字节相同**;
 /// - 文件路径([`Self::write_to`])在占位处**直接写**块树,不建那份产物 `Value`
 ///   (产物侧最大的分配来源:十万级块的整份物化 + 序列化遍历 + 整体析构)。
+///
+/// 两条 KN 产物路径共用本类型:正向(Kitten4 → KN,`build_document_product`)与
+/// NEMO(NEMO → KN,[`Self::new_nemo`])产物同形,只有块表编码口径([`model::ShieldPolicy`])不同。
 pub(super) struct ProductDocument {
     doc: Map<String, Value>,
-    hooks: Vec<BlockHook>,
+    hooks: Vec<BlockPlacement>,
+    /// 块表编码口径:正向(`ShieldPolicy::Always`)与 NEMO(`OnlyWhenTrue`)产物同为 KN 文档,
+    /// 唯一差别就在这里(见 [`model::ShieldPolicy`] 与 `model::write_block_tree`)
+    shield: model::ShieldPolicy,
 }
 
-/// 一处 `nekoBlockJsonList` 的挂点
-struct BlockHook {
-    container: BlockContainer,
-    id: String,
-    tree: model::BlockTree,
+/// 一处 `nekoBlockJsonList` 的挂点(装配侧登记,写出侧按它填占位)
+///
+/// NEMO 方向的产物同样只有这三处(见 `nemo::convert_nemo_document_product`),因此两条路径
+/// 共用这一份挂点 + 写出实现。
+pub(super) struct BlockPlacement {
+    pub(super) container: BlockContainer,
+    pub(super) id: String,
+    pub(super) tree: model::BlockTree,
 }
 
 /// 挂点所在的三处容器(各自的"段名"与"字典键"不同,官方口径见 `build_document`)
 #[derive(Clone, Copy, PartialEq)]
-enum BlockContainer {
+pub(super) enum BlockContainer {
     Actors,
     Scenes,
     Procedures,
@@ -155,6 +164,16 @@ impl BlockContainer {
 }
 
 impl ProductDocument {
+    /// NEMO → KN 的产物(`nemo::convert_nemo_document_product` 用它):同形的 KN 文档,
+    /// 块表按 NEMO 旧口径编码(不补 `shield` 假值,见 [`model::ShieldPolicy`])
+    pub(super) fn new_nemo(doc: Map<String, Value>, hooks: Vec<BlockPlacement>) -> Self {
+        ProductDocument {
+            doc,
+            hooks,
+            shield: model::ShieldPolicy::OnlyWhenTrue,
+        }
+    }
+
     /// 物化回整份文档(`TranslateDocument.document`,公开面口径不变)
     pub(super) fn into_value(mut self) -> Result<Value> {
         for hook in std::mem::take(&mut self.hooks) {
@@ -175,7 +194,7 @@ impl ProductDocument {
                 .ok_or_else(missing)?;
             entry.insert(
                 "nekoBlockJsonList".into(),
-                Value::Array(model::tree_to_json(&hook.tree)?),
+                Value::Array(model::tree_to_value(&hook.tree, self.shield)?),
             );
         }
         Ok(Value::Object(self.doc))
@@ -191,9 +210,19 @@ impl ProductDocument {
             serde_json::to_writer(&mut *w, key)?;
             w.write_all(b":")?;
             match key.as_str() {
-                "actors" => write_section(value, BlockContainer::Actors, &self.hooks, w)?,
-                "scenes" => write_section(value, BlockContainer::Scenes, &self.hooks, w)?,
-                "procedures" => write_section(value, BlockContainer::Procedures, &self.hooks, w)?,
+                "actors" => {
+                    write_section(value, BlockContainer::Actors, &self.hooks, self.shield, w)?
+                }
+                "scenes" => {
+                    write_section(value, BlockContainer::Scenes, &self.hooks, self.shield, w)?
+                }
+                "procedures" => write_section(
+                    value,
+                    BlockContainer::Procedures,
+                    &self.hooks,
+                    self.shield,
+                    w,
+                )?,
                 _ => serde_json::to_writer(&mut *w, value)?,
             }
         }
@@ -206,7 +235,8 @@ impl ProductDocument {
 fn write_section(
     section: &Value,
     container: BlockContainer,
-    hooks: &[BlockHook],
+    hooks: &[BlockPlacement],
+    shield: model::ShieldPolicy,
     w: &mut impl std::io::Write,
 ) -> Result<()> {
     let map = section
@@ -223,7 +253,7 @@ fn write_section(
         serde_json::to_writer(&mut *w, key)?;
         w.write_all(b":")?;
         if key == container.dict_key() {
-            write_entries(value, container, hooks, w)?;
+            write_entries(value, container, hooks, shield, w)?;
         } else {
             serde_json::to_writer(&mut *w, value)?;
         }
@@ -236,7 +266,8 @@ fn write_section(
 fn write_entries(
     dict: &Value,
     container: BlockContainer,
-    hooks: &[BlockHook],
+    hooks: &[BlockPlacement],
+    shield: model::ShieldPolicy,
     w: &mut impl std::io::Write,
 ) -> Result<()> {
     let map = dict.as_object().ok_or_else(|| ConvertError::TypeMismatch {
@@ -254,7 +285,7 @@ fn write_entries(
             .iter()
             .find(|hook| hook.container == container && hook.id == *id)
         {
-            Some(hook) => write_entry_with_blocks(entry, &hook.tree, w)?,
+            Some(hook) => write_entry_with_blocks(entry, &hook.tree, shield, w)?,
             None => serde_json::to_writer(&mut *w, entry)?,
         }
     }
@@ -266,6 +297,7 @@ fn write_entries(
 fn write_entry_with_blocks(
     entry: &Value,
     tree: &model::BlockTree,
+    shield: model::ShieldPolicy,
     w: &mut impl std::io::Write,
 ) -> Result<()> {
     let map = entry
@@ -282,7 +314,7 @@ fn write_entry_with_blocks(
         serde_json::to_writer(&mut *w, key)?;
         w.write_all(b":")?;
         if key == "nekoBlockJsonList" {
-            model::write_block_tree(tree, w)?;
+            model::write_block_tree(tree, shield, w)?;
         } else {
             serde_json::to_writer(&mut *w, value)?;
         }
@@ -321,7 +353,7 @@ pub(super) fn build_document_product(
     let mut scene_used: Vec<String> = Vec::new();
     let mut actors = Map::new();
     let mut scenes = Map::new();
-    let mut hooks: Vec<BlockHook> = Vec::with_capacity(entities.len() + procedures.len());
+    let mut hooks: Vec<BlockPlacement> = Vec::with_capacity(entities.len() + procedures.len());
     for entity in entities {
         // P7(rounds/37):`entities` 是按值收的 Vec ⇒ 解构搬走,不再 clone 每个实体对象
         // (与上方 `build_kitten4_document` 的同段改法同一口径)。
@@ -342,7 +374,7 @@ pub(super) fn build_document_product(
             actor_entry(&mut value, groups, &mut actor_used, landscape);
             BlockContainer::Actors
         };
-        hooks.push(BlockHook {
+        hooks.push(BlockPlacement {
             container,
             id: source_id.clone(),
             tree: blocks,
@@ -413,7 +445,7 @@ pub(super) fn build_document_product(
     );
     let (procedure_dict, procedure_blocks) = procedure_entries(procedures);
     for (id, tree) in procedure_blocks {
-        hooks.push(BlockHook {
+        hooks.push(BlockPlacement {
             container: BlockContainer::Procedures,
             id,
             tree,
@@ -439,7 +471,11 @@ pub(super) fn build_document_product(
         ]),
     );
     doc.insert("courseMaterials".into(), Value::Array(Vec::new()));
-    Ok(ProductDocument { doc, hooks })
+    Ok(ProductDocument {
+        doc,
+        hooks,
+        shield: model::ShieldPolicy::Always,
+    })
 }
 
 // ---------------------------------------------------------------- 实体(官方 78620-78680)
