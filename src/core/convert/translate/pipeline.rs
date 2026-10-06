@@ -7,7 +7,9 @@
 use super::assembly::{self, KnEntity};
 use super::mapping;
 use super::model::{self, BlockJson, BlockTree, ProcedureEntry, TEMP_ID_PREFIX, is_temp_id_char};
-use super::options::{StageOrientation, TargetEditor, TranslateError, TranslateOptions};
+use super::options::{
+    EntityConcurrency, StageOrientation, TargetEditor, TranslateError, TranslateOptions,
+};
 use super::report::{TranslateReport, TranslateWarning};
 use super::tables_gen;
 use super::xml;
@@ -298,7 +300,18 @@ fn convert_kitten4_document_impl(
     // [`normalize_object_shadows`](它在 [`parse_forward_item`] 里按项做,不改源文档)。
     let mut items = collect_forward_items(source, &mut raw_blocks)?;
     let weights: Vec<usize> = items.iter().map(|item| item.weight).collect();
-    let workers = workers(options.entity_workers(), items.len());
+    // 权重的单位随路径而变(原文路径 = 块表字节数,`Value` 路径 = 积木条数)⇒ 阈值口径跟着走
+    let unit = if raw_blocks.is_some() {
+        WeightUnit::Bytes
+    } else {
+        WeightUnit::Blocks
+    };
+    let workers = entity_workers(
+        options.entity_concurrency_plan(),
+        items.len(),
+        weights.iter().sum(),
+        unit,
+    );
     let deterministic = options.ids_deterministic();
     // 可观测事实:本次转换真的开了几个实体级线程(供基准/单测挡空门,见 `TranslateReport`)
     report.entity_workers = workers;
@@ -816,6 +829,61 @@ pub(super) type IdRemap = HashMap<String, String>;
 pub(super) fn workers(requested: usize, items: usize) -> usize {
     let available = std::thread::available_parallelism().map_or(1, |n| n.get());
     requested.max(1).min(items.max(1)).min(available.max(1))
+}
+
+/// 工作项权重的口径(**只影响"自动开"的阈值**,不进产物、也不影响均衡以外的语义)
+///
+/// `weights` 的既有用途是并行装箱;它同时被拿来做"作品够不够大"的判据,而两个来源的单位不同:
+/// `Value` 路径的权重是"源积木条数"、原文(骨架)路径与 NEMO 是"块表原文字节数"
+/// (见 [`ForwardItem::weight`] 与 NEMO 工作项的注释)。
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum WeightUnit {
+    /// 块表**原文字节数**(正向骨架路径、NEMO 的 `blocksXML`)
+    Bytes,
+    /// 源积木**条数**(正向 `translate_value(Value)` 路径)
+    Blocks,
+}
+
+/// "自动开"的**工作量阈值**(两个常量对应两种口径;自动开的取值口径见 [`entity_workers`])
+///
+/// 夹逼实测(2026-10-06,正向,`taskset -c 0-3`,同轮 1 vs 8,见 `docs/rounds/51`):
+/// **374 条**(0.3 MB 样本)无收益(e2e 1.00×,而它 `core` 只有 6 ms ⇒ 噪声级);
+/// **1 491 条**(1.3 MB 样本)起就有收益(实测 1 491 / 2 063 / 3 497 / 7 762 条 ⇒
+/// e2e 1.36× / 1.51× / 1.30× / 1.34×,core 1.56× / 1.68× / 1.49× / 1.82×)。
+/// 阈值取两者之间(条数口径 1 000);字节口径按同一**意图**取 400 KB
+/// (换算依据:正向骨架路径 ≈760 B/块、NEMO ≈250 B/块)。
+const AUTO_MIN_BLOCKS: usize = 1_000;
+const AUTO_MIN_BYTES: usize = 400_000;
+
+/// 实体级工作线程数(≥1)
+///
+/// - [`EntityConcurrency::Fixed`](super::EntityConcurrency::Fixed)(调用方显式给):按
+///   `min(请求, 工作项数, 可用核数)` 夹取 —— 显式 1 即强制串行;
+/// - [`EntityConcurrency::Auto`](super::EntityConcurrency::Auto)(**默认**):作品够大才开。
+///   "够大" = 全部工作项的权重之和 ≥ 阈值(按 [`WeightUnit`] 取 [`AUTO_MIN_BLOCKS`] 或
+///   [`AUTO_MIN_BYTES`]);够大时用 `min(折算出的核数预算, 工作项数, 可用核数)`。
+///
+/// 反向(KN → Kitten4)没有实体级并行,本函数只被正向与 NEMO 两条管线调用。
+pub(super) fn entity_workers(
+    plan: EntityConcurrency,
+    items: usize,
+    total_weight: usize,
+    unit: WeightUnit,
+) -> usize {
+    let requested = match plan {
+        EntityConcurrency::Fixed(n) => n,
+        EntityConcurrency::Auto { cap } => {
+            let threshold = match unit {
+                WeightUnit::Bytes => AUTO_MIN_BYTES,
+                WeightUnit::Blocks => AUTO_MIN_BLOCKS,
+            };
+            if total_weight < threshold {
+                return 1;
+            }
+            cap.unwrap_or(usize::MAX)
+        }
+    };
+    workers(requested, items)
 }
 
 /// 工作项并行调度:把 `items` 交给最多 `workers` 个线程(按 `weights` 贪心装箱),
@@ -1663,65 +1731,178 @@ mod forward_parallel_tests {
     /// 有效作品并发 = `min(batch_concurrency, 作品数)`;每作品分到 `可用核数 / 有效作品并发`。
     #[test]
     fn entity_concurrency_is_folded_by_work_and_core_budget() {
+        let plan = |options: &TranslateOptions| options.entity_concurrency_plan();
         let requested = TranslateOptions::new().entity_concurrency(8);
         assert_eq!(
-            requested
-                .clone()
-                .fold_entity_concurrency(1, 4)
-                .entity_workers(),
-            4,
+            plan(&requested.clone().fold_entity_concurrency(1, 4)),
+            EntityConcurrency::Fixed(4),
             "单作品:可用核数就是实体级上限"
         );
         assert_eq!(
-            requested
-                .clone()
-                .batch_concurrency(2)
-                .fold_entity_concurrency(2, 8)
-                .entity_workers(),
-            4,
+            plan(
+                &requested
+                    .clone()
+                    .batch_concurrency(2)
+                    .fold_entity_concurrency(2, 8)
+            ),
+            EntityConcurrency::Fixed(4),
             "2 作品并发 × 4 实体线程 = 8 核"
         );
         assert_eq!(
-            requested
-                .clone()
-                .batch_concurrency(8)
-                .fold_entity_concurrency(8, 8)
-                .entity_workers(),
-            1,
+            plan(
+                &requested
+                    .clone()
+                    .batch_concurrency(8)
+                    .fold_entity_concurrency(8, 8)
+            ),
+            EntityConcurrency::Fixed(1),
             "作品级已占满核数,实体级折成 1"
         );
         assert_eq!(
-            requested
-                .clone()
-                .batch_concurrency(16)
-                .fold_entity_concurrency(16, 8)
-                .entity_workers(),
-            1,
+            plan(
+                &requested
+                    .clone()
+                    .batch_concurrency(16)
+                    .fold_entity_concurrency(16, 8)
+            ),
+            EntityConcurrency::Fixed(1),
             "作品级超订时也不给实体级名额(share 至少 1)"
         );
         assert_eq!(
-            TranslateOptions::new()
-                .fold_entity_concurrency(2, 1)
-                .entity_workers(),
-            1,
-            "单核机器:实体级折成串行"
+            plan(&TranslateOptions::new().fold_entity_concurrency(2, 1)),
+            EntityConcurrency::Auto { cap: Some(1) },
+            "单核机器:自动也只拿到 1 个名额(是否开仍按作品大小判)"
         );
         assert_eq!(
-            TranslateOptions::new()
-                .entity_concurrency(8)
-                .fold_entity_concurrency(1, 64)
-                .entity_workers(),
-            8,
+            plan(
+                &TranslateOptions::new()
+                    .entity_concurrency(8)
+                    .fold_entity_concurrency(1, 64)
+            ),
+            EntityConcurrency::Fixed(8),
             "核多用不满时不吃掉用户请求值"
         );
         assert_eq!(
-            TranslateOptions::new()
-                .batch_concurrency(1)
-                .fold_entity_concurrency(8, 64)
-                .entity_workers(),
-            1,
-            "默认 1 不会被折算顶上去"
+            plan(&TranslateOptions::new().fold_entity_concurrency(8, 64)),
+            EntityConcurrency::Auto { cap: Some(64) },
+            "默认(auto)只被压低预算,不被折成固定值(阈值仍按作品大小在管线里判)"
         );
+    }
+
+    /// "自动开"的阈值(默认取值):够大才开,显式固定值不受阈值影响
+    #[test]
+    fn auto_entity_workers_respect_threshold() {
+        let auto = EntityConcurrency::Auto { cap: None };
+        assert_eq!(
+            entity_workers(auto, 100, AUTO_MIN_BLOCKS - 1, WeightUnit::Blocks),
+            1,
+            "差一条就不开(阈值是硬边)"
+        );
+        assert_eq!(
+            entity_workers(auto, 100, AUTO_MIN_BYTES - 1, WeightUnit::Bytes),
+            1,
+            "字节口径同理"
+        );
+        // 够大 + 项目数/核数足够时才会真开(单核机器上仍是 1,故只断言"不因阈值而砍")
+        let available = std::thread::available_parallelism().map_or(1, |n| n.get());
+        let expected = available.clamp(1, 100);
+        assert_eq!(
+            entity_workers(auto, 100, AUTO_MIN_BLOCKS, WeightUnit::Blocks),
+            expected,
+            "够大就吃满(受工作项数与核数夹取)"
+        );
+        assert_eq!(
+            entity_workers(auto, 3, AUTO_MIN_BYTES * 10, WeightUnit::Bytes),
+            available.clamp(1, 3),
+            "工作项少时按项数夹取"
+        );
+        // 折算出的预算优先
+        assert_eq!(
+            entity_workers(
+                EntityConcurrency::Auto { cap: Some(2) },
+                100,
+                AUTO_MIN_BLOCKS,
+                WeightUnit::Blocks
+            ),
+            available.clamp(1, 2),
+            "批量入口折算的预算生效"
+        );
+        // 显式固定值不受阈值影响(小作品也给足请求值,由调用方自己负责)
+        assert_eq!(
+            entity_workers(EntityConcurrency::Fixed(4), 100, 1, WeightUnit::Blocks),
+            available.clamp(1, 4),
+            "固定值不看阈值"
+        );
+        assert_eq!(
+            entity_workers(
+                EntityConcurrency::Fixed(1),
+                100,
+                usize::MAX,
+                WeightUnit::Bytes
+            ),
+            1,
+            "显式 1 = 强制串行"
+        );
+    }
+
+    /// "自动开"在真作品上的行为(默认取值):大作品默认就并行,小作品默认仍是串行
+    ///
+    /// 阈值口径与夹逼读数见 [`entity_workers`](`rounds/51`);这条挡的是"阈值写反 / 默认没生效 /
+    /// 显式 1 被默认顶掉"这类回归(产物不变由基准的 1 vs N 同 SHA256 门守)。
+    #[test]
+    fn auto_entity_concurrency_turns_on_for_large_real_work_only() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let cases = [
+            (
+                "kitten4-10.8MB(12 764 块)",
+                "download/compile/原气骑士 且听风吟_136021231.bcm4",
+                true,
+            ),
+            (
+                "kitten4-0.3MB(374 块)",
+                "download/compile/几何对战-联机_215246857.bcm4",
+                false,
+            ),
+        ];
+        let mut ran = 0;
+        for (label, rel, expect_parallel) in cases {
+            let path = root.join(rel);
+            if !path.exists() {
+                continue;
+            }
+            ran += 1;
+            let mut source: Value =
+                serde_json::from_str(&std::fs::read_to_string(&path).expect("读样本"))
+                    .expect("样本应是明文编辑版 JSON");
+            let mut report = TranslateReport::new(
+                crate::core::convert::EditorType::Kitten4,
+                TargetEditor::KittenN,
+            );
+            // 关键:**不给** `entity_concurrency`(走默认的"自动")
+            convert_kitten4_document(
+                &mut source,
+                &TranslateOptions::new().deterministic_ids(true),
+                &mut report,
+            )
+            .expect("转换");
+            let available = std::thread::available_parallelism().map_or(1, |n| n.get());
+            if expect_parallel && available >= 2 {
+                assert!(
+                    report.entity_workers > 1,
+                    "{label}:够大的作品默认应自动并行(实际 {} 线程,可用核数 {available})",
+                    report.entity_workers
+                );
+            }
+            if !expect_parallel {
+                assert_eq!(
+                    report.entity_workers, 1,
+                    "{label}:小作品默认应保持串行(阈值见 entity_workers 的文档)"
+                );
+            }
+        }
+        if ran == 0 {
+            super::super::missing_fixture("真作品样例(基准的两份 Kitten4 样本)");
+        }
     }
 
     /// 扫产物里"像 uuid 的 token"(36 字符、只含十六进制与 `-`)并断言每个都是合法 uuid v4,

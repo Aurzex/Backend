@@ -56,6 +56,16 @@ pub enum StageOrientation {
     Landscape,
 }
 
+/// 实体级并发的取值(默认 [`EntityConcurrency::Auto`])
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum EntityConcurrency {
+    /// 自动:作品**够大**才开(阈值与实测夹逼见 [`super::pipeline::entity_workers`])。
+    /// `cap` 是批量入口折算出的核数上限(`None` = 未折算,由可用核数兜)
+    Auto { cap: Option<usize> },
+    /// 固定线程数(≥1;显式给 1 即强制串行)
+    Fixed(usize),
+}
+
 /// 转化选项(构建器风格,与 `DecompileOptions` 一致)
 #[derive(Debug, Clone)]
 pub struct TranslateOptions {
@@ -66,7 +76,7 @@ pub struct TranslateOptions {
     stage: StageOrientation,
     deterministic_ids: bool,
     batch_concurrency: usize,
-    entity_concurrency: usize,
+    entity_concurrency: EntityConcurrency,
     /// 源文档的 `bcm_version`(只 NEMO 方向用:版本迁移 `< 0.9.4` QC / `< 0.15.0` YC)
     source_version: Option<String>,
 }
@@ -81,7 +91,9 @@ impl TranslateOptions {
             stage: StageOrientation::Auto,
             deterministic_ids: false,
             batch_concurrency: 1,
-            entity_concurrency: 1,
+            // 默认**自动**(够大才开):小作品上并行的收益测不出来,而它要付"临时 id 记账"的分配
+            // (NEMO 侧实测 +13.9%,见 `../rounds/48`)⇒ 让阈值而不是调用方来兜这件事
+            entity_concurrency: EntityConcurrency::Auto { cap: None },
             source_version: None,
         }
     }
@@ -172,7 +184,11 @@ impl TranslateOptions {
         self
     }
 
-    /// 实体级并发(正向与 NEMO;≥1,默认 1):单个作品文档内按实体/程序集并行(方案 25 S3a)。
+    /// 实体级并发(正向与 NEMO;默认 **自动**,见下):单个作品文档内按实体/程序集并行(方案 25 S3a)。
+    ///
+    /// **取值**:`n = 0` 与 `n = 1` 都是**强制串行**(等价);`n ≥ 2` 是固定线程数;不调用本方法
+    /// (默认)则是**自动** —— 作品够大才开,阈值与实测夹逼见
+    /// [`super::pipeline::entity_workers`](含 `rounds/51` 的交叉点读数)。
     ///
     /// 实现见 [`super::pipeline::convert_kitten4_document`](Kitten4 方向)与
     /// [`super::nemo::convert_nemo_document`](NEMO 方向,同构的四阶段):每个实体用自己的临时 id,
@@ -184,11 +200,12 @@ impl TranslateOptions {
     ///   (与串行实现本身也不可复现同理);
     /// - 反向(KN → Kitten4)暂不支持本选项,取值被忽略。
     ///
-    /// 批量入口 [`translate_works`](crate::core::convert::translate_works) 会把它按
-    /// 作品级并发与可用核数**折算**(见 [`TranslateOptions::fold_entity_concurrency`]),
+    /// 代价:NEMO 方向的记录法使分配次数 +13.9%(`docs/rounds/48` §4,"自动"模式下这笔代价只落在
+    /// 够大的作品上);批量入口 [`translate_works`](crate::core::convert::translate_works) 会按
+    /// 作品级并发与可用核数**折算**上限(见 [`TranslateOptions::fold_entity_concurrency`]),
     /// 避免"作品级 × 实体级"两级超订。
     pub fn entity_concurrency(mut self, n: usize) -> Self {
-        self.entity_concurrency = n.max(1);
+        self.entity_concurrency = EntityConcurrency::Fixed(n.max(1));
         self
     }
 
@@ -196,19 +213,22 @@ impl TranslateOptions {
         self.batch_concurrency.max(1)
     }
 
-    /// 本次文档转换用几个实体级工作线程(≥1)
-    pub(super) fn entity_workers(&self) -> usize {
-        self.entity_concurrency.max(1)
+    /// 实体级并发的取值(管线在拿到工作项后据此解析真实线程数)
+    pub(super) fn entity_concurrency_plan(&self) -> EntityConcurrency {
+        self.entity_concurrency
     }
 
-    /// 按**作品级并发**与**可用核数**折算实体级并发(方案 25 §7 阻塞 #6;批量入口调用)
+    /// 按**作品级并发**与**可用核数**折算实体级并发的**核数预算**(方案 25 §7 阻塞 #6;批量入口调用)
     ///
     /// 两级并发相乘会超订(作品级 `b` × 实体级 `e` 个翻译线程),所以批量入口把每作品
-    /// 分到的核数 `可用核数 / 有效作品并发`(向下取整、至少 1)作为实体级并发上限:
-    /// `e' = clamp(min(e, 可用核数 / b), 1, ∞)`。
+    /// 分到的核数 `可用核数 / 有效作品并发`(向下取整、至少 1)当作实体级的核数上限:
+    ///
+    /// - 固定值:`e' = clamp(min(e, 可用核数 / b), 1, ∞)`;
+    /// - 自动:只压低核数预算,不动"够不够大"的判断(`Auto { cap: Some(可用核数 / b) }`)——
+    ///   阈值按作品大小在管线里判,与作品级并发无关。
     ///
     /// 折算只改并行度,不碰产物。直接调用 [`super::translate_value`] / [`super::translate_file`] 的
-    /// 单文档入口不做折算(调用方自己要的并发,由 [`super::pipeline::workers`] 兜住"不超核数")。
+    /// 单文档入口不做折算(那边由可用核数兜住"不超核数")。
     pub(in crate::core::convert) fn fold_entity_concurrency(
         mut self,
         works: usize,
@@ -216,7 +236,12 @@ impl TranslateOptions {
     ) -> Self {
         let batch = self.concurrency().min(works.max(1));
         let share = (available.max(1) / batch).max(1);
-        self.entity_concurrency = self.entity_concurrency.min(share).max(1);
+        self.entity_concurrency = match self.entity_concurrency {
+            EntityConcurrency::Fixed(n) => EntityConcurrency::Fixed(n.min(share).max(1)),
+            EntityConcurrency::Auto { cap } => EntityConcurrency::Auto {
+                cap: Some(cap.map_or(share, |cap| cap.min(share)).max(1)),
+            },
+        };
         self
     }
 }

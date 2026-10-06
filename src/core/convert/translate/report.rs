@@ -93,8 +93,9 @@ pub struct TranslateReport {
     pub elapsed_ms: u128,
     /// 本次转换**实际**使用的实体级工作线程数(≥1)。
     ///
-    /// 正向与 NEMO 方向 = `min(entity_concurrency, 工作项数, 可用核数)`(见
-    /// [`super::options::TranslateOptions::entity_concurrency`]);反向暂不支持实体级并行,恒为 1。
+    /// 正向与 NEMO 方向 = `min(请求或自动算出的核数预算, 工作项数, 可用核数)`(见
+    /// [`super::options::TranslateOptions::entity_concurrency`]:默认**自动**,作品够大才开);
+    /// 反向暂不支持实体级并行,恒为 1。
     /// 这是"并行真的发生了"的可观测证据:基准/单测用它挡住"并发对照在单核上退化成串行"
     /// 这种空门(方案 25 §9)。
     pub entity_workers: usize,

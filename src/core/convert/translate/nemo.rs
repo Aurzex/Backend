@@ -265,7 +265,13 @@ fn assemble_nemo(
         }
     }
     let weights: Vec<usize> = items.iter().map(|item| item.weight).collect();
-    let workers = super::pipeline::workers(options.entity_workers(), items.len());
+    // NEMO 的权重是 `blocksXML` 字节数
+    let workers = super::pipeline::entity_workers(
+        options.entity_concurrency_plan(),
+        items.len(),
+        weights.iter().sum(),
+        super::pipeline::WeightUnit::Bytes,
+    );
     // 可观测事实:本次转换真的开了几个实体级线程(供基准/单测挡空门,见 `TranslateReport`)
     report.entity_workers = workers;
 
