@@ -9,7 +9,7 @@
 | --- | --- | --- |
 | Kitten4 `.bcm4` 到 KN `.bcmkn` | 支持:`kittenBcmToNekoBcmUtils` | 支持:过官方校验器,实体级并行 |
 | Kitten 2/3 `.bcm` 到 KN | 不支持:编辑器明确拒绝(引导去 Kitten V4.0) | 不支持(同上) |
-| NEMO 到 KN | 支持:`nemoBcmToNekoBcmUtils` | 支持:与官方逐数一致 |
+| NEMO 到 KN | 支持:`nemoBcmToNekoBcmUtils` | 支持:与官方逐数一致,实体级并行(见 `../../rounds/48-nemo-entity-parallelism.md`) |
 | NEMO 到 Kitten4 | 不支持:官方无 | 支持:附带可得(即 NEMO 到 KN 与 KN 到 Kitten4 两步复合,**损失叠加**) |
 | KN 到 Kitten4 | 不支持:官方无此方向 | 支持:本库**自建**(有损,见 §5) |
 | KN 到 NEMO | 不支持:平台无对照 | 判不做(唯一用途是把产物写回 NEMO,见 `nemo-runtime-and-upload.md`) |

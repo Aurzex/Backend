@@ -230,6 +230,53 @@ perf report --stdio -i /tmp/bench.perf --no-children --sort symbol -g none
 3. **NEMO 唯一剩下的可测杠杆仍是产物侧流式写出**(上界 17–20%,须写第三套写出器;该决策见 `../goals/convert-backlog.md` §1),本次剖面不动摇该结论 —— 产物写出与 `Value` 构建两项合计约 15%。
 4. **库自身没有超过 1% 的单符号**(全基准最高是 `model::write_block` 0.92%)。剩余成本结构与 §2bis.5 一致,集中在源解析、表构建、产物写出与分配这四类数据表示层开销上。
 
+**同一轮采样里的按调用树归因**(inclusive,占该轮全部样本;同一会话,`-F 399`):
+
+| 位置 | 占比 | 占 NEMO core 的比例 |
+| --- | --- | --- |
+| `nemo::convert_nemo_document`(整个 NEMO 转换) | 9.47% | 100% |
+| └ `nemo::parse_entity` | 6.43% | 68% |
+| &nbsp;&nbsp;├ `prepare_blocks_xml`(XML 解析 + 迁移 + 12 趟 transform) | 3.16% | 33% |
+| &nbsp;&nbsp;│ └ `xml::parse_fragment` | 1.88% | 20% |
+| &nbsp;&nbsp;└ `nemo_mapping::translate_nemo_to_kn`(映射成强类型树) | 2.82% | 30% |
+| └ `nemo::tree_to_json`(积木树写成产物节点) | 1.45% | 15% |
+| 其余(装配、`normalize_integral_numbers`、实体条目构造) | 1.59% | 17% |
+
+**由此得到的一条耐久事实**:**NEMO 的每实体工作占其 `core` 的 83%**(`parse_entity` 68% + `tree_to_json` 15%),而实体负载分布极均:
+
+| 样本 | 组 | 实体数 | 源 XML | 最大实体占比 | 前 3 实体占比 |
+| --- | --- | --- | --- | --- | --- |
+| nemo-3.4MB | `actors_dict` | 847 | 2.18 MB | 2.2% | 6.4% |
+| nemo-3.4MB | `scenes_dict` | 38 | 0.19 MB | 46.4%(该组仅 0.19 MB) | 66.0% |
+| nemo-old-1.5MB | `actors_dict` | 280 | 0.71 MB | 7.1% | 17.4% |
+| nemo-old-1.5MB | `scenes_dict` | 18 | 0.02 MB | 29.0% | 70.5% |
+
+两件样本的 `procedures_dict` 均为空(0 条),因此 §4 里 P9 的"程序集条目被解析两到三次"在基准样本上没有成本,只影响带程序集的真作品,而 XML 全链本身也只有 1.9%。
+
+**现状与上界**:`run_items`(实体级并行)只被正向的 `convert_kitten4_document` 使用,`TranslateReport.entity_workers` 的文档只写"反向暂不支持",**NEMO 方向从未接入**(`../rounds/27` §2 只记了"并行脚手架被硬编码",未评估);按上面的 83% 与同机正向实测的 `core` 1.87×(4 逻辑核 / 2 物理核)折算,NEMO `core` 期望约 1.6×、`e2e` 约 −27%(240 → 约 175 ms),分配次数不变。
+**该上界已在同日落地**(`../rounds/48-nemo-entity-parallelism.md`):实测 1 vs 8 为 `core` 1.44× / `e2e` 1.31×,而**分配次数并未"不变"**——记录法使 NEMO 腿的分配 +13.9%,见 §2bis.12。
+
+### 2bis.12 NEMO 实体级并行落地后的读数(2026-10-05,`../rounds/48-nemo-entity-parallelism.md`)
+
+同轮内对照(同一二进制、`taskset -c 0-3`、可用核数 4;`entity_concurrency` 1 vs 8):
+
+| 样本 | `core` | `e2e` | 实际线程 | 分配次数(1 / 8) |
+| --- | --- | --- | --- | --- |
+| nemo-3.4MB | 282 → **196 ms(1.44×)** | 398 → **303 ms(1.31×)** | 1 → 4 | 1 541 425 / 1 541 583 |
+| nemo-old-1.5MB | 85 → **70 ms(1.21×)** | 126 → **104 ms(1.21×)** | 1 → 4 | 472 850 / 472 974 |
+| kitten4-10.8MB(对照组,本轮未改动) | 275 → 165 ms(1.67×) | 433 → 318 ms(1.36×) | 1 → 4 | 909 987 / 910 168 |
+
+三条耐久结论:
+
+1. **默认并发 1 的产物逐字节不变**,由基准的 SHA256 与 `#meta` 直接守住(该基线写于串行实现时代)。
+   与正向同款设计:并发 1 也走临时 id 机制,"产物不变"靠的是**铸造顺序 = 项序**。
+2. **代价在分配**:NEMO 串行腿的分配由 1 353 318 涨到 **1 541 425(+13.9%)**、分配字节 164.8 → 178.3 MiB(+8%)——
+   每铸一个 id 多付"临时 id + 兑现表键 + 改写后替换"。这不是本轮新造的模式,而是正向并行(方案 25 S3a)
+   同一套设计的既有代价。**因此 §2.2 的 NEMO 分配目标(≤1 300 000)距离更远;而"NEMO 产物侧流式写出"
+   与本轮收益正交(它降的正是分配),价值相应更高。**
+3. **漂移纪律**:同一份未改动的正向代码在本会话两次读数相差 35%(`core` 204 → 275 ms),故只采信
+   同轮内的 1 vs 8 对照;"默认并发 1 的时间开销"不做结论(与 `../rounds/25` §9 对同款路径的判定一致)。
+
 ## 3. 已落地的优化(都有数字)
 
 | 优化 | 做法 | 收益 |
@@ -244,6 +291,8 @@ perf report --stdio -i /tmp/bench.perf --no-children --sort symbol -g none
 | **源侧骨架 + `RawValue` 直喂** | 文件入口先按骨架读(`bdj` 留原文),`BlockData::Raw` 直接反序列化成强类型树,省掉 `Value → BlockJson` 那一趟;旧形态自动回落 | 10.8 MB:`e2e` 595/580 → 546/545 ms(同轮 A/B),分配 1 538 778 → 1 329 054(−13.6%);0.3 MB:分配 48 436 → 42 277;**产物 SHA256 全绿**;归因见 §2bis.8 |
 | **产物流式写出(正向)** | 块树按引用直写成 JSON(`model::write_block_tree`,不建中间 `Value`)+ `assembly::ProductDocument` 三处块表挂点;公开面 `TranslateDocument.document: Value` 不变(内存路径仍 `into_value()`) | 10.8 MB:`e2e` 541 → **421 ms(−22%)**、`core` 373 → 257 ms、分配 1 329 054 → **909 987(−31.5%)**;0.3 MB:`e2e` 15 → 9 ms;反向/NEMO 逐位不变;**产物 SHA256 全绿**;读数与结论见 §2bis.9 |
 | **产物流式写出(反向)** | 邻接表形态的字节等价写出(`model::write_encoded_blocks`)+ `assembly::Kitten4ProductDocument` 两处挂点;`mark_unknown_blocks` 从 `Value` 形态移植到 typed 形态(两条路径共用) | kn-9.4MB:`e2e` 280 → **237 ms(−15.4%)**、`core` 133 → 94 ms、分配 798 343 → **602 799(−24.5%)**;kn-3.7MB:`e2e` 81 → 67 ms、分配 196 004 → 141 085;**产物 SHA256 全绿**;读数与结论见 §2bis.10 |
+
+| **实体级并行(NEMO)** | 与正向同构的四阶段(临时 id 记录 → 串行兑现 → 并行 `remap_tree` + 条目组装 + `tree_to_json` → 串行装配);`NemoParseContext` 的两张只读表改 `Arc` 共享;默认并发 1 | nemo-3.4MB:`core` 282 → **196 ms(1.44×)**、`e2e` 398 → **303 ms(1.31×)**;nemo-old-1.5MB 两项均 1.21×;**产物 SHA256 与 `#meta` 全绿**;代价:分配 +13.9%(记录法);读数与结论见 §2bis.12 与 `../rounds/48-nemo-entity-parallelism.md` |
 
 ## 4. 判定**不做**(有证据)
 
