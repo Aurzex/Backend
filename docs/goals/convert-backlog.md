@@ -246,4 +246,4 @@
 | 4 | **NEMO `parse_block` 的 `<field>` 分支克隆整份 fields** | **已核实不可行**:该 `fields` 在 `extend` 之后还要被读两次(`message` 与 `handle_procedure_fields`),而 `extend` 需要所有权 ⇒ 这次克隆是结构必需;换 `&Map` 也仍要逐条克隆,省不掉 |
 | 5 | **正向 `collect_forward_items` 每实体深拷 `source`** | **不立项**:消费方(`assembly` 的 `kitten4_scene/actor`)只读 `&source`,但要免掉这次深拷只能把整份实体搬出源文档再搬回(动"唯一接触源文档"的跨阶段不变量),而同族的反向 P2 实测收益只有 2~3% ⇒ 收益与风险不成比 |
 
-**已判不做(不要重开)**:`find_object_shadow` 惰性化(P4,`../rounds/37` §4;W10 起已由 `normalize_object_shadows` 的廉价探测替代)、P6 手写去 `#[serde(flatten)]`、W8 1)、W9、W13、单遍遍历合并、`RawValue` 透传、`BTreeMap` 改 `HashMap`、合并两份 `tree_to_json`、NEMO 每实体多趟全 DOM 遍历(属"单遍遍历合并"家族)。
+**已判不做(不要重开)**:`find_object_shadow` 惰性化(P4,`../rounds/37` §4;W10 起已由 `normalize_object_shadows` 的廉价探测替代)、P6 手写去 `#[serde(flatten)]`(**2026-10-06 按分配口径复核仍不做**,判据与重开条件见 `../knowledge/convert-performance.md` §2bis.15)、W8 1)、W9、W13、单遍遍历合并、`RawValue` 透传、`BTreeMap` 改 `HashMap`、合并两份 `tree_to_json`、NEMO 每实体多趟全 DOM 遍历(属"单遍遍历合并"家族)。
