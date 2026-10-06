@@ -139,16 +139,16 @@ NEMO 到 KN 是另一条前端(`hI.parseBlocksXML`),官方管线共 12 步(`main
 | **标记量预算** | 编辑器不认识的块被改成「未收录积木」的数量、以及被清空的影子数,必须 ≤ 记录值(只许变小,`MARKER_BUDGET`)。**定义体缺口预算**(同属这一类`:≤3193`,口径 = `def_census` 只数定义根子树;只许变小,每次跑打印读数;rounds/33 §3bis、rounds/36)。读数**直接读结构字段**(`TranslateWarning::UnmappedBlock { marked, cleared_shadows }`,rounds/39 §W4 起)——此前靠**反解中文文案**取数,文案改一个空格读数就静默变 0、门变成"永远通过" |
 | **id 口径台账** | 正向扫描器(`k4_corpus_round_trip_sweep`):源里"带类型的块节点 id"在往返产物里缺失的 **真块 / 影子** 数必须 ≤ 记录基线(`LOST_ID_BUDGET`,只许变小;每次打印 `[id台账]`)。**反向同口径**:反向扫描器(`kn_corpus_round_trip_sweep`)的 `LOST_ID_BUDGET_REVERSE`(逐件打印 `[id台账·反向]`;源侧只认积木容器节点,见 rounds/39 §W3d)。这是"块有没有被搬过去"的**直接**证据 —— 积木计数/告警/树可达都不是(rounds/37 §13 三次翻车) |
 
-## 7. 判定"不做"的两项(有证据,别再重开)
+## 7. 判定"判不做"的两项(有证据,别再重开)
 
 | 项 | 判定 | 证据 |
 | --- | --- | --- |
-| `RawValue` 顶层只透传 | **不做** | 装配期"只透传不改"的顶层字段占比 **≈0%**:`theatre`(含 `block_data_json`)占文档 99.2–99.5% 且全部重写;`styles`/`audios`/`variables`/`broadcasts` 都要变换 => 收益上限 ≈0%,远低于 30% 门槛 |
-| 正/反向遍历合并成单遍 | **不做** | 正向实为 2 趟(`parse_node` 内含 `route_children` 再 `gc_deep`),反向本已单遍;合并只省遍历,不省逐块 `kind` 匹配/`transform_shadow_xml`/`map_field_name` 这些主要成本,且 `gc_node` 依赖子树已 parse |
+| `RawValue` 顶层只透传 | **判不做** | 装配期"只透传不改"的顶层字段占比 **≈0%**:`theatre`(含 `block_data_json`)占文档 99.2–99.5% 且全部重写;`styles`/`audios`/`variables`/`broadcasts` 都要变换,故收益上限 ≈0%,远低于 30% 门槛 |
+| 正/反向遍历合并成单遍 | **判不做** | 正向实为 2 趟(`parse_node` 内含 `route_children` 再 `gc_deep`),反向本已单遍;合并只省遍历,不省逐块 `kind` 匹配/`transform_shadow_xml`/`map_field_name` 这些主要成本,且 `gc_node` 依赖子树已 parse |
 
 ## 8. 文本层(低成本高价值的调试通道)
 
-- `knBcmToText` / `textToBlock`:`.bcmkn` <-> 中文积木 Markdown(`# 场景 / ## 角色 / ### 属性 / ### 代码`)。
+- `knBcmToText` / `textToBlock`:`.bcmkn` 与中文积木 Markdown 双向对应(`# 场景 / ## 角色 / ### 属性 / ### 代码`)。
 - 实测 3.7 MB 作品 -> 4.86M 字符,1.4 s;**全树积木 359 -> 359,55 种类型多重集完全一致**(差异仅元数据/XML 归一化/新 UUID)。
 - 大文件要有大小上限;文本层不是产物的必需环节,是**人工校验**手段。
 
@@ -182,7 +182,7 @@ NEMO 到 KN 是另一条前端(`hI.parseBlocksXML`),官方管线共 12 步(`main
 | **(c) id 是否出现在文档里** | 判"这块有没有被搬过去" | 判"丢没丢"的**唯一**直接证据 |
 
 > 实例(rounds/37 §13.5–13.8):一次扫描报 `get_midis: 4 -> 0`,本项目先后用 (a)/(b) 的差值下了三次结论,
-> 全被推翻;最后 (c) 证明"源场景 20 块的 id 在产物里 20/20 都在" => **块没丢**。
+> 全被推翻;最后 (c) 证明"源场景 20 块的 id 在产物里 20/20 都在",故 **块没丢**。
 > **纪律**:跨口径比较前先声明口径;定案优先用**真 API 的最小复现**(把一个块喂进真函数看它变成什么),
 > 而不是自己写的遍历。
 

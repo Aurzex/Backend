@@ -27,9 +27,9 @@
 | --- | --- | --- |
 | [41](41-agent-contract-and-doc-reformat.md) | 根目录 `AGENTS.md` 固化项目级契约,并据此对全部 Markdown 执行格式、状态与语体清洗 | 已落地(剩两条待决口径见该文 §8,登记在 `../goals/README.md`) |
 | [42](42-dependency-refresh.md) | 依赖按 crates.io 最高稳定版刷新(直接依赖与 `Cargo.lock` 全量重解),离线门与真机测试全过 | 已落地 |
-| [43](43-a-group-real-machine-and-narrowing.md) | A 组落地:**两处协议假设真机消掉**(`currentTime` 秒级 / 字段名 `phone_number`)、**分段超时**(原"body 无读超时"诊断被推翻)、UI 输入错误传播、两处存而不用字段删除 | 已落地 |
+| [43](43-a-group-real-machine-and-narrowing.md) | A 组落地:**两处协议假设真机消掉**、**分段超时**(原"body 无读超时"诊断被推翻)、UI 输入错误传播、两处存而不用字段删除 | 已落地(`d24b781`;结论见 `../knowledge/platform-and-protocol.md` §5,过程见该文 §2–§6) |
 | [44](44-third-party-type-containment.md) | **公共面收窄**:`ureq` 类型移出公共契约(自有 `MewResponse` / `TransportError`),三处错误类型收敛为"底层失败一律经 `MewError`"(删 `FileError`) | 已落地(`5e602dd`) |
-| [45](45-mechanical-batch-and-verification-closeout.md) | **机械批与核验收口**:认证头预计算、flush 按需唤醒、`AccountStatus` 并入 `Identity`、两个私有 trait 改自由函数、工具函数归位、反向查表索引一致化;infra §3 与 `rounds/21` 遗留核销 | 已落地 |
+| [45](45-mechanical-batch-and-verification-closeout.md) | **机械批与核验收口**:认证头预计算、flush 按需唤醒、`AccountStatus` 并入 `Identity`、两个私有 trait 改自由函数、工具函数归位、反向查表索引一致化;infra §3 与 `rounds/21` 遗留核实 | 已落地(`9ddacbb`) |
 | [46](46-public-face-closeout-and-notation-rule.md) | **公共面收尾**:`DecompilerError` 改名 `ConvertError`(含 `TranslateError` 变体)、`ReportProcessor` 的自定义配置入口收窄并删零调用构造器、`api::auth` 三处零调用全局门面删除;**映射记法口径定案**(表格内 `A -> B` 属数据记法保留,正文只留代码/数值/签名) | 已落地(`264026f`) |
 
 ## 更早的轮次(01–27)
@@ -39,35 +39,17 @@
 Kitten 与 KN 之间的转换方案与落地(20–21)、NEMO 路线(22–24)、性能(25–26)、NEMO 转 KN(27)。
 **路径/类型名多数已漂移**,以 `../knowledge/` 与 `../knowledge/errata.md` 为准。
 
-## 最新落地(51)
+## 轮次 47–51(2026-10-05 ~ 10-06)
+
+> 优化读数**不在此展开**:唯一权威落点是 `../knowledge/convert-performance.md`(§2bis.7–§2bis.16);过程、验收与评审见各轮次正文。
 
 | 轮次 | 一句话 | 状态 |
 | --- | --- | --- |
-| [51](51-entity-concurrency-auto.md) | **实体级并发"默认自动"**:`EntityConcurrency::{Auto, Fixed}`,"够大"按工作项权重之和判(阈值由一次性探针夹逼);批量折算对"自动"只压低核数预算 | **已落地**(阈值 1 000 条 / 400 KB;1 491 条起 `e2e` 1.30–1.51×、374 条测不到收益;小作品默认串行、大作品默认并行;产物 SHA256 与"1 vs 8 同 SHA256"门不变,读数见该文 §2/§5) |
-
-## 更早的落地(50)
-
-| 轮次 | 一句话 | 状态 |
-| --- | --- | --- |
-| [50](50-kn-source-skeleton.md) | **反向(KN → Kitten4)源侧骨架**:`source.rs` 按"文档形状"参数化(Kitten4 / KittenN 共用一套三层 `Visitor`),三处 `nekoBlockJsonList` 留原文直喂强类型反序列化;定义体解析拆出"树来源由调用方给"的入口 | **已落地**(同轮 A/B:分配 `kn-9.4MB` 602 799 → **442 291**(−26.6%)、`kn-3.7MB` 141 085 → **108 224**(−23.3%);正向两样本分配逐位不变;产物 SHA256 与 `#meta` 全绿;读数见该文 §4) |
-
-## 更早的落地(49)
-
-| 轮次 | 一句话 | 状态 |
-| --- | --- | --- |
-| [49](49-nemo-product-streaming.md) | **NEMO 产物侧流式写出**:NEMO → KN 的文件入口复用正向那套 `assembly::ProductDocument`(按"块表 `shield` 补键口径"参数化),三处 `nekoBlockJsonList` 不再建整份 `Value`;数字归一改成"非块表部分照旧 + 块表在 typed 树上就地归一" | **已落地**(同轮 A/B:NEMO 两样本分配 −14.2% / −14.3%、`core` 各 −18%;产物 SHA256 与 `#meta` 全绿;`nemo-old-1.5MB` 三行硬指标全达标,读数见该文 §4/§5) |
-
-## 更早的落地(48)
-
-| 轮次 | 一句话 | 状态 |
-| --- | --- | --- |
-| [48](48-nemo-entity-parallelism.md) | **NEMO 方向的实体级并行**:与正向同构的四阶段(临时 id 记录 · 串行兑现 · 并行兑现与编码 · 串行装配);只置不清的上下文按原值播种;QC 迁移的字符串也按同一张 id 表改写 | **已落地**(同轮 1 vs 8:`core` 1.44×/1.21×、`e2e` 1.31×/1.21×;产物 SHA256 与 `#meta` 全绿;代价:分配 +13.9%,见该文 §4) |
-
-## 进行中的方案(47)
-
-| 轮次 | 一句话 | 状态 |
-| --- | --- | --- |
-| [47](47-data-layer-rewrite-plan.md) | **数据表示层重写**:减少中间 `serde_json::Value` 的物化(Step 1 去 `json!` 深拷贝 · Step 2 流式写出 · Step 3 块树直写 · Step 4 反向/NEMO 对齐 · Step 5 源侧骨架)· 含硬指标、验收矩阵、评审与修订 | **六行硬指标里的 NEMO 两行由 `49` 接手落地**(产物侧流式写出,机制见 `49` §2);Step 1、Step 2+3、Step 4(反向)、Step 5 已落地;Step 5b 经复核不立项 |
+| [51](51-entity-concurrency-auto.md) | **实体级并发"默认自动"**:`EntityConcurrency::{Auto, Fixed}`,"够大"按工作项权重之和判(阈值由一次性探针夹逼);批量折算对"自动"只压低核数预算 | 已落地(`0ead279`;阈值与读数见 `../knowledge/convert-performance.md` §2bis.16) |
+| [50](50-kn-source-skeleton.md) | **反向(KN → Kitten4)源侧骨架**:`source.rs` 按"文档形状"参数化(Kitten4 / KittenN 共用一套三层 `Visitor`),三处 `nekoBlockJsonList` 留原文直喂强类型反序列化;定义体解析拆出"树来源由调用方给"的入口 | 已落地(`845b2c2`;读数见 §2bis.14) |
+| [49](49-nemo-product-streaming.md) | **NEMO 产物侧流式写出**:NEMO → KN 的文件入口复用正向那套 `assembly::ProductDocument`(按"块表 `shield` 补键口径"参数化),三处 `nekoBlockJsonList` 不再建整份 `Value`;数字归一改成"非块表部分照旧 + 块表在 typed 树上就地归一" | 已落地(`9cf1616`;读数见 §2bis.13) |
+| [48](48-nemo-entity-parallelism.md) | **NEMO 方向的实体级并行**:与正向同构的四阶段(临时 id 记录 · 串行兑现 · 并行兑现与编码 · 串行装配);只置不清的上下文按原值播种;YC 迁移的字符串也按同一张 id 表改写 | 已落地(读数见 `../knowledge/convert-performance.md` §2bis.12) |
+| [47](47-data-layer-rewrite-plan.md) | **数据表示层重写**:减少中间 `serde_json::Value` 的物化(Step 1 去 `json!` 深拷贝 · Step 2 流式写出 · Step 3 块树直写 · Step 4 反向/NEMO 对齐 · Step 5 源侧骨架)· 含硬指标、验收矩阵、评审与修订 | 已完成(Step 1 / 2+3 / 4 反向 / 4 NEMO 由 `49` 接手 / 5 全部落地;Step 5b 经复核不立项。逐项提交号与读数见 `../goals/convert-backlog.md` 前言) |
 
 ## 转换域"该看哪几篇"
 

@@ -6,11 +6,11 @@
 
 | 项 | 要做的事 | 出处 |
 | --- | --- | --- |
-| ~~`/coconut/clouddb/currentTime` 返回形态与单位~~ **已完成(2026-10-03)**:实测 `data` 为 **10 位秒级**时间戳(与本地秒同值),故**不需要** `/1000`,维持现状 | 原计划:若返回毫秒数字(>1e12)=> `get_calibrated_timestamp` 先 `/1000`;否则维持 | `../rounds/04` Assumptions + Phase 5;读数见 `../rounds/43` §2、`../knowledge/platform-and-protocol.md` §5 |
-| `update_phone_number` 请求字段名 **已完成(2026-10-03)**:实测请求字段是 **`phone_number`**(OpenAPI 写的 `phone` 被服务端忽略),**维持现码** | 原计划:OpenAPI 说 `phone`,现码发 `phone_number` => 实测确认一个 | `../rounds/04` Phase 6-1;证据见 `../rounds/43` §2 |
-| 错误信息是否含服务端 body **已完成(2026-10-03)**:统一路径(`send_checked`)**带完整服务端错误体**;裸 `MewRequestBuilder::send()` 不带(需显式 `.with_error_body()`) | 原计划:跑一次真实失败请求,人工确认 `6-6` 的统一错误语义 | `../rounds/04` Phase 6;证据见 `../rounds/43` §2 |
-| 云存储事件帧是否容忍**无空格** `42[…]` **已完成(2026-10-03)**:`parse_frame` 只剥 `"42"` 前缀、其余交给 `serde_json`(跳过前导空白)⇒ **两者都接受**,无需改动 | 原计划:现实现无空格且工作正常,但 `../rounds/01` 坑 5 要求"统一带空格" => 以真机为准定论(不要盲改) | `../rounds/01` 坑 5;判定见 `../rounds/43` §2 |
-| WS 连接行为 **已完成(2026-10-03)**:两线程并发 `connect` 均 `Ok` 且数据就绪(串行化成立);`close` 的事件序列为 `[Opened, Closed { was_connected: true }]`,无虚假 `Error` | 原计划:并发 `connect` 串行化、断连**不发虚假 `Error`** 需真实 WS 服务人工验证 | `../rounds/04` Phase 4;证据见 `../rounds/43` §2 |
+| ~~`/coconut/clouddb/currentTime` 返回形态与单位~~ **已完成(2026-10-03 实测;`c5bbb13`)**:实测结论(时间戳单位与本地秒同值)⇒ **不需要**给 `get_calibrated_timestamp` 加任何缩放,维持现状 | 原计划:返回毫秒数字时需要先做一次 `/1000`;否则维持现状 | `../rounds/04` Assumptions + Phase 5;读数见 `../rounds/43` §2、`../knowledge/platform-and-protocol.md` §5 |
+| `update_phone_number` 请求字段名 **已完成(2026-10-03 实测;`c5bbb13`)**:实测确认现码发的字段名被服务端接受(OpenAPI 写的是另一个名字、被忽略),**维持现码** | 原计划:OpenAPI 与现码的字段名不一致,需实测确定一个 | `../rounds/04` Phase 6-1;证据见 `../rounds/43` §2、字段名见 `../knowledge/platform-and-protocol.md` §5 |
+| 错误信息是否含服务端 body **已完成(2026-10-03 实测;`c5bbb13`)**:统一路径带完整服务端错误体、裸 `send()` 不带 —— 逐条结论见 `../knowledge/platform-and-protocol.md` §5 的「统一错误语义」段 | 原计划:跑一次真实失败请求,人工确认 `6-6` 的统一错误语义 | `../rounds/04` Phase 6;证据见 `../rounds/43` §2 |
+| 云存储事件帧是否容忍**无空格** `42[…]` **已完成(2026-10-03 实测;`c5bbb13`)**:`parse_frame` 的实现使两种写法都接受,无需改动 | 原计划:现实现无空格且工作正常,但 `../rounds/01` 坑 5 要求"统一带空格",故以真机为准定论(不要盲改) | `../rounds/01` 坑 5;判定见 `../rounds/43` §2 |
+| WS 连接行为 **已完成(2026-10-03 实测;`c5bbb13`)**:并发 `connect` 串行化成立;`close` 的事件序列与"无虚假 `Error`"的结论见 `../knowledge/platform-and-protocol.md` §5 | 原计划:并发 `connect` 串行化、断连**不发虚假 `Error`** 需真实 WS 服务人工验证 | `../rounds/04` Phase 4;证据见 `../rounds/43` §2 |
 
 ## 2. 已核验(先前怀疑的"证据不足"已消;逐条状态见下表)
 
@@ -18,7 +18,7 @@
 2.  **已完成(核对;早已办妥)**:`fetch_7day_hot_posts_iter`(`src/api/forum.rs`)端点固定为 `"/web/forums/boards/posts/7dayHot"`,`board_id` 走 `with_iter_param`(`../rounds/13` §P3-6)。
 3.  **已完成(`60d5358`)**:`src/core/converse.rs` 补注释「chat 事件无字符串化载荷,刻意不二次解析(与 cloudvar 不同),勿改」(`../rounds/11` §P4-3),零行为改动。
 
-## 3. 待方案 + 评审(已落地项与剩余项见下表)
+## 3. 待方案 + 评审(已完成项与剩余项见下表)
 
 | 项 | 说明 | 出处 |
 | --- | --- | --- |
@@ -31,7 +31,7 @@
 ## 4. P2 性能小项(择机清)
 
 1. **已完成(2026-10-03)**:`requests.rs` 的 Bearer 头不再逐请求构造 —— 身份槽在 `set_token` 时预计算 `"Bearer {token}"`(`IdentitySlot`),`AuthProvider::auth_header` 改为返回 `Option<(&'static str, Arc<str>)>`,请求路径只做一次引用计数克隆(内置实现全部覆写;trait 默认实现保留给外部实现者)。见 `../rounds/45`。
-2. **已核实应判不做(2026-10-03)**:`PaginatedIter::build_params` 的克隆要真正省掉,必须让 `MewRequestBuilder::with_params` 改收 `&[(String, String)]`(公共面破坏)或把整条链改成 `&mut self`——而 `with_params` 按值消费 `Vec` 的现状下,`&mut self` 也省不掉克隆;`base_params` 通常只有个位数条目 ⇒ **收益 < 改动面**,不立项。
+2. **判不做(已核实,2026-10-03)**:`PaginatedIter::build_params` 的克隆要真正省掉,必须让 `MewRequestBuilder::with_params` 改收 `&[(String, String)]`(公共面破坏)或把整条链改成 `&mut self`——而 `with_params` 按值消费 `Vec` 的现状下,`&mut self` 也省不掉克隆;`base_params` 通常只有个位数条目 ⇒ **收益 < 改动面**,不立项。
 3. **已完成(2026-10-03)**:`cloudvar.rs` 的 flush 循环不再固定 `sleep(100 ms)` 轮询 —— 入队走新增的 `flush_pending` 标记 + `Notify::notify_with` 按需唤醒,`flush_loop` 用 `wait_flag(.., flush_interval, ..)` 等待;**保留超时兜底**(断线回退的批次仍会定期重试),标记在 `commands` 锁内清除以消除丢失唤醒窗口。见 `../rounds/45`。
 
 > 本节条目一律**按符号定位**(不写 `文件:行`);原始行号见 `../rounds/29` §3。

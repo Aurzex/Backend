@@ -23,7 +23,7 @@
   - **删 13**(零调用点;注意:按符号定位,不写行号):`auth.rs` 的 `as_str`+`from_str`、`forum.rs` 的 `TargetType::as_str`、`shared.rs` 的 `ValueExt::get_string_or`(声明+实现)、`pipeline.rs` 的 `clear_processed_records`、`registry.rs` 的 `description`/`reason_id_field`/`prompt`(后者连带其 `format!` 与孤立的 `parts` 绑定)、`retrieve.rs` 的两处 `as_str`、`decompile/mod.rs` 的 `BlockContext::new`。**踩坑记录**:原清单把 `forum.rs` 的 `DeleteItemType::as_str` 记为死项,但**相邻**的 `ItemType::as_str` 有调用点,误删被编译器即时报错拦下,已还原原文、改删 `DeleteItemType`/`TargetType` 两处。
   - **`#[cfg(test)]` 10**(从生产构建移出,比"留着再闭嘴"合仓库口径):`mapping::{SHADOW_XML_INDEX, shadow_xml, kitten_names_for, reverse_candidates}`、`xml::{remove_attr, parse, Parser::run}`、`model::count_types` ×2(依 `./convert-backlog.md` §2 第 10 条)、`tables_gen::SHADOW_XML`(**生成物 + 生成器 `src/bin/gen_translate_tables.rs` 两处同步**;本机 `temp/tables` 不在库内,因此无法重跑生成器核对,属刻意手改,提交信息已写明);`mapping.rs` 的 import 也拆出 cfg(test) 一条。
   - **`#[allow(dead_code)]` + 理由(阶段 2 处置 **8 项**;注意:行号会漂,按符号定位)**:`RankingData.cvid`、`CloudCommand::Variable.private`(代码里本就写明"刻意不读")、`UserInfo` 三字段、`AdminReportStatistics.total_admins`、`FanByLikesStatistics` 五字段、`ActionRegistry.client`、`ReportFetcher.client`、`ReportTypeRegistry.default_actions`(注释明写"保留")。
-    - **「8」与「6」的关系**:**8 是阶段 2 当时的处置项数**(含字段级 allow),**不是现存属性数**。其中 4 项(`RankingData.cvid`、`UserInfo` 三字段、`AdminReportStatistics.total_admins`、`FanByLikesStatistics` 五字段)已随 `104964f` 撤销;现存 4 项(`CloudCommand::Variable.private`、`ActionRegistry.client`、`ReportFetcher.client`、`ReportTypeRegistry.default_actions`)+ 2 项后加的(`KITTEN4_VOCAB_EXPORTED` 的 `cfg_attr(not(test), allow(dead_code))`、`translate/mod.rs` 的手工排障 `dump_real_work_for_external_validation`),合计为**全仓现存 6 处属性**(2026-10-02 逐处实测;R2 当时写在 `cloudvar.rs`/`pipeline.rs`/`registry.rs` 里的行号锚点已漂,故这里只按符号定位)。
+    - **「8」与「6」的关系**:**8 是阶段 2 当时的处置项数**(含字段级 allow),**不是现存属性数**。其中 4 项(`RankingData.cvid`、`UserInfo` 三字段、`AdminReportStatistics.total_admins`、`FanByLikesStatistics` 五字段)已随 `104964f` 撤销;`ActionRegistry.client` 与 `ReportFetcher.client` 两个字段随后(2026-10-03)随 `./pending-decisions.md` D6 的 2) 删除。**因此现在全仓是 4 处属性**:`CloudCommand::Variable.private`、`ReportTypeRegistry.default_actions`、`KITTEN4_VOCAB_EXPORTED` 的 `cfg_attr(not(test), allow(dead_code))`、`translate/mod.rs` 的 `dump_real_work_for_external_validation`(另有 1 处仅注释提及)。2026-10-02 的逐处实测写在 `cloudvar.rs`/`pipeline.rs`/`registry.rs` 里的行号锚点已漂,故这里只按符号定位。
 - **四处对外形状 / 公共面项已移入 `./pending-decisions.md` D6**(2026-10-02;按分库纪律:决策不写进 backlog),因此**逐项口径与状态只在 D6 展开**,此处不复制。
 
 ## 2. 小改(机械、低风险,可批量做)
@@ -45,9 +45,9 @@
 
 > 三条已于 2026-10-03 核验并结案(见 `../rounds/45`)。
 
-1. **已核销(2026-10-03)**:`services.rs` 没有 `report_processor_new_with_client_uses_injected_client` 这个测试名,且该文件**没有测试模块**;全仓同名 0 命中(`src/`、`tests/`)。这不是遗漏而是 `../rounds/15` 方案自留的退化(同文"实际执行结果"只记了 `account.rs::manager_new_with_client_uses_injected_client` 与 `registry.rs::fetch_chunked_terminates_without_duplicates`)。要闭合就在 `services.rs` 末尾加同文件 `#[cfg(test)]` 断言注入客户端身份。
-2. **已确认(2026-10-03)**:`../rounds/19` Phase 4 要求的三处 CONTRIBUTING 改动**都在现行文件里**(命名段直白名、锁段含"默认 std + 仅经评审才引 `parking_lot`"、错误段含"保留底层变体,不要压成 `Auth(String)`")。
-3. ~~`../rounds/11` §P4-3、`../rounds/13` §P3-5/§P3-6 三条~~ **已核销(2026-10-03)**:三条均已落实(`converse.rs::handle_frame` 的"刻意不二次解析"注释、`education.rs::fetch_organization_ids` 传 `None`、`forum.rs::fetch_7day_hot_posts_iter` 端点固定),且 `./platform-backlog.md` §2 已同名标完成 ⇒ 本条是**重复挂账**,已删。
+1. **判不做(已核实,2026-10-03)**:`services.rs` 没有 `report_processor_new_with_client_uses_injected_client` 这个测试名,且该文件**没有测试模块**;全仓同名 0 命中(`src/`、`tests/`)。这不是遗漏而是 `../rounds/15` 方案自留的退化(同文"实际执行结果"只记了 `account.rs::manager_new_with_client_uses_injected_client` 与 `registry.rs::fetch_chunked_terminates_without_duplicates`)。要闭合就在 `services.rs` 末尾加同文件 `#[cfg(test)]` 断言注入客户端身份。
+2. **已完成(2026-10-03 核对;`659c030`)**:`../rounds/19` Phase 4 要求的三处 CONTRIBUTING 改动**都在现行文件里**(命名段直白名、锁段含"默认 std + 仅经评审才引 `parking_lot`"、错误段含"保留底层变体,不要压成 `Auth(String)`")。
+3. ~~`../rounds/11` §P4-3、`../rounds/13` §P3-5/§P3-6 三条~~ **已完成(2026-10-03 核验;`659c030`)**:三条均已落实(`converse.rs::handle_frame` 的"刻意不二次解析"注释、`education.rs::fetch_organization_ids` 传 `None`、`forum.rs::fetch_7day_hot_posts_iter` 端点固定),且 `./platform-backlog.md` §2 已同名标完成 ⇒ 本条是**重复挂账**,已删。
 
 ## 4. 已决(不做/暂缓)
 

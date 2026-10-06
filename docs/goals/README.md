@@ -4,18 +4,18 @@
 > 历史过程放 `../rounds/`(事实不改写,写法随根目录 `AGENTS.md` 规范清洗)。**本页只做导航** —— 每条只给"状态 + 指针",不复制理由与读数。
 > 分库纪律:一项做完就在本库删掉,并把结论与证据写进 `../knowledge/` 或一个新轮次记录。
 
-## 需要你拍板
+## 待决清单(需人拍板)
 
 - **`pending-decisions.md` A 组**:只剩 **A4**(NEMO 上传是否真机验证;A1/A2/A3/A5 已处理)。
 - **B 组**:大方向 B1–B8(B5 已完成并移入"已决")。
 - **C 组**:只剩 **C8**(暂缓);C3–C7 已于 2026-10-03 结案(其中 C7 判不做,见 `../rounds/45`),C9/C10 见 `../rounds/43`。
-- **D 组**:D1–D6 已全部落定(D6 的 2)  与 4)  已于 2026-10-03 落地,见 `../rounds/43`);**D7/D8 已于 2026-10-05 落在"已决"**(分配器改为建议口径、发布档 `opt-level` 由 `"z"` 改为 `3`;读数见 `../knowledge/convert-performance.md` §2bis)。
-- **`convert-backlog.md` §1**:另有待决项(B2 / A4 / `entity_concurrency` / 反向并行是否重开)。
+- **D 组**:D1–D6 已全部落定(D6 的 2)  与 4)  已于 2026-10-03 落地,见 `../rounds/43`);**D7/D8 已于 2026-10-05 落在"已决"**(分配器改为建议口径、发布档 `opt-level` 调整;读数见 `../knowledge/convert-performance.md` §2bis)。
+- **`convert-backlog.md` §1**:另有待决项(B2 / A4 / 反向并行是否重开)。
 - **`infra-backlog.md` §6 架构盘点**:**四条已全部结案**(两条见 `../rounds/44`,两条见 `../rounds/46`),该节不再有待拍板项。
 
 ## 不用等决策就能做
 
-- `convert-backlog.md` §2 第 **7 / 13** 条(第 2、4、5 条已完成、第 6 条已核销、0b 子项已补齐;第 7 条是 NEMO 完整搬家的资源重传、第 13 条是夹具与输出目录分离,都属大件)。
+- `convert-backlog.md` §2 第 **7 / 13** 条(第 2、4、5 条已完成、第 6 条已完成(2026-10-03)、0b 子项已补齐;第 7 条是 NEMO 完整搬家的资源重传、第 13 条是夹具与输出目录分离,都属大件)。
 - `platform-backlog.md` §3 的待方案项(§1 的真机实测五项已于 2026-10-03 做完,见 `../rounds/43`)。
 - `infra-backlog.md` §2 第 1–3 条**均已完成**(第 3 条 P2 收尾的逐项结论见 `../rounds/45`)。
 - `../rounds/40-gates-cleanup-and-real-defects.md` §9.3 的 **R5**(加载门离线化进 CI):要先拍板"入库最小夹具"的形态。
@@ -23,7 +23,7 @@
 ## 要立轮的大方向 / 已决但暂缓
 
 - **要立轮的**:`pending-decisions.md` **B4**(`converse` 断线指数退避重连;前置条件=先定会话与历史重建语义);**B7/B8** 按需(`WorkId` 试点收益 / `work.rs` 再切 `WorkDataFetcher`)。
-  **B1(API DTO 类型化)与 B2(KN 到 NEMO)已列入"明确不做"**,见本节末,不再作为立轮候选。
+  **B1(API DTO 类型化)已列入"明确不做"**,见本节末,不再作为立轮候选;**B2(KN 到 NEMO)仍是待决项**(建议判不做,见 `convert-backlog.md` §1 与 `pending-decisions.md` B2)。
 - **已决但暂缓(登记,待重新立项)**:`wrap_arithmetic` 移动不重铸(**W13**)——
   为何暂缓、代价与重开条件见 `convert-backlog.md` §5 第 5 行;证据见 `../rounds/38` §8、`../rounds/39` §W13。
 

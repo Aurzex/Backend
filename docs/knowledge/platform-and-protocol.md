@@ -9,7 +9,7 @@
 - 云存储 WebSocket 的 `401` **几乎总是连接参数不匹配**,不是鉴权失败:
 
   | 作品编辑器 | `authorization_type` | `stag` |
-| --- | --- | --- |
+  | --- | --- | --- |
   | Kitten / Coco | 1 | 1 |
   | Nemo | 5 | 2 |
   | KittenN | 5 | 3 |
@@ -71,7 +71,7 @@
 
 - 实测方法:用与生产路径**同一条渠道**逐档上传临时文件(先登录,再 `file_uploader().upload(...)`),
   记录每档的成功/失败与耗时。结论对 `translate_work(upload=true)` 与反编译"上传到账号"都成立。
-- => 产物超过上限时**提前报错**(`shared::ensure_single_package_fits`,别让用户白等几分钟再吃 413);
+- 故产物超过上限时**提前报错**(`shared::ensure_single_package_fits`,别让用户白等几分钟再吃 413);
   上传请求必须单独放宽超时 —— **常量值与实测读数见 `nemo-runtime-and-upload.md` §6**(A1)。
 - 要传更大的作品只能做**分片上传**(见 `../goals/convert-backlog.md`);真实 KN 产物多在 3~9 MB。
 
@@ -102,9 +102,9 @@ ureq 3 的超时不是"一个数",而是三个互不覆盖的预算:
 2. **请求级覆盖会继承 agent 的其余超时旋钮**:只改 `timeout_global` 不会把 `timeout_recv_response` 一起抬走。
 3. ureq 3 **没有逐次读的"空闲超时"**:响应体中途卡住只会吃掉总预算(不按次重置),这是旋钮自身的边界,不是漏配。
 
-=> 本库据此分段:普通接口三段一致(默认各 30 s);下载侧(`with_timeout(DOWNLOAD_TIMEOUT)`,900 s)
+故本库据此分段:普通接口三段一致(默认各 30 s);下载侧(`with_timeout(DOWNLOAD_TIMEOUT)`,900 s)
 只抬"总预算 + 响应体预算",**等响应头仍按客户端 `timeout` 失败** —— 死连接不会在下载路径上白等 15 min,
-大响应体的 900 s 预算不受影响。=> `src/utils/requests.rs` 的 `KittyCore::new` 与 `apply_request_config`。
+大响应体的 900 s 预算不受影响。落点是 `src/utils/requests.rs` 的 `KittyCore::new` 与 `apply_request_config`。
 
 ## 依据
 

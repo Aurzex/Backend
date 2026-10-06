@@ -340,7 +340,7 @@ pub struct LocalClientProvider {
 
 ## 第三十九轮实施期间的结论变更(2026-10-01 ~ 10-02)
 
-W10 落地(`66c0b6b`)后,**"内联对象形态影子 => 拒收该作品"这条老结论全部失效**;读 33/34 轮时以本节为准:
+W10 落地(`66c0b6b`)后,**"内联对象形态影子即拒收该作品"这条老结论全部失效**;读 33/34 轮时以本节为准:
 
 | 出处 | 已过时的表述 | 正确值 / 证据 |
 | --- | --- | --- |
@@ -351,8 +351,8 @@ W10 落地(`66c0b6b`)后,**"内联对象形态影子 => 拒收该作品"这条�
 ## 第三十一轮 §3.6 N4 的"同一约定"结论(2026-10-02 核实)
 
 - **错**:`../rounds/31-convert-layout-consolidation-plan.md` §3.6 N4 引 `translate/model.rs` 的注释「`XmlBlockWriter` 的约定:首根 80、每根 +220」,据此把两边当作**同一约定**,只把起点差异记作"疑似漂移",并提出"若确认是同一约定,则把 220/80 提到一处"。
-  - **为何错**:两边是**同名不同物**(`decompile` 侧写 Kitten2/3 blocksXML 的 `y=0.0 + 220·i`;`translate/model.rs` 写 Kitten4 `block_data_json` 的 `location`,且只在缺 `location` 时兜底)=> 不存在可提的"共享常量";平台侧读数也不支持"起点 80 是平台约定"。
-  - **正确**:根块坐标**非语义**(`location` 就在语义 diff 的 allow-list 里),两处唯一的硬要求是"根块互不重叠"=> **不做共享常量、也不改数值**;只把 `model.rs` 那句自称"一致"的注释改准(`4072846`)。**平台取数与 A/B 实测的具体数字只在 `../goals/convert-backlog.md` §2 第 8 条展开。**
+  - **为何错**:两边是**同名不同物**(`decompile` 侧写 Kitten2/3 blocksXML 的 `y=0.0 + 220·i`;`translate/model.rs` 写 Kitten4 `block_data_json` 的 `location`,且只在缺 `location` 时兜底),故不存在可提的"共享常量";平台侧读数也不支持"起点 80 是平台约定"。
+  - **正确**:根块坐标**非语义**(`location` 就在语义 diff 的 allow-list 里),两处唯一的硬要求是"根块互不重叠",故**不做共享常量、也不改数值**;只把 `model.rs` 那句自称"一致"的注释改准(`4072846`)。**平台取数与 A/B 实测的具体数字只在 `../goals/convert-backlog.md` §2 第 8 条展开。**
   - 出处:docs/rounds/31-convert-layout-consolidation-plan.md §3.6 N4(注意: 它点名的 `model.rs:706-708`、`editors.rs:625-626` 已随文件增长**行号漂移**,请按符号定位:`ROOT_LAYOUT_Y`/`ROOT_LAYOUT_STEP` 及其文档注释、`XmlBlockWriter::write_blocks`)。
 
 ## 第四十九轮实施期间的符号漂移(2026-10-06)
@@ -386,7 +386,7 @@ NEMO 产物侧流式写出(`../rounds/49-nemo-product-streaming.md`)把块表写
 
 ## 第五十一轮实施期间的文档测绘(2026-10-06)
 
-本轮按 `docs-tidy` 的顺序做了一次三库测绘(live 文档的漂移已直接修,见该轮提交)。测绘同时报了**历史轮次正文**里的三处缺陷 —— 按"轮次记录不改写、勘误集中在本篇"的约定,只在此登记:
+2026-10-06 的 `docs-tidy` 复核按测绘顺序做了一次三库核对(live 文档的漂移已直接修,见该轮提交)。测绘同时报了**历史轮次正文**里的三处缺陷 —— 按"轮次记录不改写、勘误集中在本篇"的约定,只在此登记:
 
 | 出处 | 已过时的表述 | 正确值 / 证据 |
 | --- | --- | --- |
@@ -403,15 +403,15 @@ NEMO 产物侧流式写出(`../rounds/49-nemo-product-streaming.md`)把块表写
 > 这条不是某篇轮次正文写错,而是**仓库里两处配置互相矛盾**,根因出处恰在 `../rounds/01`,故记在此。
 
 - **错**:`.github/workflows/CI.yml:28/33/39/44/49` 的 `libname` 列(`libbackend.so` ×2 / `backend.dll` / `libbackend.dylib` ×2)+ 上传步 `:63-67`(`path: target/<target>/release/<libname>`)—— 蕴含"release 会产出动态库"。
-  - **为何错**:`Cargo.toml:8` 是 `crate-type = ["rlib"]`,**只产 rlib,不产 `.so`/`.dll`/`.dylib`** => 上传步按该路径**找不到文件**;`actions/upload-artifact` 的 `if-no-files-found` **默认 `warn`** => **job 静默绿,产物其实从未上传**。
+  - **为何错**:`Cargo.toml:8` 是 `crate-type = ["rlib"]`,**只产 rlib,不产 `.so`/`.dll`/`.dylib`**,故上传步按该路径**找不到文件**;`actions/upload-artifact` 的 `if-no-files-found` **默认 `warn`**,因此 **job 静默绿,产物实际从未上传**。
   - **根因线索**:`../rounds/01-websocket-pitfalls.md:791`(为让库可被测试引用,把 `"rlib"` **加进** `crate-type`)与 `:809`(「`crate-type = ["cdylib"]` 的库不参与测试…加了 `"rlib"` 后测试才运行」)。此后 `cdylib` 从 `crate-type` 里消失,而 CI 的 `libname` 列表没跟上。
-  - **正确(已决并落地,2026-10-02,`f68c2e6`)**:取方案 2)  的删法 —— **删掉 artifact 上传步**及矩阵里的 `artifact:`/`libname:` 键。理由:本仓 `[lib] crate-type=["rlib"]` **只产 rlib**、`src/main.rs` 又是需账号的**交互式管理控制台**、仓内无消费方 => **没有可分发产物**,不恢复 `cdylib`。五目标 `cargo build --release` 矩阵保留;另新增 `offline-gate` job(fmt --check + clippy -D warnings + 逐目标点名的离线测试)。CI 口径(含**刻意不跑**真机门与吃 `download/` 的语料扫描器)见 `repo-conventions.md` §6。
+  - **正确(已决并落地,2026-10-02,`f68c2e6`)**:取方案 2)  的删法 —— **删掉 artifact 上传步**及矩阵里的 `artifact:`/`libname:` 键。理由:本仓 `[lib] crate-type=["rlib"]` **只产 rlib**、`src/main.rs` 又是需账号的**交互式管理控制台**、仓内无消费方,因此**没有可分发产物**,不恢复 `cdylib`。五目标 `cargo build --release` 矩阵保留;另新增 `offline-gate` job(fmt --check + clippy -D warnings + 逐目标点名的离线测试)。CI 口径(含**刻意不跑**真机门与吃 `download/` 的语料扫描器)见 `repo-conventions.md` §6。
   - 出处:`.github/workflows/CI.yml`、`Cargo.toml:8`、`../rounds/01` 附录「空的 lib」两节;登记在 `../goals/infra-backlog.md` §1。
 
 ### 第 40 轮 R2 的 `unused` 读数(2026-10-02)
 
 - **易误**:表格/历史文里出现的 `--bins` 946(其中 `main.rs` 896)/ `--tests` 551,被当成**现在能跑出来**的数。
-  - **正确**:那是 **`47a8c5e`(bin 改走库 crate)之前**的旧读数,已被那次**重写**清掉(不是"清 `unused`"清的)=> 当前树**不可复现**。**全部读数(两棵树 / 三阶段 / 终态)与口径只在 `../goals/infra-backlog.md` §1.1 展开**;`../rounds/39` §0.3/§W5 段按纪律就地标注(2026-10-02),不改。
+  - **正确**:那是 **`47a8c5e`(bin 改走库 crate)之前**的旧读数,已被那次**重写**清掉(不是"清 `unused`"清的),故当前树**不可复现**。**全部读数(两棵树 / 三阶段 / 终态)与口径只在 `../goals/infra-backlog.md` §1.1 展开**;`../rounds/39` §0.3/§W5 段按纪律就地标注(2026-10-02),不改。
 
 ### 第 40 轮 §7.4 的"body 无读超时"诊断(2026-10-03 实测推翻)
 
@@ -451,7 +451,7 @@ NEMO 产物侧流式写出(`../rounds/49-nemo-product-streaming.md`)把块表写
 
 ### 2026-10-02 文档巡检(阶段 1:准确性)发现的两处
 
-- **渲染硬错误(已修,在此登记)**:`../rounds/37-convert-architecture-refactor-plan.md` §3.2 的表格在 Q5 与 Q6 两行之间夹了一个空行 => Markdown 把它断成两张表(Q6 那一行掉到表外、渲染异常)。已**只删该空行**(不改任何正文文字)。同批的同类空行断表另有两处:`../goals/pending-decisions.md` A 组表(A4/A5 之间)与 `../rounds/README.md` 第 40 轮两行之前,均已并回。
+- **渲染硬错误(已修,在此登记)**:`../rounds/37-convert-architecture-refactor-plan.md` §3.2 的表格在 Q5 与 Q6 两行之间夹了一个空行,Markdown 因此把它断成两张表(Q6 那一行掉到表外、渲染异常)。已**只删该空行**(不改任何正文文字)。同批的同类空行断表另有两处:`../goals/pending-decisions.md` A 组表(A4/A5 之间)与 `../rounds/README.md` 第 40 轮两行之前,均已并回。
 - **失效目录(只登记,按"历史保真"不改正文)**:`../rounds/33-corpus-sweeps-and-format-split.md` §1、§3 与 §4 的命令示例把正向语料目录写成 `download/compile/k4raw/`(§3 还写"落盘到该目录")—— **该目录不存在**;平台原件编辑格式现在落在 `download/compile/k4edit/`(由 rounds/37 §12 的采集器写入),正向扫描器实际吃 `download/compile/*.bcm4`。`../goals/convert-backlog.md` §2 第 1 条与 `../rounds/37` §10.3 已改正,轮次正文按纪律不动。
 - **尺寸写法(只登记,不改历史正文)**:`../rounds/20-kitten-kn-work-conversion-plan.md` 附录里的「3.7 MB / 63 MB」指同一份 `原气骑士 且听风吟-编辑版.bcm4` —— **63 MB 是十进制量级(≈63.6 MB),数字本身不错**;现行统一口径写**字节数** `63 598 143 B(≈60.6 MiB)`(见 `work-file-formats.md` §6 第 5 条)。
 
@@ -507,3 +507,8 @@ NEMO 产物侧流式写出(`../rounds/49-nemo-product-streaming.md`)把块表写
 | `decompile/editors/simple.rs` | 1 | 不存在 |
 | `simple.rs` | 1 | 不存在 |
 | `decompile/editors/kitten.rs` | 1 | 不存在 |
+
+## 依据
+
+- 每条自带的「出处」行即该条的来源:轮次原文(`../rounds/**`,按历史保真不改写)、当时的源码/配置(`src/**`、`Cargo.toml`、`.github/workflows/CI.yml`)与提交历史(`git log`)。
+- 凡给出「正确值」处,均已用工具在当时的工作树上核过(读文件、`git grep` 计数、`git log` 取提交号);「已修/已登记」的结论另附落地提交号或轮次指针。

@@ -24,11 +24,11 @@
 ```
 
 - `blocks` 是 **id 到积木对象** 的字典;`connections` 是父子邻接表,**根积木 = 从未作为子键出现的 id**。
-- `shadows` 的值仍然是 **XML 字符串**(Kitten4 沿用 XML shadow,KN 亦然 => 双向搬运可直接复用)。
+- `shadows` 的值仍然是 **XML 字符串**(Kitten4 沿用 XML shadow,KN 亦然,故双向搬运可直接复用)。
   注意: **例外(老形态)**:平台上还有作品把槽值写成**内联对象**(`{type, id, visible, editable, fields}`;全语料仅一件)。
   正向入口会把它就地改写成平台同款影子 XML 再解析(`pipeline::normalize_object_shadows`,只改解析副本);
   形态依据、只作必要条件的理由与残留,见 `convert-semantics.md` §3(**此处不重复**)。
-- 实测:188 个积木 <-> 188 个 `connections` 条目(86 个非空),叶子节点是空对象 `{}`。
+- 实测:188 个积木与 188 个 `connections` 条目一一对应(86 个非空),叶子节点是空对象 `{}`。
 - 反向写 `.bcm4` 时 `blocks`/`connections`/`parent_id`/`location` **都要重建**。
 - **编译版**(`compiled_block_map`)与编辑版不同:编译版引用**恒为内联对象**,字符串 id 只出现在编辑版的 `connections`(实测 2236 处采样,字符串 0 处)。见 `src/core/convert/decompile/mod.rs`(编译版积木层,原 `blocks.rs`)。
 
@@ -76,11 +76,11 @@
 
 ## 6. 实现必读的边界与陷阱
 
-1. **舞台尺寸只有两档**:KN 仅 `562×900`(竖)/ `900×562`(横)。Kitten 的 `size` 任意 => 反向必须显式选一个目标尺寸(`ConvertOptions.stage`),否则坐标失真。官方代码里额外的 `/1.3` 是 Kitten4 横屏特例,**不是**通用缩放。
+1. **舞台尺寸只有两档**:KN 仅 `562×900`(竖)/ `900×562`(横)。Kitten 的 `size` 任意,故反向必须显式选一个目标尺寸(`ConvertOptions.stage`),否则坐标失真。官方代码里额外的 `/1.3` 是 Kitten4 横屏特例,**不是**通用缩放。
 2. **可选字段不可假设齐全**:同一节点模型在真实作品里字段有无不一(HEX Editor 的 359 个节点:`location` 16、`mutation` 19、`comment` 0)。解析/比较要容忍缺失,写出时按模板给全。
 3. **shadow XML 有多形态**:带/不带 `xmlns`、带/不带 `id`、约束字面量 `-Infinity,Infinity,0,` vs `1,Infinity,1,` —— 语义等价、字节不同。产出要**稳定**(带 `xmlns` + 显式 `id`),比较用语义 diff。
-4. **脏键会传染**:`broadcasts.broadcastsDict` 里出现过 `"toJSON"` 这类键,本库反编译产物里也有 => 转换前应过滤/告警。
-5. **大文件是常态**:真实作品 3.7 MB(HEX Editor)到 63 598 143 B(≈60.6 MiB,`原气骑士 且听风吟-编辑版.bcm4`)。构建"邻接表->树"要用 `HashMap` 一次归并,禁止线性查找父节点。
+4. **脏键会传染**:`broadcasts.broadcastsDict` 里出现过 `"toJSON"` 这类键,本库反编译产物里也有,故转换前应过滤/告警。
+5. **大文件是常态**:真实作品 3.7 MB(HEX Editor)到 63 598 143 B(≈60.6 MiB,`原气骑士 且听风吟-编辑版.bcm4`)。构建"由邻接表到树"的归并要用 `HashMap` 一次完成,禁止线性查找父节点。
 6. **资源(造型/音频)必须是可访问 URL**:官方导入时会 `fetch` + 重新 `upload` 并归一化 `centerPoint`,失败是 `try/catch` + 继续。
 7. **`source` 字段是"保留原件"**:KN 编辑器导入 Kitten 作品时,把**原始 Kitten 文件字节**当 `bcm4` 重新上传,URL 写进 KN 作品的 `source`。
 

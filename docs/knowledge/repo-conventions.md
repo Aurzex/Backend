@@ -16,7 +16,7 @@
 
 > **已知例外(勘误)**:auth 域为 `LoginBuilder::execute(&mut self)` —— `LoginSession` 那套"build 后再 execute"的形态已被后续依赖注入重构推翻。见 `errata.md`。
 
-判定过"合规"的历史项(不再重新"整改"):`KittyRequestBuilder::send*` 属请求原语;`wait_for_*` 是等待原语;`CommentQueryBuilder::stream_*` 是惰性执行;`CheckConfig`/`KittyConfig`/`PaginationConfig` 是内部配置结构体;`done_chunks` 是历史查询收尾 API。
+判定过"合规"的历史项(不再重新"整改"):`MewRequestBuilder::send*`(旧名 `KittyRequestBuilder`)属请求原语;`wait_for_*` 是等待原语;`CommentQueryBuilder::stream_*` 是惰性执行;`CheckConfig`/`ClientConfig`(旧名 `KittyConfig`)/`PaginationConfig` 是内部配置结构体;`done_chunks` 是历史查询收尾 API。
 
 ## 2. 编码风格
 
@@ -62,7 +62,7 @@
 ## 4. 错误类型
 
 - 统一 `MewError` / `MewResult<T>`(`src/utils/requests.rs`);HTTP 状态码枚举已改名为 `StatusCode`(`HTTPStatus` 已不存在)。
-- **底层失败一律折进 `MewError`**(`io::Error` / `serde_json::Error` 由 `From` 折进),域错误类型只留域内变体 + 一个 `Mew` 载体。2026-10-03 前 `ProcessorError`/`DataQueryError` 并列的 `Io`/`Json` 变体已删,两者的 `External` 也统一改名为 `Mew`;`FileError` 整型删除(`CodeMaoFile::write_bytes` 直接返回 `MewResult<()>`)。口径锚点:`translate/options.rs::TranslateError` 与 `convert/shared.rs::DecompilerError`。
+- **底层失败一律折进 `MewError`**(`io::Error` / `serde_json::Error` 由 `From` 折进),域错误类型只留域内变体 + 一个 `Mew` 载体。2026-10-03 前 `ProcessorError`/`DataQueryError` 并列的 `Io`/`Json` 变体已删,两者的 `External` 也统一改名为 `Mew`;`FileError` 整型删除(`CodeMaoFile::write_bytes` 直接返回 `MewResult<()>`)。口径锚点:`translate/options.rs::TranslateError` 与 `convert/shared.rs::ConvertError`。
 - `ConvertError`(2026-10-03 前叫 `DecompilerError`,见 `errata.md`)现只有 `Mew(#[from] MewError)` 加域内变体(`Crypto`/`Decompile`/`InvalidResponse`/`MissingField`/`TypeMismatch`/`Other`)。原先记的两条**都不再成立**:"仍自带 `Io/Json/Http`、与 `MewError` 重复**待改**"已于 2026-10-01 核实消除(见 `../rounds/39` §1.3/§W12d);零调用的死变体 `UnsupportedType` **已于 `fef30e7`(2026-10-02)删除**(破...
 - 破坏性 API 变更**不留兼容别名**(已授权的前提下直接删)。
 - **第三方 crate 的类型不进公共契约**(2026-10-03):公共请求原语返回自有 `MewResponse`(内部持有 ureq 的响应),传输失败装自有 `TransportError`(只给文本与 `is_timeout()`),不再出现 `ureq::Error` / `Response<Body>` / `Agent` / `Form`;域内专用的 `agent()` / `send_multipart()` 收 `pub(crate)`。判据:下游**不声明 ureq** 也能走完整链路(验收手法见 `../rounds/44`)。
@@ -75,7 +75,7 @@
 - **域内文件组织(以 `../rounds/31-convert-layout-consolidation-plan.md` §2「目标结构」的模块图 + §2.3「组织规则」为准;该文没有 §2.1)**:一个文件一个职责;
   生成物单独一处(`translate/tables_gen.rs`,**不可与手写表混放**);测试默认内联在被测文件末尾,
   「本体 + 测试 > 3 000 行」时才独立成 `*_tests.rs`;**单文件上限 ≈ 2 500 行**。
-  当前布局:`mod.rs` + `shared.rs` + `upload.rs` + `decompile/{mod,editors,config,shadow,work}.rs` + `translate/{mod,model,mapping,assembly,pipeline,options,report,xml,nemo,nemo_mapping,source,tables_gen,kitten4_vocab,reverse_tests,nemo_tests}.rs`(**23 文件**;W2 后新增 4 个:`upload.rs` 是**域级工具层**(与门面同级,`shared.rs` 零反向依赖),`decompile/{config,shadow,work}.rs` 是反编译**私有件**;`translate/source.rs` 是源侧骨架解析(rules/47 Step 5、rounds/50 参数化)。权威清单见 `../rounds/39` §W2 落地段;其 §1.1 的表是 W2 之前的快照)。
+  当前布局:`mod.rs` + `shared.rs` + `upload.rs` + `decompile/{mod,editors,config,shadow,work}.rs` + `translate/{mod,model,mapping,assembly,pipeline,options,report,xml,nemo,nemo_mapping,source,tables_gen,kitten4_vocab,reverse_tests,nemo_tests}.rs`(**23 文件**;W2 后新增 4 个:`upload.rs` 是**域级工具层**(与门面同级,`shared.rs` 零反向依赖),`decompile/{config,shadow,work}.rs` 是反编译**私有件**;`translate/source.rs` 是源侧骨架解析(rounds/47 Step 5、rounds/50 参数化)。权威清单见 `../rounds/39` §W2 落地段;其 §1.1 的表是 W2 之前的快照)。
 - 分层纪律:`translate` 子域**不碰网络**;需要网络(上传/建作品)的编排放 `core/convert/mod.rs` 门面
   (反编译侧的可选「上传到账号」同理,见 `../rounds/30`)。
 - 文档:记录放 `docs/`;**历史轮次不改写**(保真),勘误集中到本库 `errata.md`。
@@ -93,7 +93,7 @@
 | **CI 跑什么** | `.github/workflows/CI.yml` 三个 job:`build`(**五目标** `cargo build --release` 矩阵,含 aarch64 交叉链接)、`hygiene`(`cargo test --test repo_hygiene`,与本地 pre-commit 同一份)、**`offline-gate`**(`cargo fmt --check` + `cargo clippy --all-targets -- -D warnings` + **逐目标点名**的离线测试:`--lib` / `--test repo_hygiene` / `--test convert_bench`) |
 | **CI 刻意不管什么**(是遗漏的反面,别当缺口补) | 1)  **真机门**(`compile_live`/`convert_live`/`live_features`):无 `data/test-config.json` 时它们 `load_config()` -> None 后**直接 return(静默 pass)**,当门等于没验;CI 也**不设** `BACKEND_REQUIRE_LIVE`(设了就依赖凭据/网络)=> 真机验证只在本机做。2)  **语料扫描器与 `convert_bench` 的性能样本**:吃 gitignored 的 `download/`,干净检出上走 `missing_fixture` **打印一行并跳过**(**预期跳过**,不是没跑)。3)  **artifact 上传**:本仓 `[lib] crate-type=["rlib"]`(只产 rlib)、`src/main.rs` 是需账号的交互式控制台、仓内无消费方 => **没有可分发产物**,旧上传步已删(`f68c2e6`,详见 `errata.md` 末节与 `../goals/infra-backlog.md` §1) |
 | **死代码 / 未用项** | `[lints.rust] unused = "warn"` **活着**(`8da596d`,rounds/40 R2 三阶段放开):`clippy --all-targets -- -D warnings` 下**任何**未用项(未用 import / 变量 / `mut` / 赋值 / `must_use`、`dead_code`)都会把门**打红**。新增死代码只有三条出路:**1)  接线**(真用起来)/ **2)  标 `#[cfg(test)]`**(仅测试用)/ **3)  `#[allow(dead_code)]` + 一句理由**(如"由生成器消费"),**不留无理由的 `allow`**。口径与 `Cargo.toml` 里 `[lints.rust]` 的注释一致;**放开过程的读数、两条实测坑与逐条处置见 `../goals/infra-backlog.md` §1.1** |
-| 必备前置 | 大改先出方案文档 -> 子代理评审 -> 再动 Rust 代码 |
+| 必备前置 | 大改先出方案文档,经子代理评审之后再动 Rust 代码 |
 
 配置与代码分离:真机配置从 `tests/fixtures/test-config.example.json` 复制到 `data/test-config.json`(`data/` 已 gitignore);`temp/` 放临时产物并及时清理。
 
@@ -102,7 +102,7 @@
 - 提交信息用中文、`type: 摘要` 形式(如 `perf(convert): …`、`docs: …`);一个提交一件事,搬迁与行为改动**不混在一个提交**。
 - 交付前自检:`cargo fmt`、`cargo clippy`(零新增告警)、`cargo test`;`.githooks/pre-commit` 会在可用时执行这些。CI 侧由 `offline-gate` 跑同一套**离线**门(`fmt --check` + `clippy --all-targets -D warnings` + 逐目标点名的离线测试,见 §6)——真机门与吃语料的基准**不在 CI 里**。
 
-## 文档规范
+## 8. 文档规范
 
 - **权威**:仓库级文档规范以根目录 `AGENTS.md` 为准(加载协议、体例 9 条红线、收尾 SOP、输出禁忌、正文语体、三库定位)。`../README.md` 的"文档体例"节只登记两库分工与例外,不重复条文。
 - **载体**:`README.md` 首行注释声明进入任务前须读取该契约,因此后续会话无需人工重复提示。
