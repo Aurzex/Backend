@@ -355,6 +355,16 @@ W10 落地(`66c0b6b`)后,**"内联对象形态影子 => 拒收该作品"这条�
   - **正确**:根块坐标**非语义**(`location` 就在语义 diff 的 allow-list 里),两处唯一的硬要求是"根块互不重叠"=> **不做共享常量、也不改数值**;只把 `model.rs` 那句自称"一致"的注释改准(`4072846`)。**平台取数与 A/B 实测的具体数字只在 `../goals/convert-backlog.md` §2 第 8 条展开。**
   - 出处:docs/rounds/31-convert-layout-consolidation-plan.md §3.6 N4(注意: 它点名的 `model.rs:706-708`、`editors.rs:625-626` 已随文件增长**行号漂移**,请按符号定位:`ROOT_LAYOUT_Y`/`ROOT_LAYOUT_STEP` 及其文档注释、`XmlBlockWriter::write_blocks`)。
 
+## 第四十九轮实施期间的符号漂移(2026-10-06)
+
+NEMO 产物侧流式写出(`../rounds/49-nemo-product-streaming.md`)把块表写出按口径参数化,**两个标识符因此改名/并入**,读 `47` 轮(及更早)时按本节换算:
+
+| 出处 | 已过时的表述 | 正确值 / 证据 |
+| --- | --- | --- |
+| rounds/47 §3.2 表、§4 Step 2/3 | 正向块表物化器写作 `model::tree_to_json`(恒补 `shield`) | 该函数已**并入 `model::tree_to_value(tree, ShieldPolicy)`**:`ShieldPolicy::Always` = 旧 `tree_to_json`(恒写 `shield`);`ShieldPolicy::OnlyWhenTrue` = NEMO 旧口径(`nemo::tree_to_json`,假值不写键)。`write_block_tree` 同时多了一个 `shield` 参数 |
+| rounds/47 §4 Step 2/3、§3.2 | 产物挂点类型写作 `BlockHook` | 已改名 **`assembly::BlockPlacement`** 并放开为 `pub(super)`(NEMO 装配侧同样登记它);`ProductDocument` 另加 `shield: model::ShieldPolicy` 字段 |
+| rounds/47 §4 Step 4(表)、`../goals/convert-backlog.md` §1(旧行) | "NEMO 要做就得写**第三套**写出器"(块表形态不同) | **前提不成立**:NEMO 的 KN 产物与正向同形(三处挂点/键名一致),差别只有 `shield` 口径 ⇒ 复用同一份 `assembly::ProductDocument`。落地与读数见 `../rounds/49` |
+
 ## 非轮次条目(仓库配置 · 文档读数与体例)
 
 > 本节收的是**不是某篇轮次正文写错**、而是**仓库配置 / 文档读数 / 文档体例与现实不符**的条目。
