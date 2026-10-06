@@ -86,10 +86,10 @@
 
 ## 第 45 轮(2026-10-03,机械批与核验收口)
 
-> **逐条改动、核销结论与性能读数只在 `../rounds/45-mechanical-batch-and-verification-closeout.md` 展开**。一行状态:
+> **逐条改动、核验结论与性能读数只在 `../rounds/45-mechanical-batch-and-verification-closeout.md` 展开**。一行状态:
 > **小改批量** 已落地(认证头预计算、flush 按需唤醒、`AccountStatus` 并入 `Identity`、两个私有 trait 改自由函数、`registry` 工具归位、`simple.rs` 免拷、回调 panic 契约入 rustdoc、词表重导流程);
 > **两项判掉**:`PaginatedIter::build_params` 不立项(收益<改动面)、`decompile_work` 拆分不立项(前提不存在);**一项不可行**:`get_sha` 返回借用;
-> **核销三项陈旧挂账**(`infra-backlog.md` §3 三条)+ `rounds/21` §8.6 遗留逐条过完(仅 L1/L4 仍开放,已登记);
+> **核实了三项陈旧挂账**(`infra-backlog.md` §3 三条)+ `rounds/21` §8.6 遗留逐条过完(仅 L1/L4 仍开放,已登记);
 > **性能 §7** 五条全部处置(反向查表索引已一致化,读数在噪声内、产物 SHA 零变化;其余三条判掉)。
 > **仍属大件、未动**:分片上传、NEMO 完整搬家的资源重传、夹具与输出目录分离。
 

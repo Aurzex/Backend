@@ -39,12 +39,13 @@
 Kitten 与 KN 之间的转换方案与落地(20–21)、NEMO 路线(22–24)、性能(25–26)、NEMO 转 KN(27)。
 **路径/类型名多数已漂移**,以 `../knowledge/` 与 `../knowledge/errata.md` 为准。
 
-## 轮次 47–51(2026-10-05 ~ 10-06)
+## 轮次 47–52(2026-10-05 ~ 10-06)
 
 > 优化读数**不在此展开**:唯一权威落点是 `../knowledge/convert-performance.md`(§2bis.7–§2bis.16);过程、验收与评审见各轮次正文。
 
 | 轮次 | 一句话 | 状态 |
 | --- | --- | --- |
+| [52](52-docs-survey-and-reverify.md) | **三库复核与修整**:按 `docs-tidy` 顺序做只读测绘 → 修 live 文档漂移(计数/状态/失效指针/重复展开/表格断行/体例)→ 换新会话两轮独立复验 → 修复验项;历史轮次正文不改写,其缺陷登记进 errata | 已完成(2026-10-06,`e279eee` / `133a29c` / `e404c67`) |
 | [51](51-entity-concurrency-auto.md) | **实体级并发"默认自动"**:`EntityConcurrency::{Auto, Fixed}`,"够大"按工作项权重之和判(阈值由一次性探针夹逼);批量折算对"自动"只压低核数预算 | 已落地(`0ead279`;阈值与读数见 `../knowledge/convert-performance.md` §2bis.16) |
 | [50](50-kn-source-skeleton.md) | **反向(KN → Kitten4)源侧骨架**:`source.rs` 按"文档形状"参数化(Kitten4 / KittenN 共用一套三层 `Visitor`),三处 `nekoBlockJsonList` 留原文直喂强类型反序列化;定义体解析拆出"树来源由调用方给"的入口 | 已落地(`845b2c2`;读数见 §2bis.14) |
 | [49](49-nemo-product-streaming.md) | **NEMO 产物侧流式写出**:NEMO → KN 的文件入口复用正向那套 `assembly::ProductDocument`(按"块表 `shield` 补键口径"参数化),三处 `nekoBlockJsonList` 不再建整份 `Value`;数字归一改成"非块表部分照旧 + 块表在 typed 树上就地归一" | 已落地(`9cf1616`;读数见 §2bis.13) |
