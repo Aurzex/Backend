@@ -154,6 +154,11 @@
     验证:改后连跑基准 + `cargo test --lib`,临时目录零残留(`ls -d /tmp/backend-convert-*`)。
     例外:`tests/convert_live.rs` 的 `backend-convert-live-*`(固定名、真机测试的调试工作区)不清理,保持原样。
 
+15. **待方案**:convert 域两处体量/拆分项的重新评估 ——
+    - `translate/nemo.rs::assemble_nemo`(**657 行**,域内最长的单个函数):其前任 `convert_nemo_document`(`../rounds/39` 记 ≈510 行)的"暂不做"理由与其推迟条件都已消失(函数在第 49 轮被拆成装配 + 收尾 + 两条薄包装;NEMO 现已有 SHA/`#meta` 字节门与分配计数门,第 49 轮另补三条守门),因此**"拆是否还难回归"要重新判**;按 C2 先例,只做文件头体量记账也是候选;
+    - `translate/model.rs`(**本体 3107 行**,超 `repo-conventions` §5 的 ≈2500 行软上限,且无文件头记账):第 47–51 轮后增长约 900 行,需在"拆"与"记账"之间择一。
+    - 出处:`../knowledge/errata.md`「转换域体量与拆分记录的两处漂移(2026-10-07)」、`../rounds/39` §1.1/§4、`../rounds/49` §3;读数由 2026-10-07 实测(`wc -l` + 花括号配平量最长函数)。
+
 ## 3. 已在案、判不做的(不再重开)
 
 - `RawValue` 顶层只透传、单遍遍历合并(`../rounds/26` §6;判据与读数见 `../knowledge/convert-semantics.md` §7):**判不做**。
