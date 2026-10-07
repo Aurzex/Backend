@@ -399,7 +399,7 @@ NEMO 产物侧流式写出(`../rounds/49-nemo-product-streaming.md`)把块表写
 | 出处 | 已过时的表述 | 正确值 / 证据 |
 | --- | --- | --- |
 | rounds/39 §4「明确不做」表的"拆 `convert_nemo_document`(≈510 行)"行 | "**暂不做**:NEMO 现无字节门,拆无门的行为更难回归。顺序应是 W6 → W7 后再评估" | 该项的两个前提都已消失:① 该函数在 rounds/49 的装配层改造里已被拆成装配(`assemble_nemo`)+ 收尾(`finish_document`)+ 两条薄包装,现 `convert_nemo_document` / `convert_nemo_document_product` 各 **12 行**;② "无门"已不成立 —— NEMO 有 SHA 与 `#meta` 字节门(第 47–49 轮)与分配计数门(W7),`rounds/49` §6 另补三条守门。**待重新评估的对象应换成 `nemo::assemble_nemo`(657 行,convert 域当前最长的单个函数)**;已在 `../goals/convert-backlog.md` §2 第 15 条重新登记 |
-| rounds/39 §1.1 的文件体量底账 | `translate/model.rs` 记 **2221 行** | 现为 **3154 行**(本体 3107 + 内联测试 47)—— 第 47–51 轮的数据表示层改造(骨架解析、`ShieldPolicy`、typed 写出)后增长约 900 行;本体已超 `repo-conventions` §5 的 ≈2500 行软上限,而该文件**没有**像 `nemo_mapping.rs` 那样在文件头做体量记账(记账是本仓"不拆"的既定替代动作,先例见 rounds/39 §5-C2) |
+| rounds/39 §1.1 的文件体量底账 与 §0.3 的 W12b | `translate/model.rs` 记 **2221 行**;W12b「`model.rs` 测试归位文件末尾」记 **已完成**(`e8e19d6`) | 现 **总 3154 行**(本体 ≈2285 + 内联测试 869,共 7 个测试模块):① 本体**未超** `repo-conventions` §5 的 ≈2500 行软上限;② 但**总行数 >3000 而测试仍内联** —— 按 §5 的口径此时应外移为 `translate/model_tests.rs`;③ 其中 `mod streamed_writer_tests` 夹在代码中间(`write_encoded_blocks` 与 `fill_shield` 之间),与"测试模块一律放文件末尾"不符,且正是 W12b 的**回退**(2026-10-07 实测) |
 
 ## 非轮次条目(仓库配置 · 文档读数与体例)
 
