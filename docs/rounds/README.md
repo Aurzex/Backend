@@ -25,7 +25,7 @@
 
 | 轮次 | 一句话 | 状态 |
 | --- | --- | --- |
-| [41](41-agent-contract-and-doc-reformat.md) | 根目录 `AGENTS.md` 固化项目级契约,并据此对全部 Markdown 执行格式、状态与语体清洗 | 已落地(剩两条待决口径见该文 §8,登记在 `../goals/README.md`) |
+| [41](41-agent-contract-and-doc-reformat.md) | 根目录 `AGENTS.md` 固化项目级契约,并据此对全部 Markdown 执行格式、状态与语体清洗 | 已完成(该文 §8 记录的**映射记法待决口径**已于 2026-10-03 定案,见 `46` §4;2026-10-06 在 `../README.md` 的「文档体例」补等价与"同表不混用") |
 | [42](42-dependency-refresh.md) | 依赖按 crates.io 最高稳定版刷新(直接依赖与 `Cargo.lock` 全量重解),离线门与真机测试全过 | 已落地 |
 | [43](43-a-group-real-machine-and-narrowing.md) | A 组落地:**两处协议假设真机消掉**、**分段超时**(原"body 无读超时"诊断被推翻)、UI 输入错误传播、两处存而不用字段删除 | 已落地(`d24b781`;结论见 `../knowledge/platform-and-protocol.md` §5,过程见该文 §2–§6) |
 | [44](44-third-party-type-containment.md) | **公共面收窄**:`ureq` 类型移出公共契约(自有 `MewResponse` / `TransportError`),三处错误类型收敛为"底层失败一律经 `MewError`"(删 `FileError`) | 已落地(`5e602dd`) |
