@@ -620,14 +620,12 @@ impl ReportFetcher {
             .collect();
         let total_types = sources.len();
         let mut type_index = 0;
-        let mut pending_items: Vec<Value> = Vec::new();
         // 当前类型的生成器在闭包调用间保持,避免每个 chunk 都从头重建
         // (原实现每次重建会重复产出已有数据,类型数据超过 chunk_size 时陷入死循环)
         let mut active: Option<ActiveSource> = None;
 
         Box::new(std::iter::from_fn(move || {
             let mut chunk = Vec::new();
-            std::mem::swap(&mut chunk, &mut pending_items);
 
             loop {
                 // 惰性进入下一类型,为每个类型创建一次生成器
@@ -702,8 +700,6 @@ impl ReportFetcher {
 
                     chunk.push(item);
                     if chunk.len() >= chunk_size {
-                        let remaining = chunk.split_off(chunk_size);
-                        pending_items = remaining;
                         return Some(chunk);
                     }
                 }
