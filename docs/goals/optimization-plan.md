@@ -19,7 +19,7 @@
 | P2-3 | `cloudvar` 断线 flush 抖动与关闭阻塞 | 已完成(2026-11-06,`105b7f0`) | 断线积压时不按固定短周期全量搬移队列;`close()` 不被重连退避长时间阻塞 | `../rounds/54-code-audit-and-optimization-batch.md` §3.3 |
 | P2-4 | 库内嵌路径与客户端注入 | 待方案 | `PathConfig` 根与门面客户端可显式配置;staging 跟随输出目录;API 形态先定方案 | `../rounds/54-code-audit-and-optimization-batch.md` §3.4 |
 | P2-5 | `translate_file` 网络选项与源引用失败报告 | 已完成(2026-11-06,`53c0ef8`) | 网络型选项的生效范围在文档或参数校验中明确;源引用上传失败进入报告或结果字段 | `../rounds/54-code-audit-and-optimization-batch.md` §3.5 |
-| P3-1 | 文档读数与承诺漂移 | 待做 | 举报上限口径、pre-commit 范围、分页选项与知识库中的过时结论同步修正 | `../rounds/54-code-audit-and-optimization-batch.md` §4 |
+| P3-1 | 文档读数与承诺漂移 | 已完成(2026-11-06,`72bd47b`) | 举报上限口径、pre-commit 范围、分页选项与知识库中的过时结论同步修正 | `../rounds/54-code-audit-and-optimization-batch.md` §4 |
 | P3-2 | `ide/load` 编辑格式快速通道 | 待核验 | 证明版本选择、权限回退与同版语义等价后,再决定是否作为可选入口 | `../rounds/54-code-audit-and-optimization-batch.md` §5.1 |
 | P3-3 | 两个独立作品源串行请求 | 已完成(2026-11-06,`0aee1e6`) | 两个互不依赖的请求并行发起,错误与结果顺序语义不变 | `../rounds/54-code-audit-and-optimization-batch.md` §5.2 |
 | P3-4 | 目录上传逐文件串行 | 已完成(2026-11-06,`5e4be02`) | 目录上传使用有界并发,失败清单与返回值语义不变 | `../rounds/54-code-audit-and-optimization-batch.md` §5.3 |

@@ -122,7 +122,7 @@
 | 11 | `0aee1e6` | NEMO/Web 两个作品源并发获取 | 编译与 clippy |
 | 12 | `6e665f8` | 删除举报分页恒空的 `pending_items` 分支 | `core::registry::tests` |
 | 13 | `5e4be02` | 目录上传改为固定批次并发 | 编译与 clippy |
-| 14 | 本文档提交 | 目标/知识库/轮次索引同步;`cargo test --lib` 全量 158 passed、1 ignored | 成功 |
+| 14 | `72bd47b` | 目标/知识库/轮次索引同步;`cargo test --lib` 全量 158 passed、1 ignored | 成功 |
 
 ## 依据
 
