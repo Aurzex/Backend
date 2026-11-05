@@ -79,37 +79,50 @@
 
 ## 4. 文档与测试缺口
 
-- `../goals/pending-decisions.md` B6 的“现默认移除上限”与 §2.1 实现不符。
-- `../rounds/04-review-round2.md` 的“`None` 即全量迭代”结论未真正生效。
-- `../knowledge/nemo-runtime-and-upload.md` §6 仍保留已被 `../knowledge/errata.md` 推翻的“body 无读超时、未修”表述。
-- `../knowledge/repo-conventions.md` §7 称 pre-commit 会执行 fmt/clippy/test,实际钩子只执行 `repo_hygiene`。
-- `TranslateOptions::output_dir` 的文档写“编译目录”,实际默认产物落在 `convert` 目录。
-- 全量库单测可通过,但上述路径缺少针对性回归:举报生成器上限、粉丝/回复默认 limit、回调句柄移除、首屏分页错误、并行线程数上界。
+- `../goals/pending-decisions.md` B6 的“现默认移除上限”与 §2.1 实现不符;已按 `0324b4c` 改为“现行已全量”,并把 `work.rs` 行数同步为 2026-11-06 的读数。
+- `../rounds/04-review-round2.md` 的“`None` 即全量迭代”结论在 `0324b4c` 前未真正生效;历史正文不改写,勘误见 `../knowledge/errata.md`。
+- `../knowledge/nemo-runtime-and-upload.md` §6 的“body 无读超时、未修”已被 `../knowledge/errata.md` 推翻;2026-11-06 已改为三段预算的正确表述。
+- `../knowledge/repo-conventions.md` §7 称 pre-commit 会执行 fmt/clippy/test;2026-11-06 已改为“只执行 `repo_hygiene`,完整离线门在 CI”。
+- `TranslateOptions::output_dir` 的文档写“编译目录”,实际默认产物落在 `convert` 目录;2026-11-06 已改。
+- 全量库单测可通过,但上述路径缺少针对性回归;第一批已补举报生成器上限、回调句柄、首屏分页重试、product/内存逐字节等价四类测试。
 
-## 5. 后续候选(本轮不执行)
+## 5. 后续候选
 
-### 5.1 `ide/load` 编辑格式快速通道
+### 5.1 `ide/load` 编辑格式快速通道(待核验)
 
 - 匿名请求实测 401;文档称按权限返回 `source_urls`;多版本排序无接口契约,本地 20 份 k4edit 只有“下标 0 较新”的线索。
 - 进入条件:证明当前版选择、权限/空列表/404 回退、同版语义等价与块数/程序集比对,并重建 `convert_bench` 基线。
 
-### 5.2 两个独立作品源串行请求
+### 5.2 两个独立作品源串行请求(已完成(2026-11-06,`0aee1e6`))
 
-- `stream_works_from_both_sources` 先后请求 NEMO 与 Web 两个来源,互不依赖;可并行以省一次 RTT。属低成本优化,排期靠后。
+- `stream_works_from_both_sources` 的两个来源已在同一 `thread::scope` 内并发获取,结果顺序仍为 NEMO→Web。
 
-### 5.3 目录上传逐文件串行
+### 5.3 目录上传逐文件串行(已完成(2026-11-06,`5e4be02`))
 
-- `FileProcessor::handle_directory_upload` 递归逐文件串行上传;当前无内部调用点,未来 NEMO 资源重传会依赖,届时改有界并发。
+- `FileProcessor::handle_directory_upload` 已改为固定批次并发;失败清单与返回值语义不变。
 
-### 5.4 举报分页死分支
+### 5.4 举报分页死分支(已完成(2026-11-06,`6e665f8`))
 
-- `fetch_chunked` 的 `pending_items` 在 `chunk.len() >= chunk_size` 时由 `split_off` 赋回,但此时必然为空;属可删除的死逻辑。
+- `fetch_chunked` 的恒空 `pending_items` 分支已删除;分块行为由既有测试固定。
 
-## 6. 实施记录
+## 6. 实施记录(2026-11-06,第一批)
 
 | 序 | 提交 | 内容 | 验证 |
 | --- | --- | --- | --- |
-| 待填 | 待填 | 待填 | 待填 |
+| 1 | `0324b4c` | 四类举报生成器显式传 `FETCH_ALL`;新增生成器上限回归测试 | `core::registry::tests` 2 passed;`cargo test --lib` |
+| 2 | `4fa07ad` | 粉丝统计与论坛回复显式取全量 | 编译与离线测试;注释记录 `None` 语义 |
+| 3 | `9cd837f` | 评论聚合与粉丝统计改为固定批次并发 | `clippy --all-targets -D warnings`;`cargo test --lib` |
+| 4 | `a5c44e3` | 回调句柄进程级唯一;分发改快照;补 `remove_ranking_callback` | `utils::socketio::tests` 2 passed;`cargo test --lib` |
+| 5 | `77a2869` | 分页首屏错误保留 `Uninit` 供重试 | 本地 HTTP 桩测试 `first_page_error_is_retryable` |
+| 6 | `fd45861` | 删除无实现的 `response_offset_key` 公共入口 | 编译与离线测试;破坏性公共面变更 |
+| 7 | `2d83e33` | NEMO 内存编辑版在 Arc 唯一时移出,免深拷贝 | `nemo_decompiler_offers_in_memory_editable_document` 断言文档已移出 |
+| 8 | `53c0ef8` | 源引用失败写入 `TranslateReport`;网络选项生效范围写入 rustdoc | `translate::report::tests` |
+| 9 | `48890df` | 门面改用 `translate_value_product`;补 product/内存逐字节等价测试 | `product_value_equivalence_tests` 三条方向通过 |
+| 10 | `105b7f0` | 重连退避可被 `close` 打断;未就绪时不再按短周期搬移队列 | `clippy --all-targets -D warnings` |
+| 11 | `0aee1e6` | NEMO/Web 两个作品源并发获取 | 编译与 clippy |
+| 12 | `6e665f8` | 删除举报分页恒空的 `pending_items` 分支 | `core::registry::tests` |
+| 13 | `5e4be02` | 目录上传改为固定批次并发 | 编译与 clippy |
+| 14 | 本文档提交 | 目标/知识库/轮次索引同步;`cargo test --lib` 全量 158 passed、1 ignored | 成功 |
 
 ## 依据
 

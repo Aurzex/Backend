@@ -14,6 +14,8 @@
 | **等待** | 统一 `_and_wait` 后缀;**超时参数进 Builder**,`_and_wait` 本身不接收超时 |
 | **配置** | 复杂可选配置进 Builder 链式,**不单独定义 `Options` 结构体传自由函数** |
 
+> **`limit: Option<usize>` 的调用口径**:各端点迭代器的 `None` 表示“默认页大小”而不是“无上限”;需要全量时必须显式传 `Some(FETCH_ALL)`。2026-11-06 前的举报生成器与粉丝/回复调用方传 `None` 期待全量,实际只读到首屏,见 `../rounds/54-code-audit-and-optimization-batch.md` §2。
+
 > **已知例外(勘误)**:auth 域为 `LoginBuilder::execute(&mut self)` —— `LoginSession` 那套"build 后再 execute"的形态已被后续依赖注入重构推翻。见 `errata.md`。
 
 判定过"合规"的历史项(不再重新"整改"):`MewRequestBuilder::send*`(旧名 `KittyRequestBuilder`)属请求原语;`wait_for_*` 是等待原语;`CommentQueryBuilder::stream_*` 是惰性执行;`CheckConfig`/`ClientConfig`(旧名 `KittyConfig`)/`PaginationConfig` 是内部配置结构体;`done_chunks` 是历史查询收尾 API。
@@ -100,7 +102,7 @@
 ## 7. 提交习惯(本项目实际用法)
 
 - 提交信息用中文、`type: 摘要` 形式(如 `perf(convert): …`、`docs: …`);一个提交一件事,搬迁与行为改动**不混在一个提交**。
-- 交付前自检:`cargo fmt`、`cargo clippy`(零新增告警)、`cargo test`;`.githooks/pre-commit` 会在可用时执行这些。CI 侧由 `offline-gate` 跑同一套**离线**门(`fmt --check` + `clippy --all-targets -D warnings` + 逐目标点名的离线测试,见 §6)——真机门与吃语料的基准**不在 CI 里**。
+- 交付前自检:`cargo fmt`、`cargo clippy`(零新增告警)、`cargo test`。`.githooks/pre-commit` 只执行 `repo_hygiene` 凭据检查(不跑 fmt/clippy/test);完整离线门由 CI 的 `offline-gate` 执行(`fmt --check` + `clippy --all-targets -D warnings` + 逐目标点名的离线测试,见 §6)——真机门与吃语料的基准**不在 CI 里**。
 
 ## 8. 文档规范
 

@@ -58,10 +58,10 @@
   (`src/core/convert/shared.rs`)三个方法都带请求级超时并改走显式有界的大体通路;普通接口请求仍走全局 30 s。
 - 另修一层**更严格的**下载限制:`ureq::Body::read_to_vec`/`read_to_string` 默认**上限为 10 MB**,大作品会在
   **超时之前**先 `BodyExceedsLimit` 失败。
-- 注意:实测细节,`ureq` 的 `timeout_global` 只覆盖到**响应头**,不覆盖 body 流式读取,故上述改动解决的是
-  "**首字节/响应头 > 30 s**"与"**单个响应体 > 10 MB**"两类失败;真正慢的 body 传输属**另一类"无 body 读超时"问题**(未修)。
-  因此**常量值(`DOWNLOAD_TIMEOUT` / `MAX_DOWNLOAD_BODY_BYTES`)、逐路径枚举与一次性证明只在
-  `../rounds/40-gates-cleanup-and-real-defects.md` §7 展开**。
+- 注意:2026-10-03 复测已推翻“`timeout_global` 只覆盖响应头”的旧诊断:该预算覆盖到响应体读完;
+  ureq 3 没有“逐次读的空闲超时”,body 中途卡住只会吃掉总预算。三段预算的语义、读数与配置策略见
+  `platform-and-protocol.md` §5ter;常量值(`DOWNLOAD_TIMEOUT` / `MAX_DOWNLOAD_BODY_BYTES`)与逐路径枚举见
+  `../rounds/40-gates-cleanup-and-real-defects.md` §7。
 
 ## 依据
 

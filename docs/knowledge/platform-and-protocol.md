@@ -41,7 +41,8 @@
 
 - **Condvar 铁律**:标志写入与 `notify` 持同一把锁,标志检查与等待也持同一把锁。本库统一 `Notify::notify_with`(持锁设标志再 `notify_all`)与 `wait_flag`(持锁检查后 `wait_timeout`)。
 - **不要用布尔状态做等待条件**:会漏掉"已发生过又变回去"的事件(AI 快速回复使 `receiving` 已回 false)。要用**回合计数**(`completed_round >= target`)。
-- **回调必须在锁外执行**(std `Mutex` 不可重入,故回调里再调 get/set 会死锁;回调 panic 会污染锁)。标准做法:锁内 `mem::take` 取出,释放锁后于锁外执行,再重新加锁 `extend` 放回。
+- **回调必须在锁外执行**(std `Mutex` 不可重入,故回调里再调 get/set 会死锁;回调 panic 会污染锁)。现行做法:锁内取**快照**(回调以 `Arc<dyn Fn>` 保存),释放锁后于锁外执行;不要 `take` 后再 `extend` 放回 —— 回调执行期间调用 `remove_*` 会作用于空 store,放回时被移除的回调会复活。
+- **回调句柄跨 store 唯一**:句柄由进程级分配器发号;若各事件 store 各自从 0 编号,按句柄清理会误删其它 store 的同号回调。
 - **`release` profile 是 `panic="abort"`**,故 `catch_unwind` 无效,因此"回调不应 panic"是**契约**,必须写进 rustdoc。
 
 ## 5. 作品/资源端点族(已核实)

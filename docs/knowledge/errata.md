@@ -515,6 +515,15 @@ NEMO 产物侧流式写出(`../rounds/49-nemo-product-streaming.md`)把块表写
 | `simple.rs` | 1 | 不存在 |
 | `decompile/editors/kitten.rs` | 1 | 不存在 |
 
+## 2026-11-06 第一批整改的公共面与口径变更
+
+| 出处 | 已过时的表述 | 正确值 / 证据 |
+| --- | --- | --- |
+| `../rounds/04-review-round2.md` 3-3 | "registry.rs 4 处 `Some(100)` 改为 `None`,行为:每类型全量迭代" | **2026-11-06 前不成立**:`fetch_*_reports_iter` 的 `None` 被 `limit.unwrap_or(15)` 解释为默认页 15,生成器只产出首屏。`0324b4c` 起注册处显式传 `Some(FETCH_ALL)`;见 `../rounds/54` §2.1 |
+| `src/utils/requests.rs` 的 `PaginationConfig.response_offset_key` 与 `with_response_offset_key` | 公共入口保留但设置后无效果 | **已于 2026-11-06 删除**(`fd45861`):全仓无读取点,属静默 no-op;本库未 1.0,按"破坏性变更不留别名"直接删除 |
+| `../rounds/03-fix-plan-v2.md` "不删任何东西"清单 | `with_response_offset_key` / `response_offset_key` 保留 | 同上;该历史决定以 `fd45861` 的删除为准。其余清单项未动 |
+| `../knowledge/platform-and-protocol.md` §4 旧回调执行口径 | 锁内 `mem::take` 取出、锁外执行、再 `extend` 放回 | **2026-11-06 起改为锁内快照(回调存 `Arc<dyn Fn>`)、锁外执行**;`take`/放回会让回调执行期间移除的回调复活。句柄改为进程级唯一,避免跨 store 同号误删。见 `../rounds/54` §2.5 |
+
 ## 依据
 
 - 每条自带的「出处」行即该条的来源:轮次原文(`../rounds/**`,按历史保真不改写)、当时的源码/配置(`src/**`、`Cargo.toml`、`.github/workflows/CI.yml`)与提交历史(`git log`)。
