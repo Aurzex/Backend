@@ -14,6 +14,10 @@ use log::error;
 
 use serde_json::{Value, json};
 
+/// 举报流必须取全量。`fetch_*_reports_iter` 的 `None` 会被解释成默认页大小(15),
+/// 不是“无上限”;注册处若传 `None`,每类型只会产出首屏 15 条。
+const REPORT_FETCH_ALL: Option<usize> = Some(requests::FETCH_ALL);
+
 /// 举报引擎的错误。
 ///
 /// 口径与 `core::convert` 的 `TranslateError` 一致:**底层 `io` / `serde_json` 失败一律折进
@@ -407,7 +411,7 @@ impl ReportFetcher {
                                     status,
                                     None,
                                     None,
-                                    None,
+                                    REPORT_FETCH_ALL,
                                 ),
                         )
                     }
@@ -467,7 +471,7 @@ impl ReportFetcher {
                                 status,
                                 None,
                                 None,
-                                None,
+                                REPORT_FETCH_ALL,
                             ),
                         )
                     }
@@ -511,8 +515,13 @@ impl ReportFetcher {
                     let c = client.clone();
                     move |status| {
                         gen_from(
-                            WhaleReportFetcher::new_with_client(c.clone())
-                                .fetch_post_reports_iter(status, None, None, None, None),
+                            WhaleReportFetcher::new_with_client(c.clone()).fetch_post_reports_iter(
+                                status,
+                                None,
+                                None,
+                                None,
+                                REPORT_FETCH_ALL,
+                            ),
                         )
                     }
                 },
@@ -559,7 +568,13 @@ impl ReportFetcher {
                     move |status| {
                         gen_from(
                             WhaleReportFetcher::new_with_client(c.clone())
-                                .fetch_discussion_reports_iter(status, None, None, None, None),
+                                .fetch_discussion_reports_iter(
+                                    status,
+                                    None,
+                                    None,
+                                    None,
+                                    REPORT_FETCH_ALL,
+                                ),
                         )
                     }
                 },
@@ -743,6 +758,27 @@ impl ReportFetcher {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// 回归测试:四类举报生成器必须显式取全量,不能被默认页大小(15)截断。
+    ///
+    /// `PaginatedIter` 的 `limit` 在 `Uninit` 状态进入 `size_hint().1`;`gen_from` 是
+    /// `Map<PaginatedIter, _>`,会把它原样透传。构造生成器不发网络请求。
+    #[test]
+    fn report_generators_are_not_capped_to_first_page() {
+        let fetcher = ReportFetcher::new();
+        for report_type in fetcher.registry.get_all_types() {
+            let config = fetcher
+                .registry
+                .get_config(&report_type)
+                .expect("注册表刚返回的类型必须有配置");
+            let generator = (config.fetch_generator)(ReportStatus::ToBeDone);
+            assert_eq!(
+                generator.size_hint().1,
+                Some(usize::MAX),
+                "{report_type} 的生成器上限不是全量;上限被默认页大小截断"
+            );
+        }
+    }
 
     /// 回归测试:单类型数据量超过 chunk_size 时,`fetch_chunked` 必须终止且不重复
     /// (旧实现每次闭包调用都重建生成器,超过 chunk_size 后无限重复产出)
