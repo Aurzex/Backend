@@ -294,9 +294,9 @@ impl CodemaoDecompiler {
         work_id: WorkId,
         options: DecompileOptions,
     ) -> Result<DecompiledArtifact> {
-        let (decompiler, raw, context) = self.prepare_decompile(work_id, &options)?;
+        let (decompiler, mut raw, context) = self.prepare_decompile(work_id, &options)?;
         // 内存形态优先(NEMO):只要文档,不落盘、不下资源
-        if let Some(editable) = decompiler.editable_document(&raw, &context)? {
+        if let Some(editable) = decompiler.editable_document(&mut raw, &context)? {
             // NEMO 在配置里**没有**扩展名(它的产物是资源目录),但编辑版文档本体就是
             // `<work_id>.bcm`(见 `NemoResourceManager::save_core_files`);产出文件名沿用同一口径.
             let extension = match context.work_info.work_type {
@@ -804,12 +804,15 @@ pub(crate) trait WorkDecompiler: Send + Sync {
 
     /// 内存形态的编辑版(**默认没有**):给"只要文档、不要资源目录"的调用方(如 `translate`)用。
     ///
+    /// 收 `&mut RawWorkData`:实现方可在 Arc 唯一时直接移出文档,免整份深拷贝;
+    /// 返回 `Some` 后调用方不再使用 `raw`,返回 `None` 时 `raw` 必须保持可用。
+    ///
     /// NEMO 的产物本来是"资源目录"(`.bcm` + `.userimg` + `.meta` + 下载的素材),
     /// 但互相转化只需要那份明文编辑版 JSON —— 这条入口让 `translate_work` 全程内存直通
     /// (方案 23 P0-2 的同一思路),顺带省掉一次资源下载。
     fn editable_document(
         &self,
-        _raw: &RawWorkData,
+        _raw: &mut RawWorkData,
         _context: &DecompilerContext,
     ) -> Result<Option<EditableDocument>> {
         Ok(None)

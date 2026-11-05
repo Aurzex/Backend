@@ -921,14 +921,22 @@ impl WorkDecompiler for NemoDecompiler {
     /// 源版本的唯一来源是作品元信息(`source_info.bcm_version`),编辑版文档里只有 `app_version`。
     fn editable_document(
         &self,
-        raw: &RawWorkData,
+        raw: &mut RawWorkData,
         _context: &DecompilerContext,
     ) -> Result<Option<EditableDocument>> {
         match raw {
-            RawWorkData::Nemo(bcm, source_info) => Ok(Some(EditableDocument {
-                document: (**bcm).clone(),
-                source_version: source_info.get_str_or("bcm_version", "").to_string(),
-            })),
+            RawWorkData::Nemo(bcm, source_info) => {
+                // 调用方持有 `raw` 所有权,`bcm` 通常唯一:直接移出文档,免一次整份深拷贝;
+                // 仅在仍有其它 Arc 持有时回退到克隆。
+                let document = match Arc::get_mut(bcm) {
+                    Some(value) => std::mem::take(value),
+                    None => (**bcm).clone(),
+                };
+                Ok(Some(EditableDocument {
+                    document,
+                    source_version: source_info.get_str_or("bcm_version", "").to_string(),
+                }))
+            }
             _ => Err(ConvertError::Decompile(
                 "NemoDecompiler 需要 Nemo 数据".into(),
             )),

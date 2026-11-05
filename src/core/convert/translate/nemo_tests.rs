@@ -830,20 +830,29 @@ fn nemo_decompiler_offers_in_memory_editable_document() {
         config,
     };
     let document = json!({ "actors": { "actors_dict": {} }, "app_version": "2.3.0" });
-    let raw = RawWorkData::Nemo(
+    let mut raw = RawWorkData::Nemo(
         Arc::new(document.clone()),
         Arc::new(json!({ "bcm_version": "0.11.0", "name": "测试作品" })),
     );
     let editable = NemoDecompiler
-        .editable_document(&raw, &context)
+        .editable_document(&mut raw, &context)
         .expect("内存入口")
         .expect("NEMO 一定给内存编辑版");
     assert_eq!(editable.document, document);
     assert_eq!(editable.source_version, "0.11.0");
+    // Arc 唯一时文档被移出,raw 里只剩空值;这条钉住“不再整份 clone”的走线。
+    let RawWorkData::Nemo(bcm, _) = &raw else {
+        panic!("raw 应仍是 NEMO 数据");
+    };
+    assert!(bcm.as_ref().is_null(), "唯一 Arc 时不应保留副本");
 
     // 非 NEMO 数据:明确报错(而不是给一份空文档)
-    let wrong = RawWorkData::Wood(Arc::new(json!({})));
-    assert!(NemoDecompiler.editable_document(&wrong, &context).is_err());
+    let mut wrong = RawWorkData::Wood(Arc::new(json!({})));
+    assert!(
+        NemoDecompiler
+            .editable_document(&mut wrong, &context)
+            .is_err()
+    );
 }
 
 // ===========================================================================
