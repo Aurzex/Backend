@@ -30,7 +30,8 @@
 ## 3. 依赖注入与全局状态(第 14–17 轮的结论)
 
 - 业务面**统一注入**:`src/api/**` 的 Manager、反编译器、`core` 举报引擎的 `DataQuery`/`CommentQueryBuilder`/`ReportFetcher`/`ViolationChecker`/`ReportProcessor`/`FileProcessor` 都通过 `new_with_client(client)` 注入;`client: &'static CodeMaoClient` 字段已**全仓归零**。
-- **有意保留的全局**:`CodemaoDecompiler::global()` 门面;多账号身份槽(`switch_identity`)、`ActionRegistry`(`LazyLock`)、报告展示注册表 —— 因为"多账号即切全局身份槽",**不能部分注入**。
+- **有意保留的全局**:`CodemaoDecompiler::global()` 门面;多账号身份槽(`switch_identity`)、`ActionRegistry`(`LazyLock`)、报告展示注册表 —— 因为"多账号即切全局身份槽",**不能部分注入**。默认的 `translate_work`/`translate_works` 继续用全局客户端;独立客户端必须走 `translate_work_with_client`/`translate_works_with_client`。
+- **路径根**:`PathConfig::set_global(root)` 必须在任何 `PathConfig::global()` 使用之前调用;`translate_work` 的 staging 在显式 `TranslateOptions::output_dir` 下跟随该目录,否则回退全局 `convert/staging`。库内嵌到工作目录不可写的进程时,先设置全局根或给每次转化指定输出目录。
 - `KittyFactory` 门面已删除(全仓 grep 零命中),不要再引入同类门面。
 - **已完成(2026-09-26)**:`cloudvar.rs` 的 `detect_editor` 原用全局 `WorkDataFetcher::new()` —— 现改用
   `CloudBuilder::new_with_client(work_id, client)`,并由 `CloudConnection` 暴露 `client()`(`impl ClientAccess`),

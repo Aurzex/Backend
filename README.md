@@ -209,18 +209,27 @@ for group in session.leftover_groups() {
 ```rust
 use backend::api::auth::LoginBuilder;
 use backend::core::convert::decompile::CodemaoDecompiler;
+use backend::core::convert::{translate_work_with_client, translate::{TargetEditor, TranslateOptions}};
 use backend::utils::filedata::PathConfig;
 use backend::utils::requests::{ClientConfig, CodeMaoClient};
 
+PathConfig::set_global("…/workspace")?;                                // 先于任何全局路径使用
 let client = CodeMaoClient::new_independent(ClientConfig::default());  // 独立身份槽
 LoginBuilder::new_with_client(client.clone())
     .identity("13800138000")
     .password("student-pass")
     .execute()?;
-let decompiler = CodemaoDecompiler::new(client);                       // 反编译走同一客户端
+let decompiler = CodemaoDecompiler::new(client.clone());               // 反编译走同一客户端
 
-let paths = PathConfig::with_root("…/workspace");                      // 自定义路径根
-println!("{:?}", paths.compile_file_path());
+// 按作品 id 转化时同样注入独立客户端;staging 跟随 output_dir
+let out = translate_work_with_client(
+    client.clone(),
+    123456.into(),
+    TargetEditor::KittenN,
+    TranslateOptions::new().output_dir("…/workspace/out"),
+)?;
+println!("{}", out.output.display());
+let _ = decompiler;                                                    // 示例中未继续使用
 ```
 
 ## 设计要点

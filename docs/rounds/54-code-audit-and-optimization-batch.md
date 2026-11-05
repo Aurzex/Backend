@@ -77,6 +77,16 @@
 - `on_connection_lost` 在重连退避中 `thread::sleep`,而 `close()` 会 join 读线程,关闭可被退避阻塞。
 - 处置:未就绪时等待连接就绪通知并退避,队列设上限或合并;重连退避改为可被 `stopping` 打断的等待。
 
+### 3.4 库内嵌路径与客户端注入
+
+- `PathConfig::global()` 长期是无 setter 的 `OnceLock`;`PathConfig::with_root` 在生产代码零消费;`translate_work` 的 staging 硬编码全局转化目录,即使设置 `TranslateOptions::output_dir` 也只影响产物;`translate_work`/`translate_works` 只用全局反编译器和客户端。
+- 处置(2026-11-06,`68dfb10` / `a8a4925`):新增 `PathConfig::set_global`,必须在任何全局路径使用前调用;新增 `translate_work_with_client` / `translate_works_with_client`,把注入客户端贯穿反编译、源文件上传与建草稿;staging 在指定输出目录时跟随 `output_dir`。默认入口仍使用全局客户端与全局反编译器。
+
+### 3.5 `translate_file` 网络选项与源引用失败报告
+
+- `TranslateOptions::upload` / `keep_source` 同时挂在文件入口与门面上,但文件入口不碰网络,设置后静默无效;`keep_source` 的上传失败只写日志,未进入 `TranslateReport`。
+- 处置(2026-11-06,`53c0ef8`):两个开关的 rustdoc 明确“仅门面生效”;新增非损失类 `TranslateWarning::SourceReferenceFailed`,门面在上传或引用注入失败时写入报告,`strict` 不会因此失败。
+
 ## 4. 文档与测试缺口
 
 - `../goals/pending-decisions.md` B6 的“现默认移除上限”与 §2.1 实现不符;已按 `0324b4c` 改为“现行已全量”,并把 `work.rs` 行数同步为 2026-11-06 的读数。
@@ -123,6 +133,8 @@
 | 12 | `6e665f8` | 删除举报分页恒空的 `pending_items` 分支 | `core::registry::tests` |
 | 13 | `5e4be02` | 目录上传改为固定批次并发 | 编译与 clippy |
 | 14 | `72bd47b` | 目标/知识库/轮次索引同步;`cargo test --lib` 全量 158 passed、1 ignored | 成功 |
+| 15 | `68dfb10` | `PathConfig::set_global`;全局路径根可在启动期重定向 | `utils::filedata::tests` |
+| 16 | `a8a4925` | `translate_work_with_client` / `translate_works_with_client`;staging 跟随 `output_dir` | `staging_dir` 两测例;clippy |
 
 ## 依据
 
