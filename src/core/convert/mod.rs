@@ -30,7 +30,7 @@ use crate::core::convert::translate::{
 };
 use crate::core::convert::upload::DraftUpload;
 use crate::utils::filedata::PathConfig;
-use crate::utils::requests::UploadChannel;
+use crate::utils::requests::{CodeMaoClient, UploadChannel};
 
 /// 作品 id → 目标编辑器作品文件(反编译取编辑版,再转化;可选上传并新建草稿作品)
 ///
@@ -41,10 +41,42 @@ pub fn translate_work(
     target: TargetEditor,
     options: TranslateOptions,
 ) -> Result<TranslateOutcome, TranslateError> {
-    let staging = staging_dir(work_id);
+    let client = CodeMaoClient::global().clone();
+    translate_work_with_decompiler(
+        CodemaoDecompiler::global(),
+        &client,
+        work_id,
+        target,
+        options,
+    )
+}
+
+/// 同 [`translate_work`],但反编译、源文件上传与建草稿都使用调用方注入的客户端。
+///
+/// 独立身份槽(`CodeMaoClient::new_independent`)的调用方必须用本入口,否则门面会
+/// 回退到全局客户端与全局身份槽;`PathConfig` 全局根仍由 [`PathConfig::set_global`]
+/// 在首次使用前设置。
+pub fn translate_work_with_client(
+    client: CodeMaoClient,
+    work_id: WorkId,
+    target: TargetEditor,
+    options: TranslateOptions,
+) -> Result<TranslateOutcome, TranslateError> {
+    let decompiler = CodemaoDecompiler::new(client.clone());
+    translate_work_with_decompiler(&decompiler, &client, work_id, target, options)
+}
+
+fn translate_work_with_decompiler(
+    decompiler: &CodemaoDecompiler,
+    client: &CodeMaoClient,
+    work_id: WorkId,
+    target: TargetEditor,
+    options: TranslateOptions,
+) -> Result<TranslateOutcome, TranslateError> {
+    let staging = staging_dir(work_id, &options);
     std::fs::create_dir_all(&staging)?;
 
-    let result = translate_work_in(work_id, target, options, &staging);
+    let result = translate_work_in(decompiler, client, work_id, target, options, &staging);
 
     // 收尾:只清本作品自己的中间产物(失败路径也清,不留垃圾;
     // 编辑版原文由调用方按需另行反编译,产物落在 `staging` 之外)
@@ -54,13 +86,15 @@ pub fn translate_work(
 
 /// `translate_work` 的中间产物目录:每个作品**每次调用**一个独立子目录。
 ///
-/// `translate_works` 会并发跑同一批次,共用一个目录时先完成的线程会把其它线程
-/// 正在读的源文件一起删掉;随机后缀兜住"同一作品重跑"的情况。
-fn staging_dir(work_id: WorkId) -> std::path::PathBuf {
-    PathConfig::global()
-        .convert_file_path()
-        .join("staging")
-        .join(format!("{work_id}-{:08x}", fastrand::u32(..)))
+/// 指定了 `TranslateOptions::output_dir` 时 staging 跟随该目录,避免库内嵌时仍写入
+/// 不可写的工作目录;否则回退 `PathConfig` 的转化目录。`translate_works` 会并发跑
+/// 同一批次,随机后缀兜住"同一作品重跑"的情况。
+fn staging_dir(work_id: WorkId, options: &TranslateOptions) -> std::path::PathBuf {
+    let base = options
+        .output_dir_ref()
+        .map(|dir| dir.join("staging"))
+        .unwrap_or_else(|| PathConfig::global().convert_file_path().join("staging"));
+    base.join(format!("{work_id}-{:08x}", fastrand::u32(..)))
 }
 
 /// `translate_work` 的主体:取**内存**编辑版 → 转化 → 可选源引用 → 落盘 → 可选上传
@@ -69,19 +103,21 @@ fn staging_dir(work_id: WorkId) -> std::path::PathBuf {
 /// 再读回-写回":
 ///
 /// 1. 反编译走 [`CodemaoDecompiler::decompile_artifact_with`](Kitten/NEKO 直接给内存文档);
-/// 2. 转化走 [`translate_value`];
-/// 3. 源作品引用直接改内存文档([`set_source_reference_in`]);只有**要上传源文件**
+/// 2. 转化走 `translate_value_product`(门面只写流式产物,不物化整份 `Value`);
+/// 3. 源作品引用直接改内存产物(`translate` 子域的 `FileConversion`);只有**要上传源文件**
 ///    的那一路(`keep_source` 且 Kitten → KN)才把源文档落一次盘,文件名与旧路径逐字一致
 ///    (官方导入时也重传原件,这一步省不掉,但省掉了随后的读回-改写-再写);
 /// 4. 产物只在最后流式写一次。
 fn translate_work_in(
+    decompiler: &CodemaoDecompiler,
+    client: &CodeMaoClient,
     work_id: WorkId,
     target: TargetEditor,
     options: TranslateOptions,
     staging: &std::path::Path,
 ) -> Result<TranslateOutcome, TranslateError> {
     // 1. 取编辑版(Kitten 会重建成 block_data_json;NEKO 会解密成明文 KN 文档)
-    let artifact = CodemaoDecompiler::global()
+    let artifact = decompiler
         // `.save_raw(false)`:那条路上的 raw 只落在 staging,收尾整目录删掉
         // (phase 3 P1,rounds/37)—— 默认 true 会白写一份与源同量级的 JSON(9 MB 级作品 ≈ 数百 ms)。
         .decompile_artifact_with(
@@ -137,7 +173,8 @@ fn translate_work_in(
     // 官方把原始 Kitten 文件重新上传、URL 挂到 KN 的 `source`;失败不影响转化结果,
     // 只记日志(产品语义:源引用是附加信息,不该让转化整体失败)。
     if let Some(source_path) = source_path {
-        match upload_source_file(&source_path).and_then(|url| converted.set_source_reference(&url))
+        match upload_source_file(client, &source_path)
+            .and_then(|url| converted.set_source_reference(&url))
         {
             Ok(()) => log::debug!("已写入源作品引用"),
             Err(error) => {
@@ -164,7 +201,9 @@ fn translate_work_in(
         report,
     };
     if options.upload_enabled() {
-        outcome.work_id = Some(create_draft_work(&outcome, work_id, target, preview)?);
+        outcome.work_id = Some(create_draft_work(
+            client, &outcome, work_id, target, preview,
+        )?);
     }
     Ok(outcome)
 }
@@ -182,6 +221,16 @@ pub fn translate_works(
     target: TargetEditor,
     options: TranslateOptions,
 ) -> Vec<Result<TranslateOutcome, TranslateError>> {
+    translate_works_with_client(CodeMaoClient::global().clone(), work_ids, target, options)
+}
+
+/// 同 [`translate_works`],但整批使用调用方注入的客户端。
+pub fn translate_works_with_client(
+    client: CodeMaoClient,
+    work_ids: &[WorkId],
+    target: TargetEditor,
+    options: TranslateOptions,
+) -> Vec<Result<TranslateOutcome, TranslateError>> {
     if work_ids.is_empty() {
         return Vec::new();
     }
@@ -191,24 +240,26 @@ pub fn translate_works(
     if concurrency == 1 || work_ids.len() <= 1 {
         return work_ids
             .iter()
-            .map(|&id| translate_work(id, target, options.clone()))
+            .map(|&id| translate_work_with_client(client.clone(), id, target, options.clone()))
             .collect();
     }
     let options_ref = &options;
     shared::batch_map(
         work_ids,
         concurrency,
-        |&id| translate_work(id, target, options_ref.clone()),
+        |&id| translate_work_with_client(client.clone(), id, target, options_ref.clone()),
         || TranslateError::InvalidArgument("转化线程异常".to_string()),
     )
 }
 
-/// 上传源作品文件,返回可挂到产物 `source` 的 URL(见 [`set_source_reference_in`])
+/// 上传源作品文件,返回可挂到产物 `source` 的 URL
 ///
 /// 偏差记录:官方上传的是**原始** Kitten 文件字节,我们只有反编译重建的编辑版
 /// (即这里落盘的这一份),故上传它(`docs/rounds/21` §4-10)。
-fn upload_source_file(source_path: &std::path::Path) -> Result<String, TranslateError> {
-    let client = crate::utils::requests::CodeMaoClient::global().clone();
+fn upload_source_file(
+    client: &CodeMaoClient,
+    source_path: &std::path::Path,
+) -> Result<String, TranslateError> {
     client
         .file_uploader()
         .upload(source_path, UploadChannel::Codemao, "convert-source")
@@ -220,12 +271,12 @@ fn upload_source_file(source_path: &std::path::Path) -> Result<String, Translate
 /// 上传 + 建作品 + 取名都在域级工具 `upload`(**反编译侧的"上传到账号"走同一份实现**,
 /// 见 `docs/rounds/30`);这里只负责把转化结果翻译成那份入参。
 fn create_draft_work(
+    client: &CodeMaoClient,
     outcome: &TranslateOutcome,
     source_work_id: WorkId,
     target: TargetEditor,
     preview: Option<String>,
 ) -> Result<i64, TranslateError> {
-    let client = crate::utils::requests::CodeMaoClient::global().clone();
     // 平台建作品要求封面合法(`preview` 空串会被拒:"参数preview封面非法")⇒ 用**源作品的封面**;
     // 取不到就留空(仍可能被拒,但至少不自造非法值)。
     //
@@ -244,7 +295,7 @@ fn create_draft_work(
         n_blocks: Some(outcome.report.blocks_converted as i32),
         preview: preview.as_deref(),
     };
-    crate::core::convert::upload::create_draft(&client, &spec).map_err(TranslateError::Convert)
+    crate::core::convert::upload::create_draft(client, &spec).map_err(TranslateError::Convert)
 }
 
 #[cfg(test)]
@@ -254,8 +305,9 @@ mod tests {
     /// P0-1 回归:staging 必须是"每作品每次调用"独立目录(曾共用一个目录导致并发互删)
     #[test]
     fn staging_dir_is_unique_per_call_and_scoped_to_work() {
-        let a = staging_dir(WorkId::new(7));
-        let b = staging_dir(WorkId::new(7));
+        let options = TranslateOptions::new();
+        let a = staging_dir(WorkId::new(7), &options);
+        let b = staging_dir(WorkId::new(7), &options);
         assert_ne!(a, b, "同作品两次调用也不能共用目录");
         assert!(a.starts_with(PathConfig::global().convert_file_path().join("staging")));
         assert!(
@@ -263,6 +315,19 @@ mod tests {
                 .and_then(|n| n.to_str())
                 .is_some_and(|n| n.starts_with("7-")),
             "目录名要能看出来源作品:{a:?}"
+        );
+    }
+
+    /// staging 必须跟随显式输出目录,否则库内嵌时仍会写不可写的当前工作目录。
+    #[test]
+    fn staging_dir_follows_explicit_output_dir() {
+        let output =
+            std::env::temp_dir().join(format!("backend-staging-output-{}", std::process::id()));
+        let options = TranslateOptions::new().output_dir(&output);
+        let staging = staging_dir(WorkId::new(9), &options);
+        assert!(
+            staging.starts_with(output.join("staging")),
+            "staging 应落在显式输出目录下:{staging:?}"
         );
     }
 }

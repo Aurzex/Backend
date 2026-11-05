@@ -160,7 +160,7 @@ impl TranslateOptions {
         self.source_version.as_deref()
     }
 
-    pub(super) fn output_dir_ref(&self) -> Option<&std::path::Path> {
+    pub(in crate::core::convert) fn output_dir_ref(&self) -> Option<&std::path::Path> {
         self.output_dir.as_deref()
     }
 
