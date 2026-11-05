@@ -200,6 +200,11 @@ impl ProductDocument {
         Ok(Value::Object(self.doc))
     }
 
+    /// 写一个顶层字段(域门面在流式落盘前补 `source` 等信封字段)
+    pub(super) fn set_top_level(&mut self, key: &str, value: Value) {
+        self.doc.insert(key.to_string(), value);
+    }
+
     /// 直接写整份文档(文件路径):除三处块表外逐键交给 `serde_json`,块表在占位处流式写
     pub(super) fn write_to(&self, w: &mut impl std::io::Write) -> Result<()> {
         w.write_all(b"{")?;

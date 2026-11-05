@@ -222,6 +222,18 @@ pub(super) fn convert_kitten4_document(
     Ok(convert_kitten4_document_impl(source, None, options, report)?.into_value()?)
 }
 
+/// 同 [`convert_kitten4_document`],但保留**可流式写出**的产物。
+///
+/// 域门面 `translate_work` 的源文档已由反编译给出 `Value`(没有原文可交回骨架),
+/// 因此这里直接走同一条管线、只把产物留在 `ProductDocument`,不再 `into_value()`。
+pub(super) fn convert_kitten4_document_product(
+    source: &mut serde_json::Value,
+    options: &TranslateOptions,
+    report: &mut TranslateReport,
+) -> std::result::Result<assembly::ProductDocument, TranslateError> {
+    convert_kitten4_document_impl(source, None, options, report)
+}
+
 /// 与 [`convert_kitten4_document`] 同一条管线,但 `block_data_json` 由**原文**提供,
 /// 且保留**可流式写出**的产物(文件路径用它,省掉产物侧整份 `Value`)
 ///

@@ -26,7 +26,7 @@ use crate::core::convert::decompile::{CodemaoDecompiler, DecompileOptions, Decom
 use crate::core::convert::shared::FileService;
 use crate::core::convert::translate::{
     TargetEditor, TranslateError, TranslateOptions, TranslateOutcome, TranslateWarning,
-    detect_editor, product_path, set_source_reference_in, translate_value,
+    detect_editor, product_path, translate_value_product,
 };
 use crate::core::convert::upload::DraftUpload;
 use crate::utils::filedata::PathConfig;
@@ -129,23 +129,21 @@ fn translate_work_in(
         None
     };
 
-    // 3. 转化(内存)
-    let mut converted = translate_value(source_document, target, &options)?;
-    let mut document = converted.document;
+    // 3. 转化(内存):保留可流式写出产物,避免在门面再物化一份完整 `Value`
+    let mut converted = translate_value_product(source_document, target, &options)?;
 
     // 4. 可选:把源作品文件引用写进产物(仅 Kitten → KN,官方「保留原件」行为)
     //
     // 官方把原始 Kitten 文件重新上传、URL 挂到 KN 的 `source`;失败不影响转化结果,
     // 只记日志(产品语义:源引用是附加信息,不该让转化整体失败)。
     if let Some(source_path) = source_path {
-        match upload_source_file(&source_path)
-            .and_then(|url| set_source_reference_in(&mut document, &url))
+        match upload_source_file(&source_path).and_then(|url| converted.set_source_reference(&url))
         {
             Ok(()) => log::debug!("已写入源作品引用"),
             Err(error) => {
                 log::warn!("写入源作品引用失败(产物照常输出):{error}");
                 converted
-                    .report
+                    .report_mut()
                     .warn(TranslateWarning::SourceReferenceFailed {
                         error: error.to_string(),
                     });
@@ -153,16 +151,17 @@ fn translate_work_in(
         }
     }
 
-    // 5. 落盘产物(整份文档只写这一次)
+    // 5. 落盘产物(整份文档只写这一次;product 路径不建产物侧整份 `Value`)
     let output = product_path(std::path::Path::new(&source_file_name), target, &options)?;
-    FileService::write_json(&output, &document)?;
+    converted.write_to_file(&output)?;
 
     // 6. 可选:上传产物并新建草稿作品(默认关;开=替用户在平台落一份草稿)
+    let (_, report) = converted.into_parts();
     let mut outcome = TranslateOutcome {
         output,
         work_id: None,
         target,
-        report: converted.report,
+        report,
     };
     if options.upload_enabled() {
         outcome.work_id = Some(create_draft_work(&outcome, work_id, target, preview)?);

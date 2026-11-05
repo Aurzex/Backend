@@ -149,11 +149,106 @@ pub fn translate_value(
     })
 }
 
+/// 同 [`translate_value`],但保留**可流式写出**的产物(Kitten4 → KN 与 NEMO → KN)。
+///
+/// 域门面 `translate_work` 的源文档由反编译直接给出 `Value`,没有原文可交给
+/// [`translate_text`] 的骨架通道;本入口让它在内存直通时仍能省掉产物侧整份 `Value`
+/// (`ProductDocument`),而不是走 `translate_value` 的 `into_value()`。
+///
+/// 反向(KN → Kitten4)与 NEMO → KN 复用现有 product 入口;正向补
+/// [`pipeline::convert_kitten4_document_product`]。公开面 [`TranslateDocument`] 不变。
+pub(in crate::core::convert) fn translate_value_product(
+    mut source: serde_json::Value,
+    target: TargetEditor,
+    options: &TranslateOptions,
+) -> std::result::Result<FileConversion, TranslateError> {
+    let from = detect_editor(&source);
+
+    let (document, report) = match (from, target) {
+        (Some(crate::core::convert::EditorType::Kitten4), TargetEditor::KittenN) => {
+            let mut report = TranslateReport::new(
+                crate::core::convert::EditorType::Kitten4,
+                TargetEditor::KittenN,
+            );
+            let product =
+                pipeline::convert_kitten4_document_product(&mut source, options, &mut report)?;
+            (ConvertedDocument::Product(product), report)
+        }
+        (Some(crate::core::convert::EditorType::Nemo), TargetEditor::KittenN) => {
+            let mut report = TranslateReport::new(
+                crate::core::convert::EditorType::Nemo,
+                TargetEditor::KittenN,
+            );
+            let product = nemo::convert_nemo_document_product(&source, options, &mut report)?;
+            (ConvertedDocument::Product(product), report)
+        }
+        (Some(crate::core::convert::EditorType::Neko), TargetEditor::Kitten4) => {
+            let mut report = TranslateReport::new(
+                crate::core::convert::EditorType::Neko,
+                TargetEditor::Kitten4,
+            );
+            let product = pipeline::convert_kn_document_product(&source, options, &mut report)?;
+            (ConvertedDocument::Kitten4(product), report)
+        }
+        (Some(from), to) => return Err(TranslateError::Unsupported { from, to }),
+        (None, to) => {
+            return Err(TranslateError::InvalidArgument(format!(
+                "无法识别源作品格式(目标 {to:?});本库当前支持 Kitten4(.bcm4 编辑版)、KittenN(.bcmkn)与 NEMO(.bcm 编辑版)"
+            )));
+        }
+    };
+
+    if options.is_strict() && report.is_lossy() {
+        return Err(TranslateError::Lossy {
+            report: Box::new(report),
+        });
+    }
+
+    Ok(FileConversion {
+        document,
+        target,
+        report,
+    })
+}
+
 /// 文件路径的内部产物:文档可能是**流式**产物(Kitten4 → KN 与 NEMO → KN 不建整份产物 `Value`)
-struct FileConversion {
+pub(in crate::core::convert) struct FileConversion {
     document: ConvertedDocument,
     target: TargetEditor,
     report: TranslateReport,
+}
+
+impl FileConversion {
+    /// 落盘:流式产物直接写,`Value` 走原有 `write_json`
+    pub(in crate::core::convert) fn write_to_file(
+        &self,
+        output: &std::path::Path,
+    ) -> std::result::Result<(), TranslateError> {
+        self.document.write_to_file(output)
+    }
+
+    /// 写入顶层 `source`(仅 KN 产物生效;Kitten4 产物不需要源引用)
+    pub(in crate::core::convert) fn set_source_reference(
+        &mut self,
+        url: &str,
+    ) -> std::result::Result<(), TranslateError> {
+        match &mut self.document {
+            ConvertedDocument::Product(product) => {
+                product.set_top_level("source", serde_json::Value::String(url.to_string()));
+                Ok(())
+            }
+            ConvertedDocument::Kitten4(_) => Ok(()),
+            ConvertedDocument::Value(value) => set_source_reference_in(value, url),
+        }
+    }
+
+    pub(in crate::core::convert) fn report_mut(&mut self) -> &mut TranslateReport {
+        &mut self.report
+    }
+
+    pub(in crate::core::convert) fn into_parts(self) -> (TargetEditor, TranslateReport) {
+        (self.target, self.report)
+    }
 }
 
 /// 文件路径的文档:优先流式(正向 / 反向 / NEMO 各一种),其余(回落)仍是整份 `Value`
@@ -1088,5 +1183,62 @@ mod diff_tests {
         )
         .expect("写出产物文件");
         std::fs::write(dir.join("report.md"), report.to_markdown()).expect("写出报告文件");
+    }
+}
+
+#[cfg(test)]
+mod product_value_equivalence_tests {
+    use super::*;
+    use std::path::Path;
+
+    /// 门面用的 `translate_value_product` 必须与内存入口逐字节一致。
+    ///
+    /// 三条方向各取一件真作品:正向 Kitten4→KN、反向 KN→Kitten4、NEMO→KN。
+    /// 夹具缺失时按仓库统一出口跳过(严格模式由 `missing_fixture` 处理)。
+    #[test]
+    fn value_product_is_byte_identical_to_memory_path() {
+        let cases = [
+            (
+                "download/compile/几何对战-联机_215246857.bcm4",
+                TargetEditor::KittenN,
+            ),
+            (
+                "download/compile/HEX Editor_317683843.bcmkn",
+                TargetEditor::Kitten4,
+            ),
+            (
+                "download/compile/蛋仔派对2-奥姆返场新盲盒生存赛重做_194684070/user_works/194684070/194684070.bcm",
+                TargetEditor::KittenN,
+            ),
+        ];
+        for (relative, target) in cases {
+            let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(relative);
+            if !path.exists() {
+                missing_fixture(&format!("真作品样例 {}", path.display()));
+                continue;
+            }
+            let source: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&path).expect("读取夹具作品文件"))
+                    .expect("解析夹具作品 JSON");
+            let options = TranslateOptions::new()
+                .deterministic_ids(true)
+                .entity_concurrency(1);
+
+            let product = translate_value_product(source.clone(), target, &options)
+                .expect("product 路径转化应成功");
+            let dir = unique_test_dir("value-product");
+            std::fs::create_dir_all(&dir).expect("建输出目录");
+            let output = dir.join("product.json");
+            product.write_to_file(&output).expect("写 product 产物");
+            let actual = std::fs::read(&output).expect("读 product 产物");
+
+            let expected = translate_value(source, target, &options)
+                .expect("内存路径转化应成功")
+                .document;
+            let expected = serde_json::to_vec(&expected).expect("序列化内存产物");
+            assert_eq!(actual, expected, "{relative}:product 与内存入口字节不一致");
+
+            let _ = std::fs::remove_dir_all(&dir);
+        }
     }
 }
