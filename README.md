@@ -219,7 +219,7 @@ LoginBuilder::new_with_client(client.clone())
     .identity("13800138000")
     .password("student-pass")
     .execute()?;
-let decompiler = CodemaoDecompiler::new(client.clone());               // 反编译走同一客户端
+let _decompiler = CodemaoDecompiler::new(client.clone());             // 反编译走同一客户端
 
 // 按作品 id 转化时同样注入独立客户端;staging 跟随 output_dir
 let out = translate_work_with_client(
@@ -229,7 +229,6 @@ let out = translate_work_with_client(
     TranslateOptions::new().output_dir("…/workspace/out"),
 )?;
 println!("{}", out.output.display());
-let _ = decompiler;                                                    // 示例中未继续使用
 ```
 
 ## 设计要点

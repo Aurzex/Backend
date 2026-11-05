@@ -368,6 +368,24 @@ perf report --stdio -i /tmp/bench.perf --no-children --sort symbol -g none
 4. **代价仍要记账**:NEMO 侧并行使分配 +13.9%(§2bis.12);"自动"只是把这笔代价收窄到"够大的作品",
    2026-10-06 按**时间收益**开(1.2–1.5×),没有做新的分配规避。
 
+### 2bis.17 门面三腿探针(2026-11-06)
+
+装置:`cargo test --lib facade_product_bench -- --ignored --nocapture`;同一份 10.8 MB 编辑版、
+`deterministic_ids(true)`、`entity_concurrency(1)`、`keep_source(false)`、3 轮取最小。
+三腿分别是:`translate_value` + `write_json`(内存物化)、`translate_value_product` + `write_to_file`
+(内存 product)、`translate_file`(文件入口,含读盘与源侧骨架)。
+
+| 腿 | 时间(ms) |
+| --- | --- |
+| 内存物化 | 3240 |
+| 内存 product | 3196 |
+| 文件入口 | 4184 |
+
+读法:测试档是未优化的 `test` profile,绝对值不可与 `bench_perf` 读数并列;同轮两根内存腿只差约
+1.4%,说明在该档下产物侧流式的收益被未优化的序列化/分配噪声盖住。需要发布档三腿 A/B 才能判断
+门面的实际收益;文件入口腿还包含读盘与骨架解析,不能直接当作 product 的对照。产物字节等价由
+`product_value_equivalence_tests` 守,与本探针无关。
+
 ## 3. 已完成的优化(都有数字)
 
 | 优化 | 做法 | 收益 |

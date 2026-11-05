@@ -9,7 +9,7 @@
 
 | # | 项 | 状态 | 验收 | 出处 |
 | --- | --- | --- | --- | --- |
-| P2-1 | 门面 `translate_work` 流式产物的性能读数 | 部分(2026-11-06,`48890df`) | 已与内存入口逐字节等价(三条方向);仍需同一内存源文档的三腿 A/B 读数 | `../rounds/54-code-audit-and-optimization-batch.md` §3.1 |
+| P2-1 | 门面 `translate_work` 流式产物的性能读数 | 部分(2026-11-06,`48890df` / `6b9e5cc`) | 已与内存入口逐字节等价(三条方向);测试档三腿读数见 `../knowledge/convert-performance.md` §2bis.17;发布档 A/B 待补 | `../rounds/54-code-audit-and-optimization-batch.md` §3.1 |
 | P3-2 | `ide/load` 编辑格式快速通道 | 待核验 | 证明版本选择、权限回退与同版语义等价后,再决定是否作为可选入口 | `../rounds/54-code-audit-and-optimization-batch.md` §5.1 |
 
 ## 2. 维护约定
