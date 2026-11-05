@@ -100,8 +100,9 @@
 
 ### 5.1 `ide/load` 编辑格式快速通道(待核验)
 
-- 匿名请求实测 401;文档称按权限返回 `source_urls`;多版本排序无接口契约,本地 20 份 k4edit 只有“下标 0 较新”的线索。
-- 进入条件:证明当前版选择、权限/空列表/404 回退、同版语义等价与块数/程序集比对,并重建 `convert_bench` 基线。
+- 匿名请求实测 401,文档称按权限返回 `source_urls`;转换域当前没有调用点,不能把 `ide/load` 当作默认路径。
+- 多版本排序无接口契约。本地 20 份 k4edit 的 `application_version`:`174408420` 的 0 号是 4.11.18、1–9 是 4.11.12;`215246857` 的 0/1 是 4.11.13、2–9 是 4.11.12。块数上 `215246857-0` 与反编译夹具同为 374 块;`174408420-0` 为 3237 块,与仓内反编译夹具的 2376 块不一致(夹具版本较旧),不能据此判断同版等价。
+- 进入条件:用带权限的账号确认 `source_urls` 中当前版本的选择规则、空列表/404 回退,做同版语义等价与块数/程序集比对,并重建 `convert_bench` 基线。
 
 ### 5.2 两个独立作品源串行请求(已完成(2026-11-06,`0aee1e6`))
 
@@ -135,7 +136,7 @@
 | 14 | `72bd47b` | 目标/知识库/轮次索引同步;`cargo test --lib` 全量 158 passed、1 ignored | 成功 |
 | 15 | `68dfb10` | `PathConfig::set_global`;全局路径根可在启动期重定向 | `utils::filedata::tests` |
 | 16 | `a8a4925` | `translate_work_with_client` / `translate_works_with_client`;staging 跟随 `output_dir` | `staging_dir` 两测例;clippy |
-| 17 | `70053f2` | README/知识库登记路径根与注入门面 | 文档检查 |
+| 17 | `e6a635f` | README/知识库登记路径根与注入门面、三腿读数与 P2-4 收口 | 文档检查 |
 | 18 | `6b9e5cc` | 门面三腿性能探针 | `facade_product_bench`(ignored)读数入 `../knowledge/convert-performance.md` §2bis.17 |
 
 ## 依据
