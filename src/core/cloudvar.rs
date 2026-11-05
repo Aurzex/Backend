@@ -2451,8 +2451,10 @@ fn on_connection_lost(inner: Arc<CloudInner>) {
             .saturating_mul(1u32 << (attempts - 1).min(5));
         let delay = backoff.min(Duration::from_mins(5));
         info!("连接断开,第 {attempts} 次重连将于 {delay:?} 后进行");
-        thread::sleep(delay);
-        if inner.stopping.load(Ordering::Acquire) {
+        // 退避等待必须可被 close() 打断,否则 close 会 join 在读线程的 sleep 上。
+        if wait_flag(&inner.notify, delay, || {
+            inner.stopping.load(Ordering::Acquire)
+        }) {
             return;
         }
         match establish(&inner) {
@@ -2471,6 +2473,17 @@ fn on_connection_lost(inner: Arc<CloudInner>) {
 /// 不能只靠唤醒——否则连接恢复后无人再通知,积压命令将永远滞留。
 fn flush_loop(inner: Arc<CloudInner>) {
     while !inner.stopping.load(Ordering::Acquire) {
+        // 未连接时不要按 flush_interval 反复 drain/requeue 整个队列(队列大时形成
+        // 固定频率的 O(n) 搬移与日志刷屏);等到连接就绪或 close() 再继续。
+        // 连接就绪时 `handle_frame` 会在 notify 锁内置 `io_ready` 并唤醒这里。
+        if !inner.connected.load(Ordering::Acquire) || !inner.io_ready.load(Ordering::Acquire) {
+            wait_flag(&inner.notify, inner.reconnect_interval, || {
+                inner.stopping.load(Ordering::Acquire)
+                    || (inner.connected.load(Ordering::Acquire)
+                        && inner.io_ready.load(Ordering::Acquire))
+            });
+            continue;
+        }
         // 与 `queue`/`close` 的 `notify_with` 同锁纪律:wait_flag 持 notify 锁检查标记,
         // 生产者持 notify 锁置位,消除「检查-置位」之间的丢失唤醒窗口
         wait_flag(&inner.notify, inner.flush_interval, || {
