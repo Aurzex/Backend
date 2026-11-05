@@ -1,4 +1,4 @@
-use crate::utils::requests::MewResult;
+use crate::utils::requests::{MewError, MewResult};
 use log::debug;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -19,16 +19,32 @@ impl Default for PathConfig {
     }
 }
 
+static GLOBAL: std::sync::OnceLock<PathConfig> = std::sync::OnceLock::new();
+
 impl PathConfig {
     /// 基于指定根目录创建路径配置
     pub fn with_root(root: impl Into<PathBuf>) -> Self {
         Self { root: root.into() }
     }
 
+    /// 设置全局路径根(必须在任何 [`Self::global`] 调用之前)。
+    ///
+    /// 库内嵌到其它程序时,工作目录可能不可写或与使用者期望不一致;在初始化客户端、
+    /// 登录、反编译或转换之前调用本方法,可把验证码、账号文件、下载与转化目录整体
+    /// 重定向到指定根。全局根只能设置一次;重复设置返回
+    /// [`MewError::InvalidArgument`]。
+    pub fn set_global(root: impl Into<PathBuf>) -> MewResult<()> {
+        GLOBAL.set(Self::with_root(root)).map_err(|_| {
+            MewError::InvalidArgument(
+                "PathConfig 全局根已初始化;set_global 必须在任何 PathConfig::global() 调用之前"
+                    .into(),
+            )
+        })
+    }
+
     /// 获取全局默认路径配置(基于当前目录)
     pub fn global() -> &'static Self {
-        static INSTANCE: std::sync::OnceLock<PathConfig> = std::sync::OnceLock::new();
-        INSTANCE.get_or_init(PathConfig::default)
+        GLOBAL.get_or_init(PathConfig::default)
     }
 
     /// 缓存目录
@@ -131,5 +147,20 @@ pub(crate) fn bytes_to_human(size_bytes: u64) -> String {
         format!("{:.2} MB", size_bytes as f64 / 1024.0 / 1024.0)
     } else {
         format!("{:.2} KB", size_bytes as f64 / 1024.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn global_is_stable_and_second_set_fails() {
+        let root = PathConfig::global().root.clone();
+        assert_eq!(PathConfig::global().root, root, "global 必须稳定");
+        assert!(
+            PathConfig::set_global("/tmp/backend-other-root").is_err(),
+            "全局根已初始化后不得再次设置"
+        );
     }
 }
