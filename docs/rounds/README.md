@@ -45,7 +45,7 @@ Kitten 与 KN 之间的转换方案与落地(20–21)、NEMO 路线(22–24)、�
 
 | 轮次 | 一句话 | 状态 |
 | --- | --- | --- |
-| [54](54-code-audit-and-optimization-batch.md) | **代码审计与优化整改(第一批)**:举报生成器/粉丝统计/论坛回复的默认分页上限、无界线程、回调句柄移除语义、分页首屏重试;目标与验收见 `../goals/optimization-plan.md` | 部分(2026-11-06,第一批已落地;`P2-4` 待方案、`P3-2` 待核验) |
+| [54](54-code-audit-and-optimization-batch.md) | **代码审计与优化整改(第一批)**:举报生成器/粉丝统计/论坛回复的默认分页上限、无界线程、回调句柄移除语义、分页首屏重试、门面注入与路径根;目标与验收见 `../goals/optimization-plan.md` | 部分(2026-11-06,第一批与 `P2-4` 已落地;`P2-1` 发布档读数、`P3-2` 待核验) |
 | [53](53-convert-abstraction-plan.md) | **转换域抽象与职责提取方案**:`model.rs` 的测试外移与职责分区、`nemo::assemble_nemo`(657 行)提取装配阶段对象、形状/口径抽象的推广规则、测试共用件、`WorkId` 试点收益量法 | 方案在案(2026-10-07,**未动代码**;落点在 `../goals/convert-backlog.md` §2 第 15 条) |
 | [52](52-docs-survey-and-reverify.md) | **三库复核与修整**:按 `docs-tidy` 顺序做只读测绘 → 修 live 文档漂移(计数/状态/失效指针/重复展开/表格断行/体例)→ 换新会话两轮独立复验 → 修复验项;历史轮次正文不改写,其缺陷登记进 errata | 已完成(2026-10-06,`e279eee` / `133a29c` / `e404c67`) |
 | [51](51-entity-concurrency-auto.md) | **实体级并发"默认自动"**:`EntityConcurrency::{Auto, Fixed}`,"够大"按工作项权重之和判(阈值由一次性探针夹逼);批量折算对"自动"只压低核数预算 | 已落地(`0ead279`;阈值与读数见 `../knowledge/convert-performance.md` §2bis.16) |
