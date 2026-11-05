@@ -24,6 +24,8 @@ use crate::utils::requests::{
 const DEFAULT_COMMENT_STREAM_LIMIT: usize = 500;
 const MAX_COMMENT_STREAM_LIMIT: usize = 1000;
 const COMMENT_DETAIL_PER_WORK: usize = 20;
+/// 同批最多并发的 chunk 数:线程数上界 = 本常量,而不是由作品数/粉丝数决定。
+const MAX_PARALLEL_CHUNKS: usize = 4;
 
 // 错误类型
 
@@ -761,65 +763,71 @@ impl DataQuery {
             works.push(work_result?);
         }
 
-        // 再按 chunk=8 并行提取评论;每线程维护本地 map,按线程顺序合并
+        // 再按 chunk=8 并行提取评论;每批最多 MAX_PARALLEL_CHUNKS 个 chunk 并发,
+        // 线程数有上界;每线程维护本地 map,按线程顺序合并
         type UserCommentAggregate = (String, String, Vec<String>, i32);
-        let results: Vec<Result<HashMap<String, UserCommentAggregate>, DataQueryError>> =
-            thread::scope(|s| {
-                let mut handles = Vec::new();
-                for chunk in works.chunks(8) {
-                    handles.push(s.spawn(move || {
-                        let mut local_map: HashMap<String, (String, String, Vec<String>, i32)> =
-                            HashMap::new();
-                        for work in chunk {
-                            if let Some(work_id) =
-                                work.get("work_id").and_then(serde_json::Value::as_i64)
-                            {
-                                let comment_stream = self.stream_detailed_comments(
-                                    CommentSource::Work,
-                                    i32::try_from(work_id).unwrap_or(0),
-                                    Some(COMMENT_DETAIL_PER_WORK),
-                                )?;
-                                for comment_result in comment_stream {
-                                    let comment = comment_result?;
-                                    let user_id = comment.get("user_id").and_then(|v| {
-                                        if v.is_number() {
-                                            Some(v.to_string())
-                                        } else {
-                                            v.as_str().map(ToString::to_string)
-                                        }
-                                    });
-                                    let content = comment
-                                        .get("content")
-                                        .and_then(|c| c.as_str())
-                                        .map(ToString::to_string);
-                                    let nickname = comment
-                                        .get("nickname")
-                                        .and_then(|n| n.as_str())
-                                        .map(ToString::to_string);
+        let mut results: Vec<Result<HashMap<String, UserCommentAggregate>, DataQueryError>> =
+            Vec::new();
+        for batch in works.chunks(8 * MAX_PARALLEL_CHUNKS) {
+            let batch_results: Vec<Result<HashMap<String, UserCommentAggregate>, DataQueryError>> =
+                thread::scope(|s| {
+                    let mut handles = Vec::new();
+                    for chunk in batch.chunks(8) {
+                        handles.push(s.spawn(move || {
+                            let mut local_map: HashMap<String, (String, String, Vec<String>, i32)> =
+                                HashMap::new();
+                            for work in chunk {
+                                if let Some(work_id) =
+                                    work.get("work_id").and_then(serde_json::Value::as_i64)
+                                {
+                                    let comment_stream = self.stream_detailed_comments(
+                                        CommentSource::Work,
+                                        i32::try_from(work_id).unwrap_or(0),
+                                        Some(COMMENT_DETAIL_PER_WORK),
+                                    )?;
+                                    for comment_result in comment_stream {
+                                        let comment = comment_result?;
+                                        let user_id = comment.get("user_id").and_then(|v| {
+                                            if v.is_number() {
+                                                Some(v.to_string())
+                                            } else {
+                                                v.as_str().map(ToString::to_string)
+                                            }
+                                        });
+                                        let content = comment
+                                            .get("content")
+                                            .and_then(|c| c.as_str())
+                                            .map(ToString::to_string);
+                                        let nickname = comment
+                                            .get("nickname")
+                                            .and_then(|n| n.as_str())
+                                            .map(ToString::to_string);
 
-                                    if let (Some(uid), Some(cont), Some(nick)) =
-                                        (user_id, content, nickname)
-                                    {
-                                        let entry = local_map
-                                            .entry(uid.clone())
-                                            .or_insert_with(|| (uid, nick, Vec::new(), 0));
-                                        entry.2.push(cont);
-                                        entry.3 += 1;
+                                        if let (Some(uid), Some(cont), Some(nick)) =
+                                            (user_id, content, nickname)
+                                        {
+                                            let entry = local_map
+                                                .entry(uid.clone())
+                                                .or_insert_with(|| (uid, nick, Vec::new(), 0));
+                                            entry.2.push(cont);
+                                            entry.3 += 1;
+                                        }
                                     }
                                 }
                             }
-                        }
-                        Ok(local_map)
-                    }));
-                }
-                handles
-                    .into_iter()
-                    .map(|handle| match handle.join() {
-                        Ok(r) => r,
-                        Err(_) => Err(DataQueryError::ParseError("评论聚合线程 panic".into())),
-                    })
-                    .collect()
-            });
+                            Ok(local_map)
+                        }));
+                    }
+                    handles
+                        .into_iter()
+                        .map(|handle| match handle.join() {
+                            Ok(r) => r,
+                            Err(_) => Err(DataQueryError::ParseError("评论聚合线程 panic".into())),
+                        })
+                        .collect()
+                });
+            results.extend(batch_results);
+        }
 
         // 按线程顺序合并;任一线程出错则返回第一个(线程顺序上的)错误
         let mut user_comment_map: HashMap<String, (String, String, Vec<String>, i32)> =
@@ -1012,62 +1020,72 @@ impl DataQuery {
             }
         }
 
-        // 第二段:按 chunk=16 并行查询荣誉数据(尽力而为),结果按流序写回
+        // 第二段:按 chunk=16 并行查询荣誉数据(尽力而为),结果按流序写回;
+        // 每批最多 MAX_PARALLEL_CHUNKS 个 chunk 并发,线程数有上界。
         let client = self.client.clone();
         let mut results: Vec<Option<JsonObject>> = vec![None; qualified.len()];
-        thread::scope(|s| {
-            let mut remaining: &mut [Option<JsonObject>] = &mut results[..];
-            for chunk in qualified.chunks(16) {
-                let (head, tail) = remaining.split_at_mut(chunk.len());
-                remaining = tail;
-                let c = client.clone();
-                s.spawn(move || {
-                    for (i, (id, fan, total_likes)) in chunk.iter().enumerate() {
-                        let mut fan_obj = JsonObject::new();
-                        fan_obj.insert("user_id".into(), Value::Number((*id).into()));
-                        // 荣誉数据为尽力而为:ID 超出 i32 范围或请求失败时输出 N/A
-                        let honors_data = i32::try_from(*id).ok().and_then(|id32| {
-                            UserDataFetcher::new_with_client(c.clone())
-                                .fetch_user_honors(id32)
-                                .ok()
-                        });
-                        if let Some(ref honors_data) = honors_data {
-                            if let Some(fans_total) = honors_data.get("fans_total") {
-                                fan_obj.insert("fans_total".into(), fans_total.clone());
+        for batch_start in (0..qualified.len()).step_by(16 * MAX_PARALLEL_CHUNKS) {
+            let end = (batch_start + 16 * MAX_PARALLEL_CHUNKS).min(qualified.len());
+            let batch = &qualified[batch_start..end];
+            let out = &mut results[batch_start..end];
+            thread::scope(|s| {
+                for (chunk, out_chunk) in batch.chunks(16).zip(out.chunks_mut(16)) {
+                    let c = client.clone();
+                    s.spawn(move || {
+                        for (i, (id, fan, total_likes)) in chunk.iter().enumerate() {
+                            let mut fan_obj = JsonObject::new();
+                            fan_obj.insert("user_id".into(), Value::Number((*id).into()));
+                            // 荣誉数据为尽力而为:ID 超出 i32 范围或请求失败时输出 N/A
+                            let honors_data = i32::try_from(*id).ok().and_then(|id32| {
+                                UserDataFetcher::new_with_client(c.clone())
+                                    .fetch_user_honors(id32)
+                                    .ok()
+                            });
+                            if let Some(ref honors_data) = honors_data {
+                                if let Some(fans_total) = honors_data.get("fans_total") {
+                                    fan_obj.insert("fans_total".into(), fans_total.clone());
+                                } else {
+                                    fan_obj
+                                        .insert("fans_total".into(), Value::String("N/A".into()));
+                                }
+                                if let Some(collected_total) = honors_data.get("collected_total") {
+                                    fan_obj
+                                        .insert("collected_total".into(), collected_total.clone());
+                                } else {
+                                    fan_obj.insert(
+                                        "collected_total".into(),
+                                        Value::String("N/A".into()),
+                                    );
+                                }
+                                if let Some(author_level) = honors_data.get("author_level") {
+                                    fan_obj.insert("author_level".into(), author_level.clone());
+                                } else {
+                                    fan_obj
+                                        .insert("author_level".into(), Value::String("N/A".into()));
+                                }
                             } else {
                                 fan_obj.insert("fans_total".into(), Value::String("N/A".into()));
-                            }
-                            if let Some(collected_total) = honors_data.get("collected_total") {
-                                fan_obj.insert("collected_total".into(), collected_total.clone());
-                            } else {
                                 fan_obj
                                     .insert("collected_total".into(), Value::String("N/A".into()));
-                            }
-                            if let Some(author_level) = honors_data.get("author_level") {
-                                fan_obj.insert("author_level".into(), author_level.clone());
-                            } else {
                                 fan_obj.insert("author_level".into(), Value::String("N/A".into()));
                             }
-                        } else {
-                            fan_obj.insert("fans_total".into(), Value::String("N/A".into()));
-                            fan_obj.insert("collected_total".into(), Value::String("N/A".into()));
-                            fan_obj.insert("author_level".into(), Value::String("N/A".into()));
+                            if let Some(nickname) = fan.get("nickname") {
+                                fan_obj.insert("nickname".into(), nickname.clone());
+                            }
+                            fan_obj
+                                .insert("total_likes".into(), Value::Number((*total_likes).into()));
+                            fan_obj.insert(
+                                "n_works".into(),
+                                fan.get("n_works")
+                                    .cloned()
+                                    .unwrap_or(Value::Number(0.into())),
+                            );
+                            out_chunk[i] = Some(fan_obj);
                         }
-                        if let Some(nickname) = fan.get("nickname") {
-                            fan_obj.insert("nickname".into(), nickname.clone());
-                        }
-                        fan_obj.insert("total_likes".into(), Value::Number((*total_likes).into()));
-                        fan_obj.insert(
-                            "n_works".into(),
-                            fan.get("n_works")
-                                .cloned()
-                                .unwrap_or(Value::Number(0.into())),
-                        );
-                        head[i] = Some(fan_obj);
-                    }
-                });
-            }
-        });
+                    });
+                }
+            });
+        }
 
         let qualified_fans: Vec<JsonObject> = results.into_iter().flatten().collect();
 
