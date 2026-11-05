@@ -28,15 +28,16 @@
 | [`goals/convert-backlog.md`](goals/convert-backlog.md) | 转换域待做(§1 待决 / §2 待做 / §3 判不做 / §4 防线 / §5 `rounds/37` 之后 / §6 效果目标 / §7 性能盘点) |
 | [`goals/platform-backlog.md`](goals/platform-backlog.md) | 平台/接口域待做(§1 真机实测 / §2 已核验 / §3 待方案 / §4 P2 / §5 公开面 / §6 已核对并放弃的) |
 | [`goals/infra-backlog.md`](goals/infra-backlog.md) | 仓库结构/工程待做(§1 待决 + §1.1 `unused` 落地 / §2 小改 / §3 待核验 / §4 已决 / §5 文档 / §6 架构盘点) |
+| [`goals/optimization-plan.md`](goals/optimization-plan.md) | 2026-11-06 代码审计的整改目标:P0–P3 优先级、状态、验收与轮次指针 |
 
 ## 历史记录 [`rounds/`](rounds/)(过程)
 
-`rounds/01-websocket-pitfalls.md` … `rounds/53-convert-abstraction-plan.md` —— 每轮一份的方案/评审/整改记录。
+`rounds/01-websocket-pitfalls.md` … `rounds/54-code-audit-and-optimization-batch.md` —— 每轮一份的方案/评审/整改记录。
 **入口先看 [`rounds/README.md`](rounds/README.md)**(28–53 轮的索引 + "该看哪几篇"),再看本篇。
 价值在**证据链**(真机实测、抓包、官方 bundle 逆向、逐条评审),以及"为什么当初这么决定"。
 读它们时先看 [`knowledge/errata.md`](knowledge/errata.md):早期文档里的文件名/类型名/行号多数已经漂移。
 
-**文件分布**:知识库 [`knowledge/`](knowledge/)、目标库 [`goals/`](goals/)、轮次记录 `rounds/01`–`rounds/53`(每轮一篇,40 号已合并为单篇,另设本目录索引 `README.md`;第 38–40 轮为转换域的近期工作,第 41–46 轮为工程与公共面收尾,第 47 轮为数据表示层重写方案(其 NEMO 两行的落地见第 49 轮、反向源侧骨架见第 50 轮),第 48 轮为 NEMO 方向的实体级并行,第 49 轮为 NEMO 产物侧流式写出,第 50 轮为反向源侧骨架,第 51 轮为实体级并发默认自动,第 52 轮为三库复核与修整,第 53 轮为转换域抽象与职责提取方案(仅记录、未动代码))。
+**文件分布**:知识库 [`knowledge/`](knowledge/)、目标库 [`goals/`](goals/)、轮次记录 `rounds/01`–`rounds/54`(每轮一篇,40 号已合并为单篇,另设本目录索引 `README.md`;第 38–40 轮为转换域的近期工作,第 41–46 轮为工程与公共面收尾,第 47 轮为数据表示层重写方案(其 NEMO 两行的落地见第 49 轮、反向源侧骨架见第 50 轮),第 48 轮为 NEMO 方向的实体级并行,第 49 轮为 NEMO 产物侧流式写出,第 50 轮为反向源侧骨架,第 51 轮为实体级并发默认自动,第 52 轮为三库复核与修整,第 53 轮为转换域抽象与职责提取方案(仅记录、未动代码),第 54 轮为 2026-11-06 的代码审计与优化整改(第一批))。
 
 > **读老轮次前先做的两件事**:1)  查 [`knowledge/errata.md`](knowledge/errata.md)(它集中列出已过时/写错的表述及正确值,
 > 含"第三十三至三十六轮的结论变更"一节);2)  转换相关的问题先读 [`knowledge/convert-semantics.md`](knowledge/convert-semantics.md) 的
