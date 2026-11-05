@@ -1242,3 +1242,72 @@ mod product_value_equivalence_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod facade_product_bench {
+    use super::*;
+    use std::path::Path;
+    use std::time::Instant;
+
+    /// 同一 10.8 MB 源文档的三腿对照(内存物化 / 内存 product / 文件入口)。
+    ///
+    /// 默认 `#[ignore]`;运行:
+    /// `cargo test --lib facade_product_bench -- --ignored --nocapture`。
+    /// 读数只作方向判据,跨机不可比;产物字节另有 `product_value_equivalence_tests` 守。
+    #[test]
+    #[ignore = "性能探针:需 download/ 真作品夹具"]
+    fn facade_three_legs() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("download/compile/原气骑士 且听风吟_136021231.bcm4");
+        if !path.exists() {
+            missing_fixture(&format!("真作品样例 {}", path.display()));
+            return;
+        }
+        let text = std::fs::read_to_string(&path).expect("读夹具");
+        let source: serde_json::Value = serde_json::from_str(&text).expect("解析夹具");
+        let target = TargetEditor::KittenN;
+        let options = TranslateOptions::new()
+            .deterministic_ids(true)
+            .entity_concurrency(1)
+            .keep_source(false);
+        let dir = unique_test_dir("facade-bench");
+        std::fs::create_dir_all(&dir).expect("建临时目录");
+
+        const RUNS: usize = 3;
+        let mut memory = Vec::new();
+        let mut product = Vec::new();
+        let mut file = Vec::new();
+        for run in 0..RUNS {
+            let started = Instant::now();
+            let document = translate_value(source.clone(), target, &options)
+                .expect("内存入口")
+                .document;
+            let memory_path = dir.join(format!("memory-{run}.json"));
+            crate::core::convert::shared::FileService::write_json(&memory_path, &document)
+                .expect("写内存产物");
+            memory.push(started.elapsed().as_secs_f64() * 1000.0);
+
+            let started = Instant::now();
+            let converted =
+                translate_value_product(source.clone(), target, &options).expect("product 入口");
+            let product_path = dir.join(format!("product-{run}.json"));
+            converted
+                .write_to_file(&product_path)
+                .expect("写 product 产物");
+            product.push(started.elapsed().as_secs_f64() * 1000.0);
+
+            let started = Instant::now();
+            let out = translate_file(&path, target, options.clone()).expect("文件入口");
+            std::fs::remove_file(out.output).expect("删文件入口产物");
+            file.push(started.elapsed().as_secs_f64() * 1000.0);
+        }
+        let min = |values: Vec<f64>| values.into_iter().fold(f64::INFINITY, f64::min);
+        println!(
+            "[facade-bench] 内存物化 {:.0} ms / 内存 product {:.0} ms / 文件入口 {:.0} ms",
+            min(memory),
+            min(product),
+            min(file)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
