@@ -28,7 +28,7 @@
 | [`goals/convert-backlog.md`](goals/convert-backlog.md) | 转换域待做(§1 待决 / §2 待做 / §3 判不做 / §4 防线 / §5 `rounds/37` 之后 / §6 效果目标 / §7 性能盘点) |
 | [`goals/platform-backlog.md`](goals/platform-backlog.md) | 平台/接口域待做(§1 真机实测 / §2 已核验 / §3 待方案 / §4 P2 / §5 公开面 / §6 已核对并放弃的) |
 | [`goals/infra-backlog.md`](goals/infra-backlog.md) | 仓库结构/工程待做(§1 待决 + §1.1 `unused` 落地 / §2 小改 / §3 待核验 / §4 已决 / §5 文档 / §6 架构盘点) |
-| [`goals/optimization-plan.md`](goals/optimization-plan.md) | 2026-11-06 代码审计的整改目标:P0–P3 优先级、状态、验收与轮次指针 |
+| [`goals/optimization-plan.md`](goals/optimization-plan.md) | 2026-11-06 代码审计整改目标(已收口):状态与轮次指针 |
 
 ## 历史记录 [`rounds/`](rounds/)(过程)
 
