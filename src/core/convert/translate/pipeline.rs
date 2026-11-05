@@ -1120,6 +1120,9 @@ fn remap_warning(
         TranslateWarning::ReuploadedOnImport { path } => TranslateWarning::ReuploadedOnImport {
             path: remap_owned(map, path, unmatched),
         },
+        TranslateWarning::SourceReferenceFailed { error } => {
+            TranslateWarning::SourceReferenceFailed { error }
+        }
     }
 }
 

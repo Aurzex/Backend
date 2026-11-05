@@ -54,6 +54,8 @@ pub enum TranslateWarning {
     RemintedId { from: String },
     /// 官方导入时会重新上传资源、产物里的 url 由平台重写(我们保留源 url)——**不是损失**
     ReuploadedOnImport { path: String },
+    /// 源作品引用上传或写入失败(非损失;产物照常输出,仅缺少顶层 `source`)
+    SourceReferenceFailed { error: String },
 }
 
 impl TranslateWarning {
@@ -67,6 +69,7 @@ impl TranslateWarning {
             TranslateWarning::DroppedProperty { .. } => "丢弃实体属性",
             TranslateWarning::RemintedId { .. } => "重新生成 id",
             TranslateWarning::ReuploadedOnImport { .. } => "官方重传资源(非损失)",
+            TranslateWarning::SourceReferenceFailed { .. } => "源引用写入失败(非损失)",
         }
     }
 
@@ -79,6 +82,7 @@ impl TranslateWarning {
             | TranslateWarning::DroppedProperty { path } => path,
             TranslateWarning::RemintedId { from } => from,
             TranslateWarning::ReuploadedOnImport { path } => path,
+            TranslateWarning::SourceReferenceFailed { error } => error,
         }
     }
 }
@@ -115,7 +119,7 @@ impl TranslateReport {
         }
     }
 
-    pub(super) fn warn(&mut self, w: TranslateWarning) {
+    pub(in crate::core::convert) fn warn(&mut self, w: TranslateWarning) {
         self.warnings.push(w);
     }
 
@@ -136,7 +140,9 @@ impl TranslateReport {
         self.warnings.iter().any(|w| {
             !matches!(
                 w,
-                TranslateWarning::RemintedId { .. } | TranslateWarning::ReuploadedOnImport { .. }
+                TranslateWarning::RemintedId { .. }
+                    | TranslateWarning::ReuploadedOnImport { .. }
+                    | TranslateWarning::SourceReferenceFailed { .. }
             )
         })
     }
@@ -191,5 +197,22 @@ impl TranslateReport {
             }
         }
         s
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn source_reference_failure_is_not_lossy_and_is_reported() {
+        let mut report = TranslateReport::new(EditorType::Kitten4, TargetEditor::KittenN);
+        report.warn(TranslateWarning::SourceReferenceFailed {
+            error: "上传失败".into(),
+        });
+        assert!(!report.is_lossy(), "源引用失败不是不可逆损失");
+        let counts = report.counts();
+        let category = "源引用写入失败(非损失)";
+        assert_eq!(counts[category]["上传失败"], 1);
     }
 }

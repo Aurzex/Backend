@@ -25,8 +25,8 @@ pub use crate::core::convert::shared::{ConvertError, EditorType, WorkId};
 use crate::core::convert::decompile::{CodemaoDecompiler, DecompileOptions, DecompiledArtifact};
 use crate::core::convert::shared::FileService;
 use crate::core::convert::translate::{
-    TargetEditor, TranslateError, TranslateOptions, TranslateOutcome, detect_editor, product_path,
-    set_source_reference_in, translate_value,
+    TargetEditor, TranslateError, TranslateOptions, TranslateOutcome, TranslateWarning,
+    detect_editor, product_path, set_source_reference_in, translate_value,
 };
 use crate::core::convert::upload::DraftUpload;
 use crate::utils::filedata::PathConfig;
@@ -130,7 +130,7 @@ fn translate_work_in(
     };
 
     // 3. 转化(内存)
-    let converted = translate_value(source_document, target, &options)?;
+    let mut converted = translate_value(source_document, target, &options)?;
     let mut document = converted.document;
 
     // 4. 可选:把源作品文件引用写进产物(仅 Kitten → KN,官方「保留原件」行为)
@@ -142,7 +142,14 @@ fn translate_work_in(
             .and_then(|url| set_source_reference_in(&mut document, &url))
         {
             Ok(()) => log::debug!("已写入源作品引用"),
-            Err(error) => log::warn!("写入源作品引用失败(产物照常输出):{error}"),
+            Err(error) => {
+                log::warn!("写入源作品引用失败(产物照常输出):{error}");
+                converted
+                    .report
+                    .warn(TranslateWarning::SourceReferenceFailed {
+                        error: error.to_string(),
+                    });
+            }
         }
     }
 

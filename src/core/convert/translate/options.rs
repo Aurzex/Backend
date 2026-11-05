@@ -105,6 +105,9 @@ impl TranslateOptions {
     }
 
     /// 转换后上传并新建作品(默认关;开=替用户发布,需明确授权)
+    ///
+    /// 仅 `translate_work` / `translate_works` 执行网络上传;`translate_file` / `translate_value`
+    /// 不接触网络,忽略本开关。
     pub fn upload(mut self, on: bool) -> Self {
         self.upload = on;
         self
@@ -117,6 +120,9 @@ impl TranslateOptions {
     }
 
     /// 正向时保留源作品文件引用(对齐官方 `source` 字段行为,默认开)
+    ///
+    /// 仅 `translate_work` / `translate_works` 执行源文件上传;`translate_file` / `translate_value`
+    /// 不接触网络,忽略本开关。上传或引用注入失败会进 `TranslateReport`(非损失类告警)。
     ///
     /// ⚠️ **已知偏差(已文档化,不再改)**:上传给平台的那份"源文件"是**反编译重建的编辑版**,
     /// 不是源作品的原始字节 —— 原始 `.bcm*` 的字节在反编译阶段就被解开了,本库手上只有重建版。
