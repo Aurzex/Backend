@@ -16,7 +16,8 @@ use crate::api::whale::{
 };
 use crate::api::work::{NemoWorkType, WorkDataFetcher};
 use crate::utils::requests::{
-    BaseKey, CodeMaoClient, DEFAULT_PAGE_SIZE, Identity, MewError, PaginatedIter, PaginationMethod,
+    BaseKey, CodeMaoClient, DEFAULT_PAGE_SIZE, FETCH_ALL, Identity, MewError, PaginatedIter,
+    PaginationMethod,
 };
 
 // 评论流默认值与上限(各语义独立:用户上限/每作品抽样/分页元数据)
@@ -307,8 +308,10 @@ impl CommentQueryBuilder {
         comment_obj: &JsonObject,
     ) -> Vec<Result<JsonObject, DataQueryError>> {
         if source == CommentSource::Forum {
+            // 显式 FETCH_ALL:`None` 会被 `fetch_reply_comments_iter` 解释成默认页大小(10),
+            // 只返回首屏回复,与“所有回复对象”的契约不符。
             ForumDataFetcher::new_with_client(client.clone())
-                .fetch_reply_comments_iter(i32::try_from(comment_id).unwrap_or(0), None)
+                .fetch_reply_comments_iter(i32::try_from(comment_id).unwrap_or(0), Some(FETCH_ALL))
                 .map(|r| {
                     r.map_err(DataQueryError::from).and_then(|v| {
                         v.as_object()
@@ -984,8 +987,10 @@ impl DataQuery {
         user_id: i32,
         like_threshold: i32,
     ) -> Result<FanByLikesStatistics, DataQueryError> {
+        // 显式 FETCH_ALL:`None` 会被 `fetch_followers_iter` 解释成默认页大小(15),
+        // 统计会静默只覆盖首屏粉丝。
         let fans_stream = UserDataFetcher::new_with_client(self.client.clone())
-            .fetch_followers_iter(user_id, None);
+            .fetch_followers_iter(user_id, Some(FETCH_ALL));
 
         let mut total_fans = 0;
         // 第一段(串行,无 HTTP):按流序过滤出达标的粉丝,保留 (id, fan, total_likes) 三元组
