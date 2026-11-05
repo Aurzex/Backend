@@ -710,13 +710,33 @@ impl DataQuery {
         .into_iter()
         .collect();
 
-        let nemo_result = WorkDataFetcher::new_with_client(self.client.clone())
-            .fetch_new_works_nemo(NemoWorkType::Original, per_source_limit, None);
-        let web_result = WorkDataFetcher::new_with_client(self.client.clone()).fetch_new_works_web(
-            per_source_limit,
-            None,
-            true,
-        );
+        // 两个来源互不依赖,同一 RTT 内并发取回;结果顺序仍按 NEMO→Web。
+        let client = self.client.clone();
+        let (nemo_result, web_result) = thread::scope(|scope| {
+            let nemo_client = client.clone();
+            let web_client = client.clone();
+            let nemo = scope.spawn(move || {
+                WorkDataFetcher::new_with_client(nemo_client).fetch_new_works_nemo(
+                    NemoWorkType::Original,
+                    per_source_limit,
+                    None,
+                )
+            });
+            let web = scope.spawn(move || {
+                WorkDataFetcher::new_with_client(web_client).fetch_new_works_web(
+                    per_source_limit,
+                    None,
+                    true,
+                )
+            });
+            let nemo = nemo
+                .join()
+                .unwrap_or_else(|_| Err(MewError::InvalidArgument("NEMO 作品源线程 panic".into())));
+            let web = web
+                .join()
+                .unwrap_or_else(|_| Err(MewError::InvalidArgument("Web 作品源线程 panic".into())));
+            (nemo, web)
+        });
 
         let process_result = |res: Result<Value, MewError>, mapping: HashMap<&str, &str>| match res
         {
