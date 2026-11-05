@@ -64,7 +64,7 @@
 - `translate_work_in` 走 `translate_value`(产物 `ProductDocument` 被 `into_value()` 物化)再 `FileService::write_json`;文件入口 `translate_file`/`translate_text` 已有流式产物分支。
 - 正向从 `&mut Value` 生成 `ProductDocument` 的私有实现已存在,只缺一个 `pub(super)` 薄包装;反向与 NEMO 的 product 入口已有。`ProductDocument` 缺写顶层 `source` 的方法,而 `keep_source` 默认开启。
 - 既有 `convert_facade_bench` 的 590 ms 对 637 ms 不能隔离产物侧流式收益(旧流程含读回改写,内存流程含整份源解析);结论需要同一内存源文档的三腿 A/B 支撑。
-- 处置(2026-11-06,`48890df` / `6b9e5cc`):补 `translate_value_product` 与 `ProductDocument` 顶层字段写入入口,门面按方向选择 product;`product_value_equivalence_tests` 守三条方向的逐字节等价;`facade_product_bench` 记录三腿读数(测试档,只作方向判据,见 `../knowledge/convert-performance.md` §2bis.17)。发布档三腿 A/B 仍待补。
+- 处置(2026-11-06,`48890df` / `6b9e5cc`):补 `translate_value_product` 与 `ProductDocument` 顶层字段写入入口,门面按方向选择 product;`product_value_equivalence_tests` 守三条方向的逐字节等价;`facade_product_bench` 记录三腿读数(`bench_perf` 绑核复跑:内存 product 376–379 ms,内存物化 456–470 ms,约 1.20–1.30 倍;见 `../knowledge/convert-performance.md` §2bis.17)。
 
 ### 3.2 NEMO 内存形态整份深拷贝
 
