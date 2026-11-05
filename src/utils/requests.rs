@@ -1564,11 +1564,11 @@ impl PaginatedIter {
 
     /// 获取下一个元素,内部惰性初始化并自动翻页
     fn next_item(&mut self) -> Option<MewResult<Value>> {
-        // 首次调用时自动初始化
+        // 首次调用时自动初始化。初始化失败不置 Finished:与后续页错误一致,
+        // 下一次 next() 会重试第一页;调用方仍可据返回值决定是否继续。
         if matches!(self.state, IterState::Uninit)
             && let Err(e) = self.initialize()
         {
-            self.state = IterState::Finished;
             return Some(Err(e));
         }
 
@@ -2227,6 +2227,43 @@ pub(crate) fn send_checked(builder: MewRequestBuilder) -> MewResult<MewResponse>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 首屏请求的瞬时错误必须可重试:与后续页错误一致,`next()` 再次调用会重试第一页。
+    #[test]
+    fn first_page_error_is_retryable() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("建本地 HTTP 服务");
+        let address = listener.local_addr().expect("取本地地址");
+        let server = std::thread::spawn(move || {
+            for attempt in 0..2 {
+                let (mut stream, _) = listener.accept().expect("接受连接");
+                let mut request = [0_u8; 4096];
+                let _ = stream.read(&mut request);
+                let (status, body) = if attempt == 0 {
+                    ("500 Internal Server Error", "")
+                } else {
+                    ("200 OK", r#"{"total":1,"items":[{"id":1}]}"#)
+                };
+                let response = format!(
+                    "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                stream.write_all(response.as_bytes()).expect("写响应");
+            }
+        });
+
+        let client = CodeMaoClient::new_independent(ClientConfig::default());
+        let mut iter = client
+            .build_paginated(format!("http://{address}/page"))
+            .with_limit(10);
+        let first = iter.next().expect("首屏应返回一次错误");
+        assert!(first.is_err(), "首屏应失败:{first:?}");
+        let second = iter.next().expect("首屏应可重试并返回条目");
+        assert_eq!(second.expect("重试后应成功")["id"], 1);
+        server.join().expect("本地服务线程");
+    }
 
     /// 请求级超时必须真的落到 `RequestSpec`(A1:上传大作品靠它放宽)
     #[test]
