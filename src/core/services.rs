@@ -106,11 +106,52 @@ impl FileProcessor {
         channel: UploadChannel,
         max_size_bytes: u64,
     ) -> Result<HashMap<PathBuf, String>, ProcessorError> {
-        let mut results = HashMap::new();
-        let mut cb = |entry: fs::DirEntry| {
+        let mut files = Vec::new();
+        let mut collect = |entry: fs::DirEntry| {
             if entry.file_type().is_ok_and(|ft| ft.is_file()) {
-                let path = entry.path();
-                match self.handle_file_upload(path.as_path(), save_path, channel, max_size_bytes) {
+                files.push(entry.path());
+            }
+            Ok(())
+        };
+        visit_dir(dir_path, &mut collect)?;
+
+        // 目录上传是 N 个独立请求:按固定块并发,线程数不随文件数增长。
+        const UPLOAD_BATCH: usize = 8;
+        let mut results = HashMap::new();
+        for batch in files.chunks(UPLOAD_BATCH) {
+            let batch_results: Vec<(PathBuf, Result<String, ProcessorError>)> =
+                std::thread::scope(|scope| {
+                    let handles: Vec<_> = batch
+                        .iter()
+                        .map(|path| {
+                            let worker_path = path.clone();
+                            let fallback_path = path.clone();
+                            let handle = scope.spawn(move || {
+                                let result = self.handle_file_upload(
+                                    &worker_path,
+                                    save_path,
+                                    channel,
+                                    max_size_bytes,
+                                );
+                                (worker_path, result)
+                            });
+                            (fallback_path, handle)
+                        })
+                        .collect();
+                    handles
+                        .into_iter()
+                        .map(|(fallback, handle)| {
+                            handle.join().unwrap_or_else(|_| {
+                                (
+                                    fallback,
+                                    Err(ProcessorError::Processing("上传线程 panic".into())),
+                                )
+                            })
+                        })
+                        .collect()
+                });
+            for (path, result) in batch_results {
+                match result {
                     Ok(url) => {
                         results.insert(path, url);
                     }
@@ -119,9 +160,7 @@ impl FileProcessor {
                     }
                 }
             }
-            Ok(())
-        };
-        visit_dir(dir_path, &mut cb)?;
+        }
         Ok(results)
     }
 }
