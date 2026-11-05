@@ -205,13 +205,13 @@ pub struct RankingData {
 }
 
 // 回调类型别名
-type ChangeCallback = Box<dyn Fn(&CloudValue, &CloudValue, &str) + Send + Sync>;
-type ListChangeCallback = Box<dyn Fn(&[CloudValue], &[CloudValue], &str) + Send + Sync>;
-type OperationCallback = Box<dyn Fn(&str, &[CloudValue]) + Send + Sync>;
-type RankingCallback = Box<dyn Fn(RankingData) + Send + Sync>;
-type ReadyCallback = Box<dyn Fn() + Send + Sync>;
-type OnlineUsersCallback = Box<dyn Fn(i64, i64) + Send + Sync>;
-type ConnectionCallback = Box<dyn Fn(ConnectionEvent) + Send + Sync>;
+type ChangeCallback = Arc<dyn Fn(&CloudValue, &CloudValue, &str) + Send + Sync>;
+type ListChangeCallback = Arc<dyn Fn(&[CloudValue], &[CloudValue], &str) + Send + Sync>;
+type OperationCallback = Arc<dyn Fn(&str, &[CloudValue]) + Send + Sync>;
+type RankingCallback = Arc<dyn Fn(RankingData) + Send + Sync>;
+type ReadyCallback = Arc<dyn Fn() + Send + Sync>;
+type OnlineUsersCallback = Arc<dyn Fn(i64, i64) + Send + Sync>;
+type ConnectionCallback = Arc<dyn Fn(ConnectionEvent) + Send + Sync>;
 
 // 命令模式 + 工厂
 
@@ -958,7 +958,7 @@ impl CloudConnection {
             .lock()
             .unwrap()
             .data_ready
-            .add(Box::new(cb))
+            .add(Arc::new(cb))
     }
 
     /// 注册在线用户数变更回调(旧值,新值)
@@ -973,7 +973,7 @@ impl CloudConnection {
             .lock()
             .unwrap()
             .online_users
-            .add(Box::new(cb))
+            .add(Arc::new(cb))
     }
 
     /// 注册排行榜数据接收回调
@@ -983,7 +983,7 @@ impl CloudConnection {
         &self,
         cb: impl Fn(RankingData) + Send + Sync + 'static,
     ) -> CallbackHandle {
-        self.inner.events.lock().unwrap().ranking.add(Box::new(cb))
+        self.inner.events.lock().unwrap().ranking.add(Arc::new(cb))
     }
 
     /// 注册连接生命周期事件回调
@@ -999,7 +999,7 @@ impl CloudConnection {
             .lock()
             .unwrap()
             .connection
-            .add(Box::new(cb))
+            .add(Arc::new(cb))
     }
 
     /// 按句柄移除事件回调
@@ -1277,7 +1277,7 @@ impl CloudVariable {
             .map(|v| {
                 let id = v.next_cb_id;
                 v.next_cb_id += 1;
-                v.callbacks.push((id, Box::new(cb)));
+                v.callbacks.push((id, Arc::new(cb)));
                 CallbackHandle(id)
             })
     }
@@ -1310,9 +1310,22 @@ impl CloudVariable {
             .map(|v| {
                 let id = v.next_cb_id;
                 v.next_cb_id += 1;
-                v.ranking_callbacks.push((id, Box::new(cb)));
+                v.ranking_callbacks.push((id, Arc::new(cb)));
                 CallbackHandle(id)
             })
+    }
+
+    /// 移除排行榜数据回调
+    pub fn remove_ranking_callback(&self, handle: CallbackHandle) {
+        if let Some(v) = self
+            .inner
+            .state
+            .lock()
+            .unwrap()
+            .variable_mut(self.kind, &self.name)
+        {
+            v.ranking_callbacks.retain(|(id, _)| *id != handle.0);
+        }
     }
 }
 
@@ -1485,7 +1498,7 @@ impl CloudList {
             .map(|l| {
                 let id = l.next_cb_id;
                 l.next_cb_id += 1;
-                l.change_callbacks.push((id, Box::new(cb)));
+                l.change_callbacks.push((id, Arc::new(cb)));
                 CallbackHandle(id)
             })
     }
@@ -1509,7 +1522,7 @@ impl CloudList {
                 l.operation_callbacks
                     .entry(operation.to_string())
                     .or_default()
-                    .push((id, Box::new(cb)));
+                    .push((id, Arc::new(cb)));
                 CallbackHandle(id)
             })
     }
@@ -1748,23 +1761,17 @@ impl CloudInner {
         source: ChangeSource,
     ) {
         // 操作回调
-        let op_callbacks = {
-            let mut store = self.state.lock().unwrap();
-            store
-                .list_mut(cvid)
-                .and_then(|l| l.operation_callbacks.get_mut(&outcome.op))
-                .map(std::mem::take)
-        };
+        let op_callbacks = self
+            .state
+            .lock()
+            .unwrap()
+            .list_mut(cvid)
+            .and_then(|l| l.operation_callbacks.get(&outcome.op).cloned());
         if let Some(callbacks) = op_callbacks {
             for (_, cb) in &callbacks {
                 if let Err(e) = catch_unwind(AssertUnwindSafe(|| cb(&outcome.op, &outcome.args))) {
                     warn!("列表操作回调 panic: {e:?}");
                 }
-            }
-            if let Some(l) = self.state.lock().unwrap().list_mut(cvid)
-                && let Some(entry) = l.operation_callbacks.get_mut(&outcome.op)
-            {
-                entry.extend(callbacks);
             }
         }
         // 整表变更回调:仅在存在变更回调时才克隆当前表,避免无回调场景整表拷贝
@@ -1775,12 +1782,12 @@ impl CloudInner {
                 .filter(|l| !l.change_callbacks.is_empty())
                 .map(|l| l.items.clone())
         };
-        let change_callbacks = {
-            let mut store = self.state.lock().unwrap();
-            store
-                .list_mut(cvid)
-                .map(|l| std::mem::take(&mut l.change_callbacks))
-        };
+        let change_callbacks = self
+            .state
+            .lock()
+            .unwrap()
+            .list_mut(cvid)
+            .map(|l| l.change_callbacks.clone());
         if let Some(callbacks) = change_callbacks {
             for (_, cb) in &callbacks {
                 if let Err(e) = catch_unwind(AssertUnwindSafe(|| {
@@ -1790,9 +1797,6 @@ impl CloudInner {
                 })) {
                     warn!("列表变更回调 panic: {e:?}");
                 }
-            }
-            if let Some(l) = self.state.lock().unwrap().list_mut(cvid) {
-                l.change_callbacks.extend(callbacks);
             }
         }
     }
@@ -1843,21 +1847,18 @@ fn emit_variable_change(
     new: &CloudValue,
     source: ChangeSource,
 ) {
-    let callbacks = {
-        let mut store = inner.state.lock().unwrap();
-        match store.variable_mut(kind, key) {
-            Some(v) => std::mem::take(&mut v.callbacks),
-            None => return,
-        }
-    };
+    let callbacks = inner
+        .state
+        .lock()
+        .unwrap()
+        .variable_mut(kind, key)
+        .map(|v| v.callbacks.clone());
+    let Some(callbacks) = callbacks else { return };
     let source_str = source.as_str();
     for (_, cb) in &callbacks {
         if let Err(e) = catch_unwind(AssertUnwindSafe(|| cb(old, new, source_str))) {
             warn!("变量变更回调 panic: {e:?}");
         }
-    }
-    if let Some(v) = inner.state.lock().unwrap().variable_mut(kind, key) {
-        v.callbacks.extend(callbacks);
     }
 }
 
@@ -1968,22 +1969,12 @@ fn handle_all_data(inner: &Arc<CloudInner>, payload: &Value) -> Result<()> {
     inner
         .notify
         .notify_with(|| inner.data_ready.store(true, Ordering::Release));
-    let callbacks = {
-        let mut events = inner.events.lock().unwrap();
-        events.data_ready.take_all()
-    };
+    let callbacks = inner.events.lock().unwrap().data_ready.snapshot();
     for (_, cb) in &callbacks {
-        if let Err(e) = catch_unwind(AssertUnwindSafe(cb)) {
+        if let Err(e) = catch_unwind(AssertUnwindSafe(|| cb())) {
             warn!("数据就绪回调 panic: {e:?}");
         }
     }
-    inner
-        .events
-        .lock()
-        .unwrap()
-        .data_ready
-        .items
-        .extend(callbacks);
     let store = inner.state.lock().unwrap();
     info!(
         "数据准备完成: 私有 {} 公有 {} 列表 {}",
@@ -2132,44 +2123,26 @@ fn handle_ranking(inner: &Arc<CloudInner>, payload: &Value) -> Result<()> {
         warn!("排行榜 items 不是列表");
     }
     // 变量级回调
-    let callbacks = {
-        let mut store = inner.state.lock().unwrap();
-        store
-            .variable_mut(VarKind::Private, &cvid)
-            .map(|v| std::mem::take(&mut v.ranking_callbacks))
-    };
+    let callbacks = inner
+        .state
+        .lock()
+        .unwrap()
+        .variable_mut(VarKind::Private, &cvid)
+        .map(|v| v.ranking_callbacks.clone());
     if let Some(callbacks) = callbacks {
         for (_, cb) in &callbacks {
             if let Err(e) = catch_unwind(AssertUnwindSafe(|| cb(ranking.clone()))) {
                 warn!("排行榜回调 panic: {e:?}");
             }
         }
-        if let Some(v) = inner
-            .state
-            .lock()
-            .unwrap()
-            .variable_mut(VarKind::Private, &cvid)
-        {
-            v.ranking_callbacks.extend(callbacks);
-        }
     }
     // 连接级事件
-    let event_callbacks = {
-        let mut events = inner.events.lock().unwrap();
-        events.ranking.take_all()
-    };
+    let event_callbacks = inner.events.lock().unwrap().ranking.snapshot();
     for (_, cb) in &event_callbacks {
         if let Err(e) = catch_unwind(AssertUnwindSafe(|| cb(ranking.clone()))) {
             warn!("排行榜事件回调 panic: {e:?}");
         }
     }
-    inner
-        .events
-        .lock()
-        .unwrap()
-        .ranking
-        .items
-        .extend(event_callbacks);
     Ok(())
 }
 
@@ -2270,41 +2243,21 @@ fn send_inner_text(inner: &Arc<CloudInner>, payload: &str) -> Result<()> {
 }
 
 fn emit_online_users_change(inner: &Arc<CloudInner>, old: i64, new: i64) {
-    let callbacks = {
-        let mut events = inner.events.lock().unwrap();
-        events.online_users.take_all()
-    };
+    let callbacks = inner.events.lock().unwrap().online_users.snapshot();
     for (_, cb) in &callbacks {
         if let Err(e) = catch_unwind(AssertUnwindSafe(|| cb(old, new))) {
             warn!("在线用户回调 panic: {e:?}");
         }
     }
-    inner
-        .events
-        .lock()
-        .unwrap()
-        .online_users
-        .items
-        .extend(callbacks);
 }
 
 fn emit_connection_event(inner: &Arc<CloudInner>, event: ConnectionEvent) {
-    let callbacks = {
-        let mut events = inner.events.lock().unwrap();
-        events.connection.take_all()
-    };
+    let callbacks = inner.events.lock().unwrap().connection.snapshot();
     for (_, cb) in &callbacks {
         if let Err(e) = catch_unwind(AssertUnwindSafe(|| cb(event.clone()))) {
             warn!("连接事件回调 panic: {e:?}");
         }
     }
-    inner
-        .events
-        .lock()
-        .unwrap()
-        .connection
-        .items
-        .extend(callbacks);
 }
 
 // 连接建立与读循环

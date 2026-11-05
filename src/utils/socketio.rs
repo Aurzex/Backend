@@ -4,6 +4,7 @@
 //! 流类型别名、Socket.IO 帧解析、回调存储、条件变量等待、日志截断与读超时设置。
 
 use std::net::TcpStream;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -85,16 +86,28 @@ pub(crate) fn set_stream_read_timeout(
     }
 }
 
-/// 泛型回调存储:支持按句柄增删,触发时整体取出
+/// 进程级回调句柄分配器。
+///
+/// 句柄必须跨 store 唯一:`CloudConnection::remove_callback` 按句柄清理四类事件 store,
+/// 若各 store 各自从 0 编号,删除一个回调会误删其它 store 中同号的回调。
+static NEXT_CALLBACK_ID: AtomicUsize = AtomicUsize::new(0);
+
+fn next_callback_id() -> usize {
+    NEXT_CALLBACK_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+/// 泛型回调存储:支持按句柄增删。
+///
+/// 分发时用 [`Self::snapshot`] 克隆一份回调引用,而不是把 store 清空后再放回;
+/// 这样回调执行期间调用 `remove_*` 会立即从 store 删除,不会被放回复活。
+/// 当前所有回调类型都存成 `Arc<dyn Fn ...>`(`T: Clone`)。
 pub(crate) struct CallbackStore<T> {
-    next_id: usize,
     pub(crate) items: Vec<(usize, T)>,
 }
 
 impl<T> std::fmt::Debug for CallbackStore<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CallbackStore")
-            .field("next_id", &self.next_id)
             .field("count", &self.items.len())
             .finish()
     }
@@ -102,17 +115,13 @@ impl<T> std::fmt::Debug for CallbackStore<T> {
 
 impl<T> Default for CallbackStore<T> {
     fn default() -> Self {
-        Self {
-            next_id: 0,
-            items: Vec::new(),
-        }
+        Self { items: Vec::new() }
     }
 }
 
 impl<T> CallbackStore<T> {
     pub(crate) fn add(&mut self, cb: T) -> CallbackHandle {
-        let id = self.next_id;
-        self.next_id += 1;
+        let id = next_callback_id();
         self.items.push((id, cb));
         CallbackHandle(id)
     }
@@ -121,9 +130,12 @@ impl<T> CallbackStore<T> {
         self.items.retain(|(id, _)| *id != handle.0);
     }
 
-    /// 取出全部回调(锁外执行后由调用方放回)
-    pub(crate) fn take_all(&mut self) -> Vec<(usize, T)> {
-        std::mem::take(&mut self.items)
+    /// 锁内快照;调用方在锁外执行回调。回调执行期间的新增/移除以 store 当前状态为准。
+    pub(crate) fn snapshot(&self) -> Vec<(usize, T)>
+    where
+        T: Clone,
+    {
+        self.items.clone()
     }
 }
 
@@ -208,5 +220,40 @@ pub enum SocketError {
 impl From<tungstenite::Error> for SocketError {
     fn from(err: tungstenite::Error) -> Self {
         SocketError::WebSocket(Box::new(err))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    type TestCallback = Arc<dyn Fn() + Send + Sync>;
+
+    fn noop() -> TestCallback {
+        Arc::new(|| {})
+    }
+
+    /// 句柄跨 store 唯一:`CloudConnection::remove_callback` 按句柄清理四类事件 store,
+    /// 各 store 若各自从 0 编号会误删同号回调。
+    #[test]
+    fn callback_ids_are_unique_across_stores() {
+        let mut a: CallbackStore<TestCallback> = CallbackStore::default();
+        let mut b: CallbackStore<TestCallback> = CallbackStore::default();
+        let ha = a.add(noop());
+        let hb = b.add(noop());
+        assert_ne!(ha, hb);
+    }
+
+    /// 分发快照不清空 store;执行期间移除后,后续快照不再包含该回调。
+    #[test]
+    fn snapshot_keeps_store_and_remove_during_dispatch_sticks() {
+        let mut store: CallbackStore<TestCallback> = CallbackStore::default();
+        let handle = store.add(noop());
+        let in_flight = store.snapshot();
+        assert_eq!(in_flight.len(), 1);
+        assert_eq!(store.snapshot().len(), 1, "快照不能清空 store");
+        store.remove(handle);
+        assert!(store.snapshot().is_empty(), "移除后不能被快照复活");
     }
 }

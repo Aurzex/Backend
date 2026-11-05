@@ -106,7 +106,7 @@ pub struct UserInfo {
 }
 
 // 回调类型别名
-type StreamCallback = Box<dyn Fn(&str, ChatEventType) + Send + Sync>;
+type StreamCallback = Arc<dyn Fn(&str, ChatEventType) + Send + Sync>;
 
 // 连接核心
 
@@ -360,7 +360,7 @@ impl ChatClient {
         &self,
         cb: impl Fn(&str, ChatEventType) + Send + Sync + 'static,
     ) -> CallbackHandle {
-        self.inner.callbacks.lock().unwrap().add(Box::new(cb))
+        self.inner.callbacks.lock().unwrap().add(Arc::new(cb))
     }
 
     /// 移除流式回复回调
@@ -664,16 +664,14 @@ fn dispatch_event(inner: &Arc<ChatInner>, name: &str, payload: &Value) {
 
 /// 触发流式回调
 fn emit_stream(inner: &Arc<ChatInner>, content: &str, event: ChatEventType) {
-    let callbacks = {
-        let mut store = inner.callbacks.lock().unwrap();
-        store.take_all()
-    };
+    // 快照后锁外执行:回调内部调用 remove_stream_callback 会立即从 store 删除,
+    // 不会在分发结束时被放回复活。
+    let callbacks = inner.callbacks.lock().unwrap().snapshot();
     for (_, cb) in &callbacks {
         if let Err(e) = catch_unwind(AssertUnwindSafe(|| cb(content, event))) {
             warn!("流式回调 panic: {e:?}");
         }
     }
-    inner.callbacks.lock().unwrap().items.extend(callbacks);
 }
 
 /// 在 `ChatInner` 上发送事件(供读线程内使用)
