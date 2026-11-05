@@ -1277,8 +1277,6 @@ pub struct PaginationConfig {
     pub offset_key: Option<String>,
     /// 响应中表示"实际每页大小"的 JSON 键(可选)
     pub response_amount_key: Option<String>,
-    /// 响应中表示"偏移/页码"的 JSON 键(可选)
-    pub response_offset_key: Option<String>,
 }
 
 impl Default for PaginationConfig {
@@ -1288,7 +1286,6 @@ impl Default for PaginationConfig {
             amount_key: Some("limit".into()),
             offset_key: Some("offset".into()),
             response_amount_key: None,
-            response_offset_key: None,
         }
     }
 }
@@ -1443,12 +1440,6 @@ impl PaginatedIter {
         self.config.response_amount_key = Some(key.into());
         self
     }
-    /// 设置响应中"偏移/页码"的 JSON 键
-    pub fn with_response_offset_key(mut self, key: impl Into<String>) -> Self {
-        self.config.response_offset_key = Some(key.into());
-        self
-    }
-
     /// 设置每页大小
     pub fn with_page_size(mut self, size: usize) -> Self {
         self.config.page_size = size;
