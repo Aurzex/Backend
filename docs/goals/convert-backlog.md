@@ -154,8 +154,8 @@
     验证:改后连跑基准 + `cargo test --lib`,临时目录零残留(`ls -d /tmp/backend-convert-*`)。
     例外:`tests/convert_live.rs` 的 `backend-convert-live-*`(固定名、真机测试的调试工作区)不清理,保持原样。
 
-15. **待方案**:convert 域的抽象与职责提取 —— **方案在案**:`../rounds/53-convert-abstraction-plan.md`(2026-10-07,先记录、未动代码)。范围与现状读数:
-    - `translate/model.rs`:**总 3154 行**(本体 ≈2285 + 内联测试 869,7 个测试模块)—— 本体在软上限内,但**总行数 >3000 而测试内联**(`repo-conventions` §5 要求此时外移为 `*_tests.rs`),且 `mod streamed_writer_tests` 夹在代码中间(rounds/39 W12b 的回退);职责上可分"树模型 / 源侧解析 / 编码写出 / 程序集"四类;
+15. **部分完成(2026-11-07,方案 A 的 A1)**:convert 域的抽象与职责提取 —— **方案在案**:`../rounds/53-convert-abstraction-plan.md`(2026-10-07,先记录、未动代码)。方案 A1 已落地:`model.rs` 的 7 个测试模块外移到 `model/model_tests.rs`(3204 -> 2331 行,测试路径改为 `model::model_tests::*`,读数与验证见 `../rounds/57`);A2(再拆 3 个文件)判暂不做(本体已回到 2500 行软上限内,只剩可读性收益),用文件头五区注释替代。**B/D/E/F 仍未做**。范围与现状读数:
+    - `translate/model.rs`:**A1 已完成(2026-11-07,`../rounds/57`)**:本体 2331 行,7 个测试模块外移到 `model/model_tests.rs`(880 行),`mod streamed_writer_tests` 不再夹在代码中间;文件头按"树模型 / id / 源侧解析 / 编码写出 / 程序集"五区标注。A2(再拆 3 个文件)判暂不做 —— 本体已回到 2500 行软上限内,只剩可读性收益;
     - `translate/nemo.rs::assemble_nemo`(**657 行**,域内最长的单个函数):其前任 `convert_nemo_document`(rounds/39 记 ≈510 行)的"暂不做"理由("NEMO 无字节门")与顺序条件(W6 → W7)**都已消失**,需按"有门就不难回归"的前提重评(拆法见方案 B);
     - 方案另含:测试侧 3 份重复的 `sha256_hex` 抽 `tests/common`、`WorkId` 试点(B7 的收益量法)、`translate_work` 按骨架读的分层归属。
     - 出处:`../rounds/53-convert-abstraction-plan.md`、`../knowledge/errata.md`「转换域体量与拆分记录的两处漂移(2026-10-07)」;读数由 2026-10-07 实测(`wc -l` + 按"`#[cfg(test)]` + `mod` + 顶格 `}`"界定测试块)。
