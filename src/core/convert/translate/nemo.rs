@@ -100,662 +100,795 @@ pub(super) fn convert_nemo_document_product(
 ///
 /// `placements` 是块表的去向:`None` = 内存路径(每处当场编码成 `Value`),`Some` = 文件路径
 /// (只登记挂点,树按值搬出)。两条路径共用本函数,差别只在 [`put_block_table`]。
+/// 装配 NEMO → KN 的整份文档(除块表外)
+///
+/// `placements` 是块表的去向:`None` = 内存路径(每处当场编码成 `Value`),`Some` = 文件路径
+/// (只登记挂点,树按值搬出)。两条路径共用同一份装配,差别只在 [`put_block_table`]。
 fn assemble_nemo(
     source: &Value,
     options: &TranslateOptions,
     report: &mut TranslateReport,
-    mut placements: Option<&mut Vec<BlockPlacement>>,
+    placements: Option<&mut Vec<BlockPlacement>>,
 ) -> Result<Map<String, Value>, TranslateError> {
-    let product = placements.is_some();
-    let (qc, yc) = migration_flags(options.source_version_ref());
-    let deterministic = options.ids_deterministic();
-    let now_ms = if deterministic {
-        0
-    } else {
-        super::assembly::current_epoch_ms()
-    };
-    let mut ids = IdSource::new(deterministic);
+    NemoAssembly::new(source, options, report, placements).assemble()
+}
 
-    // ── 骨架(官方 `h`)
-    let mut document = Map::new();
-    document.insert(
-        "scenes".to_string(),
-        json!({ "scenesDict": {}, "currentSceneId": "", "sortList": [""] }),
-    );
-    document.insert("styles".to_string(), json!({ "stylesDict": {} }));
-    document.insert("version".to_string(), Value::String(String::new()));
-    document.insert(
-        "stageSize".to_string(),
-        json!({ "width": PORTRAIT_WIDTH, "height": PORTRAIT_HEIGHT }),
-    );
-    document.insert("variables".to_string(), json!({ "variablesDict": {} }));
-    document.insert("broadcasts".to_string(), json!({ "broadcastsDict": {} }));
-    document.insert("actors".to_string(), json!({ "actorsDict": {} }));
-    document.insert(
-        "audios".to_string(),
-        json!({ "audiosDict": {}, "sortList": [], "currentAudioId": "" }),
-    );
-    document.insert("procedures".to_string(), json!({ "proceduresDict": {} }));
-    document.insert("previewUrl".to_string(), Value::String(String::new()));
+/// 装配阶段对象:持状态,方法按官方步骤顺序驱阶段(rounds/58)。
+///
+/// 纯提取:每个方法的函数体就是原 `assemble_nemo` 里对应的那一段,顺序只在
+/// [`assemble`](Self::assemble) 一处写出。
+struct NemoAssembly<'a> {
+    source: &'a Value,
+    options: &'a TranslateOptions,
+    report: &'a mut TranslateReport,
+    placements: Option<&'a mut Vec<BlockPlacement>>,
+    qc: bool,
+    yc: bool,
+    product: bool,
+    now_ms: u128,
+    document: Map<String, Value>,
+    ids: IdSource,
+    ctx: NemoParseContext,
+    stage_width: Option<f64>,
+    stage_height: Option<f64>,
+}
 
-    // ── 解析上下文(广播字典:官方 `getBroadcastMessage` 用)
-    let mut ctx = NemoParseContext::default();
-    if let Some(dict) = source
-        .pointer("/broadcast/broadcast_dict")
-        .and_then(Value::as_object)
-    {
-        ctx.has_broadcasts = !dict.is_empty();
-        let mut names: BTreeMap<String, String> = BTreeMap::new();
-        for (id, entry) in dict {
-            let name = entry
-                .get("name")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string();
-            names.insert(id.clone(), name);
+impl<'a> NemoAssembly<'a> {
+    fn new(
+        source: &'a Value,
+        options: &'a TranslateOptions,
+        report: &'a mut TranslateReport,
+        placements: Option<&'a mut Vec<BlockPlacement>>,
+    ) -> Self {
+        let product = placements.is_some();
+        let (qc, yc) = migration_flags(options.source_version_ref());
+        let deterministic = options.ids_deterministic();
+        let now_ms = if deterministic {
+            0
+        } else {
+            super::assembly::current_epoch_ms()
+        };
+        let ids = IdSource::new(deterministic);
+
+        // ── 骨架(官方 `h`)
+        let mut document = Map::new();
+        document.insert(
+            "scenes".to_string(),
+            json!({ "scenesDict": {}, "currentSceneId": "", "sortList": [""] }),
+        );
+        document.insert("styles".to_string(), json!({ "stylesDict": {} }));
+        document.insert("version".to_string(), Value::String(String::new()));
+        document.insert(
+            "stageSize".to_string(),
+            json!({ "width": PORTRAIT_WIDTH, "height": PORTRAIT_HEIGHT }),
+        );
+        document.insert("variables".to_string(), json!({ "variablesDict": {} }));
+        document.insert("broadcasts".to_string(), json!({ "broadcastsDict": {} }));
+        document.insert("actors".to_string(), json!({ "actorsDict": {} }));
+        document.insert(
+            "audios".to_string(),
+            json!({ "audiosDict": {}, "sortList": [], "currentAudioId": "" }),
+        );
+        document.insert("procedures".to_string(), json!({ "proceduresDict": {} }));
+        document.insert("previewUrl".to_string(), Value::String(String::new()));
+
+        // ── 解析上下文(广播字典:官方 `getBroadcastMessage` 用)
+        let mut ctx = NemoParseContext::default();
+        if let Some(dict) = source
+            .pointer("/broadcast/broadcast_dict")
+            .and_then(Value::as_object)
+        {
+            ctx.has_broadcasts = !dict.is_empty();
+            let mut names: BTreeMap<String, String> = BTreeMap::new();
+            for (id, entry) in dict {
+                let name = entry
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                names.insert(id.clone(), name);
+            }
+            ctx.broadcast_names = Arc::new(names);
         }
-        ctx.broadcast_names = Arc::new(names);
-    }
-    let split_option_names = split_option_names(source);
+        let stage_width = source.pointer("/stage_size/width").and_then(Value::as_f64);
+        let stage_height = source.pointer("/stage_size/height").and_then(Value::as_f64);
 
-    // ── 程序集(官方第 3 步;必须在演员/场景之前,解析期查表要用)
-    if let Some(dict) = source.pointer("/procedures/procedure_dict") {
-        let parsed = nemo_parse_procedures(dict, &mut ctx, &mut ids, report);
-        let mut procedures = Map::new();
-        for procedure in parsed {
-            let mut entry = Map::new();
-            entry.insert("id".to_string(), Value::String(procedure.id.clone()));
-            entry.insert("name".to_string(), Value::String(procedure.name.clone()));
-            entry.insert(
-                "type".to_string(),
-                Value::String(if procedure.kind.is_empty() {
-                    PROCEDURE_NORMAL.to_string()
-                } else {
-                    procedure.kind.clone()
-                }),
-            );
-            entry.insert(
-                "params".to_string(),
-                Value::Array(
-                    procedure
-                        .params
-                        .iter()
-                        .map(|param| {
-                            json!({
-                                "id": param.id,
-                                "type": param.kind,
-                                "name": param.name,
-                                "parent_id": param.parent_id,
-                                "parent_type": param.parent_type,
+        Self {
+            source,
+            options,
+            report,
+            placements,
+            qc,
+            yc,
+            product,
+            now_ms,
+            document,
+            ids,
+            ctx,
+            stage_width,
+            stage_height,
+        }
+    }
+
+    /// 按官方步骤顺序驱阶段;顺序即代码形状。
+    fn assemble(mut self) -> Result<Map<String, Value>, TranslateError> {
+        self.assemble_procedures();
+        self.assemble_entities();
+        self.assemble_audios();
+        self.assemble_styles();
+        self.assemble_broadcasts();
+        self.assemble_variables();
+        self.apply_stage_size();
+        self.apply_timer();
+        self.apply_extension();
+        self.apply_project_name();
+        Ok(self.document)
+    }
+
+    fn assemble_procedures(&mut self) {
+        let source: &Value = self.source;
+        let document: &mut Map<String, Value> = &mut self.document;
+        let report: &mut TranslateReport = &mut *self.report;
+        let ids: &mut IdSource = &mut self.ids;
+        let ctx: &mut NemoParseContext = &mut self.ctx;
+        let mut placements: Option<&mut Vec<BlockPlacement>> = self.placements.as_deref_mut();
+
+        // ── 程序集(官方第 3 步;必须在演员/场景之前,解析期查表要用)
+        if let Some(dict) = source.pointer("/procedures/procedure_dict") {
+            let parsed = nemo_parse_procedures(dict, ctx, ids, report);
+            let mut procedures = Map::new();
+            for procedure in parsed {
+                let mut entry = Map::new();
+                entry.insert("id".to_string(), Value::String(procedure.id.clone()));
+                entry.insert("name".to_string(), Value::String(procedure.name.clone()));
+                entry.insert(
+                    "type".to_string(),
+                    Value::String(if procedure.kind.is_empty() {
+                        PROCEDURE_NORMAL.to_string()
+                    } else {
+                        procedure.kind.clone()
+                    }),
+                );
+                entry.insert(
+                    "params".to_string(),
+                    Value::Array(
+                        procedure
+                            .params
+                            .iter()
+                            .map(|param| {
+                                json!({
+                                    "id": param.id,
+                                    "type": param.kind,
+                                    "name": param.name,
+                                    "parent_id": param.parent_id,
+                                    "parent_type": param.parent_type,
+                                })
                             })
-                        })
+                            .collect(),
+                    ),
+                );
+                report.blocks_converted += procedure.tree.count();
+                put_block_table(
+                    &mut entry,
+                    &mut placements,
+                    BlockContainer::Procedures,
+                    &procedure.key,
+                    procedure.tree,
+                    report,
+                );
+                entry.insert(
+                    "workspaceScrollXy".to_string(),
+                    json!({ "x": WORKSPACE_SCROLL.0, "y": WORKSPACE_SCROLL.1 }),
+                );
+                procedures.insert(procedure.key, Value::Object(entry));
+            }
+            document.insert(
+                "procedures".to_string(),
+                json_obj([("proceduresDict", Value::Object(procedures))]),
+            );
+        } else {
+            document.insert("procedures".to_string(), json!({}));
+        }
+    }
+
+    fn assemble_entities(&mut self) {
+        let source: &Value = self.source;
+        let options: &TranslateOptions = self.options;
+        let document: &mut Map<String, Value> = &mut self.document;
+        let report: &mut TranslateReport = &mut *self.report;
+        let ids: &mut IdSource = &mut self.ids;
+        let ctx: &NemoParseContext = &self.ctx;
+        let mut placements: Option<&mut Vec<BlockPlacement>> = self.placements.as_deref_mut();
+        let product = self.product;
+        let qc = self.qc;
+        let yc = self.yc;
+        let split_option_names = split_option_names(source);
+
+        // ── 演员 + 场景(官方第 4 步;先演员后场景)= 实体级并行的工作项
+        //
+        // 每个工作项只带这个实体需要的输入:源对象(读 `blocksXML`、装配期按它克隆条目)、由 id 与造型
+        // 算出的 `NemoEntity`、是否场景,以及装箱权重(= `blocksXML` 字节数:单实体工作量与它成正比,
+        // 负载分布见 `docs/knowledge/convert-performance.md` §2bis.11)。
+        struct NemoEntityItem<'a> {
+            id: &'a str,
+            source: &'a Map<String, Value>,
+            entity: NemoEntity,
+            is_scene: bool,
+            weight: usize,
+        }
+
+        let scenes_order = scenes_order(source);
+        let mut items: Vec<NemoEntityItem<'_>> = Vec::new();
+        for (is_scene, container) in [
+            (
+                false,
+                source
+                    .pointer("/actors/actors_dict")
+                    .and_then(Value::as_object),
+            ),
+            (
+                true,
+                source
+                    .pointer("/scenes/scenes_dict")
+                    .and_then(Value::as_object),
+            ),
+        ] {
+            let Some(dict) = container else { continue };
+            for (id, value) in dict {
+                let Some(object) = value.as_object() else {
+                    continue;
+                };
+                items.push(NemoEntityItem {
+                    id,
+                    source: object,
+                    entity: NemoEntity {
+                        id: id.clone(),
+                        styles: style_ids_value(object),
+                    },
+                    is_scene,
+                    weight: object
+                        .get("blocksXML")
+                        .and_then(Value::as_str)
+                        .map_or(0, str::len),
+                });
+            }
+        }
+        let weights: Vec<usize> = items.iter().map(|item| item.weight).collect();
+        // NEMO 的权重是 `blocksXML` 字节数
+        let workers = super::pipeline::entity_workers(
+            options.entity_concurrency_plan(),
+            items.len(),
+            weights.iter().sum(),
+            super::pipeline::WeightUnit::Bytes,
+        );
+        // 可观测事实:本次转换真的开了几个实体级线程(供基准/单测挡空门,见 `TranslateReport`)
+        report.entity_workers = workers;
+
+        // 实体阶段开始时上下文里"残留"的形参与演员:官方只置不清(见 `NemoParseContext` 的文档),
+        // 并行后每个工作项各持一份上下文,因此先照原值播种,行为与串行逐项跑一致。
+        let carry_actor = ctx.current_actor.clone();
+        let carry_params = ctx.current_params.clone();
+
+        // ── 阶段 1(并行):前置改写 + 解析 + 语义映射(铸造**临时 id**)
+        struct NemoParsed<'a> {
+            item: NemoEntityItem<'a>,
+            tree: super::model::BlockTree,
+            migrated_xml: Option<String>,
+            log: Vec<(String, MintKind)>,
+            report: TranslateReport,
+        }
+        let parsed = super::pipeline::run_items(items, &weights, workers, |index, item| {
+            let mut ids = IdSource::recording(index);
+            let mut local = TranslateReport::new(EditorType::Nemo, TargetEditor::KittenN);
+            // 程序集表与广播字典是 `Arc`:每项只加一次引用计数,不复制表本身
+            let mut ctx = NemoParseContext {
+                procedures: ctx.procedures.clone(),
+                broadcast_names: ctx.broadcast_names.clone(),
+                has_broadcasts: ctx.has_broadcasts,
+                current_actor: carry_actor.clone(),
+                current_params: carry_params.clone(),
+            };
+            let (tree, migrated_xml) = parse_entity(
+                item.source,
+                NemoSubject::Entity(&item.entity),
+                &mut ctx,
+                &mut ids,
+                &mut local,
+                &split_option_names,
+                &scenes_order,
+                qc,
+                yc,
+            );
+            NemoParsed {
+                item,
+                tree,
+                migrated_xml,
+                log: ids.into_log(),
+                report: local,
+            }
+        });
+
+        // ── 阶段 2(串行):临时 id → 最终 id
+        //
+        // 铸造顺序 = 项序(程序集的 id 已在它那一步用真源铸好,排在前面)⇒ 与串行实现逐次铸造一一对应。
+        let mut mints = super::pipeline::IdRemap::new();
+        for parsed_item in &parsed {
+            for (temp, kind) in &parsed_item.log {
+                let previous = mints.insert(temp.clone(), kind.mint(ids));
+                // 临时 id 撞车 = 记录模式给了两个不同的铸造点同一个名字(槽位没错开),表会被后来的
+                // 覆盖,产物 id 静默错位。调试构建直接抓。
+                debug_assert!(
+                    previous.is_none(),
+                    "临时 id 冲突:{temp:?}(记账槽位在同一份文档里必须唯一)"
+                );
+            }
+        }
+
+        // ── 阶段 3(并行):兑现 id + 组装实体条目 + 编码积木表
+        struct NemoEncoded<'a> {
+            item: NemoEntityItem<'a>,
+            entry: Value,
+            nodes: usize,
+            unmatched: usize,
+            parsed_report: TranslateReport,
+            encode_report: TranslateReport,
+            /// 文件路径下待登记的块表(内存路径已在阶段 3 编码成 `Value`,这里恒 `None`)
+            tree: Option<super::model::BlockTree>,
+        }
+        let encoded = super::pipeline::run_items(parsed, &weights, workers, |_, parsed_item| {
+            let NemoParsed {
+                item,
+                mut tree,
+                mut migrated_xml,
+                log: _,
+                report: parsed_report,
+            } = parsed_item;
+            let (nodes, mut unmatched) = super::pipeline::remap_tree(&mints, &mut tree);
+            // QC 迁移把注入节点的 id 写进了"迁移后的整份 XML"快照(它在本文件里早于 `replace_*`),
+            // 字符串这一处也必须走同一张表,否则临时哨兵会落进产物。
+            if let Some(xml) = &mut migrated_xml {
+                unmatched += super::pipeline::remap_string(&mints, xml);
+            }
+            let id = item.id;
+            let source = item.source;
+            let mut local = TranslateReport::new(EditorType::Nemo, TargetEditor::KittenN);
+            let mut entry = source.clone();
+            if item.is_scene {
+                // ── 场景
+                if let Some(xml) = migrated_xml {
+                    entry.insert("blocksXML".to_string(), Value::String(xml));
+                }
+                entry.insert("screenName".to_string(), Value::String(String::new()));
+                entry.insert("actorIds".to_string(), Value::Array(Vec::new()));
+                entry.insert("currentStyleId".to_string(), Value::String(String::new()));
+                entry.insert(
+                    "workspaceScrollXy".to_string(),
+                    json!({ "x": WORKSPACE_SCROLL.0, "y": WORKSPACE_SCROLL.1 }),
+                );
+                entry.insert("name".to_string(), Value::String("背景".to_string()));
+                let index = scenes_order.iter().position(|order| order.as_str() == id);
+                entry.insert(
+                    "screenName".to_string(),
+                    Value::String(format!("屏幕{}", index.map_or(0, |at| at + 1))),
+                );
+                if let Some(Value::Array(list)) = source.get("actors") {
+                    let mut reversed = list.clone();
+                    reversed.reverse();
+                    entry.insert("actorIds".to_string(), Value::Array(reversed));
+                }
+                if let Some(style) = source
+                    .get("current_style_id")
+                    .filter(|value| truthy_value(value))
+                {
+                    entry.insert("currentStyleId".to_string(), style.clone());
+                }
+            } else {
+                // ── 演员
+                if qc {
+                    // 官方 `QC`:角色 rotation 取反(0 / 缺失 / NaN 是 falsy,跳过)
+                    if let Some(rotation) =
+                        source.get("rotation").filter(|value| truthy_value(value))
+                    {
+                        let negated = rotation.as_f64().map(|value| number_value(-value));
+                        if let Some(negated) = negated {
+                            entry.insert("rotation".to_string(), negated);
+                        }
+                    }
+                }
+                entry.insert(
+                    "locked".to_string(),
+                    Value::Bool(source.get("locked").map(truthy_value).unwrap_or(false)),
+                );
+                if let Some(xml) = migrated_xml {
+                    entry.insert("blocksXML".to_string(), Value::String(xml));
+                }
+                entry.insert("position".to_string(), position_of(source));
+                entry.insert("scale".to_string(), floored(source.get("scale")));
+                insert_if_present(&mut entry, "currentStyleId", source.get("current_style_id"));
+                entry.insert(
+                    "workspaceScrollXy".to_string(),
+                    json!({ "x": WORKSPACE_SCROLL.0, "y": WORKSPACE_SCROLL.1 }),
+                );
+            }
+            // 块表去向(两条路径共用上面这段装配,只有这一步不同):内存路径当场编码(并入 `local`
+            // 的告警),文件路径把树按值搬出、由阶段 4 登记成流出挂点(见 `put_block_table`)。
+            let blocked = if product {
+                entry.insert("nekoBlockJsonList".to_string(), Value::Null);
+                Some(tree)
+            } else {
+                entry.insert(
+                    "nekoBlockJsonList".to_string(),
+                    Value::Array(tree_to_json(&tree, &mut local)),
+                );
+                None
+            };
+            NemoEncoded {
+                item,
+                entry: Value::Object(entry),
+                nodes,
+                unmatched,
+                parsed_report,
+                encode_report: local,
+                tree: blocked,
+            }
+        });
+
+        // ── 阶段 4(串行):装两桶 + 按项序并入报告
+        let mut actors = Map::new();
+        let mut scenes = Map::new();
+        let mut unmatched = 0usize;
+        for encoded_item in encoded {
+            let NemoEncoded {
+                item,
+                entry,
+                nodes,
+                unmatched: missed,
+                parsed_report,
+                encode_report,
+                tree,
+            } = encoded_item;
+            unmatched += missed;
+            report.blocks_converted += nodes;
+            // 告警顺序:每项「解析期 → 装配期」,与旧实现逐项 push 的顺序逐条相同
+            unmatched += super::pipeline::merge_report(report, parsed_report, &mints);
+            unmatched += super::pipeline::merge_report(report, encode_report, &mints);
+            // 文件路径:块表登记成流出挂点(顺序 = 项序,与内存路径填占位的顺序无关 —— `Map` 有序)
+            if let (Some(mut tree), Some(list)) = (tree, placements.as_mut()) {
+                normalize_tree_numbers(&mut tree);
+                list.push(BlockPlacement {
+                    container: if item.is_scene {
+                        BlockContainer::Scenes
+                    } else {
+                        BlockContainer::Actors
+                    },
+                    id: item.id.to_string(),
+                    tree,
+                });
+            }
+            if item.is_scene {
+                scenes.insert(item.id.to_string(), entry);
+            } else {
+                actors.insert(item.id.to_string(), entry);
+            }
+        }
+        // 便宜的兜底:改写后产物里不得残留哨兵(真实 id 不含控制字符 ⇒ 哨兵只可能来自临时 id)
+        debug_assert_eq!(unmatched, 0, "改写后产物里不得残留临时 id 哨兵");
+        document.insert(
+            "actors".to_string(),
+            json_obj([("actorsDict", Value::Object(actors))]),
+        );
+        let mut scene_container = Map::new();
+        scene_container.insert("scenesDict".to_string(), Value::Object(scenes));
+        if !scenes_order.is_empty() {
+            scene_container.insert(
+                "currentSceneId".to_string(),
+                Value::String(scenes_order[0].clone()),
+            );
+            scene_container.insert(
+                "sortList".to_string(),
+                Value::Array(
+                    scenes_order
+                        .iter()
+                        .map(|id| Value::String(id.clone()))
                         .collect(),
                 ),
             );
-            report.blocks_converted += procedure.tree.count();
-            put_block_table(
-                &mut entry,
-                &mut placements,
-                BlockContainer::Procedures,
-                &procedure.key,
-                procedure.tree,
-                report,
-            );
-            entry.insert(
-                "workspaceScrollXy".to_string(),
-                json!({ "x": WORKSPACE_SCROLL.0, "y": WORKSPACE_SCROLL.1 }),
-            );
-            procedures.insert(procedure.key, Value::Object(entry));
         }
-        document.insert(
-            "procedures".to_string(),
-            json_obj([("proceduresDict", Value::Object(procedures))]),
-        );
-    } else {
-        document.insert("procedures".to_string(), json!({}));
+        document.insert("scenes".to_string(), Value::Object(scene_container));
     }
 
-    // ── 演员 + 场景(官方第 4 步;先演员后场景)= 实体级并行的工作项
-    //
-    // 每个工作项只带这个实体需要的输入:源对象(读 `blocksXML`、装配期按它克隆条目)、由 id 与造型
-    // 算出的 `NemoEntity`、是否场景,以及装箱权重(= `blocksXML` 字节数:单实体工作量与它成正比,
-    // 负载分布见 `docs/knowledge/convert-performance.md` §2bis.11)。
-    struct NemoEntityItem<'a> {
-        id: &'a str,
-        source: &'a Map<String, Value>,
-        entity: NemoEntity,
-        is_scene: bool,
-        weight: usize,
-    }
+    fn assemble_audios(&mut self) {
+        let source: &Value = self.source;
+        let document: &mut Map<String, Value> = &mut self.document;
 
-    let scenes_order = scenes_order(source);
-    let mut items: Vec<NemoEntityItem<'_>> = Vec::new();
-    for (is_scene, container) in [
-        (
-            false,
-            source
-                .pointer("/actors/actors_dict")
-                .and_then(Value::as_object),
-        ),
-        (
-            true,
-            source
-                .pointer("/scenes/scenes_dict")
-                .and_then(Value::as_object),
-        ),
-    ] {
-        let Some(dict) = container else { continue };
-        for (id, value) in dict {
-            let Some(object) = value.as_object() else {
-                continue;
-            };
-            items.push(NemoEntityItem {
-                id,
-                source: object,
-                entity: NemoEntity {
-                    id: id.clone(),
-                    styles: style_ids_value(object),
-                },
-                is_scene,
-                weight: object
-                    .get("blocksXML")
-                    .and_then(Value::as_str)
-                    .map_or(0, str::len),
-            });
-        }
-    }
-    let weights: Vec<usize> = items.iter().map(|item| item.weight).collect();
-    // NEMO 的权重是 `blocksXML` 字节数
-    let workers = super::pipeline::entity_workers(
-        options.entity_concurrency_plan(),
-        items.len(),
-        weights.iter().sum(),
-        super::pipeline::WeightUnit::Bytes,
-    );
-    // 可观测事实:本次转换真的开了几个实体级线程(供基准/单测挡空门,见 `TranslateReport`)
-    report.entity_workers = workers;
-
-    // 实体阶段开始时上下文里"残留"的形参与演员:官方只置不清(见 `NemoParseContext` 的文档),
-    // 并行后每个工作项各持一份上下文,因此先照原值播种,行为与串行逐项跑一致。
-    let carry_actor = ctx.current_actor.clone();
-    let carry_params = ctx.current_params.clone();
-
-    // ── 阶段 1(并行):前置改写 + 解析 + 语义映射(铸造**临时 id**)
-    struct NemoParsed<'a> {
-        item: NemoEntityItem<'a>,
-        tree: super::model::BlockTree,
-        migrated_xml: Option<String>,
-        log: Vec<(String, MintKind)>,
-        report: TranslateReport,
-    }
-    let parsed = super::pipeline::run_items(items, &weights, workers, |index, item| {
-        let mut ids = IdSource::recording(index);
-        let mut local = TranslateReport::new(EditorType::Nemo, TargetEditor::KittenN);
-        // 程序集表与广播字典是 `Arc`:每项只加一次引用计数,不复制表本身
-        let mut ctx = NemoParseContext {
-            procedures: ctx.procedures.clone(),
-            broadcast_names: ctx.broadcast_names.clone(),
-            has_broadcasts: ctx.has_broadcasts,
-            current_actor: carry_actor.clone(),
-            current_params: carry_params.clone(),
-        };
-        let (tree, migrated_xml) = parse_entity(
-            item.source,
-            NemoSubject::Entity(&item.entity),
-            &mut ctx,
-            &mut ids,
-            &mut local,
-            &split_option_names,
-            &scenes_order,
-            qc,
-            yc,
-        );
-        NemoParsed {
-            item,
-            tree,
-            migrated_xml,
-            log: ids.into_log(),
-            report: local,
-        }
-    });
-
-    // ── 阶段 2(串行):临时 id → 最终 id
-    //
-    // 铸造顺序 = 项序(程序集的 id 已在它那一步用真源铸好,排在前面)⇒ 与串行实现逐次铸造一一对应。
-    let mut mints = super::pipeline::IdRemap::new();
-    for parsed_item in &parsed {
-        for (temp, kind) in &parsed_item.log {
-            let previous = mints.insert(temp.clone(), kind.mint(&mut ids));
-            // 临时 id 撞车 = 记录模式给了两个不同的铸造点同一个名字(槽位没错开),表会被后来的
-            // 覆盖,产物 id 静默错位。调试构建直接抓。
-            debug_assert!(
-                previous.is_none(),
-                "临时 id 冲突:{temp:?}(记账槽位在同一份文档里必须唯一)"
-            );
-        }
-    }
-
-    // ── 阶段 3(并行):兑现 id + 组装实体条目 + 编码积木表
-    struct NemoEncoded<'a> {
-        item: NemoEntityItem<'a>,
-        entry: Value,
-        nodes: usize,
-        unmatched: usize,
-        parsed_report: TranslateReport,
-        encode_report: TranslateReport,
-        /// 文件路径下待登记的块表(内存路径已在阶段 3 编码成 `Value`,这里恒 `None`)
-        tree: Option<super::model::BlockTree>,
-    }
-    let encoded = super::pipeline::run_items(parsed, &weights, workers, |_, parsed_item| {
-        let NemoParsed {
-            item,
-            mut tree,
-            mut migrated_xml,
-            log: _,
-            report: parsed_report,
-        } = parsed_item;
-        let (nodes, mut unmatched) = super::pipeline::remap_tree(&mints, &mut tree);
-        // QC 迁移把注入节点的 id 写进了"迁移后的整份 XML"快照(它在本文件里早于 `replace_*`),
-        // 字符串这一处也必须走同一张表,否则临时哨兵会落进产物。
-        if let Some(xml) = &mut migrated_xml {
-            unmatched += super::pipeline::remap_string(&mints, xml);
-        }
-        let id = item.id;
-        let source = item.source;
-        let mut local = TranslateReport::new(EditorType::Nemo, TargetEditor::KittenN);
-        let mut entry = source.clone();
-        if item.is_scene {
-            // ── 场景
-            if let Some(xml) = migrated_xml {
-                entry.insert("blocksXML".to_string(), Value::String(xml));
-            }
-            entry.insert("screenName".to_string(), Value::String(String::new()));
-            entry.insert("actorIds".to_string(), Value::Array(Vec::new()));
-            entry.insert("currentStyleId".to_string(), Value::String(String::new()));
-            entry.insert(
-                "workspaceScrollXy".to_string(),
-                json!({ "x": WORKSPACE_SCROLL.0, "y": WORKSPACE_SCROLL.1 }),
-            );
-            entry.insert("name".to_string(), Value::String("背景".to_string()));
-            let index = scenes_order.iter().position(|order| order.as_str() == id);
-            entry.insert(
-                "screenName".to_string(),
-                Value::String(format!("屏幕{}", index.map_or(0, |at| at + 1))),
-            );
-            if let Some(Value::Array(list)) = source.get("actors") {
-                let mut reversed = list.clone();
-                reversed.reverse();
-                entry.insert("actorIds".to_string(), Value::Array(reversed));
-            }
-            if let Some(style) = source
-                .get("current_style_id")
-                .filter(|value| truthy_value(value))
-            {
-                entry.insert("currentStyleId".to_string(), style.clone());
-            }
-        } else {
-            // ── 演员
-            if qc {
-                // 官方 `QC`:角色 rotation 取反(0 / 缺失 / NaN 是 falsy,跳过)
-                if let Some(rotation) = source.get("rotation").filter(|value| truthy_value(value)) {
-                    let negated = rotation.as_f64().map(|value| number_value(-value));
-                    if let Some(negated) = negated {
-                        entry.insert("rotation".to_string(), negated);
+        // ── 音频(官方第 6 步)
+        let mut audio_ids: Vec<Value> = Vec::new();
+        let mut audios = Map::new();
+        if let Some(dict) = source.pointer("/audios/sounds").and_then(Value::as_object) {
+            for (id, sound) in dict {
+                let Some(entry) = sound.as_object() else {
+                    continue;
+                };
+                let mut item = entry.clone();
+                let ext = entry.get("ext").and_then(Value::as_str).unwrap_or_default();
+                let url = if ext == "mid" {
+                    String::new()
+                } else {
+                    let raw = entry.get("url").and_then(Value::as_str).unwrap_or_default();
+                    if raw.contains("https") {
+                        raw.to_string()
+                    } else {
+                        format!("{NEMO_ASSET_PREFIX}{raw}")
                     }
+                };
+                insert_if_present(&mut item, "id", entry.get("id"));
+                insert_if_present(&mut item, "name", entry.get("name"));
+                item.insert("url".to_string(), Value::String(url));
+                if ext != "mid" {
+                    audio_ids.push(
+                        entry
+                            .get("id")
+                            .cloned()
+                            .unwrap_or_else(|| Value::String(id.clone())),
+                    );
                 }
+                audios.insert(id.clone(), Value::Object(item));
             }
-            entry.insert(
-                "locked".to_string(),
-                Value::Bool(source.get("locked").map(truthy_value).unwrap_or(false)),
-            );
-            if let Some(xml) = migrated_xml {
-                entry.insert("blocksXML".to_string(), Value::String(xml));
-            }
-            entry.insert("position".to_string(), position_of(source));
-            entry.insert("scale".to_string(), floored(source.get("scale")));
-            insert_if_present(&mut entry, "currentStyleId", source.get("current_style_id"));
-            entry.insert(
-                "workspaceScrollXy".to_string(),
-                json!({ "x": WORKSPACE_SCROLL.0, "y": WORKSPACE_SCROLL.1 }),
-            );
         }
-        // 块表去向(两条路径共用上面这段装配,只有这一步不同):内存路径当场编码(并入 `local`
-        // 的告警),文件路径把树按值搬出、由阶段 4 登记成流出挂点(见 `put_block_table`)。
-        let blocked = if product {
-            entry.insert("nekoBlockJsonList".to_string(), Value::Null);
-            Some(tree)
-        } else {
-            entry.insert(
-                "nekoBlockJsonList".to_string(),
-                Value::Array(tree_to_json(&tree, &mut local)),
-            );
-            None
-        };
-        NemoEncoded {
-            item,
-            entry: Value::Object(entry),
-            nodes,
-            unmatched,
-            parsed_report,
-            encode_report: local,
-            tree: blocked,
-        }
-    });
-
-    // ── 阶段 4(串行):装两桶 + 按项序并入报告
-    let mut actors = Map::new();
-    let mut scenes = Map::new();
-    let mut unmatched = 0usize;
-    for encoded_item in encoded {
-        let NemoEncoded {
-            item,
-            entry,
-            nodes,
-            unmatched: missed,
-            parsed_report,
-            encode_report,
-            tree,
-        } = encoded_item;
-        unmatched += missed;
-        report.blocks_converted += nodes;
-        // 告警顺序:每项「解析期 → 装配期」,与旧实现逐项 push 的顺序逐条相同
-        unmatched += super::pipeline::merge_report(report, parsed_report, &mints);
-        unmatched += super::pipeline::merge_report(report, encode_report, &mints);
-        // 文件路径:块表登记成流出挂点(顺序 = 项序,与内存路径填占位的顺序无关 —— `Map` 有序)
-        if let (Some(mut tree), Some(list)) = (tree, placements.as_mut()) {
-            normalize_tree_numbers(&mut tree);
-            list.push(BlockPlacement {
-                container: if item.is_scene {
-                    BlockContainer::Scenes
-                } else {
-                    BlockContainer::Actors
-                },
-                id: item.id.to_string(),
-                tree,
-            });
-        }
-        if item.is_scene {
-            scenes.insert(item.id.to_string(), entry);
-        } else {
-            actors.insert(item.id.to_string(), entry);
-        }
-    }
-    // 便宜的兜底:改写后产物里不得残留哨兵(真实 id 不含控制字符 ⇒ 哨兵只可能来自临时 id)
-    debug_assert_eq!(unmatched, 0, "改写后产物里不得残留临时 id 哨兵");
-    document.insert(
-        "actors".to_string(),
-        json_obj([("actorsDict", Value::Object(actors))]),
-    );
-    let mut scene_container = Map::new();
-    scene_container.insert("scenesDict".to_string(), Value::Object(scenes));
-    if !scenes_order.is_empty() {
-        scene_container.insert(
-            "currentSceneId".to_string(),
-            Value::String(scenes_order[0].clone()),
-        );
-        scene_container.insert(
-            "sortList".to_string(),
-            Value::Array(
-                scenes_order
-                    .iter()
-                    .map(|id| Value::String(id.clone()))
-                    .collect(),
-            ),
+        let current_audio = audio_ids
+            .first()
+            .cloned()
+            .unwrap_or(Value::String(String::new()));
+        document.insert(
+            "audios".to_string(),
+            json_obj([
+                ("audiosDict", Value::Object(audios)),
+                ("sortList", Value::Array(audio_ids)),
+                ("currentAudioId", current_audio),
+            ]),
         );
     }
-    document.insert("scenes".to_string(), Value::Object(scene_container));
 
-    // ── 音频(官方第 6 步)
-    let mut audio_ids: Vec<Value> = Vec::new();
-    let mut audios = Map::new();
-    if let Some(dict) = source.pointer("/audios/sounds").and_then(Value::as_object) {
-        for (id, sound) in dict {
-            let Some(entry) = sound.as_object() else {
-                continue;
-            };
-            let mut item = entry.clone();
-            let ext = entry.get("ext").and_then(Value::as_str).unwrap_or_default();
-            let url = if ext == "mid" {
-                String::new()
-            } else {
-                let raw = entry.get("url").and_then(Value::as_str).unwrap_or_default();
-                if raw.contains("https") {
-                    raw.to_string()
-                } else {
-                    format!("{NEMO_ASSET_PREFIX}{raw}")
+    fn assemble_styles(&mut self) {
+        let source: &Value = self.source;
+        let document: &mut Map<String, Value> = &mut self.document;
+
+        // ── 造型(官方第 7 步)
+        let mut styles = Map::new();
+        if let Some(dict) = source
+            .pointer("/styles/styles_dict")
+            .and_then(Value::as_object)
+        {
+            for (id, style) in dict {
+                let Some(entry) = style.as_object() else {
+                    continue;
+                };
+                let mut item = entry.clone();
+                if let Some(texture) = entry.get("texture").and_then(Value::as_str) {
+                    item.insert(
+                        "url".to_string(),
+                        Value::String(format!("{NEMO_ASSET_PREFIX}{texture}")),
+                    );
                 }
-            };
-            insert_if_present(&mut item, "id", entry.get("id"));
-            insert_if_present(&mut item, "name", entry.get("name"));
-            item.insert("url".to_string(), Value::String(url));
-            if ext != "mid" {
-                audio_ids.push(
-                    entry
-                        .get("id")
-                        .cloned()
-                        .unwrap_or_else(|| Value::String(id.clone())),
-                );
-            }
-            audios.insert(id.clone(), Value::Object(item));
-        }
-    }
-    let current_audio = audio_ids
-        .first()
-        .cloned()
-        .unwrap_or(Value::String(String::new()));
-    document.insert(
-        "audios".to_string(),
-        json_obj([
-            ("audiosDict", Value::Object(audios)),
-            ("sortList", Value::Array(audio_ids)),
-            ("currentAudioId", current_audio),
-        ]),
-    );
-
-    // ── 造型(官方第 7 步)
-    let mut styles = Map::new();
-    if let Some(dict) = source
-        .pointer("/styles/styles_dict")
-        .and_then(Value::as_object)
-    {
-        for (id, style) in dict {
-            let Some(entry) = style.as_object() else {
-                continue;
-            };
-            let mut item = entry.clone();
-            if let Some(texture) = entry.get("texture").and_then(Value::as_str) {
-                item.insert(
-                    "url".to_string(),
-                    Value::String(format!("{NEMO_ASSET_PREFIX}{texture}")),
-                );
-            }
-            if let Some(url) = item.get("url").and_then(Value::as_str) {
-                let fixed =
-                    if !url.ends_with(".webp?imageView2/0/format/png") && url.ends_with(".webp") {
+                if let Some(url) = item.get("url").and_then(Value::as_str) {
+                    let fixed = if !url.ends_with(".webp?imageView2/0/format/png")
+                        && url.ends_with(".webp")
+                    {
                         let trimmed = url.strip_suffix(".webp").unwrap_or(url);
                         format!("{trimmed}.webp?imageView2/0/format/png")
                     } else {
                         url.to_string()
                     };
-                item.insert("url".to_string(), Value::String(fixed));
+                    item.insert("url".to_string(), Value::String(fixed));
+                }
+                if let Some(center) = item.remove("center_point") {
+                    item.insert("centerPoint".to_string(), center);
+                }
+                styles.insert(id.clone(), Value::Object(item));
             }
-            if let Some(center) = item.remove("center_point") {
-                item.insert("centerPoint".to_string(), center);
-            }
-            styles.insert(id.clone(), Value::Object(item));
         }
-    }
-    document.insert(
-        "styles".to_string(),
-        json_obj([("stylesDict", Value::Object(styles))]),
-    );
-
-    // ── 广播按场景重组(官方第 8 步)
-    let mut broadcasts: Map<String, Value> = Map::new();
-    if let Some(dict) = source
-        .pointer("/broadcast/broadcast_dict")
-        .and_then(Value::as_object)
-    {
-        for entry in dict.values() {
-            let scene = entry
-                .get("scene")
-                .and_then(Value::as_str)
-                .unwrap_or("undefined")
-                .to_string();
-            let name = entry
-                .get("name")
-                .cloned()
-                .unwrap_or_else(|| Value::String("undefined".to_string()));
-            broadcasts
-                .entry(scene)
-                .or_insert_with(|| Value::Array(Vec::new()))
-                .as_array_mut()
-                .expect("broadcasts 入参是数组")
-                .push(name);
-        }
-    }
-    document.insert(
-        "broadcasts".to_string(),
-        json_obj([("broadcastsDict", Value::Object(broadcasts))]),
-    );
-
-    // ── 变量(官方第 9 步)
-    let stage_width = source.pointer("/stage_size/width").and_then(Value::as_f64);
-    let stage_height = source.pointer("/stage_size/height").and_then(Value::as_f64);
-    let mut variables = Map::new();
-    let mut variable_names: Vec<String> = Vec::new();
-    let mut list_names: Vec<String> = Vec::new();
-    if let Some(dict) = source
-        .pointer("/variable/variable_dict")
-        .and_then(Value::as_object)
-    {
-        for (key, variable) in dict {
-            let Some(entry) = variable.as_object() else {
-                continue;
-            };
-            // 官方 `QC`:变量坐标先按**编辑器竖屏常量**(562×900)还原成 NEMO 自身坐标系;
-            // 随后主管线再按文档 `stage_size` 重定心(两者在竖屏文档下正好抵消)。
-            let has_position = entry.get("position").is_some_and(truthy_value);
-            let mut x = entry
-                .get("position")
-                .and_then(|position| position.get("x"))
-                .and_then(Value::as_f64)
-                .unwrap_or(0.0);
-            let mut y = entry
-                .get("position")
-                .and_then(|position| position.get("y"))
-                .and_then(Value::as_f64)
-                .unwrap_or(0.0);
-            if qc && has_position {
-                x -= QC_PORTRAIT.0 / 2.0;
-                y = -y + QC_PORTRAIT.1 / 2.0;
-            }
-            let position = json!({
-                "x": x + stage_width.unwrap_or(PORTRAIT_WIDTH) / 2.0,
-                "y": stage_height.unwrap_or(PORTRAIT_HEIGHT) / 2.0 - y,
-            });
-            let raw_type = entry
-                .get("type")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            let mut name = entry
-                .get("name")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string();
-            if raw_type == "list" {
-                name = dedupe_name(&list_names, &name);
-                list_names.push(name.clone());
-            } else {
-                name = dedupe_name(&variable_names, &name);
-                variable_names.push(name.clone());
-            }
-            let mut item = Map::new();
-            insert_if_present(&mut item, "id", entry.get("id"));
-            item.insert(
-                "type".to_string(),
-                Value::String(if raw_type == "private" {
-                    "any".to_string()
-                } else {
-                    raw_type.to_string()
-                }),
-            );
-            item.insert("name".to_string(), Value::String(name));
-            item.insert(
-                "value".to_string(),
-                if raw_type == "public" || raw_type == "private" {
-                    Value::from(0)
-                } else {
-                    entry.get("value").cloned().unwrap_or(Value::Null)
-                },
-            );
-            insert_if_present(&mut item, "visible", entry.get("visible"));
-            item.insert("position".to_string(), position);
-            insert_if_present(&mut item, "isGlobal", entry.get("is_global"));
-            let create_time = entry
-                .get("create_time")
-                .filter(|value| truthy_value(value))
-                .cloned()
-                .unwrap_or_else(|| Value::from(now_ms as f64));
-            item.insert("createTime".to_string(), create_time);
-            insert_if_present(&mut item, "scale", entry.get("scale"));
-            item.insert("style".to_string(), Value::String("default".to_string()));
-            insert_if_present(&mut item, "currentEntityId", entry.get("current_entity"));
-            variables.insert(key.clone(), Value::Object(item));
-        }
-    }
-    document.insert(
-        "variables".to_string(),
-        json_obj([("variablesDict", Value::Object(variables))]),
-    );
-
-    // ── 舞台尺寸归一(官方第 10 步)
-    let width = stage_width.unwrap_or(PORTRAIT_WIDTH);
-    let height = stage_height.unwrap_or(PORTRAIT_HEIGHT);
-    document.insert(
-        "stageSize".to_string(),
-        if width > height {
-            json!({ "width": PORTRAIT_HEIGHT, "height": PORTRAIT_WIDTH })
-        } else {
-            json!({ "width": PORTRAIT_WIDTH, "height": PORTRAIT_HEIGHT })
-        },
-    );
-
-    // ── 计时器位置(有 `timer` 变量时)
-    let has_timer = source
-        .pointer("/variable/variable_dict/timer/type")
-        .and_then(Value::as_str)
-        == Some("timer");
-    if has_timer {
         document.insert(
-            "timerPosition".to_string(),
-            json!({ "x": stage_width.unwrap_or(PORTRAIT_WIDTH) - 160.0 - 20.0, "y": 12.0 }),
+            "styles".to_string(),
+            json_obj([("stylesDict", Value::Object(styles))]),
         );
     }
 
-    // ── 扩展(官方第 11 步)
-    if let Some(toolbox) = source.get("toolbox").and_then(Value::as_object) {
-        match toolbox.get("devices") {
-            Some(Value::Array(devices)) => {
-                document.insert("extension".to_string(), Value::Array(devices.clone()));
+    fn assemble_broadcasts(&mut self) {
+        let source: &Value = self.source;
+        let document: &mut Map<String, Value> = &mut self.document;
+
+        // ── 广播按场景重组(官方第 8 步)
+        let mut broadcasts: Map<String, Value> = Map::new();
+        if let Some(dict) = source
+            .pointer("/broadcast/broadcast_dict")
+            .and_then(Value::as_object)
+        {
+            for entry in dict.values() {
+                let scene = entry
+                    .get("scene")
+                    .and_then(Value::as_str)
+                    .unwrap_or("undefined")
+                    .to_string();
+                let name = entry
+                    .get("name")
+                    .cloned()
+                    .unwrap_or_else(|| Value::String("undefined".to_string()));
+                broadcasts
+                    .entry(scene)
+                    .or_insert_with(|| Value::Array(Vec::new()))
+                    .as_array_mut()
+                    .expect("broadcasts 入参是数组")
+                    .push(name);
             }
-            Some(Value::String(device)) => {
-                document.insert(
-                    "extension".to_string(),
-                    Value::Array(vec![Value::String(device.clone())]),
+        }
+        document.insert(
+            "broadcasts".to_string(),
+            json_obj([("broadcastsDict", Value::Object(broadcasts))]),
+        );
+    }
+
+    fn assemble_variables(&mut self) {
+        let source: &Value = self.source;
+        let document: &mut Map<String, Value> = &mut self.document;
+        let qc = self.qc;
+        let now_ms = self.now_ms;
+        let stage_width = self.stage_width;
+        let stage_height = self.stage_height;
+
+        // ── 变量(官方第 9 步)
+        let mut variables = Map::new();
+        let mut variable_names: Vec<String> = Vec::new();
+        let mut list_names: Vec<String> = Vec::new();
+        if let Some(dict) = source
+            .pointer("/variable/variable_dict")
+            .and_then(Value::as_object)
+        {
+            for (key, variable) in dict {
+                let Some(entry) = variable.as_object() else {
+                    continue;
+                };
+                // 官方 `QC`:变量坐标先按**编辑器竖屏常量**(562×900)还原成 NEMO 自身坐标系;
+                // 随后主管线再按文档 `stage_size` 重定心(两者在竖屏文档下正好抵消)。
+                let has_position = entry.get("position").is_some_and(truthy_value);
+                let mut x = entry
+                    .get("position")
+                    .and_then(|position| position.get("x"))
+                    .and_then(Value::as_f64)
+                    .unwrap_or(0.0);
+                let mut y = entry
+                    .get("position")
+                    .and_then(|position| position.get("y"))
+                    .and_then(Value::as_f64)
+                    .unwrap_or(0.0);
+                if qc && has_position {
+                    x -= QC_PORTRAIT.0 / 2.0;
+                    y = -y + QC_PORTRAIT.1 / 2.0;
+                }
+                let position = json!({
+                    "x": x + stage_width.unwrap_or(PORTRAIT_WIDTH) / 2.0,
+                    "y": stage_height.unwrap_or(PORTRAIT_HEIGHT) / 2.0 - y,
+                });
+                let raw_type = entry
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let mut name = entry
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                if raw_type == "list" {
+                    name = dedupe_name(&list_names, &name);
+                    list_names.push(name.clone());
+                } else {
+                    name = dedupe_name(&variable_names, &name);
+                    variable_names.push(name.clone());
+                }
+                let mut item = Map::new();
+                insert_if_present(&mut item, "id", entry.get("id"));
+                item.insert(
+                    "type".to_string(),
+                    Value::String(if raw_type == "private" {
+                        "any".to_string()
+                    } else {
+                        raw_type.to_string()
+                    }),
                 );
+                item.insert("name".to_string(), Value::String(name));
+                item.insert(
+                    "value".to_string(),
+                    if raw_type == "public" || raw_type == "private" {
+                        Value::from(0)
+                    } else {
+                        entry.get("value").cloned().unwrap_or(Value::Null)
+                    },
+                );
+                insert_if_present(&mut item, "visible", entry.get("visible"));
+                item.insert("position".to_string(), position);
+                insert_if_present(&mut item, "isGlobal", entry.get("is_global"));
+                let create_time = entry
+                    .get("create_time")
+                    .filter(|value| truthy_value(value))
+                    .cloned()
+                    .unwrap_or_else(|| Value::from(now_ms as f64));
+                item.insert("createTime".to_string(), create_time);
+                insert_if_present(&mut item, "scale", entry.get("scale"));
+                item.insert("style".to_string(), Value::String("default".to_string()));
+                insert_if_present(&mut item, "currentEntityId", entry.get("current_entity"));
+                variables.insert(key.clone(), Value::Object(item));
             }
-            _ => {}
+        }
+        document.insert(
+            "variables".to_string(),
+            json_obj([("variablesDict", Value::Object(variables))]),
+        );
+    }
+
+    fn apply_stage_size(&mut self) {
+        let document: &mut Map<String, Value> = &mut self.document;
+        let width = self.stage_width.unwrap_or(PORTRAIT_WIDTH);
+        let height = self.stage_height.unwrap_or(PORTRAIT_HEIGHT);
+
+        // ── 舞台尺寸归一(官方第 10 步)
+        document.insert(
+            "stageSize".to_string(),
+            if width > height {
+                json!({ "width": PORTRAIT_HEIGHT, "height": PORTRAIT_WIDTH })
+            } else {
+                json!({ "width": PORTRAIT_WIDTH, "height": PORTRAIT_HEIGHT })
+            },
+        );
+    }
+
+    fn apply_timer(&mut self) {
+        let source: &Value = self.source;
+        let document: &mut Map<String, Value> = &mut self.document;
+
+        // ── 计时器位置(有 `timer` 变量时)
+        let has_timer = source
+            .pointer("/variable/variable_dict/timer/type")
+            .and_then(Value::as_str)
+            == Some("timer");
+        if has_timer {
+            document.insert(
+            "timerPosition".to_string(),
+            json!({ "x": self.stage_width.unwrap_or(PORTRAIT_WIDTH) - 160.0 - 20.0, "y": 12.0 }),
+        );
         }
     }
 
-    // `"project_name" in c ? c.project_name : "新的作品"`
-    let project_name = source
-        .get("project_name")
-        .cloned()
-        .unwrap_or_else(|| Value::String("新的作品".to_string()));
-    document.insert("projectName".to_string(), project_name);
-    Ok(document)
+    fn apply_extension(&mut self) {
+        let source: &Value = self.source;
+        let document: &mut Map<String, Value> = &mut self.document;
+
+        // ── 扩展(官方第 11 步)
+        if let Some(toolbox) = source.get("toolbox").and_then(Value::as_object) {
+            match toolbox.get("devices") {
+                Some(Value::Array(devices)) => {
+                    document.insert("extension".to_string(), Value::Array(devices.clone()));
+                }
+                Some(Value::String(device)) => {
+                    document.insert(
+                        "extension".to_string(),
+                        Value::Array(vec![Value::String(device.clone())]),
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn apply_project_name(&mut self) {
+        let source: &Value = self.source;
+        let document: &mut Map<String, Value> = &mut self.document;
+
+        // `"project_name" in c ? c.project_name : "新的作品"`
+        let project_name = source
+            .get("project_name")
+            .cloned()
+            .unwrap_or_else(|| Value::String("新的作品".to_string()));
+        document.insert("projectName".to_string(), project_name);
+    }
 }
 
 /// 产物收尾:数字归一(`JSON.stringify` 把"整数值的浮点"打印成整数 —— JS 没有 int/float 之分,
