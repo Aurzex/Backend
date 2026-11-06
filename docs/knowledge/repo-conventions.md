@@ -88,6 +88,7 @@
 | 门 | 内容 |
 | --- | --- |
 | 单测 | `cargo test`(库单测:注入契约、请求头大小写、分块终止性等) |
+| **本机内循环(2026-11-06 实测)** | 写代码:`cargo check --lib`(33 s);跑单点:`cargo test --lib <模块路径>::<测试名>`;不碰转换域:`cargo test --lib -- --skip corpus_round_trip_sweep`(两道语料门一并跳过,38 s);提交前:`cargo test --lib`(全量 128 s,两道语料门占主体)。编译侧换链接器、缩 debuginfo、开优化档在同一台机器上无正收益,读数与处置见 `../rounds/56-build-test-speed.md` |
 | `tests/repo_hygiene.rs` | 挡住明文账密/敏感串入库(曾经真的漏过) |
 | 真机门 | `tests/live_features.rs`(登录 + AI + 云变量)、`tests/compile_live.rs`(7 种反编译)、`tests/convert_live.rs`(转换 + 写平台) |
 | **严格模式** | `BACKEND_REQUIRE_LIVE=1` —— 缺配置/登录失败**必须失败**,不再"静默 pass" |
