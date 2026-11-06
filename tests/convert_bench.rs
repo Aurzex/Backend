@@ -76,14 +76,15 @@
 //! - 判断"新旧谁快"要在**同一轮内并排比**(见 `convert_facade_flow_bench`),
 //!   跨轮比绝对值只能看量级,不能当结论。
 
+mod common;
+use common::{bench_dir, best, ms, require_fixtures, sha256_hex};
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use backend::core::convert::EditorType;
 use backend::core::convert::translate::{TargetEditor, TranslateOptions, translate_file};
-use sha2::{Digest, Sha256};
 
 // ---------------------------------------------------------------------------
 // 分配计数(W7)
@@ -544,45 +545,13 @@ const SAMPLES: &[Sample] = &[
 
 const BASELINE: &str = "tests/fixtures/translate/convert_bench_baseline.json";
 
-fn sha256_hex(bytes: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    // sha2 0.11 的 digest 类型不实现 LowerHex,自行拼十六进制
-    hasher
-        .finalize()
-        .iter()
-        .fold(String::with_capacity(64), |mut acc, byte| {
-            use std::fmt::Write as _;
-            let _ = write!(acc, "{byte:02x}");
-            acc
-        })
-}
-
 /// 取最小值(见 RUNS 注释)
-fn best(samples: Vec<f64>) -> f64 {
-    samples.into_iter().fold(f64::INFINITY, f64::min)
-}
-
-fn ms(d: Duration) -> f64 {
-    d.as_secs_f64() * 1000.0
-}
-
 /// 每个基准测试**独立**的临时目录(cargo 默认并行跑测试函数,共用一个目录会互相删)
 ///
 /// 跑完由测试**自己删**(`remove_dir_all`,在末尾与 REFRESH 分支各一次):不删的话每跑一次
 /// 就在 `std::env::temp_dir()` 留一份约 33 MB 的产物 —— 2026-10-05 实测 `/tmp` 里积了 46 份
 /// 约 1.5 GB,把 tmpfs 打满后让**无关测试** (`translate_file_writes_bcm4_from_bcmkn`)
 /// 假红一次(`Disk quota exceeded`)。失败/panic 时保留现场,便于看产物。
-fn bench_dir(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "backend-convert-bench-{tag}-{}-{:08x}",
-        std::process::id(),
-        fastrand::u32(..)
-    ));
-    std::fs::create_dir_all(&dir).expect("创建基准临时目录失败");
-    dir
-}
-
 /// 单个样本的一次量测结果
 struct Measured {
     /// 本次转换实际使用的实体级工作线程数(反向恒 1)
@@ -999,11 +968,6 @@ fn strict_mode() -> bool {
 /// 同一开关(见 `docs/knowledge/repo-conventions.md` §3ter)。在本文件里它管"样本(=夹具)缺了",
 /// 与 `BACKEND_REQUIRE_BENCH`(基准自身:debug 构建 / 基线)分工;两者**任一**打开都让缺样本直接失败
 /// (B1:此前只有"样本全缺"才炸,**部分缺失只打印一行警告** ⇒ 基线里那些键静默不设防)。
-fn require_fixtures() -> bool {
-    std::env::var("BACKEND_REQUIRE_FIXTURES")
-        .is_ok_and(|v| matches!(v.as_str(), "1" | "true" | "yes"))
-}
-
 /// 缺样本时的统一出口:`strict_mode() || require_fixtures()` 下 panic 并点名缺了谁,否则返回 false
 /// (调用方打印警告后继续用剩下的样本)。
 fn strict_samples() -> bool {

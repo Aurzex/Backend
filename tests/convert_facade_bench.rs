@@ -9,14 +9,15 @@
 //! cargo test --profile bench_perf --test convert_facade_bench -- --ignored --nocapture
 //! ```
 
-use std::path::{Path, PathBuf};
+mod common;
+use common::{bench_dir, best, ms, require_fixtures, sha256_hex};
+use std::path::Path;
 use std::time::Instant;
 
 use backend::core::convert::translate::{
     TargetEditor, TranslateOptions, set_source_reference, set_source_reference_in, translate_file,
     translate_value,
 };
-use sha2::{Digest, Sha256};
 
 const RUNS: usize = 5;
 
@@ -56,42 +57,6 @@ const SAMPLES: &[Sample] = &[
 /// 与 `BACKEND_REQUIRE_BENCH=1` 同族(见 `docs/knowledge/repo-conventions.md` §3ter):
 /// 那个管基准自身(debug 构建 / 基线),这个管"跑测试要用的夹具缺了" —— 口径与
 /// `tests/convert_bench.rs`、`src/core/convert/translate/reverse_tests.rs` 的同一开关一致。
-fn require_fixtures() -> bool {
-    std::env::var("BACKEND_REQUIRE_FIXTURES")
-        .is_ok_and(|v| matches!(v.as_str(), "1" | "true" | "yes"))
-}
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    hasher
-        .finalize()
-        .iter()
-        .fold(String::with_capacity(64), |mut acc, byte| {
-            use std::fmt::Write as _;
-            let _ = write!(acc, "{byte:02x}");
-            acc
-        })
-}
-
-fn best(samples: Vec<f64>) -> f64 {
-    samples.into_iter().fold(f64::INFINITY, f64::min)
-}
-
-fn ms(d: std::time::Duration) -> f64 {
-    d.as_secs_f64() * 1000.0
-}
-
-fn bench_dir(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "backend-convert-bench-{tag}-{}-{:08x}",
-        std::process::id(),
-        fastrand::u32(..)
-    ));
-    std::fs::create_dir_all(&dir).expect("创建基准临时目录失败");
-    dir
-}
-
 const FAKE_SOURCE_URL: &str = "https://creation.codemao.cn/neko/bcm/bench-source.bcm4";
 
 fn product_name(source: &str, target: TargetEditor) -> String {

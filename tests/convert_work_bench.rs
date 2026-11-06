@@ -14,28 +14,16 @@
 //! 需要网络 + `data/test-config.json`(账号);缺配置时**跳过**
 //! (`BACKEND_REQUIRE_FIXTURES=1` 或 `BACKEND_REQUIRE_BENCH=1` 下改为失败)。
 
+mod common;
+use common::sha256_hex;
 use std::path::PathBuf;
 use std::time::Instant;
 
 use backend::core::convert::translate::{TargetEditor, TranslateOptions, translate_file};
 use backend::core::convert::{WorkId, translate_work};
-use sha2::{Digest, Sha256};
 
 /// 每档重复次数(取最小值:CPU 基准里最小值≈最少干扰)
 const RUNS: usize = 3;
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    hasher
-        .finalize()
-        .iter()
-        .fold(String::with_capacity(64), |mut acc, byte| {
-            use std::fmt::Write as _;
-            let _ = write!(acc, "{byte:02x}");
-            acc
-        })
-}
 
 /// 缺夹具/配置时**失败**而不是跳过:`BACKEND_REQUIRE_FIXTURES=1`(统一开关 —— 与
 /// `tests/convert_bench.rs`、`tests/convert_facade_bench.rs`、
