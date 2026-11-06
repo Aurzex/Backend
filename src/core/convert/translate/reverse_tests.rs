@@ -1448,14 +1448,14 @@ mod reverse_tests_inner {
             };
 
             let round_trip = |source: &Value| -> Value {
-                let mut k4: Value = serde_json::from_str(&source.to_string()).expect("复刻");
+                // 直接深拷 `Value`:序列化再解析只为拿一份副本,在 O0 下对多 MB 作品是纯浪费
+                let mut k4: Value = source.clone();
                 let mut forward = TranslateReport::new(
                     crate::core::convert::EditorType::Kitten4,
                     TargetEditor::KittenN,
                 );
                 let kn = convert_kitten4_document(&mut k4, &options, &mut forward)
                     .unwrap_or_else(|e| panic!("{label}:正向 Kitten4→KN 失败: {e}"));
-                let kn: Value = serde_json::from_str(&kn.to_string()).expect("复刻");
                 let mut back = TranslateReport::new(
                     crate::core::convert::EditorType::Neko,
                     TargetEditor::Kitten4,
@@ -1470,7 +1470,7 @@ mod reverse_tests_inner {
                 );
                 continue;
             }
-            let mut k4_mid: Value = serde_json::from_str(&source.to_string()).expect("复刻");
+            let mut k4_mid: Value = source.clone();
             let mut f_report = TranslateReport::new(
                 crate::core::convert::EditorType::Kitten4,
                 TargetEditor::KittenN,
@@ -1784,8 +1784,8 @@ mod reverse_tests_inner {
                 if std::env::var("DUMP_REPORT").is_ok() {
                     eprintln!("[报告·反向] {label}:\n{:#?}", report.warnings());
                 }
-                let mut k4_mid: Value =
-                    serde_json::from_str(&k4_product.to_string()).expect("复刻中间态");
+                // 同上:产品本身就是 `Value`,深拷即可,不再序列化一遍
+                let mut k4_mid: Value = k4_product.clone();
                 let mut back = TranslateReport::new(
                     crate::core::convert::EditorType::Kitten4,
                     TargetEditor::KittenN,
