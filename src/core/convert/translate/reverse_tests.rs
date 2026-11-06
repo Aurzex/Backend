@@ -1792,6 +1792,27 @@ mod reverse_tests_inner {
                 );
                 let kn = convert_kitten4_document(&mut k4_mid, &options, &mut back)
                     .expect("正向 Kitten4→KN");
+                // **注释还原门**(rounds/55):被改成「未收录积木」的块,内容都在平台注释里;
+                // 再转回 KN 时原类型必须一个不少地回来(按"至少这么多"断,余量留给等价类归并)。
+                // 同一类型的标记分散在多个实体里(每个实体一条告警)⇒ 按类型**求和**
+                let mut expected: std::collections::BTreeMap<String, u64> =
+                    std::collections::BTreeMap::new();
+                for warning in report.warnings() {
+                    if let TranslateWarning::UnmappedBlock { kind, marked, .. } = warning
+                        && *marked > 0
+                    {
+                        *expected.entry(kind.clone()).or_insert(0) += *marked;
+                    }
+                }
+                let after = census_of_kn(&kn);
+                for (kind, marked) in expected {
+                    let got = after.get(&kind).copied().unwrap_or(0) as u64;
+                    assert!(
+                        got >= marked,
+                        "{label}:标记块没有从注释还原:`{kind}` 标了 {marked} 块,往返后只剩 {got} 块\
+                         (rounds/55;先看注释是否写进 `block_data_json.comments`)"
+                    );
+                }
                 // 中间态(Kitten4 产物)一并返回:反向的 id 台账要拿它当"产物"
                 (k4_product, kn, markers)
             };
@@ -2935,6 +2956,110 @@ mod reverse_tests_inner {
         assert_eq!(s1.len(), 2, "s1 的两个角色");
         let s1_ids: Vec<&str> = s1.iter().filter_map(Value::as_str).collect();
         assert_eq!(s1_ids, vec!["a1", "a2"]);
+    }
+
+    /// rounds/55:被改成「未收录积木」的块,内容写进**平台原生注释**;再转回 KN 时逐字段还原。
+    ///
+    /// 这是 D1(不做语义降级)之后唯一能提高反向保真的口子:标记块仍是"不冒充可用"的占位,
+    /// 但类型/字段/影子/变异不再丢 —— 注释就是"看得见且可恢复"的损失。
+    #[test]
+    fn marker_content_round_trips_through_platform_comment() {
+        let source = json!({
+            "stageSize": { "width": 562, "height": 900 },
+            "scenes": {
+                "scenesDict": { "s1": { "actorIds": ["a1"] } },
+                "sortList": ["s1"]
+            },
+            "actors": { "actorsDict": { "a1": { "x": 0, "y": 0, "nekoBlockJsonList": [
+                {
+                    "type": "list_append",
+                    "id": "p1",
+                    "inputs": {
+                        "list": {
+                            "type": "temporary_list",
+                            "id": "t1",
+                            "fields": { "list": "list-1" },
+                            "shadows": { "MUTATE_BUTTON": "" },
+                            "mutation": "<mutation xmlns=\"http://www.w3.org/1999/xhtml\" items=\"2\"></mutation>",
+                            "is_output": true,
+                            "inputs": {
+                                "VALUE": { "type": "math_number", "id": "n1", "fields": { "NUM": "1" } }
+                            }
+                        },
+                        "VALUE": { "type": "math_number", "id": "n2", "fields": { "NUM": "2" } }
+                    }
+                }
+            ] } } },
+            "procedures": { "proceduresDict": {} }
+        });
+        let options = TranslateOptions::new().deterministic_ids(true);
+        let mut reverse_report = TranslateReport::new(
+            crate::core::convert::EditorType::Neko,
+            TargetEditor::Kitten4,
+        );
+        let k4 = convert_kn_document(&source, &options, &mut reverse_report).expect("反向");
+        let bdj = &k4["theatre"]["actors"]["a1"]["block_data_json"];
+        let marker = &bdj["blocks"]["t1"];
+        assert_eq!(
+            marker["type"],
+            json!("incompatible_output_block"),
+            "值位未知块 → 值型标记"
+        );
+        let comment_id = marker["comment"]
+            .as_str()
+            .expect("标记块必须挂注释(rounds/55)");
+        let comment = &bdj["comments"][comment_id];
+        assert_eq!(comment["parent_id"], json!("t1"), "注释挂在标记块上");
+        let text = comment["text"].as_str().expect("注释文本");
+        assert!(
+            text.contains(origin::COMMENT_SENTINEL) && text.contains("temporary_list"),
+            "注释要「给人看的类型名 + 机器载荷」:{text}"
+        );
+        assert_eq!(
+            comment["pinned"],
+            json!(false),
+            "未置顶(与平台用户注释同形)"
+        );
+
+        // 再转回 KN:类型/字段/影子/变异/子块全部回来
+        let mut k4 = k4;
+        let mut back_report = TranslateReport::new(
+            crate::core::convert::EditorType::Kitten4,
+            TargetEditor::KittenN,
+        );
+        let kn = convert_kitten4_document(&mut k4, &options, &mut back_report).expect("正向");
+        assert!(
+            back_report.warnings().iter().any(|warning| matches!(
+                warning,
+                TranslateWarning::RestoredMarkedBlock { blocks: 1 }
+            )),
+            "报告里要有还原读数:{:?}",
+            back_report.counts()
+        );
+        let restored = kn["actors"]["actorsDict"]["a1"]["nekoBlockJsonList"]
+            .as_array()
+            .and_then(|list| {
+                list.iter()
+                    .flat_map(|node| node["inputs"].as_object().into_iter().flatten())
+                    .map(|(_, child)| child)
+                    .find(|child| child["id"] == json!("t1"))
+            })
+            .expect("还原后的 temporary_list");
+        assert_eq!(restored["type"], json!("temporary_list"));
+        assert_eq!(restored["fields"]["list"], json!("list-1"));
+        assert_eq!(restored["shadows"]["MUTATE_BUTTON"], json!(""));
+        assert!(
+            restored["mutation"]
+                .as_str()
+                .is_some_and(|xml| xml.contains("items=\"2\"")),
+            "变异原样还原:{restored}"
+        );
+        assert_eq!(
+            restored["inputs"]["VALUE"]["type"],
+            json!("math_number"),
+            "子块按载荷槽名放回:{restored}"
+        );
+        assert_eq!(restored["inputs"]["VALUE"]["id"], json!("n1"));
     }
 
     /// 单候选也要过**编辑器词汇**判据(rounds/36)。

@@ -56,6 +56,12 @@ pub enum TranslateWarning {
     ReuploadedOnImport { path: String },
     /// 源作品引用上传或写入失败(非损失;产物照常输出,仅缺少顶层 `source`)
     SourceReferenceFailed { error: String },
+    /// 反向写出的「未收录积木」**从原内容注释还原**回原 KN 积木(非损失,rounds/55)。
+    ///
+    /// 这条只在"本库产物再转回 KN"时出现:标记块上带着写出阶段写进平台注释的原积木快照
+    /// (类型/字段/影子/变异),`origin::restore_marked_blocks` 据此把它换回去。
+    /// 有这条说明这些块**没有丢**;产物里不再出现「未收录积木」占位。
+    RestoredMarkedBlock { blocks: u64 },
 }
 
 impl TranslateWarning {
@@ -70,6 +76,7 @@ impl TranslateWarning {
             TranslateWarning::RemintedId { .. } => "重新生成 id",
             TranslateWarning::ReuploadedOnImport { .. } => "官方重传资源(非损失)",
             TranslateWarning::SourceReferenceFailed { .. } => "源引用写入失败(非损失)",
+            TranslateWarning::RestoredMarkedBlock { .. } => "从注释还原未收录积木(非损失)",
         }
     }
 
@@ -83,6 +90,7 @@ impl TranslateWarning {
             TranslateWarning::RemintedId { from } => from,
             TranslateWarning::ReuploadedOnImport { path } => path,
             TranslateWarning::SourceReferenceFailed { error } => error,
+            TranslateWarning::RestoredMarkedBlock { .. } => "restore",
         }
     }
 }
@@ -143,6 +151,7 @@ impl TranslateReport {
                 TranslateWarning::RemintedId { .. }
                     | TranslateWarning::ReuploadedOnImport { .. }
                     | TranslateWarning::SourceReferenceFailed { .. }
+                    | TranslateWarning::RestoredMarkedBlock { .. }
             )
         })
     }

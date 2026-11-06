@@ -96,6 +96,12 @@ pub(super) struct BlockJson {
     /// 本编辑器特有键,原样保真
     #[serde(flatten)]
     pub extra: Map<String, Value>,
+    /// 反向写出的「原 KN 内容载荷」(rounds/55):
+    /// 只对**会被改成「未收录积木」标记**的块有值,由 `mapping::reverse_node` 抓、
+    /// `assembly::mark_unknown_blocks_encoded` 消费成平台注释。
+    /// **不参与序列化**:落盘形态是 `block_data_json.comments`,不是积木自己的键。
+    #[serde(skip)]
+    pub origin: Option<Box<super::origin::KnOrigin>>,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -727,6 +733,9 @@ pub(super) struct EncodedBlocks {
     /// 被改成「未收录积木」标记的 id(这些块**不写** `fields`/`shadows` 默认键:
     /// 旧口径是"先补默认、再由标记把那两个键**删掉**",见 `mark_unknown_blocks_encoded`)
     marked: BTreeSet<String>,
+    /// 注释 id → 注释对象(`block_data_json.comments` 的原样形态)。
+    /// 目前只有「未收录积木」标记的原内容注释走这里(rounds/55)。
+    comments: BTreeMap<String, Value>,
 }
 
 impl EncodedBlocks {
@@ -738,6 +747,7 @@ impl EncodedBlocks {
             blocks: BTreeMap::new(),
             connections: BTreeMap::new(),
             marked: BTreeSet::new(),
+            comments: BTreeMap::new(),
         };
         if let Some(blocks) = value.get("blocks").and_then(Value::as_object) {
             for (id, block) in blocks {
@@ -766,6 +776,33 @@ impl EncodedBlocks {
         self.marked.insert(id.to_string());
     }
 
+    /// 给标记块挂一条「原内容注释」(rounds/55):积木上的 `comment` 指向注释 id,
+    /// 注释对象进 `comments`(平台原生形态,编辑器会读、会存)。
+    ///
+    /// 返回 `false` 表示块不在本块表里(装配端不应发生;真发生了就是不写注释,不 panic)。
+    pub(super) fn add_origin_comment(
+        &mut self,
+        block_id: &str,
+        comment_id: &str,
+        origin: super::origin::KnOrigin,
+    ) -> bool {
+        let Some((node, _)) = self.blocks.get_mut(block_id) else {
+            return false;
+        };
+        node.extra.insert(
+            String::from("comment"),
+            Value::String(comment_id.to_string()),
+        );
+        let entry = super::origin::comment_entry(
+            comment_id,
+            block_id,
+            origin.comment_text(),
+            node.location.as_ref(),
+        );
+        self.comments.insert(comment_id.to_string(), entry);
+        true
+    }
+
     /// 值位子块 id 集合(`connections` 里 `input_type == "value"` 的那些)
     pub(super) fn value_children(&self) -> std::collections::BTreeSet<String> {
         self.connections
@@ -786,6 +823,7 @@ pub(super) fn encode_block_data_json(
         blocks: BTreeMap::new(),
         connections: BTreeMap::new(),
         marked: BTreeSet::new(),
+        comments: BTreeMap::new(),
     };
     let mut seen: HashSet<String> = HashSet::new();
     for (index, root) in tree.roots.iter().enumerate() {
@@ -826,11 +864,15 @@ pub(super) fn encoded_to_value(encoded: EncodedBlocks) -> Result<Value> {
     for (parent, links) in encoded.connections {
         connections.insert(parent, Value::Object(links));
     }
+    let mut comments = Map::new();
+    for (id, entry) in encoded.comments {
+        comments.insert(id, entry);
+    }
     // 顶层键序 = `Map` 字典序:blocks < comments < connections(写出端按同一顺序手写)
     Ok(json_obj([
         ("blocks", Value::Object(blocks)),
         ("connections", Value::Object(connections)),
-        ("comments", Value::Object(Map::new())),
+        ("comments", Value::Object(comments)),
     ]))
 }
 
@@ -857,7 +899,16 @@ pub(super) fn write_encoded_blocks(
             w,
         )?;
     }
-    w.write_all(b"},\"comments\":{},\"connections\":{")?;
+    w.write_all(b"},\"comments\":{")?;
+    for (index, (id, entry)) in encoded.comments.iter().enumerate() {
+        if index > 0 {
+            w.write_all(b",")?;
+        }
+        serde_json::to_writer(&mut *w, id)?;
+        w.write_all(b":")?;
+        serde_json::to_writer(&mut *w, entry)?;
+    }
+    w.write_all(b"},\"connections\":{")?;
     for (index, (parent_id, links)) in encoded.connections.iter().enumerate() {
         if index > 0 {
             w.write_all(b",")?;

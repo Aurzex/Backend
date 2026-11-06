@@ -61,6 +61,7 @@ mod nemo_mapping;
 #[cfg(test)]
 mod nemo_tests;
 mod options;
+mod origin;
 mod pipeline;
 mod report;
 #[cfg(test)]

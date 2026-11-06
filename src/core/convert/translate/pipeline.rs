@@ -150,6 +150,22 @@ fn parse_value_block_data(
     }
 }
 
+/// 源块表里的注释(`id → 文本`)。反向写出的「未收录积木」原内容就存在这里(rounds/55)。
+///
+/// 原文路径(Raw)只在原文里出现哨兵时才多做一次解析 —— 平台原件没有这个哨兵,
+/// 因此普通 `.bcm4` 的骨架快速通道成本不变;只有"本库产物再转回去"才会付这一次解析。
+fn comments_of(block_data: Option<&BlockData>) -> BTreeMap<String, String> {
+    match block_data {
+        Some(BlockData::Value(value)) => super::origin::comments_of(value),
+        Some(BlockData::Raw(raw)) if raw.get().contains(super::origin::COMMENT_SENTINEL) => {
+            serde_json::from_str::<serde_json::Value>(raw.get())
+                .map(|value| super::origin::comments_of(&value))
+                .unwrap_or_default()
+        }
+        _ => BTreeMap::new(),
+    }
+}
+
 /// 阶段 1(单个工作项,项内自足):解析 → 语义映射 → 抽程序集
 ///
 /// 铸造走**临时 id**(`IdSource::recording`),账本交给串行阶段兑现最终 id。
@@ -178,7 +194,18 @@ fn parse_forward_item(
         None => model::BlockTree::default(),
     };
     local.blocks_total += tree.count(); // 源文件里的积木数(映射前)
+    // 「未收录积木」标记的原内容注释(id → 文本):反向写出时挂在标记块上(rounds/55)
+    let comments = comments_of(block_data);
     mapping::translate_kitten_to_kn(&mut tree, landscape, &mut ids, &mut local);
+    // 标记块(已被映射成 `bcm_translator_text_*`)带本转换器的注释 ⇒ 换回原 KN 积木。
+    // 放在语义映射**之后**:那一趟会把标记改写成占位块(字段/影子/槽名都动过),而载荷里的
+    // 快照本来就是 KN 口径 —— 直接整块替换、只按载荷映射把子块放回原槽。
+    let restored = super::origin::restore_marked_blocks(&mut tree, &comments);
+    if restored > 0 {
+        local.warn(TranslateWarning::RestoredMarkedBlock {
+            blocks: restored as u64,
+        });
+    }
     let (kept, procedures) = model::split_procedures(tree, &mut ids, &mut local);
     Ok(ForwardParsed {
         tree: kept,
@@ -1134,6 +1161,10 @@ fn remap_warning(
         },
         TranslateWarning::SourceReferenceFailed { error } => {
             TranslateWarning::SourceReferenceFailed { error }
+        }
+        // 计数型告警,不带任何 id(rounds/55)
+        TranslateWarning::RestoredMarkedBlock { blocks } => {
+            TranslateWarning::RestoredMarkedBlock { blocks }
         }
     }
 }

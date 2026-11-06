@@ -1162,7 +1162,16 @@ const KITTEN4_TOOLBOX_ORDER: &[&str] = &[
 /// (它本来就是"不可执行"的占位块)。位置与存在都保住:语句位**原地**渲染成「未收录积木」并留在链里;
 /// 值位因平台块定义**没有 `output` 连接**而落成孤立块(槽位仍空,但块还在画布上)。
 /// "哪个类型没认出来、有多少块"照旧逐类进报告 —— 效果从"悄悄少几块"变成"看得见的损失"。
-fn mark_unknown_blocks_encoded(encoded: &mut EncodedBlocks, report: &mut TranslateReport) {
+///
+/// **rounds/55 起:损失可恢复**。标记块的定义是 `args0: []`(线上编辑器 bundle
+/// `kitten.fc848ad0…`),没有字段能承载原积木;但平台自己用**注释**表达"这条积木上有一段说明",
+/// 于是原 KN 内容(`mapping::reverse_node` 抓的快照)写进注释(`block_data_json.comments`),
+/// 反向解析时由 `origin::restore_marked_blocks` 还回去。返回待挂注释的 `(块 id, 原内容)`:
+/// 注释 id 的铸造放在装配末尾(其它 id 铸完再铸,避免整体偏移既有产物的 id)。
+fn mark_unknown_blocks_encoded(
+    encoded: &mut EncodedBlocks,
+    report: &mut TranslateReport,
+) -> Vec<(String, super::origin::KnOrigin)> {
     use std::collections::BTreeMap;
 
     /// 编辑器认识的「未收录积木」标记(语句位 / 值位)
@@ -1181,12 +1190,26 @@ fn mark_unknown_blocks_encoded(encoded: &mut EncodedBlocks, report: &mut Transla
     // 登记"已改成标记"的 id(写出/物化时它们不写 `fields`/`shadows` 默认键);
     // 遍历需要 `&mut blocks`,故先攒 id、循环后再写回 `encoded.marked`。
     let mut marked_ids: Vec<String> = Vec::new();
+    // 原内容载荷(块 id, 快照):装配末尾统一铸注释 id 再挂上去
+    let mut pending: Vec<(String, super::origin::KnOrigin)> = Vec::new();
     for (id, node) in encoded.blocks_mut() {
         if knows(&node.kind) {
             continue;
         }
         let output = node.is_output || value_children.contains(id);
-        *marked.entry(node.kind.clone()).or_insert(0) += 1;
+        // 报告里的类型名用**原 KN 类型**(rounds/55):反向挑出来的名字可能是 Kitten 侧候选
+        // (如 `timer` 挑成 `mobile__timer_value`,后者只是"它对应的 Kitten 原名"、不在源作品里
+        // 出现过)。有原内容快照就以快照的 `type` 为准,否则退回节点当前类型。
+        let origin = node.origin.take();
+        let report_kind = origin
+            .as_ref()
+            .and_then(|origin| origin.node.get("type"))
+            .and_then(Value::as_str)
+            .map_or_else(|| node.kind.clone(), str::to_string);
+        *marked.entry(report_kind).or_insert(0) += 1;
+        if let Some(origin) = origin {
+            pending.push((id.clone(), *origin));
+        }
         node.kind = if output {
             MARKER_OUTPUT
         } else {
@@ -1238,6 +1261,7 @@ fn mark_unknown_blocks_encoded(encoded: &mut EncodedBlocks, report: &mut Transla
             cleared_shadows: 0,
         });
     }
+    pending
 }
 
 /// 影子 XML 串里的 `type="…"` 取值(没有则 `None`)
@@ -1270,6 +1294,8 @@ struct Kitten4Hook {
     is_scene: bool,
     id: String,
     blocks: EncodedBlocks,
+    /// 待挂「原内容注释」的标记块(`(块 id, 原 KN 快照)`);注释 id 在装配末尾统一铸
+    pending_comments: Vec<(String, super::origin::KnOrigin)>,
 }
 
 impl Kitten4ProductDocument {
@@ -1459,11 +1485,12 @@ pub(super) fn build_kitten4_document_product(
         // (实机实测:80 种类型里 20 种不认识 ⇒ 画布一块都不显示)。所以写出前把不认识的块
         // 就地改成编辑器认识的「未收录积木」标记(而不是删掉),并逐类记进报告。
         let mut blocks = blocks;
-        mark_unknown_blocks_encoded(&mut blocks, report);
+        let pending_comments = mark_unknown_blocks_encoded(&mut blocks, report);
         let hook = Kitten4Hook {
             is_scene: entity.is_scene,
             id: entity.source_id.clone(),
             blocks,
+            pending_comments,
         };
         if entity.is_scene {
             scenes.insert(
@@ -1636,6 +1663,23 @@ pub(super) fn build_kitten4_document_product(
             });
         }
     }
+    // ── 「未收录积木」的原内容注释(rounds/55)
+    //
+    // 放**最后**统一铸注释 id:组 id / 变量 / 音频的铸造次序都在它之前,既有产物的 id
+    // 因此一个都不偏移(否则同一份输入的 SHA 会因为"多铸了几次"整体改变)。
+    for hook in &mut hooks {
+        for (block_id, origin) in std::mem::take(&mut hook.pending_comments) {
+            let comment_id = ids.short();
+            if !hook
+                .blocks
+                .add_origin_comment(&block_id, &comment_id, origin)
+            {
+                // 装配端一定先登记了块;走到这里就是写出器的 bug,留痕而不是静默丢注释
+                debug_assert!(false, "反向产物缺少标记块 {block_id}");
+            }
+        }
+    }
+
     Kitten4ProductDocument { doc, hooks }
 }
 

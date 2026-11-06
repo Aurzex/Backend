@@ -1039,7 +1039,7 @@ fn unmapped_field_text(name: &str, text: &str) -> Option<String> {
 }
 
 /// KN 输入/影子槽位名 → Kitten 槽位名(按 `INPUT_NAME_MAP` 反查;`key` 是正向 lookup 用的类型)
-fn reverse_slot_name(key: &str, kn_slot: &str) -> String {
+pub(super) fn reverse_slot_name(key: &str, kn_slot: &str) -> String {
     let Some(entries) = INPUT_NAME_MAP_GROUPS.get(key) else {
         return kn_slot.to_string();
     };
@@ -1148,6 +1148,14 @@ fn reverse_node(mut node: BlockJson, ctx: &mut RevCtx) -> BlockJson {
 
     // (3) 类型反演(gc 的 `attribute` 补齐要等字段反演之后再写,否则会被取值表再搬一次)
     let (kitten_kind, get3_attribute) = reverse_kind(&kn_kind, &mut node, ctx);
+
+    // (3bis) 编辑器不认识 ⇒ 写出阶段会把它改成「未收录积木」标记,内容按定义要丢。
+    // 在**改写字段/影子/槽名之前**抓一份原 KN 快照(rounds/55):写出阶段把它写成平台注释,
+    // 反向(Kitten4 → KN)解析时据此逐字段还原 —— 损失从"看得见但恢复不了"变成"可恢复"。
+    // 这里必须早于 (4)~(7):那几步会把字段名/取值/影子 XML/槽名搬到 Kitten4 口径。
+    if !super::kitten4_vocab::kitten4_editor_knows(&kitten_kind) {
+        node.origin = super::origin::KnOrigin::capture(&kn_kind, &node).map(Box::new);
+    }
 
     // (4) 字段名 + 取值反演
     reverse_fields(&mut node, &kitten_kind);
