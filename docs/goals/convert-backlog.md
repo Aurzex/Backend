@@ -213,8 +213,8 @@
 | 面 | 状态 | 出处 |
 | --- | --- | --- |
 | 正向(Kitten4 到 KN) | 真原件语料 24 条差异**全部**归因于改名/等价类 + 已文档化降级与包装 + 槽默认影子不回写,因此**无已确认缺陷** | `../rounds/37` §13.4/§13.8 |
-| 反向(KN 到 Kitten4) | 自建、有损;实机门已过(角色列表 + 画布块数);损失已量化 = **改成「未收录积木」标记**(位置与存在保住、内容不可恢复)+ 槽默认影子不回写 + 类型歧义 + id 重铸 | `../rounds/34/35/36/38`、`../knowledge/convert-semantics.md` §5bis |
-| 既有门 | **门的定义与数值以 `../knowledge/convert-semantics.md` §6 为准**;本表只记落地读数:**三处预算门(都只许变小)** —— id 台账门 `LOST_ID_BUDGET`(正向扫描器,`reverse_tests` 的 `k4_corpus_round_trip_sweep`)+ id 台账门 `LOST_ID_BUDGET_REVERSE`(反向扫描器,`kn_corpus_round_trip_sweep`;逐件打印 `[id台账·反向]`,口径见 `../rounds/39` §W3d)+ 标记量门 `MARKER_BUDGET`(反向扫描器,**"改成「未收录积木」标记的块数 + 清空影子数"**,rounds/38 起由"剔除量门"改名改语义);`convert_bench` SHA + `#meta` 基线(Phase 0 已重刷加固,`ae41361`);往返多重集守恒 | `reverse_tests` 的扫描器/预算函数(按名引用;行号会漂)、`tests/convert_bench.rs` |
+| 反向(KN 到 Kitten4) | 自建、有损;实机门已过(角色列表 + 画布块数);损失已量化 = **改成「未收录积木」标记**(位置与存在保住;内容**自 2026-11-06 起由平台注释承载,K4 到 KN 时逐字段还原**,见 `../rounds/55`)+ 槽默认影子不回写 + 类型歧义 + id 重铸 | `../rounds/34/35/36/38`、`../knowledge/convert-semantics.md` §5bis |
+| 既有门 | **门的定义与数值以 `../knowledge/convert-semantics.md` §6 为准**;本表只记落地读数:**三处预算门(都只许变小)** —— id 台账门 `LOST_ID_BUDGET`(正向扫描器,`reverse_tests` 的 `k4_corpus_round_trip_sweep`)+ id 台账门 `LOST_ID_BUDGET_REVERSE`(反向扫描器,`kn_corpus_round_trip_sweep`;逐件打印 `[id台账·反向]`,口径见 `../rounds/39` §W3d)+ 标记量门 `MARKER_BUDGET`(反向扫描器,**"改成「未收录积木」标记的块数 + 清空影子数"**,rounds/38 起由"剔除量门"改名改语义);**标记可恢复门**(反向扫描器,标记块在 KN 到 Kitten4 再到 KN 之后按类型全部回来,rounds/55 起);`convert_bench` SHA + `#meta` 基线(Phase 0 已重刷加固,`ae41361`);往返多重集守恒 | `reverse_tests` 的扫描器/预算函数(按名引用;行号会漂)、`tests/convert_bench.rs` |
 | 仪器 | `kn_corpus_round_trip_sweep` / `k4_corpus_round_trip_sweep`(默认跑,读 `download/compile/`,缺语料则跳过)+ 平台真原件编辑格式语料 `download/compile/k4edit/`(2 件作品 × 10 版)+ 实机门(手动) | `reverse_tests` 的同名扫描器、`tests/convert_edit_harvest.rs` |
 | NEMO | 与官方逐数一致;**已有 SHA + `#meta` 字节门**(`convert_bench` 的 `nemo-3.4MB-kn` / `nemo-old-1.5MB-kn`,后者让版本迁移真的进基线;`#meta` 带 `source_version`);`report.elapsed_ms` 实测非 0(3.5 MB 源:core 365–442 ms),原先记的"恒 0"已过时;`tree_to_json` 编码失败不再静默丢块(进报告,计有损) | `tests/convert_bench.rs`、`src/core/convert/translate/nemo.rs`(2026-10-01) |
 
