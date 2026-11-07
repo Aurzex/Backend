@@ -147,6 +147,14 @@ impl KittenFetcher {
     }
 }
 
+/// 按 JSON Pointer 取 URL 字符串;缺字段时统一报 `InvalidResponse`(四个 fetcher 共用一口径)
+fn url_at<'a>(value: &'a Value, pointer: &str, missing: &str) -> Result<&'a str> {
+    value
+        .pointer(pointer)
+        .and_then(Value::as_str)
+        .ok_or_else(|| ConvertError::InvalidResponse(format!("无法获取{missing}")))
+}
+
 impl WorkFetcher for KittenFetcher {
     fn fetch(&self, work_info: &WorkInfo) -> Result<RawWorkData> {
         let url = format!(
@@ -154,12 +162,7 @@ impl WorkFetcher for KittenFetcher {
             self.ctx.config.creation_base_url, work_info.id
         );
         let data = self.ctx.http_client.get_json(&url, None)?;
-        let compiled_url = data
-            .get("source_urls")
-            .and_then(|v| v.as_array())
-            .and_then(|arr| arr.first())
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| ConvertError::InvalidResponse("无法获取source_urls".to_string()))?;
+        let compiled_url = url_at(&data, "/source_urls/0", "source_urls")?;
         let compiled = self.ctx.http_client.get_json(compiled_url, None)?;
         Ok(RawWorkData::Kitten(Arc::new(compiled)))
     }
@@ -851,12 +854,7 @@ impl WorkFetcher for NemoFetcher {
         );
         let source_info = self.ctx.http_client.get_json(&source_url, None)?;
 
-        let bcm_url = source_info
-            .get("work_urls")
-            .and_then(|v| v.as_array())
-            .and_then(|arr| arr.first())
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| ConvertError::InvalidResponse("无法获取work_urls".to_string()))?;
+        let bcm_url = url_at(&source_info, "/work_urls/0", "work_urls")?;
 
         let bcm_data = self.ctx.http_client.get_json(bcm_url, None)?;
         Ok(RawWorkData::Nemo(Arc::new(bcm_data), Arc::new(source_info)))
@@ -1167,11 +1165,7 @@ impl WorkFetcher for CocoFetcher {
             self.ctx.config.creation_base_url, work_info.id
         );
         let data = self.ctx.http_client.get_json(&url, None)?;
-        let compiled_url = data
-            .get("data")
-            .and_then(|v| v.get("bcmc_url"))
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| ConvertError::InvalidResponse("无法获取bcmc_url".to_string()))?;
+        let compiled_url = url_at(&data, "/data/bcmc_url", "bcmc_url")?;
         let compiled = self.ctx.http_client.get_json(compiled_url, None)?;
         Ok(RawWorkData::Coco(Arc::new(compiled)))
     }
@@ -1400,12 +1394,7 @@ impl WorkFetcher for NekoFetcher {
 
         let detail = self.ctx.http_client.get_json(&detail_url, Some(headers))?;
 
-        let encrypted_url = detail
-            .get("source_urls")
-            .and_then(|v| v.as_array())
-            .and_then(|arr| arr.first())
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| ConvertError::InvalidResponse("无法获取source_urls".to_string()))?;
+        let encrypted_url = url_at(&detail, "/source_urls/0", "source_urls")?;
 
         let encrypted_content = self.ctx.http_client.get_text(encrypted_url)?;
         Ok(RawWorkData::NekoEncrypted(encrypted_content))

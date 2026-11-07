@@ -1,6 +1,9 @@
 use super::mapping::truthy;
 use super::model::{EncodedBlocks, ProcedureEntry, procedure_entries, type_name};
-use std::collections::HashMap;
+use super::product::Kitten4Hook;
+pub(super) use super::product::{
+    BlockContainer, BlockPlacement, Kitten4ProductDocument, ProductDocument,
+};
 use super::report::{TranslateReport, TranslateWarning};
 use super::tables_gen::{BCM_VERSION, STAGE_LANDSCAPE, STAGE_PORTRAIT};
 use super::{model, tables_gen};
@@ -107,229 +110,6 @@ pub(super) fn build_document(
     report: &mut TranslateReport,
 ) -> Result<Value> {
     build_document_product(source, entities, procedures, now_ms, report)?.into_value()
-}
-
-/// 可**流式写出**的产物文档(`rounds/47` §4 Step 2/3)
-///
-/// 三处 `nekoBlockJsonList`(角色 / 场景 / 程序集定义体)在 `doc` 里只留 `null` **占位**
-/// (位置由 `Map` 的字典序决定),真正的块表挂在 [`BlockPlacement`] 上:
-///
-/// - 内存路径([`Self::into_value`])把树物化回 `Value` 填占位 —— 与旧口径**逐字节相同**;
-/// - 文件路径([`Self::write_to`])在占位处**直接写**块树,不建那份产物 `Value`
-///   (产物侧最大的分配来源:十万级块的整份物化 + 序列化遍历 + 整体析构)。
-///
-/// 两条 KN 产物路径共用本类型:正向(Kitten4 → KN,`build_document_product`)与
-/// NEMO(NEMO → KN,[`Self::new_nemo`])产物同形,只有块表编码口径([`model::ShieldPolicy`])不同。
-pub(super) struct ProductDocument {
-    doc: Map<String, Value>,
-    hooks: Vec<BlockPlacement>,
-    /// 块表编码口径:正向(`ShieldPolicy::Always`)与 NEMO(`OnlyWhenTrue`)产物同为 KN 文档,
-    /// 唯一差别就在这里(见 [`model::ShieldPolicy`] 与 `model::write_block_tree`)
-    shield: model::ShieldPolicy,
-}
-
-/// 一处 `nekoBlockJsonList` 的挂点(装配侧登记,写出侧按它填占位)
-///
-/// NEMO 方向的产物同样只有这三处(见 `nemo::convert_nemo_document_product`),因此两条路径
-/// 共用这一份挂点 + 写出实现。
-pub(super) struct BlockPlacement {
-    pub(super) container: BlockContainer,
-    pub(super) id: String,
-    pub(super) tree: model::BlockTree,
-}
-
-/// 挂点所在的三处容器(各自的"段名"与"字典键"不同,官方口径见 `build_document`)
-#[derive(Clone, Copy, PartialEq)]
-pub(super) enum BlockContainer {
-    Actors,
-    Scenes,
-    Procedures,
-}
-
-impl BlockContainer {
-    fn section_key(self) -> &'static str {
-        match self {
-            BlockContainer::Actors => "actors",
-            BlockContainer::Scenes => "scenes",
-            BlockContainer::Procedures => "procedures",
-        }
-    }
-
-    fn dict_key(self) -> &'static str {
-        match self {
-            BlockContainer::Actors => "actorsDict",
-            BlockContainer::Scenes => "scenesDict",
-            BlockContainer::Procedures => "proceduresDict",
-        }
-    }
-}
-
-impl ProductDocument {
-    /// NEMO → KN 的产物(`nemo::convert_nemo_document_product` 用它):同形的 KN 文档,
-    /// 块表按 NEMO 旧口径编码(不补 `shield` 假值,见 [`model::ShieldPolicy`])
-    pub(super) fn new_nemo(doc: Map<String, Value>, hooks: Vec<BlockPlacement>) -> Self {
-        ProductDocument {
-            doc,
-            hooks,
-            shield: model::ShieldPolicy::OnlyWhenTrue,
-        }
-    }
-
-    /// 物化回整份文档(`TranslateDocument.document`,公开面口径不变)
-    pub(super) fn into_value(mut self) -> Result<Value> {
-        for hook in std::mem::take(&mut self.hooks) {
-            let missing = || ConvertError::Other {
-                msg: format!(
-                    "产物缺少 {} 段的 {} 条目:无法放回块表",
-                    hook.container.section_key(),
-                    hook.id
-                ),
-                source: None,
-            };
-            let entry = self
-                .doc
-                .get_mut(hook.container.section_key())
-                .and_then(|section| section.get_mut(hook.container.dict_key()))
-                .and_then(|dict| dict.get_mut(&hook.id))
-                .and_then(Value::as_object_mut)
-                .ok_or_else(missing)?;
-            entry.insert(
-                "nekoBlockJsonList".into(),
-                Value::Array(model::tree_to_value(&hook.tree, self.shield)?),
-            );
-        }
-        Ok(Value::Object(self.doc))
-    }
-
-    /// 写一个顶层字段(域门面在流式落盘前补 `source` 等信封字段)
-    pub(super) fn set_top_level(&mut self, key: &str, value: Value) {
-        self.doc.insert(key.to_string(), value);
-    }
-
-    /// 直接写整份文档(文件路径):除三处块表外逐键交给 `serde_json`,块表在占位处流式写
-    pub(super) fn write_to(&self, w: &mut impl std::io::Write) -> Result<()> {
-        w.write_all(b"{")?;
-        for (index, (key, value)) in self.doc.iter().enumerate() {
-            if index > 0 {
-                w.write_all(b",")?;
-            }
-            serde_json::to_writer(&mut *w, key)?;
-            w.write_all(b":")?;
-            match key.as_str() {
-                "actors" => {
-                    write_section(value, BlockContainer::Actors, &self.hooks, self.shield, w)?
-                }
-                "scenes" => {
-                    write_section(value, BlockContainer::Scenes, &self.hooks, self.shield, w)?
-                }
-                "procedures" => write_section(
-                    value,
-                    BlockContainer::Procedures,
-                    &self.hooks,
-                    self.shield,
-                    w,
-                )?,
-                _ => serde_json::to_writer(&mut *w, value)?,
-            }
-        }
-        w.write_all(b"}")?;
-        Ok(())
-    }
-}
-
-/// 写一个"段"(`{<字典键>: {...}, 其余键原样}`):只有字典键里带块表挂点
-fn write_section(
-    section: &Value,
-    container: BlockContainer,
-    hooks: &[BlockPlacement],
-    shield: model::ShieldPolicy,
-    w: &mut impl std::io::Write,
-) -> Result<()> {
-    let map = section
-        .as_object()
-        .ok_or_else(|| ConvertError::TypeMismatch {
-            expected: format!("object({} 段)", container.section_key()),
-            actual: type_name(section).into(),
-        })?;
-    w.write_all(b"{")?;
-    for (index, (key, value)) in map.iter().enumerate() {
-        if index > 0 {
-            w.write_all(b",")?;
-        }
-        serde_json::to_writer(&mut *w, key)?;
-        w.write_all(b":")?;
-        if key == container.dict_key() {
-            write_entries(value, container, hooks, shield, w)?;
-        } else {
-            serde_json::to_writer(&mut *w, value)?;
-        }
-    }
-    w.write_all(b"}")?;
-    Ok(())
-}
-
-/// 写"条目字典"(`{<id>: {…}}`):命中挂点的条目走 [`write_entry_with_blocks`]
-fn write_entries(
-    dict: &Value,
-    container: BlockContainer,
-    hooks: &[BlockPlacement],
-    shield: model::ShieldPolicy,
-    w: &mut impl std::io::Write,
-) -> Result<()> {
-    let map = dict.as_object().ok_or_else(|| ConvertError::TypeMismatch {
-        expected: format!("object({} 字典)", container.dict_key()),
-        actual: type_name(dict).into(),
-    })?;
-    // 挂点按 id 建一次索引:写出路径上按条目线性扫挂点会是 O(实体 × 挂点)
-    let hook_by_id: HashMap<&str, &BlockPlacement> = hooks
-        .iter()
-        .filter(|hook| hook.container == container)
-        .map(|hook| (hook.id.as_str(), hook))
-        .collect();
-    w.write_all(b"{")?;
-    for (index, (id, entry)) in map.iter().enumerate() {
-        if index > 0 {
-            w.write_all(b",")?;
-        }
-        serde_json::to_writer(&mut *w, id)?;
-        w.write_all(b":")?;
-        match hook_by_id.get(id.as_str()) {
-            Some(hook) => write_entry_with_blocks(entry, &hook.tree, shield, w)?,
-            None => serde_json::to_writer(&mut *w, entry)?,
-        }
-    }
-    w.write_all(b"}")?;
-    Ok(())
-}
-
-/// 写一个带块表的条目:除 `nekoBlockJsonList` 占位处外逐键原样写
-fn write_entry_with_blocks(
-    entry: &Value,
-    tree: &model::BlockTree,
-    shield: model::ShieldPolicy,
-    w: &mut impl std::io::Write,
-) -> Result<()> {
-    let map = entry
-        .as_object()
-        .ok_or_else(|| ConvertError::TypeMismatch {
-            expected: "object(实体/程序集条目)".into(),
-            actual: type_name(entry).into(),
-        })?;
-    w.write_all(b"{")?;
-    for (index, (key, value)) in map.iter().enumerate() {
-        if index > 0 {
-            w.write_all(b",")?;
-        }
-        serde_json::to_writer(&mut *w, key)?;
-        w.write_all(b":")?;
-        if key == "nekoBlockJsonList" {
-            model::write_block_tree(tree, shield, w)?;
-        } else {
-            serde_json::to_writer(&mut *w, value)?;
-        }
-    }
-    w.write_all(b"}")?;
-    Ok(())
 }
 
 /// 装配 KN 作品文档(官方 `De`):边装配边登记三处块表挂点
@@ -480,11 +260,7 @@ pub(super) fn build_document_product(
         ]),
     );
     doc.insert("courseMaterials".into(), Value::Array(Vec::new()));
-    Ok(ProductDocument {
-        doc,
-        hooks,
-        shield: model::ShieldPolicy::Always,
-    })
+    Ok(ProductDocument::new(doc, hooks))
 }
 
 // ---------------------------------------------------------------- 实体(官方 78620-78680)
@@ -1283,158 +1059,6 @@ pub(super) struct StageSize {
     pub(super) kn: (f64, f64),
 }
 
-/// 可**流式写出**的反向产物文档(`rounds/47` §4 Step 4)
-///
-/// 每实体的 `block_data_json` 在文档里只留 `null` 占位(键序由 `Map` 决定),真正的
-/// [`EncodedBlocks`] 挂在 [`Kitten4Hook`] 上:
-/// - [`Self::into_value`] 物化回 `Value`(与旧口径逐字节相同);
-/// - [`Self::write_to`] 在占位处**直接写**(不建节点 `Value` —— 与正向 Step 2/3 同一套做法)。
-pub(super) struct Kitten4ProductDocument {
-    doc: Map<String, Value>,
-    hooks: Vec<Kitten4Hook>,
-}
-
-struct Kitten4Hook {
-    is_scene: bool,
-    id: String,
-    blocks: EncodedBlocks,
-    /// 待挂「原内容注释」的标记块(`(块 id, 原 KN 快照)`);注释 id 在装配末尾统一铸
-    pending_comments: Vec<(String, super::origin::KnOrigin)>,
-}
-
-impl Kitten4ProductDocument {
-    /// 物化回整份文档(`TranslateDocument.document` 口径不变)
-    pub(super) fn into_value(mut self) -> Result<Value> {
-        for hook in std::mem::take(&mut self.hooks) {
-            let container = if hook.is_scene { "scenes" } else { "actors" };
-            let filled = model::encoded_to_value(hook.blocks)?;
-            if let Some(entry) = self
-                .doc
-                .get_mut("theatre")
-                .and_then(Value::as_object_mut)
-                .and_then(|theatre| theatre.get_mut(container))
-                .and_then(Value::as_object_mut)
-                .and_then(|table| table.get_mut(&hook.id))
-                .and_then(Value::as_object_mut)
-            {
-                entry.insert("block_data_json".into(), filled);
-            } else {
-                // 装配端一定放好了占位;真到不了这里(到了就是写出器的 bug,留痕而不是静默丢键)
-                debug_assert!(false, "反向产物缺少 {container}.{} 条目", hook.id);
-            }
-        }
-        Ok(Value::Object(self.doc))
-    }
-
-    /// 直接写整份文档(文件路径):除两处块表外逐键交给 `serde_json`,块表在占位处流式写
-    pub(super) fn write_to(&self, w: &mut impl std::io::Write) -> Result<()> {
-        w.write_all(b"{")?;
-        for (index, (key, value)) in self.doc.iter().enumerate() {
-            if index > 0 {
-                w.write_all(b",")?;
-            }
-            serde_json::to_writer(&mut *w, key)?;
-            w.write_all(b":")?;
-            if key == "theatre" {
-                self.write_theatre(value, w)?;
-            } else {
-                serde_json::to_writer(&mut *w, value)?;
-            }
-        }
-        w.write_all(b"}")?;
-        Ok(())
-    }
-
-    /// `theatre` 段:`actors` / `scenes` 两个字典里挂块表
-    fn write_theatre(&self, theatre: &Value, w: &mut impl std::io::Write) -> Result<()> {
-        let map = theatre
-            .as_object()
-            .ok_or_else(|| ConvertError::TypeMismatch {
-                expected: "object(theatre)".into(),
-                actual: type_name(theatre).into(),
-            })?;
-        w.write_all(b"{")?;
-        for (index, (key, value)) in map.iter().enumerate() {
-            if index > 0 {
-                w.write_all(b",")?;
-            }
-            serde_json::to_writer(&mut *w, key)?;
-            w.write_all(b":")?;
-            match key.as_str() {
-                "actors" => self.write_entity_table(value, false, w)?,
-                "scenes" => self.write_entity_table(value, true, w)?,
-                _ => serde_json::to_writer(&mut *w, value)?,
-            }
-        }
-        w.write_all(b"}")?;
-        Ok(())
-    }
-
-    /// `theatre.{actors,scenes}` 字典:命中挂点的实体走占位处流写
-    fn write_entity_table(
-        &self,
-        table: &Value,
-        is_scene: bool,
-        w: &mut impl std::io::Write,
-    ) -> Result<()> {
-        let map = table
-            .as_object()
-            .ok_or_else(|| ConvertError::TypeMismatch {
-                expected: "object(实体字典)".into(),
-                actual: type_name(table).into(),
-            })?;
-        w.write_all(b"{")?;
-        let hook_by_id: HashMap<&str, &Kitten4Hook> = self
-            .hooks
-            .iter()
-            .filter(|hook| hook.is_scene == is_scene)
-            .map(|hook| (hook.id.as_str(), hook))
-            .collect();
-        for (index, (id, entry)) in map.iter().enumerate() {
-            if index > 0 {
-                w.write_all(b",")?;
-            }
-            serde_json::to_writer(&mut *w, id)?;
-            w.write_all(b":")?;
-            match hook_by_id.get(id.as_str()) {
-                Some(hook) => write_entity_with_blocks(entry, &hook.blocks, w)?,
-                None => serde_json::to_writer(&mut *w, entry)?,
-            }
-        }
-        w.write_all(b"}")?;
-        Ok(())
-    }
-}
-
-/// 写一个带块表的实体条目:除 `block_data_json` 占位处外逐键原样写
-fn write_entity_with_blocks(
-    entry: &Value,
-    blocks: &EncodedBlocks,
-    w: &mut impl std::io::Write,
-) -> Result<()> {
-    let map = entry
-        .as_object()
-        .ok_or_else(|| ConvertError::TypeMismatch {
-            expected: "object(实体条目)".into(),
-            actual: type_name(entry).into(),
-        })?;
-    w.write_all(b"{")?;
-    for (index, (key, value)) in map.iter().enumerate() {
-        if index > 0 {
-            w.write_all(b",")?;
-        }
-        serde_json::to_writer(&mut *w, key)?;
-        w.write_all(b":")?;
-        if key == "block_data_json" {
-            model::write_encoded_blocks(blocks, w)?;
-        } else {
-            serde_json::to_writer(&mut *w, value)?;
-        }
-    }
-    w.write_all(b"}")?;
-    Ok(())
-}
-
 /// 装配 Kitten4 编辑版文档(旧口径的入口说明见 [`build_kitten4_document`] 的上方文档)
 pub(super) fn build_kitten4_document_product(
     src: &serde_json::Map<String, serde_json::Value>,
@@ -1492,12 +1116,12 @@ pub(super) fn build_kitten4_document_product(
         // 就地改成编辑器认识的「未收录积木」标记(而不是删掉),并逐类记进报告。
         let mut blocks = blocks;
         let pending_comments = mark_unknown_blocks_encoded(&mut blocks, report);
-        let hook = Kitten4Hook {
-            is_scene: entity.is_scene,
-            id: entity.source_id.clone(),
+        let hook = Kitten4Hook::new(
+            entity.is_scene,
+            entity.source_id.clone(),
             blocks,
             pending_comments,
-        };
+        );
         if entity.is_scene {
             scenes.insert(
                 entity.source_id.clone(),
@@ -1674,19 +1298,16 @@ pub(super) fn build_kitten4_document_product(
     // 放**最后**统一铸注释 id:组 id / 变量 / 音频的铸造次序都在它之前,既有产物的 id
     // 因此一个都不偏移(否则同一份输入的 SHA 会因为"多铸了几次"整体改变)。
     for hook in &mut hooks {
-        for (block_id, origin) in std::mem::take(&mut hook.pending_comments) {
+        for (block_id, origin) in hook.take_pending_comments() {
             let comment_id = ids.short();
-            if !hook
-                .blocks
-                .add_origin_comment(&block_id, &comment_id, origin)
-            {
+            if !hook.add_origin_comment(&block_id, &comment_id, origin) {
                 // 装配端一定先登记了块;走到这里就是写出器的 bug,留痕而不是静默丢注释
                 debug_assert!(false, "反向产物缺少标记块 {block_id}");
             }
         }
     }
 
-    Kitten4ProductDocument { doc, hooks }
+    Kitten4ProductDocument::new(doc, hooks)
 }
 
 /// 一个 KN 实体的公共字段(角色/场景共用):名字、造型、工作区滚动、可见性

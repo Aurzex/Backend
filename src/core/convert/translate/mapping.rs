@@ -221,7 +221,13 @@ pub(super) fn translate_kitten_to_kn(
 // 索引构造统一走 `model::flat_index`/`nested_index`(一律 `entry().or_insert()`,
 // **首个命中优先**,与原来的 `iter().find(...)` 逐键等价)。
 static KITTEN_TO_KN_INDEX: std::sync::LazyLock<HashMap<&'static str, &'static str>> =
-    std::sync::LazyLock::new(|| flat_index(KITTEN_TO_KN));
+    std::sync::LazyLock::new(|| {
+        let mut index = flat_index(KITTEN_TO_KN);
+        // 手工补充在生成表之后写入(同键覆盖),与旧口径"先查手工表、再查索引"等价;
+        // 合进一处后 `translate_type` 只做一次查表。
+        index.extend(KITTEN_TO_KN_MANUAL.iter().copied());
+        index
+    });
 
 // 只服务 `shadow_xml`(见下),而 `shadow_xml` 只被本文件的 cfg(test) 用例调用 ⇒ 生产构建里不需要它。
 #[cfg(test)]
@@ -310,12 +316,6 @@ const KITTEN_TO_KN_MANUAL: &[(&str, &str)] = &[
 /// `pub(super)`:往返扫描(测试)要用同一张表把两侧类型**归一化到同一等价类**,
 /// 否则"有意的改名"(歧义类型保留 KN 名,见 `mod.rs` 顶部说明)会被当成保真差异。
 pub(super) fn translate_type(kind: &str) -> &str {
-    if let Some((_, kn)) = KITTEN_TO_KN_MANUAL
-        .iter()
-        .find(|(kitten, _)| *kitten == kind)
-    {
-        return kn;
-    }
     KITTEN_TO_KN_INDEX.get(kind).copied().unwrap_or(kind)
 }
 

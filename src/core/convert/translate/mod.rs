@@ -63,6 +63,7 @@ mod nemo_tests;
 mod options;
 mod origin;
 mod pipeline;
+mod product;
 mod report;
 #[cfg(test)]
 mod reverse_tests;
