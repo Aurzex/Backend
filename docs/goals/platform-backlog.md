@@ -23,7 +23,7 @@
 | 项 | 说明 | 出处 |
 | --- | --- | --- |
 | AI 对话**指数退避重连** | 现在断线只置 `connected=false` + emit 错误;`send_and_wait` 只能等 `Timeout`,必须手动 `connect()`。云变量有退避 => 对齐前**先定会话/历史重建语义** | `../rounds/29` §2-3 |
-| 举报"每类型 100 条"上限 | 现默认移除上限;是否保留取决于产品语义 | `../rounds/04` Assumptions |
+| ~~举报"每类型 100 条"上限~~ **已完成(2026-11-06,`0324b4c`)** | 举报生成器此前实际只读首屏 15 条;现已显式 `FETCH_ALL` 全量迭代。若要重新加产品上限,另立决策并记录剩余量(见 `./pending-decisions.md` B6) | `../rounds/04` Assumptions;`./pending-decisions.md` B6 |
 | ~~大作品上传超时~~ |  已完成(修复,2026-09-26):上传请求用**请求级超时覆盖**(常量值与实测读数见 `../knowledge/nemo-runtime-and-upload.md` §6) | `../rounds/21` §8.4 N1 |
 | ~~单包上传大小上限(413)~~ |  **已完成(收尾,2026-09-26)**:已加 `shared::ensure_single_package_fits` 提前报错;**阈值/速率/渠道与逐档读数只在 `../knowledge/platform-and-protocol.md` §5bis 展开**。要传更大作品需分片上传(暂无需求) | `pending-decisions.md` A5/D5 |
 | ~~下载侧大文件风险~~ |  **已完成(修复,2026-10-02,`afca96c`)**:两层 —— 请求级超时 + 显式有界的大体通路(普通 API 响应仍守 10 MB 护栏)。**子项"无读超时"已结案(2026-10-03)**:原诊断经实测推翻(`timeout_global` **覆盖**响应体读取),改为**分段预算** —— 下载路径抬总预算与响应体预算,而"等响应头"仍按客户端 30 s 失败;ureq 3 无逐次读的空闲超时,判不做。常量值/逐路径枚举见 `../rounds/40-gates-cleanup-and-real-defects.md` §7,复测与落点见 `../rounds/43` §3 | `../rounds/40-gates-cleanup-and-real-defects.md` §7;`../rounds/43` §3 |
