@@ -296,6 +296,78 @@ impl ConvertedDocument {
     }
 }
 
+/// 落盘形态的统一收尾:strict 门 + [`FileConversion`] 构造(骨架/回落三条路径共用)
+fn finish_conversion(
+    document: ConvertedDocument,
+    target: TargetEditor,
+    options: &TranslateOptions,
+    report: TranslateReport,
+) -> std::result::Result<FileConversion, TranslateError> {
+    let report = finish_report(options, report)?;
+    Ok(FileConversion {
+        document,
+        target,
+        report,
+    })
+}
+
+/// 正向(Kitten4 → KN)的**源侧骨架**快速通道;`None` = 形态判据不成立,交回落路径。
+///
+/// 判据与 [`detect_editor`] 同款:先按定长键做字节扫描,命中才试骨架;演员带
+/// `block_data_json`(在旁表里)且没有 `blocksXML` ⇒ Kitten4。
+fn forward_skeleton(
+    text: &str,
+    options: &TranslateOptions,
+) -> std::result::Result<Option<FileConversion>, TranslateError> {
+    if !text.contains("\"block_data_json\"") {
+        return Ok(None);
+    }
+    let Ok(skeleton) = source::parse(text) else {
+        return Ok(None);
+    };
+    let actors_have_bdj = skeleton
+        .block_data
+        .keys()
+        .any(|(container, _)| container == "actors");
+    if !actors_have_bdj
+        || detect_editor_with_actors_bdj(&skeleton.doc, actors_have_bdj)
+            != Some(crate::core::convert::EditorType::Kitten4)
+    {
+        return Ok(None);
+    }
+    let source::Skeleton {
+        mut doc,
+        block_data,
+    } = skeleton;
+    let target = TargetEditor::KittenN;
+    let mut report = TranslateReport::new(crate::core::convert::EditorType::Kitten4, target);
+    let product =
+        pipeline::convert_kitten4_document_raw_product(&mut doc, block_data, options, &mut report)?;
+    finish_conversion(ConvertedDocument::Product(product), target, options, report).map(Some)
+}
+
+/// 反向(KN → Kitten4)的**源侧骨架**快速通道;`None` = 形态判据不成立,交回落路径。
+fn reverse_skeleton(
+    text: &str,
+    options: &TranslateOptions,
+) -> std::result::Result<Option<FileConversion>, TranslateError> {
+    if !text.contains("\"nekoBlockJsonList\"") {
+        return Ok(None);
+    }
+    let Ok(skeleton) = source::parse_kn(text) else {
+        return Ok(None);
+    };
+    if detect_editor(&skeleton.doc) != Some(crate::core::convert::EditorType::Neko) {
+        return Ok(None);
+    }
+    let source::Skeleton { doc, block_data } = skeleton;
+    let target = TargetEditor::Kitten4;
+    let mut report = TranslateReport::new(crate::core::convert::EditorType::Neko, target);
+    let product =
+        pipeline::convert_kn_document_raw_product(&doc, block_data, options, &mut report)?;
+    finish_conversion(ConvertedDocument::Kitten4(product), target, options, report).map(Some)
+}
+
 /// 文本 → 文档 → 文档:文件路径的专用入口(源侧骨架快速通道 + 流式产物)
 ///
 /// **源侧骨架**按方向各一套(同一个 [`source::SourceShape`] 机制,见该模块):
@@ -314,80 +386,19 @@ fn translate_text(
     target: TargetEditor,
     options: &TranslateOptions,
 ) -> std::result::Result<FileConversion, TranslateError> {
-    // 只对"可能带 `block_data_json` 的文本"先试骨架:KN/NEMO 文档里没有这个键,直接
-    // 整份 `Value` 解析即可 —— 否则会白付一次全量骨架解析(同轮 A/B 实测:nemo-3.4MB
-    // 的 `e2e` +26 ms、分配 +50 638 次,见 `../rounds/47-data-layer-rewrite-plan.md` Step 5)。
-    // 扫描是纯字节 memchr,10 MB 级文本在毫秒量级;键名是定长 ASCII,JSON 里不可能有其他写法。
+    // 两条**源侧骨架**快速通道:先按定长键做一次纯字节扫描(见 `forward_skeleton` 的注释),
+    // 未命中/形态不符时交回落路径;回落与内存入口共用同一分派与 strict 门。
     if matches!(target, TargetEditor::KittenN)
-        && text.contains("\"block_data_json\"")
-        && let Ok(skeleton) = source::parse(text)
+        && let Some(done) = forward_skeleton(text, options)?
     {
-        let actors_have_bdj = skeleton
-            .block_data
-            .keys()
-            .any(|(container, _)| container == "actors");
-        // 判据与 `detect_editor` 相同:演员带 `block_data_json`(现在在旁表里)且没有
-        // `blocksXML` ⇒ Kitten4(混合文档、Kitten3 都据此排除,走回落)
-        if actors_have_bdj
-            && detect_editor_with_actors_bdj(&skeleton.doc, actors_have_bdj)
-                == Some(crate::core::convert::EditorType::Kitten4)
-        {
-            let source::Skeleton {
-                mut doc,
-                block_data,
-            } = skeleton;
-            let mut report = TranslateReport::new(
-                crate::core::convert::EditorType::Kitten4,
-                TargetEditor::KittenN,
-            );
-            let product = pipeline::convert_kitten4_document_raw_product(
-                &mut doc,
-                block_data,
-                options,
-                &mut report,
-            )?;
-            if options.is_strict() && report.is_lossy() {
-                return Err(TranslateError::Lossy {
-                    report: Box::new(report),
-                });
-            }
-            return Ok(FileConversion {
-                document: ConvertedDocument::Product(product),
-                target,
-                report,
-            });
-        }
+        return Ok(done);
     }
-    // 反向(KN → Kitten4)也先试**源侧骨架**:`nekoBlockJsonList` 是三处块表里最大的一份,
-    // 留原文直喂强类型反序列化,省掉"整份源文档建 `Value`"再给每个实体深拷一次的那一趟
-    // (读数见 `docs/rounds/50-kn-source-skeleton.md`)。判据与正向同款:先按定长键做一次
-    // 字节扫描,命中才试 —— 非 KN 文本不得白付一次全量骨架解析。
     if matches!(target, TargetEditor::Kitten4)
-        && text.contains("\"nekoBlockJsonList\"")
-        && let Ok(skeleton) = source::parse_kn(text)
-        && detect_editor(&skeleton.doc) == Some(crate::core::convert::EditorType::Neko)
+        && let Some(done) = reverse_skeleton(text, options)?
     {
-        let source::Skeleton { doc, block_data } = skeleton;
-        let mut report = TranslateReport::new(
-            crate::core::convert::EditorType::Neko,
-            TargetEditor::Kitten4,
-        );
-        let product =
-            pipeline::convert_kn_document_raw_product(&doc, block_data, options, &mut report)?;
-        if options.is_strict() && report.is_lossy() {
-            return Err(TranslateError::Lossy {
-                report: Box::new(report),
-            });
-        }
-        return Ok(FileConversion {
-            document: ConvertedDocument::Kitten4(product),
-            target,
-            report,
-        });
+        return Ok(done);
     }
     let mut source: serde_json::Value = serde_json::from_str(text)?;
-    // 回落路径同样走**流式产物**(三条支持的方向都有 product 入口):分派与 strict 门与
-    // `translate_value_product` 共用一份实现,避免"新方向只改了其中一处"。
     let from = detect_editor(&source).ok_or_else(|| unknown_source(target))?;
     let mut report = TranslateReport::new(from, target);
     let document = convert_document(
@@ -398,12 +409,7 @@ fn translate_text(
         &mut report,
         DocumentMode::Product,
     )?;
-    let report = finish_report(options, report)?;
-    Ok(FileConversion {
-        document,
-        target,
-        report,
-    })
+    finish_conversion(document, target, options, report)
 }
 
 /// 把一个作品文件转化成另一种编辑器的作品文件
