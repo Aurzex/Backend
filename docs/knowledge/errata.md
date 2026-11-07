@@ -5,7 +5,7 @@
 > 每节的标题是**被勘误的源文件**(路径相对仓库的 `docs/`),按文件排;篇末几节按"多轮结论变更 / 非轮次"分组。
 >
 > 为什么不在原文档上直接改:`../rounds/20` §6.1 定为**历史保真** —— 轮次记录不改写,只在本篇集中勘误。
-> 每条的「正确」列都已在**写下时的**当前源码上核过(总表初版 2026-09-25;**此后各节按各自标注日期增补,最晚一节为 2026-10-06**;续修时请连同日期一起更新)。
+> 每条的「正确」列都已在**写下时的**当前源码上核过(总表初版 2026-09-25;**此后各节按各自标注日期增补,最晚一节为 2026-11-07**;续修时请连同日期一起更新)。
 >
 > 常见失效类型:1)  文件被重命名/搬迁(`utils/acquire.rs` 改名为 `utils/requests.rs`、`core/compiler.rs` 并入 `core/convert/**`、
 > `utils/data.rs` 改名为 `utils/filedata.rs`);2)  类型改名(`HTTPStatus` 改为 `StatusCode`、`CloudError`/`ChatError` 改为 `SocketError`);3)  行号漂移;
@@ -400,6 +400,18 @@ NEMO 产物侧流式写出(`../rounds/49-nemo-product-streaming.md`)把块表写
 | --- | --- | --- |
 | rounds/39 §4「明确不做」表的"拆 `convert_nemo_document`(≈510 行)"行 | "**暂不做**:NEMO 现无字节门,拆无门的行为更难回归。顺序应是 W6 → W7 后再评估" | 该项的两个前提都已消失:① 该函数在 rounds/49 的装配层改造里已被拆成装配(`assemble_nemo`)+ 收尾(`finish_document`)+ 两条薄包装,现 `convert_nemo_document` / `convert_nemo_document_product` 各 **12 行**;② "无门"已不成立 —— NEMO 有 SHA 与 `#meta` 字节门(第 47–49 轮)与分配计数门(W7),`rounds/49` §6 另补三条守门。**待重新评估的对象应换成 `nemo::assemble_nemo`(657 行,convert 域当前最长的单个函数)**;已在 `../goals/convert-backlog.md` §2 第 15 条重新登记 |
 | rounds/39 §1.1 的文件体量底账 与 §0.3 的 W12b | `translate/model.rs` 记 **2221 行**;W12b「`model.rs` 测试归位文件末尾」记 **已完成**(`e8e19d6`) | 现 **总 3154 行**(本体 ≈2285 + 内联测试 869,共 7 个测试模块):① 本体**未超** `repo-conventions` §5 的 ≈2500 行软上限;② 但**总行数 >3000 而测试仍内联** —— 按 §5 的口径此时应外移为 `translate/model_tests.rs`;③ 其中 `mod streamed_writer_tests` 夹在代码中间(`write_encoded_blocks` 与 `fill_shield` 之间),与"测试模块一律放文件末尾"不符,且正是 W12b 的**回退**(2026-10-07 实测) |
+
+## 第五十五轮的一处未经验证推断(2026-11-07)
+
+- **错**:`../rounds/55-marker-content-comments.md` §6「正向(Kitten4 到 KN)的对称损失未处理:Kitten4 专有块降级成
+  `bcm_translator_text_*` 时类型同样不可恢复」。
+- **为何错**:该条是当时未做实测的推断。2026-11-07 实测(`../rounds/59` §2):正向确实把 1 520 个 Kitten4 专有块
+  包装成 KN 文本占位积木(28 / 60 件语料),但**反向映射按占位块的 mutation 标题选回原类型**
+  (`mapping::reverse_placeholder` / `KITTEN_MUTATION_TEXT`);把正向产物里的注释全部抹掉再往返,
+  三件作品(含单件 748 块)的往返文档与带注释时**逐字节相同**。
+- **正确**:正向包装不构成"类型不可恢复";对称载荷(把原 Kitten4 内容写进 KN 实体注释)判不做。
+  注释跨保存存活另有取证(见 `../knowledge/convert-semantics.md` §5bis 第 5 条)。
+- 出处:docs/rounds/55 §6;证据与读数见 docs/rounds/59 §1–§2。
 
 ## 非轮次条目(仓库配置 · 文档读数与体例)
 
