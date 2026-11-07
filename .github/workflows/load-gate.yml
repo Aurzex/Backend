@@ -1,0 +1,43 @@
+# 加载门(手动触发):把本库产出的 `.bcmkn` 交官方 `BcmHelpers.validateBcm` 判。
+#
+# 为什么不进主 CI:
+#   - 官方编辑器 bundle 不入库(第三方产物、约 14 MB),本工作流在运行时按**固定 SHA256**
+#     从官方 CDN 下载四个 chunk;主 CI 保持"不联网、不吃 download/"的口径
+#     (见 `docs/knowledge/repo-conventions.md` §6 与 `docs/rounds/60`）。
+#   - 需要 node + 下载量,放在 `workflow_dispatch` 里手动跑;失败即红,不允许静默跳过。
+
+name: load-gate
+
+on:
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+jobs:
+    validate:
+        name: validateBcm (official loader)
+        runs-on: ubuntu-24.04
+        steps:
+            - uses: actions/checkout@v6
+            - uses: dtolnay/rust-toolchain@stable
+            - name: Download official editor bundles (pinned)
+              run: |
+                  set -euo pipefail
+                  mkdir -p temp/web
+                  base=https://creation.bcmcdn.com/neko/web/release/static/js
+                  curl -fsSL "$base/base.f158ddbf.js" -o temp/web/base.f158ddbf.js
+                  curl -fsSL "$base/crc_libs.8196dbd1.js" -o temp/web/crc_libs.8196dbd1.js
+                  curl -fsSL "$base/main-vendors.9b801394.js" -o temp/web/main-vendors.9b801394.js
+                  curl -fsSL "$base/main.14802dc2.js" -o temp/web/main.js
+                  sha256sum -c <<'SUMS'
+                  724251e202e9dac074241e6296f3bbf3773c420141516764c8434dd17eb113e7  temp/web/base.f158ddbf.js
+                  462bb78dc75f99002dfe628d15211941469aa01d71e12890327eedcdb142f8a7  temp/web/crc_libs.8196dbd1.js
+                  23dd6052f04563c91736e60d929789964b15a48fe330e4ba301135fcd6a4d887  temp/web/main-vendors.9b801394.js
+                  2214a97e56be14f02a3d20639c7ffadab6ff32a1b0d570e6c572e445c1af138d  temp/web/main.js
+                  SUMS
+            - name: Validate produced .bcmkn with the official loader
+              env:
+                  BCM_WEB_DIR: temp/web
+                  BACKEND_REQUIRE_LOAD_GATE: "1"
+              run: cargo test --test load_gate -- --ignored --nocapture
