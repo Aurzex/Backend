@@ -56,6 +56,17 @@ pub enum CommentSource {
     Shop,  // 工坊讨论评论
 }
 
+impl CommentSource {
+    /// 线路与违规标识符里使用的来源名(`work` / `forum` / `shop`)
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CommentSource::Work => "work",
+            CommentSource::Forum => "forum",
+            CommentSource::Shop => "shop",
+        }
+    }
+}
+
 impl std::str::FromStr for CommentSource {
     type Err = DataQueryError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {

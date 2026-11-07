@@ -82,14 +82,14 @@ impl Default for CheckConfig {
 
 // 静态映射与注册表
 /// 来源类型映射
-static SOURCE_TYPE_MAP: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
+static SOURCE_TYPE_MAP: LazyLock<HashMap<&'static str, CommentSource>> = LazyLock::new(|| {
     HashMap::from([
-        ("shop_comment", "shop"),
-        ("forum_post", "forum"),
-        ("forum_discussion", "forum"),
+        ("shop_comment", CommentSource::Shop),
+        ("forum_post", CommentSource::Forum),
+        ("forum_discussion", CommentSource::Forum),
     ])
 });
-pub(crate) fn get_source_type_map() -> &'static HashMap<&'static str, &'static str> {
+pub(crate) fn get_source_type_map() -> &'static HashMap<&'static str, CommentSource> {
     &SOURCE_TYPE_MAP
 }
 
@@ -742,21 +742,21 @@ impl ViolationChecker {
     pub(crate) fn check_violations(
         &self,
         source_id: i64,
-        source_type: &str,
+        source_type: CommentSource,
         report_type: &str,
         board_name: &str,
         user_id: Option<i64>,
         title: &str,
         comment_limit: usize,
     ) -> Result<Vec<String>, ProcessorError> {
+        let comment_source = source_type;
         info!(
             "检查违规: source_id={}, type={}, board={}, user={:?}",
-            source_id, source_type, board_name, user_id
+            source_id,
+            comment_source.as_str(),
+            board_name,
+            user_id
         );
-
-        let comment_source: CommentSource = source_type
-            .parse()
-            .map_err(|_| ProcessorError::Processing(format!("未知来源类型: {}", source_type)))?;
 
         let source_id32 = i32::try_from(source_id).map_err(|_| {
             ProcessorError::Processing(format!("source_id 超出 i32 范围: {}", source_id))
@@ -770,7 +770,8 @@ impl ViolationChecker {
         let detailed_comments =
             self.fetch_detailed_comments(comment_source, source_id32, comment_limit)?;
 
-        let pending = self.collect_pending_violations(&detailed_comments, source_type, source_id);
+        let pending =
+            self.collect_pending_violations(&detailed_comments, comment_source.as_str(), source_id);
         let mut violations = Self::classify_violations(pending, self.config.spam_threshold);
 
         // 刷帖检查只针对帖子举报;讨论举报仅做评论广告/刷屏

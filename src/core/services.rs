@@ -20,6 +20,7 @@ use super::registry::{
     ProcessorError, ReportAction, ReportFetcher, SourceConfig, resolution_display_name,
 };
 use crate::api::whale::{ReportStatus, Resolution};
+use crate::core::retrieve::CommentSource;
 use crate::utils::filedata::{bytes_to_human, html_to_text, value_to_i64, value_to_string};
 use crate::utils::requests::{CodeMaoClient, FileUploader, UploadChannel, current_timestamp_secs};
 
@@ -510,7 +511,7 @@ impl ReportProcessor {
         let source_type = get_source_type_map()
             .get(report_type)
             .copied()
-            .unwrap_or("work");
+            .unwrap_or(CommentSource::Work);
         let user_id = item.get(&config.user_id_field).and_then(value_to_i64);
         let title = config
             .title_field
