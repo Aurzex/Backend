@@ -82,7 +82,8 @@
 - **域内文件组织(以 `../rounds/31-convert-layout-consolidation-plan.md` §2「目标结构」的模块图 + §2.3「组织规则」为准;该文没有 §2.1)**:一个文件一个职责;
   生成物单独一处(`translate/tables_gen.rs`,**不可与手写表混放**);测试默认内联在被测文件末尾,
   「本体 + 测试 > 3 000 行」时才独立成 `*_tests.rs`;**单文件上限 ≈ 2 500 行**。
-  当前布局:`mod.rs` + `shared.rs` + `upload.rs` + `decompile/{mod,editors,config,shadow,work}.rs` + `translate/{mod,model,model/model_tests,mapping,assembly,pipeline,options,report,xml,nemo,nemo_mapping,source,tables_gen,kitten4_vocab,reverse_tests,nemo_tests}.rs`(**24 文件**;`model/model_tests.rs` 是 `model` 的子模块,故能访问其私有项,见 `../rounds/57`;W2 后新增 4 个:`upload.rs` 是**域级工具层**(与门面同级,`shared.rs` 零反向依赖),`decompile/{config,shadow,work}.rs` 是反编译**私有件**;`translate/source.rs` 是源侧骨架解析(rounds/47 Step 5、rounds/50 参数化)。权威清单见 `../rounds/39` §W2 落地段;其 §1.1 的表是 W2 之前的快照)。
+  当前布局:`mod.rs` + `shared.rs` + `upload.rs` + `decompile/{mod,editors,config,shadow,work}.rs` +
+  `translate/{assembly,kitten4_vocab,mapping,mod,model,model/model_tests,nemo,nemo_mapping,nemo_tables,nemo_tests,options,origin,pipeline,product,report,reverse_tests,source,tables_gen,xml}.rs`(`product.rs` 是流式写出器、`nemo_tables.rs` 是纯数据表,见 `../rounds/61`;`model/model_tests.rs` 是 `model` 的子模块,故能访问其私有项,见 `../rounds/57`;W2 后新增 4 个:`upload.rs` 是**域级工具层**(与门面同级,`shared.rs` 零反向依赖),`decompile/{config,shadow,work}.rs` 是反编译**私有件**;`translate/source.rs` 是源侧骨架解析(rounds/47 Step 5、rounds/50 参数化)。权威清单见 `../rounds/39` §W2 落地段;其 §1.1 的表是 W2 之前的快照)。
 - 分层纪律:`translate` 子域**不碰网络**;需要网络(上传/建作品)的编排放 `core/convert/mod.rs` 门面
   (反编译侧的可选「上传到账号」同理,见 `../rounds/30`)。
 - 文档:记录放 `docs/`;**历史轮次不改写**(保真),勘误集中到本库 `errata.md`。
