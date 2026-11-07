@@ -58,6 +58,7 @@ mod mapping;
 mod model;
 mod nemo;
 mod nemo_mapping;
+mod nemo_tables;
 #[cfg(test)]
 mod nemo_tests;
 mod options;
