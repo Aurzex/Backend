@@ -323,7 +323,7 @@ fn translate_work_creates_draft_when_ignored() {
         return;
     };
     // 产物写本测试自己的临时目录(本文件头部约定「输出写系统临时目录,不污染仓库」):
-    // 不给 `output_dir` 时门面用默认输出目录 `download/convert/`,那里曾与 bench 夹具撞车。
+    // 默认输出已是 `target/convert-out/`(与语料目录分离),这里仍显式给目录,避免测试间互相覆盖。
     let dir = work_dir("draft");
     let out = translate_work(
         WorkId::new(work_id),

@@ -67,14 +67,33 @@ impl PathConfig {
         self.cache_dir().join("captcha.jpg")
     }
 
-    /// 编译文件路径
-    pub fn compile_file_path(&self) -> PathBuf {
-        self.download_dir().join("compile")
+    /// 产物目录(默认 `<root>/target/convert-out`)。
+    ///
+    /// **不再写进 `download/`**:那里是语料与夹具目录(只读),产物与夹具同名时会覆盖夹具
+    /// (rounds/40 的 `kn-9.4MB` 就是这样被真机门覆盖的)。产物改随构建产物同生命周期;
+    /// 需要别的落点时用调用方的 `output_dir` 显式覆盖。
+    pub fn output_dir(&self) -> PathBuf {
+        let target = std::env::var_os("CARGO_TARGET_DIR")
+            .map(PathBuf::from)
+            .map(|dir| {
+                if dir.is_absolute() {
+                    dir
+                } else {
+                    self.root.join(dir)
+                }
+            })
+            .unwrap_or_else(|| self.root.join("target"));
+        target.join("convert-out")
     }
 
-    /// 转化文件路径(编辑器间互相转化的输出目录)
+    /// 编译文件路径(默认 `<output_dir>/compile`)
+    pub fn compile_file_path(&self) -> PathBuf {
+        self.output_dir().join("compile")
+    }
+
+    /// 转化文件路径(编辑器间互相转化的输出目录,默认 `<output_dir>/convert`)
     pub fn convert_file_path(&self) -> PathBuf {
-        self.download_dir().join("convert")
+        self.output_dir().join("convert")
     }
 
     /// 密码文件路径
@@ -153,6 +172,19 @@ pub(crate) fn bytes_to_human(size_bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 产物目录与语料目录分离(rounds/40 的夹具被覆盖事故的根治项):默认产物落在
+    /// `target/convert-out`,不再写进 `download/`。
+    #[test]
+    fn output_dirs_stay_out_of_the_fixture_root() {
+        let root = std::path::PathBuf::from("/tmp/backend-pathcfg");
+        let cfg = PathConfig::with_root(root.clone());
+        assert_eq!(cfg.output_dir(), root.join("target/convert-out"));
+        assert!(cfg.compile_file_path().starts_with(cfg.output_dir()));
+        assert!(cfg.convert_file_path().starts_with(cfg.output_dir()));
+        assert!(!cfg.compile_file_path().starts_with(cfg.download_dir()));
+        assert!(!cfg.convert_file_path().starts_with(cfg.download_dir()));
+    }
 
     #[test]
     fn global_is_stable_and_second_set_fails() {

@@ -98,7 +98,7 @@ impl TranslateOptions {
         }
     }
 
-    /// 输出目录;`None` 时用 `PathConfig` 的转化目录(`download/convert`)
+    /// 输出目录;`None` 时用 `PathConfig` 的转化目录(`target/convert-out/convert`,不写进语料目录 `download/`)
     pub fn output_dir(mut self, dir: impl Into<std::path::PathBuf>) -> Self {
         self.output_dir = Some(dir.into());
         self
