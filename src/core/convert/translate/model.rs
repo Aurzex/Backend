@@ -525,7 +525,7 @@ fn parse_parts_typed(
         }
         let mut ancestors = Vec::new();
         roots.push(build_node_typed(
-            id,
+            id.as_str(),
             block,
             blocks,
             connections,
@@ -544,19 +544,19 @@ fn parse_parts_typed(
 }
 
 /// [`build_node`] 的强类型版本(逐句对齐:祖先环检查、缺 id 兜底、连接类型与错误文案)
-fn build_node_typed(
-    id: &str,
+fn build_node_typed<'a>(
+    id: &'a str,
     block: &BlockJson,
-    blocks: &BTreeMap<String, BlockJson>,
-    connections: &BTreeMap<String, BTreeMap<String, TypedLink>>,
-    ancestors: &mut Vec<String>,
+    blocks: &'a BTreeMap<String, BlockJson>,
+    connections: &'a BTreeMap<String, BTreeMap<String, TypedLink>>,
+    ancestors: &mut Vec<&'a str>,
 ) -> Result<BlockJson> {
-    if ancestors.iter().any(|a| a == id) {
+    if ancestors.contains(&id) {
         return Err(ConvertError::Decompile(format!(
             "Kitten 积木图存在环:节点 {id} 重复出现在自身祖先链上"
         )));
     }
-    ancestors.push(id.to_string());
+    ancestors.push(id);
 
     // `from_value(&Value)` 的等价物:从已类型化的节点复制一份新节点
     let mut node = block.clone();
@@ -569,7 +569,13 @@ fn build_node_typed(
             let child_block = blocks.get(child_id).ok_or_else(|| {
                 ConvertError::Decompile(format!("积木 {id} 的连接指向不存在的子积木 {child_id}"))
             })?;
-            let child = build_node_typed(child_id, child_block, blocks, connections, ancestors)?;
+            let child = build_node_typed(
+                child_id.as_str(),
+                child_block,
+                blocks,
+                connections,
+                ancestors,
+            )?;
             match link.kind.as_deref().unwrap_or("next") {
                 "next" => node.next = Some(Box::new(child)),
                 "input" => {
@@ -618,7 +624,13 @@ fn parse_parts(blocks: &Map<String, Value>, connections: Option<&Value>) -> Resu
             continue;
         }
         let mut ancestors = Vec::new();
-        roots.push(build_node(id, block, blocks, connections, &mut ancestors)?);
+        roots.push(build_node(
+            id.as_str(),
+            block,
+            blocks,
+            connections,
+            &mut ancestors,
+        )?);
     }
 
     // 有积木却没有任何根 = 整张图是环(每个 id 都当过别人的子节点),
@@ -634,19 +646,19 @@ fn parse_parts(blocks: &Map<String, Value>, connections: Option<&Value>) -> Resu
 }
 
 /// 递归把一个积木及其子图变成节点
-fn build_node(
-    id: &str,
+fn build_node<'a>(
+    id: &'a str,
     block: &Value,
-    blocks: &Map<String, Value>,
-    connections: &Map<String, Value>,
-    ancestors: &mut Vec<String>,
+    blocks: &'a Map<String, Value>,
+    connections: &'a Map<String, Value>,
+    ancestors: &mut Vec<&'a str>,
 ) -> Result<BlockJson> {
-    if ancestors.iter().any(|a| a == id) {
+    if ancestors.contains(&id) {
         return Err(ConvertError::Decompile(format!(
             "Kitten 积木图存在环:节点 {id} 重复出现在自身祖先链上"
         )));
     }
-    ancestors.push(id.to_string());
+    ancestors.push(id);
 
     let mut node = BlockJson::from_value(block)?;
     if node.id.is_none() {
@@ -658,7 +670,13 @@ fn build_node(
             let child_block = blocks.get(child_id).ok_or_else(|| {
                 ConvertError::Decompile(format!("积木 {id} 的连接指向不存在的子积木 {child_id}"))
             })?;
-            let child = build_node(child_id, child_block, blocks, connections, ancestors)?;
+            let child = build_node(
+                child_id.as_str(),
+                child_block,
+                blocks,
+                connections,
+                ancestors,
+            )?;
             match link.get("type").and_then(Value::as_str).unwrap_or("next") {
                 "next" => node.next = Some(Box::new(child)),
                 "input" => {
@@ -944,8 +962,9 @@ fn write_kitten4_block(
     skip_field_defaults: bool,
     w: &mut impl std::io::Write,
 ) -> Result<()> {
-    let mut keys: Vec<&str> =
-        Vec::with_capacity(KNOWN_BLOCK_KEYS.len() + KITTEN4_DEFAULTS.len() + 1);
+    // 同 [`write_block`]:`extra` 为空时键表放栈上,省掉每块的堆分配
+    let mut known: [&str; KITTEN4_MAX_KEYS] = [""; KITTEN4_MAX_KEYS];
+    let mut count = 0usize;
     for (present, key) in [
         (true, "type"),
         (node.id.is_some(), "id"),
@@ -964,21 +983,41 @@ fn write_kitten4_block(
         (node.field_constraints.is_some(), "field_constraints"),
     ] {
         if present {
-            keys.push(key);
+            known[count] = key;
+            count += 1;
         }
     }
-    keys.extend(node.extra.keys().map(String::as_str));
     for (key, _) in KITTEN4_DEFAULTS {
         // 标记块不写 `fields`/`shadows`(旧口径:先补默认、再由标记把这两个键删掉)
         if skip_field_defaults && matches!(*key, "fields" | "shadows") {
             continue;
         }
-        keys.push(*key);
+        known[count] = *key;
+        count += 1;
     }
-    keys.push("parent_id");
+    known[count] = "parent_id";
+    count += 1;
+    if node.extra.is_empty() {
+        let mut keys = known;
+        keys[..count].sort_unstable();
+        let count = dedup_sorted(&mut keys[..count]);
+        return write_kitten4_keys(node, parent_id, &keys[..count], w);
+    }
+    let mut keys: Vec<&str> = Vec::with_capacity(count + node.extra.len());
+    keys.extend_from_slice(&known[..count]);
+    keys.extend(node.extra.keys().map(String::as_str));
     keys.sort_unstable();
     keys.dedup();
+    write_kitten4_keys(node, parent_id, &keys, w)
+}
 
+/// 键表已定序后的写出主体(`parent_id` 强制、`extra` 胜出等优先级见 [`write_kitten4_block`])
+fn write_kitten4_keys(
+    node: &BlockJson,
+    parent_id: Option<&str>,
+    keys: &[&str],
+    w: &mut impl std::io::Write,
+) -> Result<()> {
     w.write_all(b"{")?;
     for (index, key) in keys.iter().enumerate() {
         if index > 0 {
@@ -2038,8 +2077,9 @@ pub(super) fn write_block_tree(
 
 /// 单块 → JSON 对象(键序与 [`BlockJson::to_value`] 的 `Map` 一致)
 fn write_block(node: &BlockJson, shield: ShieldPolicy, w: &mut impl std::io::Write) -> Result<()> {
-    // 每块一份小键表(容量取已知键数,免增长);与 `to_value` 的 Map 同序要求见函数文档
-    let mut keys: Vec<&str> = Vec::with_capacity(KNOWN_BLOCK_KEYS.len() + node.extra.len());
+    // 常见路径(`extra` 为空)用栈上固定数组:每块一份 `Vec` 的堆分配省掉;键序要求见函数文档
+    let mut known: [&str; KNOWN_BLOCK_KEYS.len()] = [""; KNOWN_BLOCK_KEYS.len()];
+    let mut count = 0usize;
     for (present, key) in [
         (true, "type"),
         (node.id.is_some(), "id"),
@@ -2060,13 +2100,32 @@ fn write_block(node: &BlockJson, shield: ShieldPolicy, w: &mut impl std::io::Wri
         (node.field_constraints.is_some(), "field_constraints"),
     ] {
         if present {
-            keys.push(key);
+            known[count] = key;
+            count += 1;
         }
     }
+    if node.extra.is_empty() {
+        let mut keys = known;
+        keys[..count].sort_unstable();
+        let count = dedup_sorted(&mut keys[..count]);
+        return write_block_keys(node, &keys[..count], shield, w);
+    }
+    // `extra` 只有少见的热键(如 `collapsed`),才走堆表
+    let mut keys: Vec<&str> = Vec::with_capacity(KNOWN_BLOCK_KEYS.len() + node.extra.len());
+    keys.extend_from_slice(&known[..count]);
     keys.extend(node.extra.keys().map(String::as_str));
     keys.sort_unstable();
     keys.dedup();
+    write_block_keys(node, &keys, shield, w)
+}
 
+/// 键表已定序后的写出主体(取值口径见 [`write_block`] 与函数文档)
+fn write_block_keys(
+    node: &BlockJson,
+    keys: &[&str],
+    shield: ShieldPolicy,
+    w: &mut impl std::io::Write,
+) -> Result<()> {
     w.write_all(b"{")?;
     for (index, key) in keys.iter().enumerate() {
         if index > 0 {
@@ -2147,6 +2206,22 @@ const KNOWN_BLOCK_KEYS: [&str; 15] = [
     "parent_id",
     "field_constraints",
 ];
+
+/// `write_kitten4_block` 的栈上键表容量:已知键 + 缺省键 + `parent_id`
+const KITTEN4_MAX_KEYS: usize = KNOWN_BLOCK_KEYS.len() + KITTEN4_DEFAULTS.len() + 1;
+
+/// 就地去掉已排序键表里的重复项,返回去重后的长度(替代 `Vec::dedup`,以免为去重再建 `Vec`)
+fn dedup_sorted(keys: &mut [&str]) -> usize {
+    let mut len = 0usize;
+    for index in 0..keys.len() {
+        let key = keys[index];
+        if len == 0 || key != keys[len - 1] {
+            keys[len] = key;
+            len += 1;
+        }
+    }
+    len
+}
 
 /// 上面那张"存在才写"的表保证键存在;真到不了 `None`(到了就是写出器的 bug,直接报)
 fn expect_some<'a, T>(value: &'a Option<T>, key: &str) -> Result<&'a T> {

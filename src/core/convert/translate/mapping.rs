@@ -1001,18 +1001,19 @@ fn reverse_field_name(kitten: &str, kn_name: &str) -> String {
     if map_field_name(kitten, kn_name) == kn_name && reverse.is_none() {
         return kn_name.to_string();
     }
-    let mut candidates: Vec<&str> = reverse.cloned().unwrap_or_default();
-    if kn_name == "type" && !candidates.contains(&"OP") {
-        candidates.push("OP");
-    }
-    match candidates.len() {
+    // 不 clone `Vec`:候选表借自静态表,`OP` 追加只是"再多一个候选"(逐字段调用,clone 是白分配)
+    let candidates: &[&str] = reverse.map(Vec::as_slice).unwrap_or(&[]);
+    let append_op = kn_name == "type" && !candidates.contains(&"OP");
+    let len = candidates.len() + usize::from(append_op);
+    let first = candidates.first().copied().or(append_op.then_some("OP"));
+    match len {
         0 => kn_name.to_string(),
-        1 => candidates[0].to_string(),
+        1 => first.unwrap_or(kn_name).to_string(),
         _ => {
             if map_field_name(kitten, kn_name) == kn_name {
                 kn_name.to_string()
             } else {
-                candidates[0].to_string()
+                first.unwrap_or(kn_name).to_string()
             }
         }
     }
