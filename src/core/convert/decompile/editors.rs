@@ -57,10 +57,10 @@ fn save_json_result_for_editor(
     // 扩展名与其它编辑器同一来源(与 coco/kitten 一致,不再硬编码)
     let extension = context
         .work_info
-        .file_extension(&context.config)
-        .trim_start_matches('.')
-        .to_owned();
-    save_json_result(result, output_dir, context, &extension, editor)
+        .work_type
+        .file_extension()
+        .unwrap_or("json");
+    save_json_result(result, output_dir, context, extension, editor)
 }
 
 // `decompile` 入口的变体校验:取出目标变体,错变体时的错误文案与原各反编译器逐字一致。
@@ -1389,13 +1389,8 @@ impl WorkFetcher for NekoFetcher {
         let mut auth = CloudAuthenticator::new(None);
         let device_auth = auth
             .generate_x_device_auth()
-            .map_err(|e| ConvertError::Other {
-                msg: format!("生成设备认证失败: {}", e),
-                source: Some(Box::new(ConvertError::Other {
-                    msg: e.to_string(),
-                    source: None,
-                })),
-            })?;
+            .map_err(ConvertError::from)
+            .with_context(|| "生成设备认证失败".to_string())?;
 
         // 修复:generate_x_device_auth 已返回 JSON 字符串({"sign":...,"timestamp":...,"client_id":...}),
         // 直接作为 header 值.此前二次 serde_json::to_string 会再包一层引号转义,

@@ -4,7 +4,6 @@
 //! 原先躺在地基 `shared.rs`(合并前是 `shared/model.rs` 的作品信息/抓取契约段),
 //! 但消费者只有 `decompile` ⇒ 回归子域(见 `docs/rounds/39` §W2b)。
 
-use super::config::DecompilerConfig;
 use crate::core::convert::shared::{EditorType, Result, ValueExt, WorkId};
 use serde_json::Value;
 use std::sync::Arc;
@@ -49,14 +48,6 @@ impl WorkInfo {
                 .filter(|s| !s.is_empty())
                 .map(str::to_string),
         })
-    }
-
-    pub(crate) fn file_extension(&self, config: &Arc<DecompilerConfig>) -> String {
-        config
-            .file_extensions
-            .get(self.work_type.as_str())
-            .cloned()
-            .unwrap_or(".json".to_string())
     }
 }
 

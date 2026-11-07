@@ -1,5 +1,6 @@
 use super::mapping::truthy;
 use super::model::{EncodedBlocks, ProcedureEntry, procedure_entries, type_name};
+use std::collections::HashMap;
 use super::report::{TranslateReport, TranslateWarning};
 use super::tables_gen::{BCM_VERSION, STAGE_LANDSCAPE, STAGE_PORTRAIT};
 use super::{model, tables_gen};
@@ -279,6 +280,12 @@ fn write_entries(
         expected: format!("object({} 字典)", container.dict_key()),
         actual: type_name(dict).into(),
     })?;
+    // 挂点按 id 建一次索引:写出路径上按条目线性扫挂点会是 O(实体 × 挂点)
+    let hook_by_id: HashMap<&str, &BlockPlacement> = hooks
+        .iter()
+        .filter(|hook| hook.container == container)
+        .map(|hook| (hook.id.as_str(), hook))
+        .collect();
     w.write_all(b"{")?;
     for (index, (id, entry)) in map.iter().enumerate() {
         if index > 0 {
@@ -286,10 +293,7 @@ fn write_entries(
         }
         serde_json::to_writer(&mut *w, id)?;
         w.write_all(b":")?;
-        match hooks
-            .iter()
-            .find(|hook| hook.container == container && hook.id == *id)
-        {
+        match hook_by_id.get(id.as_str()) {
             Some(hook) => write_entry_with_blocks(entry, &hook.tree, shield, w)?,
             None => serde_json::to_writer(&mut *w, entry)?,
         }
@@ -1380,17 +1384,19 @@ impl Kitten4ProductDocument {
                 actual: type_name(table).into(),
             })?;
         w.write_all(b"{")?;
+        let hook_by_id: HashMap<&str, &Kitten4Hook> = self
+            .hooks
+            .iter()
+            .filter(|hook| hook.is_scene == is_scene)
+            .map(|hook| (hook.id.as_str(), hook))
+            .collect();
         for (index, (id, entry)) in map.iter().enumerate() {
             if index > 0 {
                 w.write_all(b",")?;
             }
             serde_json::to_writer(&mut *w, id)?;
             w.write_all(b":")?;
-            match self
-                .hooks
-                .iter()
-                .find(|hook| hook.is_scene == is_scene && hook.id == *id)
-            {
+            match hook_by_id.get(id.as_str()) {
                 Some(hook) => write_entity_with_blocks(entry, &hook.blocks, w)?,
                 None => serde_json::to_writer(&mut *w, entry)?,
             }

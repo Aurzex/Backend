@@ -96,6 +96,30 @@ pub enum EditorType {
     Wood,
 }
 
+impl EditorType {
+    /// 编辑版产物的扩展名(不含点)。
+    ///
+    /// `Nemo` / `Wood` 的产物形态不是单个编辑版文件(资源目录),由调用方各自决定
+    /// (NEMO 的编辑版本体仍是 `<work_id>.bcm`,见 `decompile/mod.rs`)。
+    pub(crate) fn file_extension(self) -> Option<&'static str> {
+        match self {
+            EditorType::Kitten2 | EditorType::Kitten3 => Some("bcm"),
+            EditorType::Kitten4 => Some("bcm4"),
+            EditorType::Coco => Some("json"),
+            EditorType::Neko => Some("bcmkn"),
+            EditorType::Nemo | EditorType::Wood => None,
+        }
+    }
+
+    pub(crate) fn use_xml_shadow(&self) -> bool {
+        // Kitten2/3/4 编辑版(.bcm/.bcm4)的 shadows 均为 XML 字符串
+        matches!(
+            self,
+            EditorType::Kitten2 | EditorType::Kitten3 | EditorType::Kitten4
+        )
+    }
+}
+
 impl std::str::FromStr for EditorType {
     type Err = ();
 
@@ -112,28 +136,6 @@ impl std::str::FromStr for EditorType {
             "WOOD" => Ok(EditorType::Wood),
             _ => Err(()),
         }
-    }
-}
-
-impl EditorType {
-    pub(crate) fn as_str(&self) -> &'static str {
-        match self {
-            EditorType::Kitten2 => "KITTEN2",
-            EditorType::Kitten3 => "KITTEN3",
-            EditorType::Kitten4 => "KITTEN4",
-            EditorType::Coco => "COCO",
-            EditorType::Neko => "NEKO",
-            EditorType::Nemo => "NEMO",
-            EditorType::Wood => "WOOD",
-        }
-    }
-
-    pub(crate) fn use_xml_shadow(&self) -> bool {
-        // Kitten2/3/4 编辑版(.bcm/.bcm4)的 shadows 均为 XML 字符串
-        matches!(
-            self,
-            EditorType::Kitten2 | EditorType::Kitten3 | EditorType::Kitten4
-        )
     }
 }
 

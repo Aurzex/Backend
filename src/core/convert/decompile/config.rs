@@ -42,7 +42,6 @@ pub(crate) struct DecompilerConfig {
     pub(crate) toolbox_categories: Vec<String>,
     pub(crate) shadow_types: Arc<HashSet<String>>,
     pub(crate) shadow_fields: Arc<HashMap<String, HashMap<String, String>>>,
-    pub(crate) file_extensions: Arc<HashMap<String, String>>,
     pub(crate) shadow_templates: Arc<HashMap<String, ShadowTemplate>>,
 }
 
@@ -157,15 +156,6 @@ impl Default for DecompilerConfig {
         variables_get.insert("name".to_string(), "VAR".to_string());
         variables_get.insert("text".to_string(), "?".to_string());
         shadow_fields.insert("variables_get".to_string(), variables_get);
-
-        let mut file_extensions = HashMap::new();
-        file_extensions.insert("KITTEN2".to_string(), ".bcm".to_string());
-        file_extensions.insert("KITTEN3".to_string(), ".bcm".to_string());
-        file_extensions.insert("KITTEN4".to_string(), ".bcm4".to_string());
-        file_extensions.insert("COCO".to_string(), ".json".to_string());
-        file_extensions.insert("NEKO".to_string(), ".bcmkn".to_string());
-        file_extensions.insert("NEMO".to_string(), String::new());
-        file_extensions.insert("WOOD".to_string(), String::new());
 
         let mut shadow_templates = HashMap::new();
         shadow_templates.insert(
@@ -408,7 +398,6 @@ impl Default for DecompilerConfig {
             .collect(),
             shadow_types: Arc::new(shadow_types),
             shadow_fields: Arc::new(shadow_fields),
-            file_extensions: Arc::new(file_extensions),
             shadow_templates: Arc::new(shadow_templates),
         }
     }

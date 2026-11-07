@@ -3,7 +3,7 @@
 //! 原先躺在地基 `shared.rs`(合并前是 `shared/config.rs` 的影子构建器段);这是
 //! **反编译器独占**的实现细节 ⇒ 回归子域(见 `docs/rounds/39` §W2b)。
 
-use super::config::DecompilerConfig;
+use super::config::{DecompilerConfig, ShadowTemplate};
 use crate::core::convert::shared::{EditorType, IdGenerator};
 use log::warn;
 use serde_json::Value;
@@ -48,6 +48,36 @@ impl ShadowBuilder {
         }
     }
 
+    /// 影子字段的**唯一**计算口径(JSON 与 XML 两种方言共用):
+    /// 主字段取 `display_text`,其余取 `shadow_fields` 的缺省值,最后合并模板的 `extra_fields`。
+    fn effective_fields(
+        &self,
+        shadow_type: &str,
+        tmpl: &ShadowTemplate,
+        display_text: &str,
+    ) -> Vec<(String, String)> {
+        let mut fields: Vec<(String, String)> = Vec::new();
+        if let Some(field_map) = self.config.shadow_fields.get(shadow_type) {
+            if let Some(main_field) = &tmpl.main_field {
+                for (fname, default_val) in field_map {
+                    if fname == main_field {
+                        fields.push((fname.clone(), display_text.to_string()));
+                    } else {
+                        fields.push((fname.clone(), default_val.clone()));
+                    }
+                }
+            } else {
+                for (fname, val) in field_map {
+                    fields.push((fname.clone(), val.clone()));
+                }
+            }
+        }
+        for (key, value) in &tmpl.extra_fields {
+            fields.push((key.clone(), value.clone()));
+        }
+        fields
+    }
+
     pub(crate) fn create_json(
         &self,
         shadow_type: &str,
@@ -68,24 +98,8 @@ impl ShadowBuilder {
 
             if tmpl.use_custom_name {
                 let mut fields = serde_json::Map::new();
-                if let Some(field_map) = self.config.shadow_fields.get(shadow_type) {
-                    if let Some(main_field) = &tmpl.main_field {
-                        for (fname, default_val) in field_map {
-                            if fname == main_field {
-                                fields
-                                    .insert(fname.clone(), Value::String(display_text.to_string()));
-                            } else {
-                                fields.insert(fname.clone(), Value::String(default_val.clone()));
-                            }
-                        }
-                    } else {
-                        for (fname, val) in field_map {
-                            fields.insert(fname.clone(), Value::String(val.clone()));
-                        }
-                    }
-                }
-                for (key, value) in &tmpl.extra_fields {
-                    fields.insert(key.clone(), Value::String(value.clone()));
+                for (name, value) in self.effective_fields(shadow_type, tmpl, display_text) {
+                    fields.insert(name, Value::String(value));
                 }
                 map.insert("fields".to_string(), Value::Object(fields));
             }
@@ -126,25 +140,7 @@ impl ShadowBuilder {
             );
         }
 
-        let mut fields: Vec<(String, String)> = Vec::new();
-        if let Some(field_map) = self.config.shadow_fields.get(shadow_type) {
-            if let Some(main_field) = &tmpl.main_field {
-                for (fname, default_val) in field_map {
-                    if fname == main_field {
-                        fields.push((fname.clone(), display_text.to_string()));
-                    } else {
-                        fields.push((fname.clone(), default_val.clone()));
-                    }
-                }
-            } else {
-                for (fname, val) in field_map {
-                    fields.push((fname.clone(), val.clone()));
-                }
-            }
-        }
-        for (k, v) in &tmpl.extra_fields {
-            fields.push((k.clone(), v.clone()));
-        }
+        let fields = self.effective_fields(shadow_type, tmpl, display_text);
 
         let mut xml = format!(
             r#"<shadow type="{}" id="{}" visible="{}" editable="{}">"#,

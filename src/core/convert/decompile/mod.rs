@@ -300,17 +300,13 @@ impl CodemaoDecompiler {
             // NEMO 在配置里**没有**扩展名(它的产物是资源目录),但编辑版文档本体就是
             // `<work_id>.bcm`(见 `NemoResourceManager::save_core_files`);产出文件名沿用同一口径.
             let extension = match context.work_info.work_type {
-                EditorType::Nemo => "bcm".to_string(),
-                _ => context
-                    .work_info
-                    .file_extension(&context.config)
-                    .trim_start_matches('.')
-                    .to_owned(),
+                EditorType::Nemo => "bcm",
+                other => other.file_extension().unwrap_or("json"),
             };
             let file_name = FileService::safe_filename(
                 &context.work_info.name,
                 context.work_info.id.get(),
-                &extension,
+                extension,
             );
             info!(
                 "作品 [work_id={}] 反编译完成(内存编辑版,未落盘;将命名为 {file_name})",
@@ -328,15 +324,15 @@ impl CodemaoDecompiler {
             DecompileResult::Json(document) => {
                 let extension = context
                     .work_info
-                    .file_extension(&context.config)
-                    .trim_start_matches('.')
-                    .to_owned();
+                    .work_type
+                    .file_extension()
+                    .unwrap_or("json");
                 // 与 `save_json_result` 同一命名口径(同名同扩展名,只是不落盘),
                 // 让调用方在需要落盘/上传时拿到**逐字一致**的文件名
                 let file_name = FileService::safe_filename(
                     &context.work_info.name,
                     context.work_info.id.get(),
-                    &extension,
+                    extension,
                 );
                 info!(
                     "作品 [work_id={}] 反编译完成(内存,未落盘;将命名为 {file_name})",

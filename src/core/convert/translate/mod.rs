@@ -97,52 +97,89 @@ pub struct TranslateDocument {
 /// = 读盘 → 本函数 → 流式写盘。`translate_work`(域门面)用本入口把
 /// 「反编译落盘 → translate 读回」这一段整个省掉(方案 23 P0-2):
 /// 10 MB 级作品实测省一次 serialize + 一次 parse(墙钟 10–20%)。
-pub fn translate_value(
-    mut source: serde_json::Value,
+/// 产物形态:内存入口(`translate_value`)要整份 `Value`;文件路径优先**可流式写出**的 product
+#[derive(Clone, Copy)]
+enum DocumentMode {
+    Value,
+    Product,
+}
+
+/// 方向分派与报告构造的唯一入口:三个公开入口共用。
+///
+/// `Unsupported` 只在**识别出源格式**后按方向报;源格式识别不出时统一走 [`unknown_source`]。
+fn convert_document(
+    from: crate::core::convert::EditorType,
     target: TargetEditor,
+    source: &mut serde_json::Value,
     options: &TranslateOptions,
-) -> std::result::Result<TranslateDocument, TranslateError> {
-    let from = detect_editor(&source);
+    report: &mut TranslateReport,
+    mode: DocumentMode,
+) -> std::result::Result<ConvertedDocument, TranslateError> {
+    use crate::core::convert::EditorType;
+    match (from, target, mode) {
+        (EditorType::Kitten4, TargetEditor::KittenN, DocumentMode::Value) => {
+            pipeline::convert_kitten4_document(source, options, report)
+                .map(ConvertedDocument::Value)
+        }
+        (EditorType::Kitten4, TargetEditor::KittenN, DocumentMode::Product) => {
+            pipeline::convert_kitten4_document_product(source, options, report)
+                .map(ConvertedDocument::Product)
+        }
+        (EditorType::Nemo, TargetEditor::KittenN, DocumentMode::Value) => {
+            nemo::convert_nemo_document(source, options, report).map(ConvertedDocument::Value)
+        }
+        (EditorType::Nemo, TargetEditor::KittenN, DocumentMode::Product) => {
+            nemo::convert_nemo_document_product(source, options, report)
+                .map(ConvertedDocument::Product)
+        }
+        (EditorType::Neko, TargetEditor::Kitten4, DocumentMode::Value) => {
+            pipeline::convert_kn_document(source, options, report).map(ConvertedDocument::Value)
+        }
+        (EditorType::Neko, TargetEditor::Kitten4, DocumentMode::Product) => {
+            pipeline::convert_kn_document_product(source, options, report)
+                .map(ConvertedDocument::Kitten4)
+        }
+        (from, to, _) => Err(TranslateError::Unsupported { from, to }),
+    }
+}
 
-    let (document, report) = match (from, target) {
-        (Some(crate::core::convert::EditorType::Kitten4), TargetEditor::KittenN) => {
-            let mut report = TranslateReport::new(
-                crate::core::convert::EditorType::Kitten4,
-                TargetEditor::KittenN,
-            );
-            let document = pipeline::convert_kitten4_document(&mut source, options, &mut report)?;
-            (document, report)
-        }
-        (Some(crate::core::convert::EditorType::Nemo), TargetEditor::KittenN) => {
-            let mut report = TranslateReport::new(
-                crate::core::convert::EditorType::Nemo,
-                TargetEditor::KittenN,
-            );
-            let document = nemo::convert_nemo_document(&source, options, &mut report)?;
-            (document, report)
-        }
-        (Some(crate::core::convert::EditorType::Neko), TargetEditor::Kitten4) => {
-            let mut report = TranslateReport::new(
-                crate::core::convert::EditorType::Neko,
-                TargetEditor::Kitten4,
-            );
-            let document = pipeline::convert_kn_document(&source, options, &mut report)?;
-            (document, report)
-        }
-        (Some(from), to) => return Err(TranslateError::Unsupported { from, to }),
-        (None, to) => {
-            return Err(TranslateError::InvalidArgument(format!(
-                "无法识别源作品格式(目标 {to:?});本库当前支持 Kitten4(.bcm4 编辑版)、KittenN(.bcmkn)与 NEMO(.bcm 编辑版)"
-            )));
-        }
-    };
-
+/// strict 门:有损且开启严格模式时把报告装进错误返回(六个入口共用这一份)
+fn finish_report(
+    options: &TranslateOptions,
+    report: TranslateReport,
+) -> std::result::Result<TranslateReport, TranslateError> {
     if options.is_strict() && report.is_lossy() {
         return Err(TranslateError::Lossy {
             report: Box::new(report),
         });
     }
+    Ok(report)
+}
 
+/// 源格式无法识别时的统一文案(三个入口共用,避免文案漂移)
+fn unknown_source(target: TargetEditor) -> TranslateError {
+    TranslateError::InvalidArgument(format!(
+        "无法识别源作品格式(目标 {target:?});本库当前支持 Kitten4(.bcm4 编辑版)、KittenN(.bcmkn)与 NEMO(.bcm 编辑版)"
+    ))
+}
+
+pub fn translate_value(
+    mut source: serde_json::Value,
+    target: TargetEditor,
+    options: &TranslateOptions,
+) -> std::result::Result<TranslateDocument, TranslateError> {
+    let from = detect_editor(&source).ok_or_else(|| unknown_source(target))?;
+    let mut report = TranslateReport::new(from, target);
+    let document = convert_document(
+        from,
+        target,
+        &mut source,
+        options,
+        &mut report,
+        DocumentMode::Value,
+    )?
+    .into_value()?;
+    let report = finish_report(options, report)?;
     Ok(TranslateDocument {
         document,
         target,
@@ -163,48 +200,17 @@ pub(in crate::core::convert) fn translate_value_product(
     target: TargetEditor,
     options: &TranslateOptions,
 ) -> std::result::Result<FileConversion, TranslateError> {
-    let from = detect_editor(&source);
-
-    let (document, report) = match (from, target) {
-        (Some(crate::core::convert::EditorType::Kitten4), TargetEditor::KittenN) => {
-            let mut report = TranslateReport::new(
-                crate::core::convert::EditorType::Kitten4,
-                TargetEditor::KittenN,
-            );
-            let product =
-                pipeline::convert_kitten4_document_product(&mut source, options, &mut report)?;
-            (ConvertedDocument::Product(product), report)
-        }
-        (Some(crate::core::convert::EditorType::Nemo), TargetEditor::KittenN) => {
-            let mut report = TranslateReport::new(
-                crate::core::convert::EditorType::Nemo,
-                TargetEditor::KittenN,
-            );
-            let product = nemo::convert_nemo_document_product(&source, options, &mut report)?;
-            (ConvertedDocument::Product(product), report)
-        }
-        (Some(crate::core::convert::EditorType::Neko), TargetEditor::Kitten4) => {
-            let mut report = TranslateReport::new(
-                crate::core::convert::EditorType::Neko,
-                TargetEditor::Kitten4,
-            );
-            let product = pipeline::convert_kn_document_product(&source, options, &mut report)?;
-            (ConvertedDocument::Kitten4(product), report)
-        }
-        (Some(from), to) => return Err(TranslateError::Unsupported { from, to }),
-        (None, to) => {
-            return Err(TranslateError::InvalidArgument(format!(
-                "无法识别源作品格式(目标 {to:?});本库当前支持 Kitten4(.bcm4 编辑版)、KittenN(.bcmkn)与 NEMO(.bcm 编辑版)"
-            )));
-        }
-    };
-
-    if options.is_strict() && report.is_lossy() {
-        return Err(TranslateError::Lossy {
-            report: Box::new(report),
-        });
-    }
-
+    let from = detect_editor(&source).ok_or_else(|| unknown_source(target))?;
+    let mut report = TranslateReport::new(from, target);
+    let document = convert_document(
+        from,
+        target,
+        &mut source,
+        options,
+        &mut report,
+        DocumentMode::Product,
+    )?;
+    let report = finish_report(options, report)?;
     Ok(FileConversion {
         document,
         target,
@@ -274,6 +280,17 @@ impl ConvertedDocument {
             ConvertedDocument::Value(value) => FileService::write_json(output, value)?,
         }
         Ok(())
+    }
+}
+
+impl ConvertedDocument {
+    /// 物化成整份 `Value`(内存入口用;`Value` 形态是恒等)
+    fn into_value(self) -> std::result::Result<serde_json::Value, TranslateError> {
+        Ok(match self {
+            ConvertedDocument::Value(value) => value,
+            ConvertedDocument::Product(product) => product.into_value()?,
+            ConvertedDocument::Kitten4(product) => product.into_value()?,
+        })
     }
 }
 
@@ -366,53 +383,24 @@ fn translate_text(
             report,
         });
     }
-    let source: serde_json::Value = serde_json::from_str(text)?;
-    // 反向(KN → Kitten4)同样吃**流式产物**(Step 4):判据与 `translate_value` 的分派一致
-    if matches!(target, TargetEditor::Kitten4)
-        && detect_editor(&source) == Some(crate::core::convert::EditorType::Neko)
-    {
-        let mut report = TranslateReport::new(
-            crate::core::convert::EditorType::Neko,
-            TargetEditor::Kitten4,
-        );
-        let product = pipeline::convert_kn_document_product(&source, options, &mut report)?;
-        if options.is_strict() && report.is_lossy() {
-            return Err(TranslateError::Lossy {
-                report: Box::new(report),
-            });
-        }
-        return Ok(FileConversion {
-            document: ConvertedDocument::Kitten4(product),
-            target,
-            report,
-        });
-    }
-    // NEMO → KN 同样吃**流式产物**(`docs/rounds/49-nemo-product-streaming.md`):判据与
-    // `translate_value` 的分派一致(`detect_editor` 认 NEMO 且目标 KN)
-    if matches!(target, TargetEditor::KittenN)
-        && detect_editor(&source) == Some(crate::core::convert::EditorType::Nemo)
-    {
-        let mut report = TranslateReport::new(
-            crate::core::convert::EditorType::Nemo,
-            TargetEditor::KittenN,
-        );
-        let product = nemo::convert_nemo_document_product(&source, options, &mut report)?;
-        if options.is_strict() && report.is_lossy() {
-            return Err(TranslateError::Lossy {
-                report: Box::new(report),
-            });
-        }
-        return Ok(FileConversion {
-            document: ConvertedDocument::Product(product),
-            target,
-            report,
-        });
-    }
-    let converted = translate_value(source, target, options)?;
+    let mut source: serde_json::Value = serde_json::from_str(text)?;
+    // 回落路径同样走**流式产物**(三条支持的方向都有 product 入口):分派与 strict 门与
+    // `translate_value_product` 共用一份实现,避免"新方向只改了其中一处"。
+    let from = detect_editor(&source).ok_or_else(|| unknown_source(target))?;
+    let mut report = TranslateReport::new(from, target);
+    let document = convert_document(
+        from,
+        target,
+        &mut source,
+        options,
+        &mut report,
+        DocumentMode::Product,
+    )?;
+    let report = finish_report(options, report)?;
     Ok(FileConversion {
-        document: ConvertedDocument::Value(converted.document),
-        target: converted.target,
-        report: converted.report,
+        document,
+        target,
+        report,
     })
 }
 
