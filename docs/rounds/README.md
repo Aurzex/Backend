@@ -39,12 +39,13 @@
 Kitten 与 KN 之间的转换方案与落地(20–21)、NEMO 路线(22–24)、性能(25–26)、NEMO 转 KN(27)。
 **路径/类型名多数已漂移**,以 `../knowledge/` 与 `../knowledge/errata.md` 为准。
 
-## 轮次 47–61(2026-10-05 ~ 11-08)
+## 轮次 47–62(2026-10-05 ~ 11-08)
 
 > 优化读数**不在此展开**:唯一权威落点是 `../knowledge/convert-performance.md`(§2bis.7–§2bis.16);过程、验收与评审见各轮次正文。
 
 | 轮次 | 一句话 | 状态 |
 | --- | --- | --- |
+| [62](62-code-logic-and-architecture-pass-2.md) | **代码逻辑与架构优化(第二批)**:骨架快速通道拆函数;举报来源类型内部统一为 `CommentSource`;名称去重改 `HashSet`、变量表借用;六样本 SHA 不变 | 已完成(2026-11-08,`d0800d6`/`f07943a`/`cf248d5`) |
 | [61](61-code-logic-and-architecture-pass.md) | **代码逻辑与架构优化(审计后第一批)**:分配 −0.4%~−1.5%;方向分派/strict 门/影子字段/扩展名单一来源;流式写出器拆 `product.rs`、NEMO 表拆 `nemo_tables.rs` | 已完成(2026-11-08,`00fc981`/`78b5c8c`/`58d7bb5`/`75dc7a0`/`febf7fc`) |
 | [60](60-load-gate-and-output-separation.md) | **加载门离线化 + 目录分离**:自制夹具入库、官方 bundle 按固定 SHA256 由手动工作流下载,产物过 `validateBcm` 且负控被拦;产物默认改 `target/convert-out`,不再写 `download/` | 已完成(2026-11-07,`f6f6b8e` / `2d3321b`) |
 | [59](59-save-persistence-and-symmetric-audit.md) | **注释保存存活取证 + 正向「对称损失」审计**:平台编辑格式的 10 个版本各带 9 条注释(KN 侧 3 件 60 条)⇒ 保存不丢注释;正向包装的 1 520 块反向已按 mutation 标题还原,抹掉注释再往返逐字节相同 ⇒ 对称载荷判不做 | 已完成(2026-11-07) |
