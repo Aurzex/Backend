@@ -133,17 +133,11 @@
     预 1.0 可接受),并计入 `is_lossy`(Kitten 原类型名不可恢复)。
     报告类别因此从「丢弃实体属性 3301」修正为「类型歧义 2959 + 丢弃实体属性 342」。
 
-13. **待方案**(未修 + 有风险):`download/compile/` 同时是**输出目录**与**夹具/语料目录**(`../rounds/40` 记的
-    "夹具同名冲突"在同一结构上的第二个实例)——
-    - **写点**:反编译默认输出目录(`decompile/config.rs` 的 `default_output_dir`)、语料采集器
-      `tests/convert_corpus_harvest.rs`、编辑格式采集器 `tests/convert_edit_harvest.rs`;
-    - **读点(byte-baselined 夹具)**:`convert_bench` 6 个样本、`convert_facade_bench` 4 个样本、
-      `convert_work_bench` 的 `RAW_SAMPLE`,以及 `reverse_tests.rs` / `nemo_tests.rs` / `translate/mod.rs` /
-      `pipeline.rs` 的多条真作品门 + 两个**默认跑**的往返扫描器(遍历整个目录)。
-    采集器是"增量写新文件、不覆盖"故**至今未出事故**;但**默认输出通路仍在**:以默认选项反编译恰为夹具的那几件
-    作品会按同名口径**覆盖夹具**(`../rounds/40` 的 `kn-9.4MB` 就是这么被真机门覆盖的,已按"夹具迁到只读目录"
-    临时处置)。**彻底修 = 把"语料/夹具目录"与"输出目录"分离**(较大的布局约定变更),需先出方案。
-    出处:`../rounds/40-gates-cleanup-and-real-defects.md` §8.4。
+13. **已完成(2026-11-07,`f6f6b8e`)**:输出目录与夹具/语料目录分离 —— 默认产物改为
+    `<root>/target/convert-out`(`compile_file_path` / `convert_file_path` 跟随,`CARGO_TARGET_DIR` 可改 target 根),
+    `download/` 只作语料/夹具的只读目录;显式 `output_dir` 覆盖语义不变;
+    回归测试 `filedata::tests::output_dirs_stay_out_of_the_fixture_root`。
+    背景与事故链见 `../rounds/40` §8.4,落地记录见 `../rounds/60` §2。
 
 14. **已完成(2026-10-05,`be92ee2`)**:测试临时目录不清理 —— `tests/convert_bench.rs` / `convert_facade_bench.rs` /
     `convert_work_bench.rs` 的 `bench_dir()` 与 crate 内 `translate::unique_test_dir()` 的两处调用
@@ -229,12 +223,12 @@
 | **G2** **已完成(2026-10-01,rounds/38 §7bis)** | **减损:把「不认识就剔除」在信息层降级为「保留为编辑器认识的不可用标记」** | 写出阶段统一处理:**所有**编辑器不认识的块就地改成 `incompatible_block`(语句位)/ `incompatible_output_block`(值位),位置与连接保持、字段/影子/变异清空;影子仍是清空。覆盖占位积木(43 类型)+ D1 的 Neko 专有块族(`temporary_list`/`script_variables*` …)。正向补了由 `incompatible_*` 到 `bcm_translator_text_*` 的手工映射,往返稳定 | 已生效 + 单测 + 全语料 + 实机(`HEX Editor` 182 个标记,角色 `raw` 4/4 对上) |
 | **G3** 部分(两腿 id 台账均已建立;类别集合门改判不做,2026-10-01) | **id 口径台账**(正/反两腿)+ 差异类别集合门 | 已完成(正向扫描器 `k4_corpus_round_trip_sweep`):**`LOST_ID_BUDGET`**(只许变小,每次打印 `[id台账]`;基线 = 59 件里 33 件非零,构成已逐类查过)。**已完成(反向 id 台账已建)**(`../rounds/39` §W3d):反向扫描器 `kn_corpus_round_trip_sweep` 的 **`LOST_ID_BUDGET_REVERSE`**(正向同口径,逐件打印 `[id台账·反向]`;`d10d0cb` 首版、`ef37978` 把口径收窄到真正的积木节点)。基线读数:多数作品 **0/0**,`FjDQB…bcmkn` 真块 0 / 影子 120,`FjSw…bcmkn` 真块 110 / 影子 32(全名见 `reverse_tests` 的 `LOST_ID_BUDGET_REVERSE`)。**差异类别集合门已改判不做**(gitignored 增量语料,必然假红,`../rounds/39` §W3c;那份死 allow-list 副本已随 `e8e19d6` 删除) | 成本低;口径已稳 |
 | **G4** **已完成(2026-10-02)** | **覆盖度**:真原件语料常态化(并入常规扫描)+ 词表新鲜度检查 | 已完成(语料常态化):`download/compile/k4edit/` 的平台原件已由正向扫描器常规吃到(`k4_corpus_round_trip_sweep` 扫 `k4edit/*.bcm4`,默认 `cargo test` 即覆盖)。已完成(词表侧):`kitten4_vocab::tests::editor_type_list_is_sorted_and_queryable`(严格升序 + 抽样查询,含两个「未收录积木」标记)+ **新鲜度读数** `editor_type_list_freshness_is_reported_not_enforced`(打印条目数 / 导出日期 / 距今天数,条目数与记录不一致或 >180 天时醒目提醒;单一事实源 = `kitten4_vocab::KITTEN4_VOCAB_EXPORTED`)。**刻意不做按挂钟时间失败**(如"导出超 N 天就 panic"):那会让整套测试在某个日期之后**自动变红**、门沦为噪音而被忽略(仓库的门是 `-D warnings` + 全绿)—— 新鲜度**只打印,不参与断言** | 成本低;扩语料需登录采样 |
-| **G5** 待决(已挂到第 40 轮 R5) | **加载门离线化进 CI**:`validateBcm` headless 接进 CI(实机浏览器门仍手动) | CI 上一条"产物可被编辑器加载"的校验;故意写一个编辑器不认识的类型,预期被拦下 | 重:`download/` 与官方 bundle 都不入库,因此要先决定**入库最小夹具**。CI 现状(2026-10-02,`f68c2e6`)= `build` 矩阵 + `hygiene` + `offline-gate`;真机门与语料基准**刻意不进**(见 `../knowledge/repo-conventions.md` §6) |
+| **G5** **已完成(2026-11-07,`2d3321b`)** | **加载门离线化**:`validateBcm` headless 接入手动工作流 | 产物过官方校验;负控(删 `actorsDict`)必须被判 false | 落地形态:**自制夹具**入库(`tests/fixtures/convert/load_gate/minimal.bcm4`),官方 bundle 不入库,由 `.github/workflows/load-gate.yml`(`workflow_dispatch`)按固定 SHA256 下载到 `temp/web/` 后跑 `tests/load_gate.rs`;主 CI 仍不联网(见 `../knowledge/repo-conventions.md` §6) |
 | **G6** **已完成(2026-10-01)** | **NEMO 补门**:加 SHA 字节基线 + 耗时读数 | NEMO 样本进了 `convert_bench` 的 `SAMPLES` 并有 `#meta`:1)  `nemo-3.4MB`(`download/compile/` 的真作品,`source_version` = 0.16.2 = 迁移目标版本,迁移为 no-op;与官方产物**语义 diff 0 处**、`validateBcm` 判定为 VALID);2)  `nemo-old-1.5MB`(公开作品 `103791894`,0.11.0 < 0.15.0,因此**YC 迁移生效**;文件已挪进语料目录 `download/compile/`(`1d0be93`;R2 前在 `temp/harness/`),缺失仍只跳过不假红)。`elapsed_ms` 非 0(实测)。另:`tree_to_json` 的编码失败不再静默丢块(进报告、计有损) | 已完成(含基线刷新) |
 
 ### 6.4 建议顺序与需拍板处
 
-**顺序**:`G0`、`G1`(定案,决定后面是否还有真正可做的工作)、`G3` 与 `G4`(成本低、防复发)、`G2`(真收益,依赖 G1 结论 + 载体研究),最后 `G5`/`G6`。
+**顺序**:`G0`、`G1`(定案,决定后面是否还有真正可做的工作)、`G3` 与 `G4`(成本低、防复发)、`G2`(真收益,依赖 G1 结论 + 载体研究),最后 `G5`/`G6`(均已完成:2026-11-07 / 2026-10-01)。
 
 **G2 的载体路线已决(2026-10-01,rounds/38 §7bis,用户拍板)**:「不认识就保留为编辑器认识的标记」
 (`incompatible_block` / `incompatible_output_block`)已生效并实机验证 —— 它不是 D1 的语义降级(不声称等价、

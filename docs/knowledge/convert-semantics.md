@@ -150,7 +150,7 @@ NEMO 到 KN 是另一条前端(`hI.parseBlocksXML`),官方管线共 12 步(`main
 
 | 门 | 内容 |
 | --- | --- |
-| 官方校验器 | `BcmHelpers.validateBcm`(bundle module 87123)**可 headless 运行** —— "产物能否被编辑器加载"的硬门 |
+| 官方校验器 | `BcmHelpers.validateBcm`(bundle module 87123)**可 headless 运行** —— "产物能否被编辑器加载"的硬门;已离线化为手动工作流(`tests/load_gate.rs` + `.github/workflows/load-gate.yml`,见 `../rounds/60`) |
 | 语义 diff | 与官方产物比较**忽略 id/location/uuid**(`../rounds/20` §9);官方产物按键插入序,**从不逐字节对齐官方** |
 | 确定性 | `IdSource` + `TranslateOptions::deterministic_ids`;并发 1 与并发 N 产物 **SHA256 相同** |
 | **字节基线** | `convert_bench` 的产物 SHA256 + `#meta`(源 SHA / 字节 / 块数 / 告警数 / `source_version`);**样本清单与"两种门(可复现 / 快照冻结)"的说明只在 `convert-performance.md` §5 展开**。不变量:产物字节或报告退化(块变少、告警变多)都必须先解释再接受 |

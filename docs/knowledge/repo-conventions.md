@@ -32,6 +32,9 @@
 - 业务面**统一注入**:`src/api/**` 的 Manager、反编译器、`core` 举报引擎的 `DataQuery`/`CommentQueryBuilder`/`ReportFetcher`/`ViolationChecker`/`ReportProcessor`/`FileProcessor` 都通过 `new_with_client(client)` 注入;`client: &'static CodeMaoClient` 字段已**全仓归零**。
 - **有意保留的全局**:`CodemaoDecompiler::global()` 门面;多账号身份槽(`switch_identity`)、`ActionRegistry`(`LazyLock`)、报告展示注册表 —— 因为"多账号即切全局身份槽",**不能部分注入**。默认的 `translate_work`/`translate_works` 继续用全局客户端;独立客户端必须走 `translate_work_with_client`/`translate_works_with_client`。
 - **路径根**:`PathConfig::set_global(root)` 必须在任何 `PathConfig::global()` 使用之前调用;`translate_work` 的 staging 在显式 `TranslateOptions::output_dir` 下跟随该目录,否则回退全局 `convert/staging`。库内嵌到工作目录不可写的进程时,先设置全局根或给每次转化指定输出目录。
+- **产物目录与语料目录分离(2026-11-07)**:默认产物落 `<root>/target/convert-out`(`CARGO_TARGET_DIR` 可改 target 根),
+  反编译/转化不再写 `download/`(那是语料与夹具目录);需要别的落点时用 `output_dir` 显式覆盖。
+  背景:`download/compile/` 曾同时是输出目录与夹具目录,同名产物会覆盖夹具(`../rounds/40` §8.4 的 `kn-9.4MB`);落地记录见 `../rounds/60`。
 - `KittyFactory` 门面已删除(全仓 grep 零命中),不要再引入同类门面。
 - **已完成(2026-09-26)**:`cloudvar.rs` 的 `detect_editor` 原用全局 `WorkDataFetcher::new()` —— 现改用
   `CloudBuilder::new_with_client(work_id, client)`,并由 `CloudConnection` 暴露 `client()`(`impl ClientAccess`),
@@ -54,6 +57,7 @@
 | `BACKEND_REQUIRE_LIVE=1` | 真机测试严格模式:缺配置/登录失败**一律失败**,不再静默 pass |
 | `BACKEND_REQUIRE_BENCH=1` | **基准**严格模式:debug 构建、样本缺失一律失败(默认这两条是"打印后 return **显示 pass**",干净检出上等于没有这条门)。**基线例外**:`NotFound`/解析失败在**默认模式下也直接失败**(`f62aec7`,W3a;此前"NotFound 则返回空 map 并首次运行自动写盘"会让门在「基线被删 / 全新检出」时静默消失)——建基线的**唯一**通道是显式 `BACKEND_BENCH_REFRESH=1` |
 | `BACKEND_REQUIRE_FIXTURES=1` | **夹具**严格模式:跑测试要用的夹具(语料 / 真作品样例 / 官方 harness)缺失时**失败并点名缺了什么**(默认只打印一行 `跳过:` 后 return —— 干净检出上等于**显示 pass**)。与 `BACKEND_REQUIRE_BENCH` 分工:后者管基准自身(debug 构建 / 样本 / 基线),它只管"夹具缺了";`convert_work_bench` 另认历史的 `BACKEND_REQUIRE_BENCH` 作别名(避免既有的环境配置在不知情的情况下被放宽)。**唯一出口**:`translate/mod.rs` 的 `require_fixtures` / `missing_fixture`(`reverse_tests` 原先那份重复定义已删,不再新增第四份)。覆盖 `reverse_tests` 的 10 处、`translate/mod.rs` 的 `diff_tests` 2 处、`pipeline.rs` 1 处(`f01a6a8`)、`convert_facade_bench`(原先**静默** `continue`)与 `convert_bench` 的**样本缺失**(全缺或**部分缺**都算;`strict_mode()` 与 `require_fixtures()` 任一为真即生效 — 此前部分缺失只打印一行警告、那些基线键静默不设防)。例外:`nemo_tests` 的真作品门是 `#[ignore]` 与硬 `assert!`(没有静默出口,不需要它);`translate/mod.rs` 的"无法执行 node"是环境错误,不折进本开关 |
+| `BACKEND_REQUIRE_LOAD_GATE=1` | 加载门严格模式:缺 node / 官方 bundle(`BCM_WEB_DIR`)时**失败**(默认打印一行 `[跳过]`);只由 `.github/workflows/load-gate.yml` 设置 |
 | `BACKEND_BENCH_REFRESH=1` | **有据刷新**基线:写出新基线并**逐键打印**变化(产物字节/块数/告警数/源文件 SHA256);不用它时基线损坏/缺失**一律失败**,绝不静默重建 |
 
 **验证纪律(由三次实践教训得出)**:
@@ -95,6 +99,7 @@
 | 转换专项 | 官方校验器(`validateBcm`)硬门 + 语义 diff + `deterministic_ids` 字节一致 + 往返多重集守恒 |
 | 词表新鲜度 | `kitten4_vocab::tests::editor_type_list_freshness_is_reported_not_enforced` —— **只打印读数**(条目数 / 导出日期 / 距今天数;超过 180 天、或条目数与单一事实源 `KITTEN4_VOCAB_EXPORTED` 不一致时醒目提醒)。**刻意不做按挂钟时间失败**:那会让门在某个日期之后**自动变红**、沦为噪音;允许随日期改变**打印内容**,不允许让测试失败 |
 | **CI 跑什么** | `.github/workflows/CI.yml` 三个 job:`build`(**五目标** `cargo build --release` 矩阵,含 aarch64 交叉链接)、`hygiene`(`cargo test --test repo_hygiene`,与本地 pre-commit 同一份)、**`offline-gate`**(`cargo fmt --check` + `cargo clippy --all-targets -- -D warnings` + **逐目标点名**的离线测试:`--lib` / `--test repo_hygiene` / `--test convert_bench`) |
+| **手动工作流 `load-gate`** | `.github/workflows/load-gate.yml`(`workflow_dispatch`):按固定 SHA256 从官方 CDN 下载四个编辑器 chunk 到 `temp/web/`,跑 `cargo test --test load_gate -- --ignored`;产物(自制夹具的正向结果)过 `validateBcm` 为门,负控(删 `actorsDict`)必须被判 false。官方 bundle 不入库,主 CI 不联网 |
 | **CI 刻意不管什么**(是遗漏的反面,别当缺口补) | 1)  **真机门**(`compile_live`/`convert_live`/`live_features`):无 `data/test-config.json` 时它们 `load_config()` -> None 后**直接 return(静默 pass)**,当门等于没验;CI 也**不设** `BACKEND_REQUIRE_LIVE`(设了就依赖凭据/网络)=> 真机验证只在本机做。2)  **语料扫描器与 `convert_bench` 的性能样本**:吃 gitignored 的 `download/`,干净检出上走 `missing_fixture` **打印一行并跳过**(**预期跳过**,不是没跑)。3)  **artifact 上传**:本仓 `[lib] crate-type=["rlib"]`(只产 rlib)、`src/main.rs` 是需账号的交互式控制台、仓内无消费方 => **没有可分发产物**,旧上传步已删(`f68c2e6`,详见 `errata.md` 末节与 `../goals/infra-backlog.md` §1) |
 | **死代码 / 未用项** | `[lints.rust] unused = "warn"` **活着**(`8da596d`,rounds/40 R2 三阶段放开):`clippy --all-targets -- -D warnings` 下**任何**未用项(未用 import / 变量 / `mut` / 赋值 / `must_use`、`dead_code`)都会把门**打红**。新增死代码只有三条出路:**1)  接线**(真用起来)/ **2)  标 `#[cfg(test)]`**(仅测试用)/ **3)  `#[allow(dead_code)]` + 一句理由**(如"由生成器消费"),**不留无理由的 `allow`**。口径与 `Cargo.toml` 里 `[lints.rust]` 的注释一致;**放开过程的读数、两条实测坑与逐条处置见 `../goals/infra-backlog.md` §1.1** |
 | 必备前置 | 大改先出方案文档,经子代理评审之后再动 Rust 代码 |
