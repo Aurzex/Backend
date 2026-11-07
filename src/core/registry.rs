@@ -81,6 +81,31 @@ impl ReportAction {
         }
     }
 
+    /// 中文名称(终端/报告展示)
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            ReportAction::Delete => "删除",
+            ReportAction::Mute7d => "禁言7天",
+            ReportAction::Mute3m => "禁言3月",
+            ReportAction::Unpublish => "取消发布",
+            ReportAction::Pass => "通过",
+            ReportAction::CheckViolation => "检查违规",
+            ReportAction::Skip => "跳过",
+        }
+    }
+
+    /// 执行类动作对应的处理决议;检查违规/跳过不是执行类
+    pub(crate) fn resolution(self) -> Option<Resolution> {
+        match self {
+            ReportAction::Delete => Some(Resolution::Delete),
+            ReportAction::Mute7d => Some(Resolution::MuteSevenDays),
+            ReportAction::Mute3m => Some(Resolution::MuteThreeMonths),
+            ReportAction::Unpublish => Some(Resolution::Unload),
+            ReportAction::Pass => Some(Resolution::Pass),
+            ReportAction::CheckViolation | ReportAction::Skip => None,
+        }
+    }
+
     pub fn from_key(s: &str) -> Option<ReportAction> {
         match s {
             "D" => Some(ReportAction::Delete),
@@ -97,16 +122,9 @@ impl ReportAction {
 
 /// 动作键对应的中文名称
 pub(crate) fn action_name(key: &str) -> &'static str {
-    match key {
-        "D" => "删除",
-        "S" => "禁言7天",
-        "T" => "禁言3月",
-        "U" => "取消发布",
-        "P" => "通过",
-        "F" => "检查违规",
-        "J" => "跳过",
-        _ => "未知动作",
-    }
+    ReportAction::from_key(key)
+        .map(ReportAction::label)
+        .unwrap_or("未知动作")
 }
 
 /// 决议/状态字符串对应的中文名称,用于展示已处理记录
@@ -126,18 +144,11 @@ pub(crate) fn resolution_display_name(status: &str) -> String {
 impl ActionConfig {
     /// 由动作键构造配置(名称与决议取自内置映射)
     fn simple(key: &str) -> Self {
-        let resolution = match key {
-            "D" => Some(Resolution::Delete),
-            "S" => Some(Resolution::MuteSevenDays),
-            "T" => Some(Resolution::MuteThreeMonths),
-            "U" => Some(Resolution::Unload),
-            "P" => Some(Resolution::Pass),
-            _ => None,
-        };
+        let action = ReportAction::from_key(key);
         ActionConfig {
             key: key.into(),
             name: action_name(key).into(),
-            resolution,
+            resolution: action.and_then(ReportAction::resolution),
             enabled: true,
         }
     }
