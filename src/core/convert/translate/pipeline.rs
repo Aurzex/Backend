@@ -307,7 +307,7 @@ fn convert_kitten4_document_impl(
         ));
     }
     let (src_w, src_h) = assembly::source_stage_size(src_map);
-    let landscape = src_w > src_h;
+    let landscape = assembly::landscape_from_size(src_w, src_h);
 
     // Kitten4 的真正特征:实体带 `block_data_json`。Kitten2/3 的积木在 `blocksXML` 里
     // (没有 `block_data_json`)—— 那种喂进来只会得到"零积木的空产物",所以明确报错。
@@ -721,7 +721,7 @@ fn convert_kn_document_impl(
         TranslateError::InvalidArgument("源作品不是 JSON 对象:无法按 KittenN 作品解析".into())
     })?;
     let (kn_w, kn_h) = assembly::kn_stage_size(src);
-    let landscape = kn_w > kn_h;
+    let landscape = assembly::landscape_from_size(kn_w, kn_h);
     let (canvas_w, canvas_h) = match options.orientation() {
         StageOrientation::Portrait => (tables_gen::STAGE_PORTRAIT.0, tables_gen::STAGE_PORTRAIT.1),
         StageOrientation::Landscape => {

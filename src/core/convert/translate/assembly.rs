@@ -134,7 +134,7 @@ pub(super) fn build_document_product(
 
     // 源画布:官方 `p = size?.width ?? width ?? 562` / `g = size?.height ?? height ?? 900`
     let (src_w, src_h) = source_stage_size(src);
-    let landscape = src_w > src_h;
+    let landscape = landscape_from_size(src_w, src_h);
     let groups = theatre
         .and_then(|t| t.get("groups"))
         .and_then(Value::as_object);
@@ -1060,6 +1060,12 @@ fn shadow_type_str(text: &str) -> Option<&str> {
     let rest = &text[start..];
     let end = rest.find('"')?;
     Some(&rest[..end])
+}
+
+/// 横竖屏判定(官方 `UC = size.width > size.height`):正向装配与两条管线共用这一处,
+/// 避免"同一规则在调用方与被调方各写一遍"后悄悄漂移。
+pub(super) fn landscape_from_size(width: f64, height: f64) -> bool {
+    width > height
 }
 
 /// 装配阶段需要的舞台口径(打包传参:横竖屏 + 画布尺寸 + KN 舞台尺寸)
