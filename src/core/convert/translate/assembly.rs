@@ -9,6 +9,7 @@ use super::tables_gen::{BCM_VERSION, STAGE_LANDSCAPE, STAGE_PORTRAIT};
 use super::{model, tables_gen};
 use crate::core::convert::shared::{ConvertError, Result, json_obj};
 use serde_json::{Map, Value, json};
+use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 // 来自 src/core/convert/translate/assembly.rs
@@ -138,8 +139,8 @@ pub(super) fn build_document_product(
         .and_then(|t| t.get("groups"))
         .and_then(Value::as_object);
 
-    let mut actor_used: Vec<String> = Vec::new();
-    let mut scene_used: Vec<String> = Vec::new();
+    let mut actor_used: HashSet<String> = HashSet::new();
+    let mut scene_used: HashSet<String> = HashSet::new();
     let mut actors = Map::new();
     let mut scenes = Map::new();
     let mut hooks: Vec<BlockPlacement> = Vec::with_capacity(entities.len() + procedures.len());
@@ -269,7 +270,7 @@ pub(super) fn build_document_product(
 fn actor_entry(
     value: &mut Map<String, Value>,
     groups: Option<&Map<String, Value>>,
-    used: &mut Vec<String>,
+    used: &mut HashSet<String>,
     landscape: bool,
 ) {
     value.remove("user_change_r_c");
@@ -281,7 +282,7 @@ fn actor_entry(
         name = FALLBACK_NAME.to_string();
     }
     let name = uniquify(used, &name, NAME_MAX_WIDTH);
-    used.push(name.clone());
+    used.insert(name.clone());
     value.insert("name".into(), Value::String(name));
 
     if truthy(value.get("current_style_id"))
@@ -330,11 +331,11 @@ fn actor_entry(
 fn scene_entry(
     value: &mut Map<String, Value>,
     groups: Option<&Map<String, Value>>,
-    used: &mut Vec<String>,
+    used: &mut HashSet<String>,
 ) {
     // screenName 唯一化(作用域是"场景列表",与角色名互不影响)
     let screen_name = uniquify(used, &text(value.get("screen_name")), NAME_MAX_WIDTH);
-    used.push(screen_name.clone());
+    used.insert(screen_name.clone());
     value.insert("screenName".into(), Value::String(screen_name));
     value.insert("name".into(), Value::String(SCENE_NAME.to_string()));
 
@@ -459,7 +460,7 @@ fn build_variables(
             continue;
         };
         dict.insert(
-            key,
+            key.into_owned(),
             Value::Object(local_variable(var, src_w, src_h, landscape, now_ms)),
         );
     }
@@ -469,7 +470,7 @@ fn build_variables(
             continue;
         };
         dict.insert(
-            key,
+            key.into_owned(),
             Value::Object(cloud_variable(var, src_w, src_h, landscape, now_ms)),
         );
     }
@@ -601,7 +602,10 @@ fn build_broadcasts(src: &Map<String, Value>) -> Value {
 }
 
 /// 变量表:优先顶层(`variables`/`cloud_variables`),退化到 `theatre.*`;数组输入按条目 `id` 做键
-fn variable_entries(src: &Map<String, Value>, key: &str) -> Vec<(String, Value)> {
+fn variable_entries<'a>(
+    src: &'a Map<String, Value>,
+    key: &str,
+) -> Vec<(std::borrow::Cow<'a, str>, &'a Value)> {
     let value = src.get(key).or_else(|| {
         src.get("theatre")
             .and_then(Value::as_object)
@@ -612,8 +616,14 @@ fn variable_entries(src: &Map<String, Value>, key: &str) -> Vec<(String, Value)>
             let inner = dict.get(key).and_then(Value::as_object);
             match inner {
                 // 已是 `{variablesDict: {...}}` 形态(阶段 1 之后再次装配)
-                Some(nested) => nested.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
-                None => dict.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+                Some(nested) => nested
+                    .iter()
+                    .map(|(k, v)| (std::borrow::Cow::Borrowed(k.as_str()), v))
+                    .collect(),
+                None => dict
+                    .iter()
+                    .map(|(k, v)| (std::borrow::Cow::Borrowed(k.as_str()), v))
+                    .collect(),
             }
         }
         Some(Value::Array(list)) => list
@@ -623,9 +633,9 @@ fn variable_entries(src: &Map<String, Value>, key: &str) -> Vec<(String, Value)>
                 let key = item
                     .get("id")
                     .and_then(Value::as_str)
-                    .map(str::to_string)
-                    .unwrap_or_else(|| index.to_string());
-                (key, item.clone())
+                    .map(std::borrow::Cow::Borrowed)
+                    .unwrap_or_else(|| std::borrow::Cow::Owned(index.to_string()));
+                (key, item)
             })
             .collect(),
         _ => Vec::new(),
@@ -741,7 +751,7 @@ fn truncate_width(text: &str, limit: usize) -> String {
 }
 
 /// 官方 `mq`(`J`):净化 + 截断 + 去重;净化后为空 → 空串(调用方自己补 `"1"`)
-fn uniquify(used: &[String], base: &str, limit: usize) -> String {
+fn uniquify(used: &HashSet<String>, base: &str, limit: usize) -> String {
     let cleaned = sanitize(base);
     if cleaned.is_empty() {
         return String::new();
@@ -755,7 +765,7 @@ fn uniquify(used: &[String], base: &str, limit: usize) -> String {
 }
 
 /// 官方 `X`:尾随数字 +1,仍冲突就继续(`小明`→`小明1`,`小明9`→`小明10`)
-fn increment_until_free(used: &[String], base: &str) -> String {
+fn increment_until_free(used: &HashSet<String>, base: &str) -> String {
     let mut current = increment_suffix(base);
     while used.contains(&current) {
         current = increment_suffix(&current);
