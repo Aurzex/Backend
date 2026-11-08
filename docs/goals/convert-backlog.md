@@ -156,6 +156,11 @@
     - **F 维持登记**:`translate_work` 按骨架读的收益与接口面未量,不动(见本文前言「覆盖面缺口」)。
     - 出处:`../rounds/53-convert-abstraction-plan.md`、`../knowledge/errata.md`「转换域体量与拆分记录的两处漂移(2026-10-07)」;读数由 2026-10-07 实测(`wc -l` + 按"`#[cfg(test)]` + `mod` + 顶格 `}`"界定测试块)。
 
+16. **待核验:正向与 NEMO 的 KN 顶层键集是否应一致** —— NEMO → KN 只写 10 个顶层键(无
+    `toolType`/`resourceZip`/`guideUrl`/`textToBlock`/`aiImageUrls`/`hidden_toolbox`/`courseMaterials`),
+    正向写 18 个;需要先对平台 NEMO 原件取证"哪些键是官方确实不写的",再决定是否统一
+    (统一会改 NEMO 产物字节)。出处:`../rounds/61` §5。
+
 ## 3. 已在案、判不做的(不再重开)
 
 - `RawValue` 顶层只透传、单遍遍历合并(`../rounds/26` §6;判据与读数见 `../knowledge/convert-semantics.md` §7):**判不做**。
@@ -247,5 +252,10 @@
 | 3 | **`resolve_callee` 逐调用块扫 `procedures`** | **判不做**:量级上限 = 调用块数 × 定义数 × ≤3,典型作品为万级短串比较(比 P5 那次的百万级低两个量级),且要为此把索引穿进 `rewrite_node`/`unrewrite_node` 递归链;除非某件作品实测显示它进热路径,否则不动 |
 | 4 | **NEMO `parse_block` 的 `<field>` 分支克隆整份 fields** | **已核实不可行**:该 `fields` 在 `extend` 之后还要被读两次(`message` 与 `handle_procedure_fields`),而 `extend` 需要所有权 ⇒ 这次克隆是结构必需;换 `&Map` 也仍要逐条克隆,省不掉 |
 | 5 | **正向 `collect_forward_items` 每实体深拷 `source`** | **判不做**:消费方(`assembly` 的 `kitten4_scene/actor`)只读 `&source`,但要免掉这次深拷只能把整份实体搬出源文档再搬回(动"唯一接触源文档"的跨阶段不变量),而同族的反向 P2 实测收益只有 2~3% ⇒ 收益与风险不成比 |
+
+| 6 | **分页参数每页重建 `Vec`**(`PaginatedIter::build_params`) | **判不做**:每页几十字节,相对一次 RTT 可忽略(`../rounds/61` §5) |
+| 7 | **影子三表(`shadow_types`/`shadow_fields`/`shadow_templates`)统一** | **判不做**:集合语义本就不同 —— `variables_get`/`math_angle` 有模板/字段但不是 shadow 类型,统一会改变反编译分类(`../rounds/61` §5) |
+| 8 | **`is_kitten_side` 的多次成员检查合成集合** | **判不做**:仅"未映射类型"分支调用(罕见),不在热路径(`../rounds/61` §5) |
+| 9 | **NEMO 迁移状态 `(qc, yc)` 收成枚举** | **判不做(低于门槛)**:真实状态只有 3 种,但调用链只有 3 处,收益是可读性;留待下次动该文件时顺手(`../rounds/62` §4) |
 
 **已判不做(不要重开)**:`find_object_shadow` 惰性化(P4,`../rounds/37` §4;W10 起已由 `normalize_object_shadows` 的廉价探测替代)、P6 手写去 `#[serde(flatten)]`(**2026-10-06 按分配口径复核仍判不做**,判据与重开条件见 `../knowledge/convert-performance.md` §2bis.15)、W8 1)、W9、W13、单遍遍历合并、`RawValue` 透传、`BTreeMap` 改 `HashMap`、合并两份 `tree_to_json`、NEMO 每实体多趟全 DOM 遍历(属"单遍遍历合并"家族)。
